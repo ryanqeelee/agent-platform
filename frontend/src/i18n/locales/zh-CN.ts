@@ -5865,6 +5865,7 @@ export default {
   },
   menu: {
     knowledgeBase: '知识库',
+    operatingAnalysis: '经营分析',
     agents: '智能体',
     organizations: '共享空间',
     newChat: '新对话',

@@ -273,8 +273,6 @@ func authenticateJWTUser(
 //     membership, see IsTenantAccessible) and the tenant must exist. The
 //     fetched tenant is returned so the caller doesn't refetch it.
 //  2. JWT tenant claim (falling back to user.TenantID when the claim is 0).
-//  3. First active membership — lets a tenantless session become usable as
-//     soon as an invitation is accepted (see resolveFirstMembershipTarget).
 //
 // Returns ok=false when the response has already been written (malformed
 // header, inaccessible or missing target tenant). targetTenantID == 0 with
@@ -330,41 +328,7 @@ func resolveTargetTenant(
 		return parsedTenantID, targetTenant, parsedTenantID != user.TenantID, true
 	}
 
-	if targetTenantID == 0 {
-		targetTenantID = resolveFirstMembershipTarget(ctx, user, memberService, tenantService)
-	}
 	return targetTenantID, nil, targetTenantID != user.TenantID, true
-}
-
-// resolveFirstMembershipTarget lets a tenantless session immediately become
-// usable once an active membership exists (for example after accepting its
-// first invitation or being added directly by an administrator). The user
-// service persists the same earliest-membership choice on the next token
-// issuance; middleware keeps the current JWT usable until then.
-func resolveFirstMembershipTarget(
-	ctx context.Context,
-	user *types.User,
-	memberService interfaces.TenantMemberService,
-	tenantService interfaces.TenantService,
-) uint64 {
-	if user == nil || memberService == nil || tenantService == nil {
-		return 0
-	}
-	members, err := memberService.ListByUser(ctx, user.ID)
-	if err != nil {
-		logger.Warnf(ctx, "Failed to list memberships for tenantless user %s: %v", user.ID, err)
-		return 0
-	}
-	for _, member := range members {
-		if member == nil || member.TenantID == 0 || member.Status != types.TenantMemberStatusActive {
-			continue
-		}
-		tenant, err := tenantService.GetTenantByID(ctx, member.TenantID)
-		if err == nil && tenant != nil {
-			return member.TenantID
-		}
-	}
-	return 0
 }
 
 func authenticateAPIKeyRequest(
@@ -754,6 +718,12 @@ func resolveTenantRole(
 	crossTenantSwitch bool,
 	cfg *config.Config,
 ) (types.TenantRole, bool) {
+	if targetTenantID != user.TenantID {
+		if crossTenantSwitch && IsTenantAccessible(ctx, user, targetTenantID, memberService, cfg) {
+			return types.TenantRoleAdmin, true
+		}
+		return "", false
+	}
 	// 1. 正常成员关系
 	member, err := memberService.GetMembership(ctx, user.ID, targetTenantID)
 	if err == nil && member != nil && member.Status == types.TenantMemberStatusActive {
@@ -765,8 +735,7 @@ func resolveTenantRole(
 	if err != nil {
 		logger.Warnf(ctx, "tenant_members lookup failed user=%s tenant=%d: %v",
 			user.ID, targetTenantID, err)
-		// Fall through; treat lookup errors the same as "no membership
-		// found" so a transient DB hiccup doesn't lock everyone out.
+		return "", false
 	} else {
 		var statusInfo string
 		if member == nil {
@@ -782,7 +751,7 @@ func resolveTenantRole(
 	// 2. 跨空间超管直通：CanAccessAllTenants 用户切到别的空间时不强制要求 membership。
 	//    注意：这里只授予临时 Admin 角色，不写入 tenant_members，避免"看一眼别人空间"
 	//    意外升级为持久化所有权。
-	if crossTenantSwitch && user.CanAccessAllTenants {
+	if crossTenantSwitch && cfg != nil && cfg.Tenant != nil && cfg.Tenant.EnableCrossTenantAccess && user.CanAccessAllTenants {
 		logger.Infof(ctx,
 			"[auth] resolveTenantRole step2 (cross-tenant superuser) -> Admin: user=%s tenant=%d",
 			user.ID, targetTenantID)

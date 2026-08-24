@@ -79,14 +79,7 @@ func NewAgentShareService(
 	userRepo interfaces.UserRepository,
 	webSearchProviderRepo interfaces.WebSearchProviderRepository,
 ) interfaces.AgentShareService {
-	return &agentShareService{
-		shareRepo:             shareRepo,
-		disabledRepo:          disabledRepo,
-		orgRepo:               orgRepo,
-		agentRepo:             agentRepo,
-		userRepo:              userRepo,
-		webSearchProviderRepo: webSearchProviderRepo,
-	}
+	return enterpriseManagedAgentShareService{}
 }
 
 func (s *agentShareService) sharedAgentInfo(

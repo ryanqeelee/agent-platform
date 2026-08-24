@@ -68,9 +68,8 @@ func IsCrossTenantSuperuser(ctx context.Context, cfg *config.Config) bool {
 //
 //  1. Home tenant (user.TenantID == targetTenantID): always.
 //  2. Cross-tenant superuser: governed by IsCrossTenantSuperuser.
-//  3. Multi-tenant member: an active tenant_members row in the target
-//     tenant grants access (this is what makes cross-tenant browsing
-//     work for non-superusers added via PR 3's member management).
+//  3. Ordinary users never cross the enterprise bound in User.TenantID;
+//     historical membership rows in other tenants are ignored.
 //
 // Lookup errors are treated as "not a member" — the safest fallback
 // that doesn't expose other tenants on a transient DB hiccup.
@@ -90,14 +89,7 @@ func IsTenantAccessible(
 	if cfg != nil && cfg.Tenant != nil && cfg.Tenant.EnableCrossTenantAccess && user.CanAccessAllTenants {
 		return true
 	}
-	if memberService == nil {
-		return false
-	}
-	m, err := memberService.GetMembership(ctx, user.ID, targetTenantID)
-	if err != nil || m == nil {
-		return false
-	}
-	return m.Status == types.TenantMemberStatusActive
+	return false
 }
 
 // RequireCrossTenantAccess gates a route on the caller being an

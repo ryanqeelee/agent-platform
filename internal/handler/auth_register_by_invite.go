@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -182,33 +184,32 @@ func (h *AuthHandler) RegisterByInvite(c *gin.Context) {
 		return
 	}
 
-	// The invited tenant becomes the user's initial/default tenant. No
-	user.TenantID = inv.TenantID
-	if err := h.userService.UpdateUser(ctx, user); err != nil {
-		logger.Errorf(ctx, "register-by-invite: failed to set home tenant for user %s: %v", user.ID, err)
-		_ = h.userService.DeleteUser(ctx, user.ID)
-		c.Error(apperrors.NewInternalServerError("failed to finalise invited account").WithDetails(err.Error()))
-		return
-	}
-
 	if _, err := h.invitationSvc.AcceptByToken(ctx, req.Token, user.ID); err != nil {
-		// Race: link was revoked between Lookup and Accept. Keep the new
-		// account, but restore it to tenantless so it does not point at a
-		// tenant for which no membership was created. If even that repair
-		// fails, remove the half-provisioned identity.
+		// AcceptByToken binds the tenantless identity and creates membership
+		// in one repository transaction. A revoked link therefore leaves the
+		// new account tenantless without a compensating write.
 		logger.Errorf(ctx, "register-by-invite: accept failed for user %s: %v", user.ID, err)
-		user.TenantID = 0
-		if rollbackErr := h.userService.UpdateUser(ctx, user); rollbackErr != nil {
-			logger.Errorf(ctx, "register-by-invite: failed to restore tenantless user %s: %v", user.ID, rollbackErr)
-			_ = h.userService.DeleteUser(ctx, user.ID)
+		if errors.Is(err, service.ErrUserBoundToAnotherEnterprise) {
+			c.Error(apperrors.NewConflictError(err.Error()))
+			return
+		}
+		if deleteErr := h.userService.DeleteTenantlessUser(ctx, user.ID); deleteErr != nil {
+			logger.Errorf(ctx, "register-by-invite: failed to remove incomplete user %s: %v", user.ID, deleteErr)
+			c.Error(apperrors.NewInternalServerError("failed to clean up incomplete invited account").WithDetails(deleteErr.Error()))
+			return
+		}
+		if !errors.Is(err, service.ErrInvitationTokenInvalid) {
+			c.Error(apperrors.NewInternalServerError("failed to accept invitation").WithDetails(err.Error()))
+			return
 		}
 		c.Error(&apperrors.AppError{
 			Code:     apperrors.ErrNotFound,
-			Message:  "invitation link is no longer valid; please log in to your new account",
+			Message:  "invitation link is no longer valid; request a new invitation",
 			HTTPCode: http.StatusGone,
 		})
 		return
 	}
+	user.TenantID = inv.TenantID
 
 	accessToken, refreshToken, err := h.userService.GenerateTokens(ctx, user)
 	if err != nil {

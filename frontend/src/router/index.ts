@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteLocationNormalized } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { autoSetup, getCurrentUser, userInfoFromApi } from '@/api/auth'
+import { post } from '@/utils/request'
 
 /** Lite /桌面 WebView 硬刷新时可能只打开 `/`，用 session 记住上次页面以便恢复 */
 const LITE_LAST_PATH_KEY = 'weknora_lite_last_path'
@@ -110,6 +111,28 @@ const router = createRouter({
           name: "knowledgeBaseList",
           component: () => import("../views/knowledge/KnowledgeBaseList.vue"),
           meta: { requiresInit: true, requiresAuth: true }
+        },
+        {
+          path: "operating-analysis",
+          name: "operatingAnalysis",
+          component: { render: () => null },
+          meta: { requiresInit: true, requiresAuth: true },
+          beforeEnter: async () => {
+            try {
+              const response = await post<{ access_token?: string; expires_in?: number }>(
+                '/api/auth/weknora-exchange',
+              )
+              if (!response.access_token || response.expires_in !== 900) {
+                return '/platform/creatChat'
+              }
+              localStorage.setItem('retail_ai_app_auth_token', response.access_token)
+              document.cookie = `retail_ai_app_auth_token=${response.access_token}; Path=/app; Max-Age=900; SameSite=Lax`
+              window.location.assign('/app/')
+              return false
+            } catch {
+              return '/platform/creatChat'
+            }
+          },
         },
         {
           path: "knowledge-bases/:kbId",

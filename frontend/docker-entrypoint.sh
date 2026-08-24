@@ -12,7 +12,8 @@ export MAX_FILE_SIZE=${MAX_FILE_SIZE_MB}M
 export APP_HOST=${APP_HOST:-app}
 export APP_PORT=${APP_PORT:-8080}
 export APP_SCHEME=${APP_SCHEME:-http}
-envsubst '${MAX_FILE_SIZE} ${APP_HOST} ${APP_PORT} ${APP_SCHEME}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf
+export RETAIL_AI_CENTER_BASE_URL=${RETAIL_AI_CENTER_BASE_URL:-http://retail-ai-app:8080}
+envsubst '${MAX_FILE_SIZE} ${APP_HOST} ${APP_PORT} ${APP_SCHEME} ${RETAIL_AI_CENTER_BASE_URL}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf
 
 # 启动 nginx
 exec nginx -g 'daemon off;'

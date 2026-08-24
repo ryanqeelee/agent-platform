@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -78,7 +80,7 @@ func TestUserServiceRegisterTenantlessSkipsTenantCreation(t *testing.T) {
 	}
 }
 
-func TestResolveLoginTenantIDRepairsTenantlessUserWithMembership(t *testing.T) {
+func TestEnterpriseManagedLoginDoesNotRepairTenantlessUserFromMembership(t *testing.T) {
 	repo := &provisioningUserRepo{}
 	tenantSvc := &provisioningTenantService{}
 	memberSvc := &provisioningMemberService{members: []*types.TenantMember{
@@ -87,10 +89,18 @@ func TestResolveLoginTenantIDRepairsTenantlessUserWithMembership(t *testing.T) {
 	svc := &userService{userRepo: repo, tenantService: tenantSvc, memberService: memberSvc}
 	user := &types.User{ID: "alice", TenantID: 0}
 
-	if got := svc.resolveLoginTenantID(context.Background(), user); got != 42 {
-		t.Fatalf("resolved tenant = %d, want 42", got)
+	if got := svc.resolveLoginTenantID(context.Background(), user); got != 0 {
+		t.Fatalf("resolved tenant = %d, want tenantless", got)
 	}
-	if repo.updatedTenant != 42 || user.TenantID != 42 {
-		t.Fatalf("repair was not persisted: repo=%d user=%d", repo.updatedTenant, user.TenantID)
+	if repo.updatedTenant != 0 || user.TenantID != 0 {
+		t.Fatalf("historical membership rebound tenantless user: repo=%d user=%d", repo.updatedTenant, user.TenantID)
+	}
+}
+
+func TestEnterpriseManagedSwitchTenantHonorsDisabledCrossTenantFlag(t *testing.T) {
+	svc := &userService{config: &config.Config{Tenant: &config.TenantConfig{EnableCrossTenantAccess: false}}}
+	user := &types.User{ID: "operator", TenantID: 1, CanAccessAllTenants: true}
+	if _, err := svc.SwitchTenant(context.Background(), user, 2, ""); !errors.Is(err, ErrMembershipNotFound) {
+		t.Fatalf("cross-tenant switch with disabled flag: %v", err)
 	}
 }

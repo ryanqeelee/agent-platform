@@ -90,6 +90,10 @@ type userService struct {
 	config        *config.Config
 }
 
+type tenantlessUserDeleter interface {
+	DeleteTenantlessUser(ctx context.Context, id string) error
+}
+
 // NewUserService creates a new user service instance
 func NewUserService(
 	configInfo *config.Config,
@@ -326,7 +330,7 @@ func (s *userService) buildMembershipsForUser(
 	// 收集需要批量查询名称的 tenant id（跳过 activeTenant 因为它已经在手）。
 	needsLookup := make([]uint64, 0, len(rows))
 	for _, m := range rows {
-		if m == nil || m.Status != types.TenantMemberStatusActive {
+		if m == nil || m.Status != types.TenantMemberStatusActive || m.TenantID != user.TenantID {
 			continue
 		}
 		if activeTenant != nil && m.TenantID == activeTenant.ID {
@@ -346,7 +350,7 @@ func (s *userService) buildMembershipsForUser(
 
 	out := make([]types.Membership, 0, len(rows))
 	for _, m := range rows {
-		if m == nil || m.Status != types.TenantMemberStatusActive {
+		if m == nil || m.Status != types.TenantMemberStatusActive || m.TenantID != user.TenantID {
 			continue
 		}
 		name := ""
@@ -626,6 +630,14 @@ func (s *userService) DeleteUser(ctx context.Context, id string) error {
 	return s.userRepo.DeleteUser(ctx, id)
 }
 
+func (s *userService) DeleteTenantlessUser(ctx context.Context, id string) error {
+	deleter, ok := s.userRepo.(tenantlessUserDeleter)
+	if !ok {
+		return errors.New("user repository cannot delete incomplete tenantless identities")
+	}
+	return deleter.DeleteTenantlessUser(ctx, id)
+}
+
 // ChangePassword changes user password
 func (s *userService) ChangePassword(ctx context.Context, userID string, oldPassword, newPassword string) error {
 	user, err := s.userRepo.GetUserByID(ctx, userID)
@@ -711,10 +723,8 @@ func (s *userService) GenerateTokens(
 // resolveLoginTenantID picks the tenant whose ID should be encoded in a
 // freshly minted access token. The contract:
 //
-//  1. If the user has no LastActiveTenantID preference set (or it points
-//     at home), return home — the historical behaviour. A tenantless user
-//     with an active membership adopts their earliest membership instead;
-//     this repairs partial invitation/admin-assignment flows.
+//  1. Ordinary users always return to User.TenantID, their enterprise binding.
+//     Tenantless identities remain tenantless until invite registration binds them.
 //  2. Otherwise validate the preference: the tenant must still exist and
 //     the user must still have an active membership (or be a cross-tenant
 //     superuser). Validation failure logs a warning, best-effort clears
@@ -729,8 +739,14 @@ func (s *userService) resolveLoginTenantID(ctx context.Context, user *types.User
 		return 0
 	}
 	pref := user.Preferences.LastActiveTenantID
+	crossTenantEnabled := s.config != nil && s.config.Tenant != nil &&
+		s.config.Tenant.EnableCrossTenantAccess && user.CanAccessAllTenants
+	if !crossTenantEnabled && pref != nil && *pref != 0 && *pref != user.TenantID {
+		s.clearLastActiveTenantPreference(ctx, user)
+		return user.TenantID
+	}
 	if pref == nil || *pref == 0 || *pref == user.TenantID {
-		return s.homeOrFirstMembershipTenant(ctx, user)
+		return user.TenantID
 	}
 	preferred := *pref
 
@@ -742,13 +758,13 @@ func (s *userService) resolveLoginTenantID(ctx context.Context, user *types.User
 					"clearing preference and falling back to home: %v",
 				preferred, user.ID, err)
 			s.clearLastActiveTenantPreference(ctx, user)
-			return s.homeOrFirstMembershipTenant(ctx, user)
+			return user.TenantID
 		}
 	}
 
 	// Membership (or cross-tenant superuser) must still be valid. Mirrors
 	// the gate in SwitchTenant so the two entry points stay consistent.
-	if !user.CanAccessAllTenants {
+	if !crossTenantEnabled {
 		if s.memberService == nil {
 			logger.Warnf(ctx,
 				"resolveLoginTenantID: member service unavailable; falling back to home for user %s",
@@ -762,68 +778,11 @@ func (s *userService) resolveLoginTenantID(ctx context.Context, user *types.User
 					"clearing preference and falling back to home (err=%v)",
 				user.ID, preferred, err)
 			s.clearLastActiveTenantPreference(ctx, user)
-			return s.homeOrFirstMembershipTenant(ctx, user)
+			return user.TenantID
 		}
 	}
 
 	return preferred
-}
-
-// homeOrFirstMembershipTenant returns the user's home tenant, or — for a
-// tenantless identity (TenantID == 0) — the earliest active membership.
-// Shared by the happy path and the stale-preference fallbacks so a
-// tenantless session with a valid membership never gets a zero-tenant
-// token when a usable tenant is available (repairs partial
-// invitation/admin-assignment flows). resolveFirstMembershipTenant
-// best-effort persists the resolved tenant as the new home.
-func (s *userService) homeOrFirstMembershipTenant(ctx context.Context, user *types.User) uint64 {
-	if user == nil {
-		return 0
-	}
-	if user.TenantID == 0 {
-		return s.resolveFirstMembershipTenant(ctx, user)
-	}
-	return user.TenantID
-}
-
-// resolveFirstMembershipTenant makes a tenantless identity usable when an
-// active membership already exists (for example, an invitation was accepted
-// but persisting the default tenant failed). ListByUser is stably ordered by
-// join time, so the earliest valid membership is deterministic. Persisting it
-// as home is best-effort: even if the repair write fails, the freshly issued
-// token can still be scoped to the membership and the next login retries.
-func (s *userService) resolveFirstMembershipTenant(ctx context.Context, user *types.User) uint64 {
-	if user == nil || s.memberService == nil {
-		return 0
-	}
-	members, err := s.memberService.ListByUser(ctx, user.ID)
-	if err != nil {
-		logger.Warnf(ctx, "resolveLoginTenantID: failed to list memberships for tenantless user %s: %v", user.ID, err)
-		return 0
-	}
-	for _, member := range members {
-		if member == nil || member.TenantID == 0 || member.Status != types.TenantMemberStatusActive {
-			continue
-		}
-		if s.tenantService != nil {
-			if _, err := s.tenantService.GetTenantByID(ctx, member.TenantID); err != nil {
-				logger.Warnf(ctx, "resolveLoginTenantID: tenant %d for tenantless user %s is unavailable: %v",
-					member.TenantID, user.ID, err)
-				continue
-			}
-		}
-
-		user.TenantID = member.TenantID
-		if s.userRepo != nil {
-			if err := s.userRepo.UpdateUser(ctx, user); err != nil {
-				logger.Warnf(ctx, "resolveLoginTenantID: failed to persist tenant %d for tenantless user %s: %v",
-					member.TenantID, user.ID, err)
-				user.TenantID = 0
-			}
-		}
-		return member.TenantID
-	}
-	return 0
 }
 
 // clearLastActiveTenantPreference is the best-effort cleanup half of
@@ -929,10 +888,14 @@ func (s *userService) SwitchTenant(
 	if targetTenantID == 0 {
 		return nil, errors.New("target workspace ID is required")
 	}
-
+	crossTenantEnabled := s.config != nil && s.config.Tenant != nil &&
+		s.config.Tenant.EnableCrossTenantAccess && user.CanAccessAllTenants
+	if targetTenantID != user.TenantID && !crossTenantEnabled {
+		return nil, ErrMembershipNotFound
+	}
 	// Verify membership unless the caller is a cross-tenant superuser
 	// switching outside their home tenant.
-	if !user.CanAccessAllTenants || targetTenantID == user.TenantID {
+	if !crossTenantEnabled || targetTenantID == user.TenantID {
 		if s.memberService == nil {
 			return nil, errors.New("workspace membership service unavailable")
 		}

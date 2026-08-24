@@ -13,7 +13,12 @@ import (
 // ErrPendingInvitationExists is returned by Create when a pending
 // invitation for (tenant_id, invitee_user_id) already exists. The
 // service layer maps it to its own sentinel for the handler.
-var ErrPendingInvitationExists = errors.New("repository: pending invitation already exists")
+var (
+	ErrPendingInvitationExists = errors.New("repository: pending invitation already exists")
+	ErrInvitationNotPending    = errors.New("repository: invitation is not pending")
+	ErrInvitationExpired       = errors.New("repository: invitation is expired")
+	ErrInvitationForbidden     = errors.New("repository: invitation belongs to another user")
+)
 
 // tenantInvitationRepository implements interfaces.TenantInvitationRepository.
 type tenantInvitationRepository struct {
@@ -263,6 +268,87 @@ func (r *tenantInvitationRepository) MarkStatusIfPending(
 		return gorm.ErrRecordNotFound
 	}
 	return nil
+}
+
+func (r *tenantInvitationRepository) AcceptInvitation(
+	ctx context.Context,
+	id uint64,
+	userID string,
+	at time.Time,
+) (*types.TenantMember, error) {
+	return r.acceptWithMembership(ctx, id, userID, at, false)
+}
+
+func (r *tenantInvitationRepository) AcceptShareLink(
+	ctx context.Context,
+	id uint64,
+	userID string,
+	at time.Time,
+) (*types.TenantMember, error) {
+	return r.acceptWithMembership(ctx, id, userID, at, true)
+}
+
+func (r *tenantInvitationRepository) acceptWithMembership(
+	ctx context.Context,
+	id uint64,
+	userID string,
+	at time.Time,
+	shareLink bool,
+) (*types.TenantMember, error) {
+	var accepted *types.TenantMember
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var inv types.TenantInvitation
+		if err := tx.Clauses(forUpdateClause()).Where("id = ?", id).Take(&inv).Error; err != nil {
+			return err
+		}
+		if inv.Status != types.TenantInvitationStatusPending {
+			return ErrInvitationNotPending
+		}
+		if inv.IsExpired(at) {
+			return ErrInvitationExpired
+		}
+		if shareLink {
+			if inv.InviteeUserID != "" {
+				return ErrInvitationForbidden
+			}
+		} else if inv.InviteeUserID != userID {
+			return ErrInvitationForbidden
+		}
+
+		var existing types.TenantMember
+		existingErr := tx.WithContext(ctx).
+			Where(boundEnterpriseMembership).
+			Where("user_id = ? AND tenant_id = ?", userID, inv.TenantID).
+			First(&existing).Error
+		if existingErr == nil {
+			accepted = &existing
+			if shareLink {
+				return nil
+			}
+		} else if !errors.Is(existingErr, gorm.ErrRecordNotFound) {
+			return existingErr
+		} else {
+			member := &types.TenantMember{
+				UserID: userID, TenantID: inv.TenantID, Role: inv.Role,
+				Status: types.TenantMemberStatusActive, InvitedBy: inv.InvitedBy, JoinedAt: at,
+			}
+			if err := createTenantMember(ctx, tx, member); err != nil {
+				return err
+			}
+			accepted = member
+		}
+
+		updates := map[string]any{"updated_at": at}
+		if shareLink {
+			updates["accepted_count"] = gorm.Expr("accepted_count + 1")
+		} else {
+			updates["status"] = types.TenantInvitationStatusAccepted
+			updates["responded_at"] = at
+			updates["accepted_count"] = 1
+		}
+		return tx.Model(&types.TenantInvitation{}).Where("id = ?", id).Updates(updates).Error
+	})
+	return accepted, err
 }
 
 // SweepExpired transitions all overdue pending rows to expired in a

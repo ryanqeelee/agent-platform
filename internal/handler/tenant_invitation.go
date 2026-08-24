@@ -484,6 +484,8 @@ func (h *TenantInvitationHandler) AcceptMyInvitation(c *gin.Context) {
 			c.Error(apperrors.NewConflictError(err.Error()))
 		case errors.Is(err, service.ErrInvitationExpired):
 			c.Error(apperrors.NewConflictError(err.Error()))
+		case errors.Is(err, service.ErrUserBoundToAnotherEnterprise):
+			c.Error(apperrors.NewConflictError(err.Error()))
 		default:
 			logger.Errorf(ctx, "AcceptMyInvitation failed: id=%d user=%s err=%v",
 				invID, caller, err)

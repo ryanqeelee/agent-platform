@@ -35,6 +35,8 @@ type UserService interface {
 	UpdateUser(ctx context.Context, user *types.User) error
 	// DeleteUser deletes a user
 	DeleteUser(ctx context.Context, id string) error
+	// DeleteTenantlessUser permanently removes an incomplete, unbound identity.
+	DeleteTenantlessUser(ctx context.Context, id string) error
 	// ChangePassword changes user password
 	ChangePassword(ctx context.Context, userID string, oldPassword, newPassword string) error
 	// AdminResetPassword replaces a user's password without requiring the old

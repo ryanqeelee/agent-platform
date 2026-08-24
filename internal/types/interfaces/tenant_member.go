@@ -13,9 +13,8 @@ import (
 // docstring explicitly says otherwise. Soft deletion is handled by GORM
 // via the DeletedAt field on TenantMember.
 type TenantMemberRepository interface {
-	// Create inserts a new active membership row. Caller is responsible
-	// for ensuring no other active row exists for the same (user, tenant)
-	// pair; the partial unique index will return a conflict error otherwise.
+	// Create atomically binds a tenantless user to the target enterprise and
+	// inserts the active membership. A user already bound elsewhere is rejected.
 	Create(ctx context.Context, member *types.TenantMember) error
 
 	// Get returns the active membership for the given (user, tenant) pair,

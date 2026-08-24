@@ -133,6 +133,19 @@ func (r *userRepository) DeleteUser(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&types.User{}).Error
 }
 
+func (r *userRepository) DeleteTenantlessUser(ctx context.Context, id string) error {
+	result := r.db.WithContext(ctx).Unscoped().
+		Where("id = ? AND (tenant_id IS NULL OR tenant_id = 0)", id).
+		Delete(&types.User{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
 // ListUsers lists users with pagination
 func (r *userRepository) ListUsers(ctx context.Context, offset, limit int) ([]*types.User, error) {
 	var users []*types.User

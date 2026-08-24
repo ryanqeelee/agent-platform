@@ -81,49 +81,13 @@ func NewAuthHandler(configInfo *config.Config,
 // Centralised here so /auth/register and /auth/config stay in lock-step —
 // otherwise a SystemAdmin's UI edit could affect one path and not the other.
 func (h *AuthHandler) resolveRegistrationMode(ctx context.Context) string {
-	// cfg-derived default: empty is impossible after applyAuthAndTenantDefaults,
-	// but be defensive in case AuthHandler was constructed before that ran
-	// (the NewAuthHandler guard already logged in that case).
-	def := config.AuthRegistrationModeSelfServe
-	if h.configInfo != nil && h.configInfo.Auth != nil {
-		if m := strings.TrimSpace(h.configInfo.Auth.RegistrationMode); m != "" {
-			def = m
-		}
-	}
-	if h.systemSettingSvc == nil {
-		return def
-	}
-	// envName = "" because DISABLE_REGISTRATION is a boolean and
-	// auth.registration_mode is a string — the legacy env was already
-	// coerced into `def` above. Mixing the two semantics at the resolver
-	// layer would mean a UI delete (DB row absent) silently flipped to
-	// the legacy boolean read again, which is surprising.
-	return h.systemSettingSvc.GetString(ctx, "auth.registration_mode", "", def)
+	return config.AuthRegistrationModeInviteOnly
 }
 
-// resolveDefaultTenantMode returns the provisioning policy for ordinary
-// public password registrations. Invitation registration never uses this
-// value: the invitation itself supplies the target tenant.
+// resolveDefaultTenantMode keeps first-time OIDC identities tenantless.
+// Enterprise membership is established only by invitation acceptance.
 func (h *AuthHandler) resolveDefaultTenantMode(ctx context.Context) types.TenantProvisioningMode {
-	def := config.AuthDefaultTenantModeCreatePersonal
-	if h.configInfo != nil && h.configInfo.Auth != nil {
-		if mode := strings.TrimSpace(h.configInfo.Auth.DefaultTenantMode); mode != "" {
-			def = mode
-		}
-	}
-	mode := def
-	if h.systemSettingSvc != nil {
-		mode = h.systemSettingSvc.GetString(
-			ctx,
-			"auth.default_tenant_mode",
-			"WEKNORA_AUTH_DEFAULT_TENANT_MODE",
-			def,
-		)
-	}
-	if mode == config.AuthDefaultTenantModeTenantless {
-		return types.TenantProvisioningTenantless
-	}
-	return types.TenantProvisioningCreatePersonal
+	return types.TenantProvisioningTenantless
 }
 
 // Register godoc
@@ -563,11 +527,14 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 		}
 	}
 	userInfo := user.ToUserInfo()
-	userInfo.CanAccessAllTenants = user.CanAccessAllTenants && h.configInfo.Tenant.EnableCrossTenantAccess
+	// Keep the stored privilege visible to trusted identity consumers even when
+	// cross-tenant product behavior is disabled. Downstream exchanges must reject
+	// privileged identities rather than mistake a masked value for ordinary access.
+	userInfo.CanAccessAllTenants = user.CanAccessAllTenants
 	// 同步返回当前用户的 memberships，让前端在页面刷新（仅命中 /auth/me）
 	// 后也能恢复 currentTenantRole，避免角色信息只在 login 那一刻可用。
 	memberships := h.userService.BuildLoginMemberships(ctx, user, tenant)
-	canCreateTenant := user.CanAccessAllTenants ||
+	canCreateTenant := (user.CanAccessAllTenants && h.configInfo.Tenant.EnableCrossTenantAccess) ||
 		resolveTenantSelfServiceCreationEnabled(ctx, h.configInfo, h.systemSettingSvc)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

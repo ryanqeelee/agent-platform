@@ -50,6 +50,9 @@ var (
 	// (user, tenant) pair already has an active membership.
 	ErrMembershipAlreadyExists = errors.New("tenant membership already exists")
 
+	// ErrUserBoundToAnotherEnterprise keeps one account bound to one company.
+	ErrUserBoundToAnotherEnterprise = errors.New("user already belongs to another enterprise")
+
 	// ErrInvalidTenantRole is returned when the caller passes a role
 	// value that is not one of the four defined TenantRole constants.
 	ErrInvalidTenantRole = errors.New("invalid tenant role")
@@ -166,6 +169,9 @@ func (s *tenantMemberService) AddMember(
 		JoinedAt:  time.Now(),
 	}
 	if err := s.repo.Create(ctx, member); err != nil {
+		if errors.Is(err, apprepo.ErrUserBoundToAnotherEnterprise) {
+			return nil, ErrUserBoundToAnotherEnterprise
+		}
 		// TOCTOU race: a concurrent AddMember / EnsureOwner slipped past
 		// the Get above. The DB's partial unique index on
 		// (user_id, tenant_id) WHERE deleted_at IS NULL caught it; map
@@ -212,6 +218,9 @@ func (s *tenantMemberService) EnsureOwner(
 		JoinedAt: time.Now(),
 	}
 	if err := s.repo.Create(ctx, member); err != nil {
+		if errors.Is(err, apprepo.ErrUserBoundToAnotherEnterprise) {
+			return nil, ErrUserBoundToAnotherEnterprise
+		}
 		// Idempotent contract: if a concurrent Ensure/AddMember beat us
 		// (two simultaneous registrations of the same user, or the
 		// orphan-tenant self-heal path firing on parallel JWTs), the

@@ -159,12 +159,29 @@ func TestResolveTenantRole_ActiveMembershipWins(t *testing.T) {
 	}
 }
 
+func TestEnterpriseManagedResolveTenantRoleAllowsContributorOnlyInHomeEnterprise(t *testing.T) {
+	svc := newFakeMemberService()
+	svc.seedActive("u1", 10, types.TenantRoleContributor)
+	if role, ok := resolveTenantRole(context.Background(), svc, &types.User{ID: "u1", TenantID: 10}, 10, false, cfgWithRBAC(true)); !ok || role != types.TenantRoleContributor {
+		t.Fatal("contributor must remain usable in the bound enterprise")
+	}
+	svc.seedActive("u2", 11, types.TenantRoleViewer)
+	if _, ok := resolveTenantRole(context.Background(), svc, &types.User{ID: "u2", TenantID: 10}, 11, true, cfgWithRBAC(true)); ok {
+		t.Fatal("a historical membership outside the bound enterprise must be rejected")
+	}
+	if _, ok := resolveTenantRole(context.Background(), svc, &types.User{ID: "super", TenantID: 10, CanAccessAllTenants: true}, 11, true, cfgWithRBAC(true)); ok {
+		t.Fatal("cross-tenant flag off must also reject a platform superuser")
+	}
+}
+
 func TestResolveTenantRole_CrossTenantSuperuserGetsAdmin_NoAutoPromote(t *testing.T) {
 	// 回归 H1：跨空间超管 switch 到他人空间时，绝对不能写入 tenant_members。
 	svc := newFakeMemberService()
 	user := &types.User{ID: "super", TenantID: 1, CanAccessAllTenants: true}
+	cfg := cfgWithRBAC(true)
+	cfg.Tenant.EnableCrossTenantAccess = true
 
-	got, ok := resolveTenantRole(context.Background(), svc, user, 99, true, cfgWithRBAC(true))
+	got, ok := resolveTenantRole(context.Background(), svc, user, 99, true, cfg)
 	if !ok || got != types.TenantRoleAdmin {
 		t.Fatalf("got (%v, %v), want (admin, true)", got, ok)
 	}

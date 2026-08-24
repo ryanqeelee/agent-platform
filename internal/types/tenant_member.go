@@ -80,9 +80,8 @@ const (
 // TenantMember represents the (user, tenant) membership record that
 // carries the user's TenantRole for that specific tenant.
 //
-// A user has one TenantMember row per tenant they belong to. The home
-// tenant recorded on User.TenantID is always one of these rows; additional
-// rows are created when an admin adds the user to another tenant.
+// User.TenantID is the enterprise binding. TenantMember records the role
+// held by that user inside the bound enterprise.
 type TenantMember struct {
 	// Surrogate primary key.
 	ID uint64 `json:"id" gorm:"primaryKey;autoIncrement"`

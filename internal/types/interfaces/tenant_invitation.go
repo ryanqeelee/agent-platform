@@ -73,6 +73,14 @@ type TenantInvitationRepository interface {
 		respondedAt time.Time,
 	) error
 
+	// AcceptInvitation atomically creates the enterprise-bound membership
+	// and consumes a direct invitation while holding the invitation row lock.
+	AcceptInvitation(ctx context.Context, id uint64, userID string, at time.Time) (*types.TenantMember, error)
+
+	// AcceptShareLink atomically creates the enterprise-bound membership and
+	// increments the reusable link counter while the link is still pending.
+	AcceptShareLink(ctx context.Context, id uint64, userID string, at time.Time) (*types.TenantMember, error)
+
 	// SweepExpired transitions all pending rows whose expires_at is
 	// before `now` into the expired state. Returns the affected row
 	// count so callers can decide whether to emit per-row audit

@@ -1,11 +1,8 @@
 package middleware
 
 import (
-	"context"
 	"net/http"
 	"testing"
-
-	"github.com/Tencent/WeKnora/internal/types"
 )
 
 func TestTenantOptionalAPISurface(t *testing.T) {
@@ -27,21 +24,5 @@ func TestTenantOptionalAPISurface(t *testing.T) {
 		if got := isTenantOptionalAPI(tt.path, tt.method); got != tt.want {
 			t.Errorf("isTenantOptionalAPI(%s %s) = %v, want %v", tt.method, tt.path, got, tt.want)
 		}
-	}
-}
-
-func TestResolveFirstMembershipTarget(t *testing.T) {
-	members := newFakeMemberService()
-	members.seedActive("tenantless-user", 42, types.TenantRoleViewer)
-	tenants := &fakeTenantService{tenant: &types.Tenant{ID: 42}}
-
-	got := resolveFirstMembershipTarget(
-		context.Background(),
-		&types.User{ID: "tenantless-user"},
-		members,
-		tenants,
-	)
-	if got != 42 {
-		t.Fatalf("resolved tenant = %d, want 42", got)
 	}
 }

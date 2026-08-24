@@ -16,7 +16,10 @@ import (
 // when the operation would leave the tenant without an active Owner.
 // The service layer maps this to its own ErrLastOwner sentinel (same
 // semantic; just kept separate so the repo doesn't import service).
-var ErrLastOwner = errors.New("repository: last active owner")
+var (
+	ErrLastOwner                    = errors.New("repository: last active owner")
+	ErrUserBoundToAnotherEnterprise = errors.New("repository: user is bound to another enterprise")
+)
 
 // forUpdateClause returns the gorm SELECT ... FOR UPDATE clause. Kept
 // in one place so we can swap it out for `clause.Locking{Strength: "UPDATE"}`
@@ -36,17 +39,44 @@ func NewTenantMemberRepository(db *gorm.DB) interfaces.TenantMemberRepository {
 	return &tenantMemberRepository{db: db}
 }
 
-// Create inserts a new active membership row. Status defaults to
-// TenantMemberStatusActive when the caller leaves it blank, and JoinedAt
-// defaults to the current time, matching service-layer expectations.
-func (r *tenantMemberRepository) Create(ctx context.Context, member *types.TenantMember) error {
+const boundEnterpriseMembership = `EXISTS (
+	SELECT 1 FROM users
+	WHERE users.id = tenant_members.user_id
+	  AND users.tenant_id = tenant_members.tenant_id
+	  AND users.deleted_at IS NULL
+)`
+
+func createTenantMember(ctx context.Context, tx *gorm.DB, member *types.TenantMember) error {
 	if member.Status == "" {
 		member.Status = types.TenantMemberStatusActive
 	}
 	if member.JoinedAt.IsZero() {
 		member.JoinedAt = time.Now()
 	}
-	return r.db.WithContext(ctx).Create(member).Error
+	var user types.User
+	if err := tx.WithContext(ctx).Clauses(forUpdateClause()).Select("id", "tenant_id").
+		Where("id = ?", member.UserID).Take(&user).Error; err != nil {
+		return err
+	}
+	if user.TenantID != 0 && user.TenantID != member.TenantID {
+		return ErrUserBoundToAnotherEnterprise
+	}
+	if user.TenantID == 0 {
+		if err := tx.WithContext(ctx).Model(&types.User{}).Where("id = ?", member.UserID).
+			Update("tenant_id", member.TenantID).Error; err != nil {
+			return err
+		}
+	}
+	return tx.WithContext(ctx).Create(member).Error
+}
+
+// Create binds a tenantless user to the target enterprise and inserts the
+// membership in one transaction. Locking the user row serializes competing
+// invitations from different enterprises.
+func (r *tenantMemberRepository) Create(ctx context.Context, member *types.TenantMember) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return createTenantMember(ctx, tx, member)
+	})
 }
 
 // Get returns the active membership for (userID, tenantID), or (nil, nil)
@@ -54,6 +84,7 @@ func (r *tenantMemberRepository) Create(ctx context.Context, member *types.Tenan
 func (r *tenantMemberRepository) Get(ctx context.Context, userID string, tenantID uint64) (*types.TenantMember, error) {
 	var member types.TenantMember
 	err := r.db.WithContext(ctx).
+		Where(boundEnterpriseMembership).
 		Where("user_id = ? AND tenant_id = ?", userID, tenantID).
 		First(&member).Error
 	if err != nil {
@@ -71,6 +102,7 @@ func (r *tenantMemberRepository) Get(ctx context.Context, userID string, tenantI
 func (r *tenantMemberRepository) ListByUser(ctx context.Context, userID string) ([]*types.TenantMember, error) {
 	var members []*types.TenantMember
 	err := r.db.WithContext(ctx).
+		Where(boundEnterpriseMembership).
 		Where("user_id = ?", userID).
 		Order("joined_at ASC, id ASC").
 		Find(&members).Error
@@ -84,6 +116,7 @@ func (r *tenantMemberRepository) ListByUser(ctx context.Context, userID string) 
 func (r *tenantMemberRepository) ListByTenant(ctx context.Context, tenantID uint64) ([]*types.TenantMember, error) {
 	var members []*types.TenantMember
 	err := r.db.WithContext(ctx).
+		Where(boundEnterpriseMembership).
 		Where("tenant_id = ?", tenantID).
 		Order("joined_at ASC, id ASC").
 		Find(&members).Error
@@ -100,6 +133,7 @@ func (r *tenantMemberRepository) CountFilteredByTenant(
 ) (int64, error) {
 	search = strings.TrimSpace(search)
 	q := r.db.WithContext(ctx).Model(&types.TenantMember{}).
+		Joins(`INNER JOIN users ON users.id = tenant_members.user_id AND users.tenant_id = tenant_members.tenant_id AND users.deleted_at IS NULL`).
 		Where("tenant_members.tenant_id = ?", tenantID)
 	var total int64
 	var err error
@@ -107,9 +141,7 @@ func (r *tenantMemberRepository) CountFilteredByTenant(
 		err = q.Count(&total).Error
 	} else {
 		like := "%" + escapeLikePattern(search) + "%"
-		err = q.
-			Joins(`INNER JOIN users ON users.id = tenant_members.user_id AND users.deleted_at IS NULL`).
-			Where(`(LOWER(users.email) LIKE LOWER(?) OR LOWER(users.username) LIKE LOWER(?))`, like, like).
+		err = q.Where(`(LOWER(users.email) LIKE LOWER(?) OR LOWER(users.username) LIKE LOWER(?))`, like, like).
 			Count(&total).Error
 	}
 	return total, err
@@ -122,6 +154,7 @@ func (r *tenantMemberRepository) ListPagedByTenant(
 	search = strings.TrimSpace(search)
 	var members []*types.TenantMember
 	q := r.db.WithContext(ctx).Model(&types.TenantMember{}).
+		Joins(`INNER JOIN users ON users.id = tenant_members.user_id AND users.tenant_id = tenant_members.tenant_id AND users.deleted_at IS NULL`).
 		Where("tenant_members.tenant_id = ?", tenantID).
 		Order("tenant_members.joined_at ASC, tenant_members.id ASC").
 		Offset(offset).
@@ -132,9 +165,7 @@ func (r *tenantMemberRepository) ListPagedByTenant(
 		err = q.Find(&members).Error
 	} else {
 		like := "%" + escapeLikePattern(search) + "%"
-		err = q.
-			Joins(`INNER JOIN users ON users.id = tenant_members.user_id AND users.deleted_at IS NULL`).
-			Where(`(LOWER(users.email) LIKE LOWER(?) OR LOWER(users.username) LIKE LOWER(?))`, like, like).
+		err = q.Where(`(LOWER(users.email) LIKE LOWER(?) OR LOWER(users.username) LIKE LOWER(?))`, like, like).
 			Find(&members).Error
 	}
 	if err != nil {
@@ -174,6 +205,7 @@ func (r *tenantMemberRepository) CountActiveOwners(ctx context.Context, tenantID
 	var count int64
 	err := r.db.WithContext(ctx).
 		Model(&types.TenantMember{}).
+		Where(boundEnterpriseMembership).
 		Where("tenant_id = ? AND role = ? AND status = ?",
 			tenantID, types.TenantRoleOwner, types.TenantMemberStatusActive).
 		Count(&count).Error
@@ -209,6 +241,7 @@ func (r *tenantMemberRepository) DemoteOwnerAtomically(
 		var locked []types.TenantMember
 		err := tx.
 			Clauses(forUpdateClause()).
+			Where(boundEnterpriseMembership).
 			Where("tenant_id = ? AND user_id <> ? AND role = ? AND status = ?",
 				tenantID, userID, types.TenantRoleOwner, types.TenantMemberStatusActive).
 			Find(&locked).Error
@@ -246,6 +279,7 @@ func (r *tenantMemberRepository) RemoveOwnerAtomically(
 		var locked []types.TenantMember
 		err := tx.
 			Clauses(forUpdateClause()).
+			Where(boundEnterpriseMembership).
 			Where("tenant_id = ? AND user_id <> ? AND role = ? AND status = ?",
 				tenantID, userID, types.TenantRoleOwner, types.TenantMemberStatusActive).
 			Find(&locked).Error
@@ -279,6 +313,7 @@ func (r *tenantMemberRepository) HasAnyMembers(ctx context.Context, tenantID uin
 	err := r.db.WithContext(ctx).
 		Model(&types.TenantMember{}).
 		Select("id").
+		Where(boundEnterpriseMembership).
 		Where("tenant_id = ? AND status = ?", tenantID, types.TenantMemberStatusActive).
 		Limit(1).
 		Take(&probe).Error

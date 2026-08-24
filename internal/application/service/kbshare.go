@@ -51,14 +51,7 @@ func NewKBShareService(
 	chunkRepo interfaces.ChunkRepository,
 	audit interfaces.AuditLogService,
 ) interfaces.KBShareService {
-	return &kbShareService{
-		shareRepo: shareRepo,
-		orgRepo:   orgRepo,
-		kbRepo:    kbRepo,
-		kgRepo:    kgRepo,
-		chunkRepo: chunkRepo,
-		audit:     audit,
-	}
+	return enterpriseManagedKBShareService{}
 }
 
 // applyTenantRoleCap applies the third dimension of the cap: a caller

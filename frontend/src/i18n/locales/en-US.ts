@@ -1,6 +1,7 @@
 export default {
   menu: {
     knowledgeBase: 'Knowledge Base',
+    operatingAnalysis: 'Operating Analysis',
     agents: 'Agents',
     organizations: 'Shared Spaces',
     newChat: 'New Chat',

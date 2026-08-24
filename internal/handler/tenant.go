@@ -230,7 +230,8 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 	}
 	apiKeyScope, hasAPIKeyScope := types.TenantAPIKeyScopeFromContext(ctx)
 	platformCaller := hasAPIKeyScope && apiKeyScope.IsPlatform()
-	catalogManager := caller.CanAccessAllTenants || platformCaller
+	catalogManager := platformCaller ||
+		(caller.CanAccessAllTenants && h.config.Tenant.EnableCrossTenantAccess)
 
 	// Deployment-level policy: ordinary users may be restricted to joining
 	// existing workspaces by invitation. This check is authoritative; the
@@ -356,7 +357,7 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 	// yet still occupies storage_bucket / name uniqueness slots.
 	// Idempotent: EnsureOwner is a no-op when the row already exists,
 	// so cross-tenant superusers create-and-own through the same path.
-	if h.memberService != nil && !platformCaller {
+	if h.memberService != nil && !catalogManager {
 		if _, err := h.memberService.EnsureOwner(ctx, caller.ID, createdTenant.ID); err != nil {
 			logger.Errorf(ctx,
 				"Failed to bootstrap owner membership for user %s tenant %d: %v — rolling back tenant",
@@ -420,7 +421,7 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 	// When a tenantless user creates their first workspace, make it their
 	// default login tenant. Roll the just-created resources back if this
 	// finalisation fails so the user is not left with an unreachable tenant.
-	if caller.TenantID == 0 && !platformCaller {
+	if caller.TenantID == 0 && !catalogManager {
 		caller.TenantID = createdTenant.ID
 		if err := h.userService.UpdateUser(ctx, caller); err != nil {
 			logger.Errorf(ctx, "Failed to set first tenant %d as default for user %s: %v",

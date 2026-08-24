@@ -3,11 +3,12 @@ package handler
 import (
 	"bytes"
 	"context"
-	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
@@ -15,9 +16,8 @@ import (
 
 type invitedRegistrationUserService struct {
 	interfaces.UserService
-	registeredMode types.TenantProvisioningMode
-	updatedTenant  uint64
-	updateCalls    []uint64
+	registeredMode        types.TenantProvisioningMode
+	deleteTenantlessCalls int
 }
 
 func (s *invitedRegistrationUserService) GetUserByEmail(context.Context, string) (*types.User, error) {
@@ -29,14 +29,13 @@ func (s *invitedRegistrationUserService) Register(_ context.Context, req *types.
 	return &types.User{ID: "new-user", Username: req.Username, Email: req.Email, IsActive: true}, nil
 }
 
-func (s *invitedRegistrationUserService) UpdateUser(_ context.Context, user *types.User) error {
-	s.updatedTenant = user.TenantID
-	s.updateCalls = append(s.updateCalls, user.TenantID)
-	return nil
-}
-
 func (s *invitedRegistrationUserService) GenerateTokens(context.Context, *types.User) (string, string, error) {
 	return "access", "refresh", nil
+}
+
+func (s *invitedRegistrationUserService) DeleteTenantlessUser(context.Context, string) error {
+	s.deleteTenantlessCalls++
+	return nil
 }
 
 type invitedRegistrationInvitationService struct {
@@ -65,7 +64,7 @@ func TestRegisterByInviteRestoresTenantlessAccountWhenInviteExpiresDuringRegistr
 	h := &AuthHandler{
 		userService:   users,
 		tenantService: &invitedRegistrationTenantService{},
-		invitationSvc: &invitedRegistrationInvitationService{acceptErr: errors.New("expired")},
+		invitationSvc: &invitedRegistrationInvitationService{acceptErr: service.ErrInvitationTokenInvalid},
 	}
 	r := gin.New()
 	r.Use(errorCapture())
@@ -80,11 +79,34 @@ func TestRegisterByInviteRestoresTenantlessAccountWhenInviteExpiresDuringRegistr
 	if w.Code != http.StatusGone {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
-	if users.updatedTenant != 0 {
-		t.Fatalf("updated tenant=%d, want tenantless rollback", users.updatedTenant)
+	if users.deleteTenantlessCalls != 1 {
+		t.Fatalf("DeleteTenantlessUser called %d times, want 1", users.deleteTenantlessCalls)
 	}
-	if len(users.updateCalls) != 2 || users.updateCalls[0] != 42 || users.updateCalls[1] != 0 {
-		t.Fatalf("update calls=%v, want [42 0]", users.updateCalls)
+}
+
+func TestRegisterByInviteReportsUnexpectedAcceptanceFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	users := &invitedRegistrationUserService{}
+	h := &AuthHandler{
+		userService:   users,
+		tenantService: &invitedRegistrationTenantService{},
+		invitationSvc: &invitedRegistrationInvitationService{acceptErr: fmt.Errorf("database unavailable")},
+	}
+	r := gin.New()
+	r.Use(errorCapture())
+	r.POST("/auth/register-by-invite", h.RegisterByInvite)
+
+	body := []byte(`{"token":"invite-token","email":"alice@example.com","username":"alice","password":"supersecret"}`)
+	req := httptest.NewRequest(http.MethodPost, "/auth/register-by-invite", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if users.deleteTenantlessCalls != 1 {
+		t.Fatalf("DeleteTenantlessUser called %d times, want 1", users.deleteTenantlessCalls)
 	}
 }
 
@@ -115,8 +137,5 @@ func TestRegisterByInviteUsesInvitedTenantWithoutPersonalTenant(t *testing.T) {
 	}
 	if users.registeredMode != types.TenantProvisioningTenantless {
 		t.Fatalf("register mode=%q, want tenantless", users.registeredMode)
-	}
-	if users.updatedTenant != 42 {
-		t.Fatalf("updated tenant=%d, want 42", users.updatedTenant)
 	}
 }

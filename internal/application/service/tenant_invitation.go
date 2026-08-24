@@ -196,17 +196,8 @@ func (s *tenantInvitationService) Create(
 	return inv, nil
 }
 
-// Accept transitions a pending invitation into accepted AND creates
-// the active tenant_members row in the same flow. We do NOT wrap both
-// writes in a single DB transaction because TenantMemberService.AddMember
-// owns its own write + audit emit and reaching across services here
-// would force the audit-log writes to commit/rollback in lockstep.
-// Instead, we order operations so the user-visible failure mode is
-// "you couldn't accept the invitation"; if the membership insert fails
-// AFTER the invitation transition committed (rare; collision on the
-// tenant_members unique index would be the only realistic case), the
-// row already in tenant_members wins and a subsequent Accept call sees
-// ErrInvitationNotPending which the handler renders as 409.
+// Accept creates the enterprise-bound membership and consumes the direct
+// invitation in one repository transaction.
 func (s *tenantInvitationService) Accept(
 	ctx context.Context,
 	invID uint64,
@@ -233,39 +224,36 @@ func (s *tenantInvitationService) Accept(
 		// Treat it as expired regardless.
 		return nil, ErrInvitationExpired
 	}
-
-	now := s.now()
-	if err := s.repo.MarkStatusIfPending(ctx, invID, types.TenantInvitationStatusAccepted, now); err != nil {
-		// Another goroutine (concurrent click) won the race. Honour
-		// the state machine.
-		return nil, ErrInvitationNotPending
-	}
-
-	// Create the actual tenant_members row. Cross-service hop: the
-	// member service handles its own audit (rbac.member_added) and
-	// also enforces the (user, tenant) uniqueness invariant via the
-	// repo. If it fails here the invitation is already accepted —
-	// see comment above for why we don't rollback the invitation.
-	member, err := s.memberSvc.AddMember(ctx, inv.InviteeUserID, inv.TenantID, inv.Role, inv.InvitedBy)
+	member, err := s.repo.AcceptInvitation(ctx, invID, callerUserID, s.now())
 	if err != nil {
-		// Special-case "already a member": that's the idempotent
-		// outcome we want. Return the existing membership instead of
-		// bubbling the error up to the invitee.
-		if errors.Is(err, ErrMembershipAlreadyExists) {
-			existing, getErr := s.memberSvc.GetMembership(ctx, inv.InviteeUserID, inv.TenantID)
-			if getErr == nil && existing != nil {
-				s.emitInvitationAccepted(ctx, inv)
-				return existing, nil
-			}
+		switch {
+		case errors.Is(err, apprepo.ErrInvitationNotPending):
+			return nil, ErrInvitationNotPending
+		case errors.Is(err, apprepo.ErrInvitationExpired):
+			return nil, ErrInvitationExpired
+		case errors.Is(err, apprepo.ErrInvitationForbidden):
+			return nil, ErrInvitationForbidden
+		case errors.Is(err, apprepo.ErrUserBoundToAnotherEnterprise):
+			return nil, ErrUserBoundToAnotherEnterprise
+		default:
+			return nil, err
 		}
-		logger.Errorf(ctx,
-			"invitation %d accepted but tenant_members insert failed: %v",
-			invID, err)
-		return nil, err
 	}
 
+	s.emitMemberAdded(ctx, member)
 	s.emitInvitationAccepted(ctx, inv)
 	return member, nil
+}
+
+func (s *tenantInvitationService) emitMemberAdded(ctx context.Context, member *types.TenantMember) {
+	if member == nil {
+		return
+	}
+	s.emitAudit(ctx, &types.AuditLog{
+		TenantID: member.TenantID, ActorUserID: auditActor(ctx), ActorRole: auditActorRole(ctx),
+		Action: types.AuditActionMemberAdded, TargetType: "tenant_member", TargetUserID: member.UserID,
+		Outcome: types.AuditOutcomeSuccess,
+	})
 }
 
 // emitInvitationAccepted writes the rbac.invitation_accepted audit row.
@@ -554,28 +542,20 @@ func (s *tenantInvitationService) AcceptByToken(
 	if err != nil {
 		return nil, err
 	}
-	member, err := s.memberSvc.AddMember(ctx, newUserID, inv.TenantID, inv.Role, inv.InvitedBy)
+	member, err := s.repo.AcceptShareLink(ctx, inv.ID, newUserID, s.now())
 	if err != nil {
-		if errors.Is(err, ErrMembershipAlreadyExists) {
-			existing, getErr := s.memberSvc.GetMembership(ctx, newUserID, inv.TenantID)
-			if getErr == nil && existing != nil {
-				return existing, nil
-			}
+		if errors.Is(err, apprepo.ErrInvitationNotPending) || errors.Is(err, apprepo.ErrInvitationExpired) {
+			return nil, ErrInvitationTokenInvalid
+		}
+		if errors.Is(err, apprepo.ErrUserBoundToAnotherEnterprise) {
+			return nil, ErrUserBoundToAnotherEnterprise
 		}
 		logger.Errorf(ctx,
 			"share-link %d accept failed for user %s: %v",
 			inv.ID, newUserID, err)
 		return nil, err
 	}
-	// Bump usage counter so the management UI can show "N 人已加入".
-	// Best-effort: a failure here doesn't undo the membership the user
-	// just earned — log and move on. The counter is for display only;
-	// audit log + tenant_members rows are the authoritative trail.
-	if incErr := s.repo.IncrementAcceptedCount(ctx, inv.ID); incErr != nil {
-		logger.Warnf(ctx,
-			"share-link %d accepted_count bump failed (membership still created): %v",
-			inv.ID, incErr)
-	}
+	s.emitMemberAdded(ctx, member)
 	s.emitAudit(ctx, &types.AuditLog{
 		TenantID:     inv.TenantID,
 		ActorUserID:  auditActor(ctx),

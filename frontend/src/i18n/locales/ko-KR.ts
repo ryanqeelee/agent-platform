@@ -5865,6 +5865,7 @@ export default {
   },
   menu: {
     knowledgeBase: '지식베이스',
+    operatingAnalysis: '경영 분석',
     agents: '에이전트',
     organizations: '공유 공간',
     newChat: '새 대화',

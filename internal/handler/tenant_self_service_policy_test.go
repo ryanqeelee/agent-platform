@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -58,6 +59,16 @@ type tenantPolicyTenantService struct {
 	createCalls int
 }
 
+type tenantPolicyMemberService struct {
+	interfaces.TenantMemberService
+	ensureOwnerCalls int
+}
+
+func (s *tenantPolicyMemberService) EnsureOwner(context.Context, string, uint64) (*types.TenantMember, error) {
+	s.ensureOwnerCalls++
+	return nil, errors.New("catalog manager must not become tenant owner")
+}
+
 func (s *tenantPolicyTenantService) CreateTenant(_ context.Context, tenant *types.Tenant) (*types.Tenant, error) {
 	s.createCalls++
 	tenant.ID = 99
@@ -92,7 +103,7 @@ func TestCreateTenantRejectsRegularUserWhenSelfServiceDisabled(t *testing.T) {
 	}
 }
 
-func TestCreateTenantAllowsCrossTenantSuperuserWhenSelfServiceDisabled(t *testing.T) {
+func TestCreateTenantRejectsDormantCrossTenantSuperuserWhenFlagDisabled(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tenants := &tenantPolicyTenantService{}
 	h := &TenantHandler{
@@ -113,11 +124,45 @@ func TestCreateTenantAllowsCrossTenantSuperuserWhenSelfServiceDisabled(t *testin
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if tenants.createCalls != 0 {
+		t.Fatalf("CreateTenant called %d times, want 0", tenants.createCalls)
+	}
+}
+
+func TestCreateTenantAllowsCrossTenantSuperuserWhenFlagEnabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tenants := &tenantPolicyTenantService{}
+	members := &tenantPolicyMemberService{}
+	h := &TenantHandler{
+		service:       tenants,
+		memberService: members,
+		userService: &tenantPolicyUserService{user: &types.User{
+			ID:                  "super-user",
+			TenantID:            1,
+			CanAccessAllTenants: true,
+		}},
+		config:           &config.Config{Tenant: &config.TenantConfig{EnableCrossTenantAccess: true}},
+		systemSettingSvc: &tenantPolicySettingService{enabled: false},
+	}
+	r := gin.New()
+	r.Use(errorCapture())
+	r.POST("/tenants", h.CreateTenant)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/tenants", bytes.NewBufferString(`{"name":"admin-created"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
 	if w.Code != http.StatusCreated {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
 	if tenants.createCalls != 1 {
 		t.Fatalf("CreateTenant called %d times, want 1", tenants.createCalls)
+	}
+	if members.ensureOwnerCalls != 0 {
+		t.Fatalf("EnsureOwner called %d times, want 0", members.ensureOwnerCalls)
 	}
 }
 
@@ -125,9 +170,10 @@ func TestAuthMeProjectsTenantCreationCapability(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	h := &AuthHandler{
 		userService: &tenantPolicyUserService{user: &types.User{
-			ID:       "tenantless-user",
-			Username: "tenantless",
-			Email:    "tenantless@example.com",
+			ID:                  "tenantless-user",
+			Username:            "tenantless",
+			Email:               "tenantless@example.com",
+			CanAccessAllTenants: true,
 		}},
 		configInfo:       &config.Config{Tenant: &config.TenantConfig{}},
 		systemSettingSvc: &tenantPolicySettingService{enabled: false},
@@ -142,5 +188,8 @@ func TestAuthMeProjectsTenantCreationCapability(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), `"can_create_tenant":false`) {
 		t.Fatalf("response missing capability: %s", w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"can_access_all_tenants":true`) {
+		t.Fatalf("response masked stored cross-tenant privilege: %s", w.Body.String())
 	}
 }

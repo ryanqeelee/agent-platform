@@ -245,6 +245,8 @@ func (h *TenantMemberHandler) AddMember(c *gin.Context) {
 			// 409 reads better than 400 here: the request was syntactically
 			// fine, the conflict is semantic ("already a member").
 			c.Error(apperrors.NewConflictError(err.Error()))
+		case errors.Is(err, service.ErrUserBoundToAnotherEnterprise):
+			c.Error(apperrors.NewConflictError(err.Error()))
 		default:
 			logger.Errorf(ctx, "AddMember failed: user=%s tenant=%d err=%v",
 				user.ID, tenantID, err)

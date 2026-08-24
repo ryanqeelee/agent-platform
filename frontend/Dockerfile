@@ -6,9 +6,16 @@
 # newer Alpine base (3.24+) fails to start on old hosts such as CentOS 7
 # (kernel 3.10 + old libseccomp), which broke v0.7.0. This digest is
 # nginx 1.30.3 / Alpine 3.23.5, the same base as the working v0.6.3 image.
+FROM node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS build
+WORKDIR /src
+ENV NODE_OPTIONS=--max-old-space-size=4096
+COPY . .
+RUN npm ci
+RUN npm run type-check && npm run check-i18n && npm run build
+
 FROM nginx:1.30.3-alpine@sha256:0d3b80406a13a767339fbe2f41406d6c7da727ab89cf8fae399e81f780f814d1
 
-COPY dist /usr/share/nginx/html
+COPY --from=build /src/dist /usr/share/nginx/html
 
 COPY nginx.conf /etc/nginx/templates/default.conf.template
 

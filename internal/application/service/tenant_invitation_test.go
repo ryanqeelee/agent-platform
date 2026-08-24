@@ -19,8 +19,9 @@ import (
 // rather than the SQL surface. The production repo gets exercised via
 // the real DB in repo tests if/when those are added.
 type fakeInvitationRepo struct {
-	rows   []*types.TenantInvitation
-	nextID uint64
+	rows         []*types.TenantInvitation
+	nextID       uint64
+	acceptMember func(context.Context, string, uint64, types.TenantRole, *string) (*types.TenantMember, error)
 }
 
 func newFakeInvitationRepo() *fakeInvitationRepo { return &fakeInvitationRepo{} }
@@ -180,6 +181,51 @@ func (r *fakeInvitationRepo) MarkStatusIfPending(
 	return gormErrRecordNotFound
 }
 
+func (r *fakeInvitationRepo) AcceptInvitation(
+	ctx context.Context, id uint64, userID string, at time.Time,
+) (*types.TenantMember, error) {
+	for _, inv := range r.rows {
+		if inv.ID != id || inv.Status != types.TenantInvitationStatusPending {
+			continue
+		}
+		if inv.IsExpired(at) {
+			return nil, apprepo.ErrInvitationExpired
+		}
+		if inv.InviteeUserID != userID {
+			return nil, apprepo.ErrInvitationForbidden
+		}
+		member, err := r.acceptMember(ctx, userID, inv.TenantID, inv.Role, inv.InvitedBy)
+		if err != nil {
+			return nil, err
+		}
+		inv.Status = types.TenantInvitationStatusAccepted
+		inv.RespondedAt = &at
+		inv.AcceptedCount = 1
+		return member, nil
+	}
+	return nil, apprepo.ErrInvitationNotPending
+}
+
+func (r *fakeInvitationRepo) AcceptShareLink(
+	ctx context.Context, id uint64, userID string, at time.Time,
+) (*types.TenantMember, error) {
+	for _, inv := range r.rows {
+		if inv.ID != id || inv.Status != types.TenantInvitationStatusPending || inv.InviteeUserID != "" {
+			continue
+		}
+		if inv.IsExpired(at) {
+			return nil, apprepo.ErrInvitationExpired
+		}
+		member, err := r.acceptMember(ctx, userID, inv.TenantID, inv.Role, inv.InvitedBy)
+		if err != nil {
+			return nil, err
+		}
+		inv.AcceptedCount++
+		return member, nil
+	}
+	return nil, apprepo.ErrInvitationNotPending
+}
+
 func (r *fakeInvitationRepo) SweepExpired(
 	ctx context.Context, now time.Time,
 ) (int64, error) {
@@ -220,6 +266,13 @@ func newInvitationSvc() (
 ) {
 	invRepo := newFakeInvitationRepo()
 	memberSvc, _ := newServiceWithRepo()
+	invRepo.acceptMember = func(ctx context.Context, userID string, tenantID uint64, role types.TenantRole, invitedBy *string) (*types.TenantMember, error) {
+		member, err := memberSvc.AddMember(ctx, userID, tenantID, role, invitedBy)
+		if errors.Is(err, ErrMembershipAlreadyExists) {
+			return memberSvc.GetMembership(ctx, userID, tenantID)
+		}
+		return member, err
+	}
 	svc := NewTenantInvitationService(invRepo, memberSvc, nil)
 	return svc, invRepo, memberSvc
 }

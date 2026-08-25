@@ -2131,19 +2131,14 @@ export default {
     multimodalParsing: '기업 지식 통합 관리',
     hybridSearchEngine: '신뢰 검색과 출처',
     ragQandA: '거버넌스된 경영 분석',
+    workspace: 'Huanshu 지능형 워크스페이스',
+    workspaceHint: '하나의 기업 계정으로 권한에 따라 이용',
+    assistantDescription: '규정, 프로세스, 기업 지식을 한곳에서 확인',
+    analysisDescription: '지표 변화와 이상을 파악해 의사결정 지원',
+    governedData: '거버넌스된 운영 데이터',
     independentTenant: '독립 워크스페이스',
     fullApiAccess: '전체 API 접근',
-    knowledgeBaseManagement: '지식베이스 관리',
-    carousel: {
-      agenticRagTitle: 'Agentic RAG',
-      agenticRagDesc: 'ReAct 추론 + 도구 호출 + 다단계 사고',
-      hybridSearchTitle: '하이브리드 검색 전략',
-      hybridSearchDesc: 'BM25 + 벡터 + 지식 그래프',
-      wikiTitle: 'Wiki 지식베이스',
-      wikiDesc: '문서를 구조화된 상호 연결 지식으로 정제',
-      smartDocRetrievalTitle: '지능형 문서 검색',
-      smartDocRetrievalDesc: 'PDF/Word/이미지 다중 형식 파싱'
-    }
+    knowledgeBaseManagement: '지식베이스 관리'
   },
   font: {
     uiFont: '인터페이스 글꼴',
@@ -4392,7 +4387,7 @@ export default {
     firstTime: 'Huanshu가 처음이신가요?',
     registerSuccess: '가입이 완료되었습니다. 로그인해주세요',
     registerFailed: '가입 실패',
-    subtitle: 'RAG Q&A, ReAct 에이전트, Wiki 지식베이스 — 대규모 언어 모델 기반 엔터프라이즈 지식 프레임워크',
+    subtitle: '하나의 기업 계정으로 직원 도우미와 경영 분석을 이용하세요',
     registerSubtitle: '계정을 만들고 Huanshu를 시작하세요',
     emailPlaceholder: '이메일 주소 입력',
     passwordPlaceholder: '비밀번호 입력 (8-32자, 문자와 숫자 포함)',

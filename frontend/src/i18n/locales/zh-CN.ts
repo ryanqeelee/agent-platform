@@ -2131,19 +2131,14 @@ export default {
     multimodalParsing: '企业知识统一管理',
     hybridSearchEngine: '可信检索与引用',
     ragQandA: '受治理经营分析',
+    workspace: '环枢智能工作台',
+    workspaceHint: '统一企业账号，按权限进入工作入口',
+    assistantDescription: '问制度、查流程、找知识',
+    analysisDescription: '看指标、找异常、辅助经营决策',
+    governedData: '受治理经营数据',
     independentTenant: '独立空间',
     fullApiAccess: '完整 API 访问',
-    knowledgeBaseManagement: '知识库管理',
-    carousel: {
-      agenticRagTitle: 'Agentic RAG',
-      agenticRagDesc: 'ReAct 推理 + 工具调用 + 多步思考',
-      hybridSearchTitle: '混合检索策略',
-      hybridSearchDesc: 'BM25 + 向量 + 知识图谱',
-      wikiTitle: 'Wiki 知识库',
-      wikiDesc: '文档蒸馏为结构化互联知识',
-      smartDocRetrievalTitle: '智能文档检索',
-      smartDocRetrievalDesc: 'PDF/Word/图片多格式解析'
-    }
+    knowledgeBaseManagement: '知识库管理'
   },
   font: {
     uiFont: '界面字体',
@@ -4392,7 +4387,7 @@ export default {
     firstTime: '首次使用环枢？',
     registerSuccess: '注册成功，请登录',
     registerFailed: '注册失败',
-    subtitle: 'RAG 问答、ReAct 智能体与 Wiki 知识库，大模型驱动的企业级知识框架',
+    subtitle: '使用统一企业账号，进入员工助理与经营分析',
     registerSubtitle: '创建账户并开始使用环枢',
     emailPlaceholder: '输入邮箱地址',
     passwordPlaceholder: '输入密码（8-32个字符，包含字母和数字）',

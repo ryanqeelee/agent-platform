@@ -2131,19 +2131,14 @@ export default {
     multimodalParsing: 'Единое управление знаниями',
     hybridSearchEngine: 'Надежный поиск и источники',
     ragQandA: 'Управляемый операционный анализ',
+    workspace: 'Интеллектуальное пространство Huanshu',
+    workspaceHint: 'Одна корпоративная учетная запись, доступ по правам',
+    assistantDescription: 'Политики, процессы и корпоративные знания',
+    analysisDescription: 'Показатели, изменения и поддержка решений',
+    governedData: 'Управляемые операционные данные',
     independentTenant: 'Независимое рабочее пространство',
     fullApiAccess: 'Полный доступ к API',
-    knowledgeBaseManagement: 'Управление базой знаний',
-    carousel: {
-      agenticRagTitle: 'Agentic RAG',
-      agenticRagDesc: 'ReAct-рассуждения + вызов инструментов + многошаговое мышление',
-      hybridSearchTitle: 'Гибридная стратегия поиска',
-      hybridSearchDesc: 'BM25 + Вектор + Граф знаний',
-      wikiTitle: 'Wiki-база знаний',
-      wikiDesc: 'Дистилляция документов в структурированные связанные знания',
-      smartDocRetrievalTitle: 'Интеллектуальный поиск документов',
-      smartDocRetrievalDesc: 'Многоформатный разбор PDF/Word/изображений'
-    }
+    knowledgeBaseManagement: 'Управление базой знаний'
   },
   font: {
     uiFont: 'Шрифт интерфейса',
@@ -4392,7 +4387,7 @@ export default {
     firstTime: 'Впервые в Huanshu?',
     registerSuccess: 'Регистрация завершена. Войдите в систему',
     registerFailed: 'Ошибка регистрации',
-    subtitle: 'RAG, ReAct-агент и Wiki — корпоративный фреймворк знаний на основе больших моделей',
+    subtitle: 'Одна корпоративная учетная запись для помощника и операционного анализа',
     registerSubtitle: 'Создайте аккаунт и начните работу с Huanshu',
     emailPlaceholder: 'Введите адрес электронной почты',
     passwordPlaceholder: 'Введите пароль (8-32 символа, включая буквы и цифры)',

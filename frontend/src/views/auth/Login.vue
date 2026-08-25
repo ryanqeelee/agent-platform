@@ -137,19 +137,53 @@
           <span class="tag">{{ $t('platform.hybridSearch') }}</span>
         </div>
 
-        <!-- Swiper Carousel -->
-        <div class="carousel-container">
-          <swiper :modules="modules" :slides-per-view="1" :loop="true" :autoplay="{
-            delay: 4000,
-            disableOnInteraction: false,
-          }" :effect="'fade'" :fade-effect="{ crossFade: true }"
-            :pagination="{ clickable: true, dynamicBullets: false }" :speed="800" class="screenshot-swiper">
-            <swiper-slide v-for="(slide, index) in slides" :key="index">
-              <div class="slide-content">
-                <img :src="slide.image" :alt="slide.title" class="slide-image" />
+        <div class="workspace-preview">
+          <div class="workspace-preview__header">
+            <div class="workspace-preview__identity">
+              <span class="workspace-preview__mark" aria-hidden="true"></span>
+              <div>
+                <strong>{{ $t('platform.workspace') }}</strong>
+                <span>{{ $t('platform.workspaceHint') }}</span>
               </div>
-            </swiper-slide>
-          </swiper>
+            </div>
+            <span class="workspace-preview__evidence">{{ $t('platform.hybridSearch') }}</span>
+          </div>
+
+          <div class="workspace-preview__capabilities">
+            <article class="capability-card">
+              <div class="capability-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <path d="M21 15a3 3 0 0 1-3 3H8l-5 3V6a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3z" />
+                  <path d="M8 9h8M8 13h5" />
+                </svg>
+              </div>
+              <div class="capability-card__content">
+                <span class="capability-card__source">{{ $t('platform.wiki') }}</span>
+                <strong>{{ $t('platform.rag') }}</strong>
+                <p>{{ $t('platform.assistantDescription') }}</p>
+              </div>
+            </article>
+
+            <article class="capability-card capability-card--analysis">
+              <div class="capability-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />
+                  <path d="m4 7 6-4 6 7 5-4" />
+                </svg>
+              </div>
+              <div class="capability-card__content">
+                <span class="capability-card__source">{{ $t('platform.governedData') }}</span>
+                <strong>{{ $t('platform.agent') }}</strong>
+                <p>{{ $t('platform.analysisDescription') }}</p>
+              </div>
+            </article>
+          </div>
+
+          <div class="workspace-preview__knowledge">
+            <span>{{ $t('platform.multimodalParsing') }}</span>
+            <span aria-hidden="true">→</span>
+            <span>{{ $t('platform.hybridSearchEngine') }}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -311,11 +345,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useRoleLabel } from '@/composables/useRoleLabel'
 import { notifyLoginSuccess } from '@/utils/loginNotify'
-import { Swiper, SwiperSlide } from 'swiper/vue'
-import { Autoplay, EffectFade, Pagination } from 'swiper/modules'
-import 'swiper/css'
-import 'swiper/css/effect-fade'
-import 'swiper/css/pagination'
 import {
   login,
   register,
@@ -331,44 +360,11 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
 
-// Import screenshot images
-import screenshot1 from '@/assets/img/screenshot-1.svg'
-import screenshot2 from '@/assets/img/screenshot-2.svg'
-import screenshot3 from '@/assets/img/screenshot-3.svg'
-import screenshot4 from '@/assets/img/screenshot-4.svg'
-
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
 const { t, tm, locale } = useI18n()
 const { formatRole, roleIcon } = useRoleLabel()
-
-// Swiper modules
-const modules = [Autoplay, EffectFade, Pagination]
-
-// Carousel slides data
-const slides = [
-  {
-    image: screenshot4,
-    title: t('platform.carousel.agenticRagTitle'),
-    description: t('platform.carousel.agenticRagDesc')
-  },
-  {
-    image: screenshot2,
-    title: t('platform.carousel.hybridSearchTitle'),
-    description: t('platform.carousel.hybridSearchDesc')
-  },
-  {
-    image: screenshot3,
-    title: t('platform.carousel.wikiTitle'),
-    description: t('platform.carousel.wikiDesc')
-  },
-  {
-    image: screenshot1,
-    title: t('platform.carousel.smartDocRetrievalTitle'),
-    description: t('platform.carousel.smartDocRetrievalDesc')
-  }
-]
 
 // Form references
 const formRef = ref()
@@ -1049,60 +1045,155 @@ onMounted(async () => {
   font-family: var(--app-font-family);
 }
 
-/* Carousel */
-.carousel-container {
+.workspace-preview {
   width: 100%;
-  margin-top: 48px;
+  margin-top: 8px;
+  padding: 22px;
+  border: 1px solid rgba(167, 243, 208, 0.28);
+  border-radius: 18px;
+  background: linear-gradient(145deg, rgba(2, 44, 34, 0.88), rgba(3, 78, 58, 0.66));
+  box-shadow: 0 24px 64px rgba(1, 28, 21, 0.32);
+  backdrop-filter: blur(12px);
 }
 
-.screenshot-swiper {
-  width: 100%;
-  border-radius: 16px;
-  overflow: hidden;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-  padding-bottom: 40px;
+.workspace-preview__header,
+.workspace-preview__identity,
+.workspace-preview__knowledge {
+  display: flex;
+  align-items: center;
+}
 
-  :deep(.swiper-wrapper) {
-    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+.workspace-preview__header {
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.workspace-preview__identity {
+  gap: 12px;
+  min-width: 0;
+
+  div {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
   }
 
-  :deep(.swiper-pagination) {
-    bottom: 15px !important;
-    z-index: 10;
+  strong {
+    color: #fff;
+    font-size: 15px;
+    font-weight: 600;
   }
 
-  :deep(.swiper-pagination-bullet) {
-    width: 10px;
-    height: 10px;
-    background: rgba(255, 255, 255, 0.5);
-    opacity: 1;
-    transition: all 0.3s ease;
-    margin: 0 6px !important;
-  }
-
-  :deep(.swiper-pagination-bullet-active) {
-    background: var(--td-bg-color-container);
-    width: 28px;
-    border-radius: 5px;
+  span:not(.workspace-preview__mark) {
+    color: rgba(255, 255, 255, 0.66);
+    font-size: 12px;
+    line-height: 1.4;
   }
 }
 
-.slide-content {
-  width: 100%;
-  height: 100%;
-  background: var(--td-bg-color-container);
-  border-radius: 16px;
-  overflow: hidden;
+.workspace-preview__mark {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border: 1px solid rgba(167, 243, 208, 0.48);
+  border-radius: 11px;
+  background:
+    radial-gradient(circle at 36% 40%, #6ee7b7 0 17%, transparent 18%),
+    radial-gradient(circle at 66% 62%, #34d399 0 17%, transparent 18%),
+    rgba(16, 185, 129, 0.15);
+  box-shadow: 0 0 24px rgba(52, 211, 153, 0.18);
+}
+
+.workspace-preview__evidence,
+.capability-card__source {
+  border: 1px solid rgba(167, 243, 208, 0.24);
+  border-radius: 999px;
+  color: #a7f3d0;
+  background: rgba(16, 185, 129, 0.1);
+  white-space: nowrap;
+}
+
+.workspace-preview__evidence {
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
+.workspace-preview__capabilities {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 18px 0;
+}
+
+.capability-card {
+  display: flex;
+  gap: 13px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.capability-card--analysis {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.14), rgba(255, 255, 255, 0.06));
+}
+
+.capability-card__icon {
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  border-radius: 12px;
+  color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.14);
+
+  svg {
+    width: 22px;
+    height: 22px;
+  }
 }
 
-.slide-image {
-  width: 100%;
-  height: 100%;
-  display: block;
-  object-fit: contain;
+.capability-card__content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+
+  strong {
+    margin-top: 9px;
+    color: #fff;
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  p {
+    margin: 5px 0 0;
+    color: rgba(255, 255, 255, 0.68);
+    font-size: 12px;
+    line-height: 1.55;
+  }
+}
+
+.capability-card__source {
+  display: inline-flex;
+  padding: 4px 8px;
+  font-size: 10px;
+}
+
+.workspace-preview__knowledge {
+  justify-content: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border-radius: 10px;
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(0, 0, 0, 0.12);
+  font-size: 11px;
 }
 
 /* Right Form Section */
@@ -1645,8 +1736,8 @@ onMounted(async () => {
     margin-bottom: 24px;
   }
 
-  .carousel-container {
-    margin-top: 24px;
+  .workspace-preview {
+    margin-top: 0;
   }
 
   .form-section {
@@ -1703,6 +1794,26 @@ onMounted(async () => {
   .tag {
     font-size: 12px;
     padding: 6px 16px;
+  }
+
+  .workspace-preview {
+    padding: 16px;
+  }
+
+  .workspace-preview__header {
+    align-items: flex-start;
+  }
+
+  .workspace-preview__evidence {
+    display: none;
+  }
+
+  .workspace-preview__capabilities {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-preview__knowledge {
+    flex-wrap: wrap;
   }
 
   .form-section {
@@ -1812,10 +1923,6 @@ html[theme-mode="dark"] {
     &:focus-within {
       border-color: var(--td-brand-color) !important;
     }
-  }
-
-  .screenshot-swiper .swiper-pagination-bullet-active {
-    background: rgba(255, 255, 255, 0.9) !important;
   }
 
   .login-features .feature-icon {

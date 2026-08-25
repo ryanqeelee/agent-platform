@@ -1488,7 +1488,7 @@ export default {
     firstTime: 'New to Huanshu?',
     registerSuccess: 'Registration successful. Please sign in',
     registerFailed: 'Registration failed',
-    subtitle: 'RAG Q&A, ReAct Agent and Wiki — an LLM-powered enterprise knowledge framework',
+    subtitle: 'Use one enterprise account for the employee assistant and operating analysis',
     registerSubtitle: 'Create your account and start using Huanshu',
     emailPlaceholder: 'Enter email address',
     passwordPlaceholder: 'Enter password (8-32 characters, including letters and numbers)',
@@ -3756,19 +3756,14 @@ export default {
     multimodalParsing: 'Managed Enterprise Knowledge',
     hybridSearchEngine: 'Trusted Retrieval and Citations',
     ragQandA: 'Governed Operating Analysis',
+    workspace: 'Huanshu Intelligent Workspace',
+    workspaceHint: 'One enterprise account, access based on your permissions',
+    assistantDescription: 'Find policies, processes and enterprise knowledge',
+    analysisDescription: 'Track metrics, spot changes and support decisions',
+    governedData: 'Governed Operating Data',
     independentTenant: 'Independent Workspace',
     fullApiAccess: 'Full API Access',
-    knowledgeBaseManagement: 'Knowledge Base Management',
-    carousel: {
-      agenticRagTitle: 'Agentic RAG',
-      agenticRagDesc: 'ReAct reasoning + tool calls + multi-step thinking',
-      hybridSearchTitle: 'Hybrid search strategy',
-      hybridSearchDesc: 'BM25 + Vector + Knowledge Graph',
-      wikiTitle: 'Wiki Knowledge Base',
-      wikiDesc: 'Distills documents into structured, interlinked knowledge',
-      smartDocRetrievalTitle: 'Intelligent document retrieval',
-      smartDocRetrievalDesc: 'PDF/Word/Image multi-format parsing'
-    }
+    knowledgeBaseManagement: 'Knowledge Base Management'
   },
   time: {
     today: 'Today',

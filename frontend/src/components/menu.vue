@@ -2,8 +2,8 @@
     <div class="aside_box" :class="{ 'aside_box--collapsed': uiStore.sidebarCollapsed }">
         <!-- 展开时：Logo + 搜索/折叠按钮同行 -->
         <div class="logo_row" v-if="!uiStore.sidebarCollapsed">
-            <div class="logo_box" @click="router.push('/platform/knowledge-bases')" style="cursor: pointer;">
-                <img class="logo" src="@/assets/img/weknora.png" alt="">
+            <div class="logo_box" @click="router.push('/platform/creatChat')" style="cursor: pointer;">
+                <img class="logo" src="@/assets/img/product-brand.svg" alt="环枢">
                 <sup v-if="isLiteEdition" class="lite-badge">Lite</sup>
             </div>
             <div class="logo_actions">
@@ -1273,7 +1273,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         overflow: hidden;
 
         .logo {
-            width: 128px;
+            width: 168px;
             height: auto;
         }
 

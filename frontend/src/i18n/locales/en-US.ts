@@ -64,12 +64,12 @@ export default {
     reopen: 'Product tour',
     steps: {
       welcome: {
-        title: 'Welcome to WeKnora',
+        title: 'Welcome to Huanshu',
         desc: 'A few quick steps to get you familiar with knowledge bases, chat and agents. Click "Next" to begin.'
       },
       knowledge: {
         title: 'Create your knowledge base',
-        desc: 'Everything starts here: upload documents, web pages or FAQs and WeKnora parses and indexes them automatically. Click here to open knowledge bases.'
+        desc: 'Everything starts here: upload documents, web pages or FAQs and Huanshu parses and indexes them automatically. Click here to open knowledge bases.'
       },
       chat: {
         title: 'Start an AI chat',
@@ -1032,6 +1032,7 @@ export default {
   },
   settings: {
     modelManagement: 'Model Management',
+    platformCloudService: 'Platform Cloud Service',
     webSearchConfig: 'Web Search',
     autoCheckUpdate: 'Auto Download Updates',
     autoCheckUpdateDesc: 'When enabled, automatically check and download the latest version in the background.',
@@ -1056,37 +1057,37 @@ export default {
       desc: 'Your role can\'t access this settings page. Ask an admin of this workspace to grant the required role.'
     },
     weknoraCloud: {
-      title: 'WeKnora Cloud',
-      description: 'Configure WeKnora Cloud APPID and APPSECRET credentials. Credentials are used for model services and document parsing engine.',
+      title: 'Huanshu Cloud Service',
+      description: 'Configure Huanshu Cloud Service APPID and APPSECRET credentials. Credentials are used for model services and document parsing engine.',
       viewDocs: 'View Docs',
       unconfigured: 'Credentials not configured. Please fill in APPID and APPSECRET.',
       configured: 'Credentials configured and working.',
-      expired: 'WeKnora Cloud credentials expired',
+      expired: 'Huanshu Cloud Service credentials expired',
       expiredDefault: 'Encryption key changed after service restart. Saved credentials cannot be decrypted. Please re-enter credentials.',
       reconfigure: 'Reconfigure',
       appIdLabel: 'APPID',
-      appIdDesc: 'WeKnora Cloud application ID',
+      appIdDesc: 'Huanshu Cloud Service application ID',
       appIdPlaceholder: 'Enter APPID',
       appSecretLabel: 'APPSECRET',
-      appSecretDesc: 'WeKnora Cloud application secret',
+      appSecretDesc: 'Huanshu Cloud Service application secret',
       appSecretPlaceholder: 'Enter APPSECRET',
       saveHint: 'Credentials will be validated and encrypted before saving.',
       saveBtn: 'Save Credentials',
       usageTitle: 'Usage Guide',
-      usageSteps: '1. Save APPID and APPSECRET\n2. Register chat, embedding, rerank, and vlm in Cloud Models below\n3. Parser: Knowledge Base Settings → Parser Engine → WeKnora Cloud',
+      usageSteps: '1. Save APPID and APPSECRET\n2. Register chat, embedding, rerank, and vlm in Cloud Models below\n3. Parser: Knowledge Base Settings → Parser Engine → Huanshu Cloud Service',
       fillRequired: 'Please fill in APPID and APPSECRET',
       saveSuccess: 'Credentials saved successfully',
       saveFailed: 'Failed to save credentials',
-      credentialConfigured: 'WeKnoraCloud credentials configured.',
+      credentialConfigured: 'Huanshu Cloud Service credentials configured.',
       credentialExpired: 'Credentials expired. Please reconfigure.',
-      credentialUnconfigured: 'WeKnoraCloud credentials not configured. Please set up APPID and APPSECRET first.',
+      credentialUnconfigured: 'Huanshu Cloud Service credentials not configured. Please set up APPID and APPSECRET first.',
       checkingStatus: 'Checking credential status...',
       goToSettings: 'Go to Settings',
-      modelHintConfigured: 'WeKnoraCloud credentials configured. See supported models in',
+      modelHintConfigured: 'Huanshu Cloud Service credentials configured. See supported models in',
       modelHintDocsLink: 'API docs',
       modelsSection: {
         title: 'Cloud Models',
-        descReady: 'Register the four standard WeKnora Cloud models for chat, retrieval, reranking, and vision.',
+        descReady: 'Register the four standard Huanshu Cloud Service models for chat, retrieval, reranking, and vision.',
         descPending: 'Save credentials above before adding cloud models here.',
         statusAdded: 'Added',
         statusPending: 'Credentials required',
@@ -1102,10 +1103,10 @@ export default {
       addModelsFailed: 'Failed to add models',
       addModelsEmbeddingFailed: 'Embedding connection test failed; could not detect vector dimension',
       addModelsDisplayName: {
-        chat: 'WeKnoraCloud Chat',
-        embedding: 'WeKnoraCloud Embedding',
-        rerank: 'WeKnoraCloud ReRank',
-        vllm: 'WeKnoraCloud Vision'
+        chat: 'Huanshu Cloud Service Chat',
+        embedding: 'Huanshu Cloud Service Embedding',
+        rerank: 'Huanshu Cloud Service ReRank',
+        vllm: 'Huanshu Cloud Service Vision'
       }
     },
     system: 'System Settings',
@@ -1224,8 +1225,8 @@ export default {
       needsConfig: 'Needs Configuration',
       configurable: 'Configurable',
       pathPrefix: 'Path Prefix (optional)',
-      pathPrefixPlaceholder: 'e.g. weknora/images',
-      prefixPlaceholder: 'e.g. weknora',
+      pathPrefixPlaceholder: 'e.g. agent/images',
+      prefixPlaceholder: 'e.g. agent',
       bucketName: 'Bucket Name',
       bucketPlaceholder: 'Bucket name',
       minioDesc: 'S3-compatible self-hosted object storage, suitable for private networks and private cloud deployment.',
@@ -1484,11 +1485,11 @@ export default {
     haveAccount: 'Already have an account?',
     backToLogin: 'Back to Login',
     loginHint: 'Sign in to continue, or create an account below if this is your first time.',
-    firstTime: 'New to WeKnora?',
+    firstTime: 'New to Huanshu?',
     registerSuccess: 'Registration successful. Please sign in',
     registerFailed: 'Registration failed',
     subtitle: 'RAG Q&A, ReAct Agent and Wiki — an LLM-powered enterprise knowledge framework',
-    registerSubtitle: 'Create your account and start using WeKnora',
+    registerSubtitle: 'Create your account and start using Huanshu',
     emailPlaceholder: 'Enter email address',
     passwordPlaceholder: 'Enter password (8-32 characters, including letters and numbers)',
     confirmPasswordPlaceholder: 'Enter password again',
@@ -1739,7 +1740,7 @@ export default {
     goToAgentSettings: 'Go to agent settings'
   },
   createChat: {
-    title: 'Hi, I am WeKnora — your knowledge, within reach',
+    title: 'Hi, I am Huanshu, your enterprise assistant',
     newSessionTitle: 'New Session',
     messages: {
       createFailed: 'Failed to create session',
@@ -1916,10 +1917,10 @@ export default {
     allowFileUpload: 'Show file upload',
     allowFileUploadDesc: 'When enabled, visitors can upload images and document attachments. Requires the bound agent to support image upload.',
     webhookUrl: 'Webhook URL',
-    webhookUrlPlaceholder: 'https://your-server.example.com/weknora/embed-events',
-    webhookUrlDesc: 'Optional. WeKnora POSTs message_sent / message_received events to this HTTPS endpoint.',
+    webhookUrlPlaceholder: 'https://your-server.example.com/agent/embed-events',
+    webhookUrlDesc: 'Optional. Huanshu POSTs message_sent / message_received events to this HTTPS endpoint.',
     webhookSecret: 'Webhook secret',
-    webhookSecretPlaceholder: 'HMAC-SHA256 secret (X-WeKnora-Signature header)',
+    webhookSecretPlaceholder: 'Secret used for HMAC-SHA256 signing',
     webhookSecretKeep: 'Leave blank to keep the saved secret',
     webhookSecretDesc: 'Optional. When set, request bodies are signed for verification on your server.',
     agentWebSearchDisabledHint: 'This agent does not have web search enabled. Visitors will not see the web search button until you enable it in agent settings.',
@@ -2880,9 +2881,9 @@ export default {
     loadingInfo: 'Loading information...',
     retry: 'Retry',
     versionLabel: 'App Version',
-    versionDescription: 'Version of the application service (weknora-app)',
+    versionDescription: 'Version of the application service (agent-server)',
     frontendVersionLabel: 'UI Version',
-    frontendVersionDescription: 'Build version of the UI (weknora-ui)',
+    frontendVersionDescription: 'Build version of the UI (agent-web)',
     versionMismatch: 'Mismatch with app version',
     buildTimeLabel: 'Build Time',
     buildTimeDescription: 'Time when the system was built',
@@ -3746,15 +3747,15 @@ export default {
     }
   },
   platform: {
-    subtitle: 'LLM-Powered Enterprise Knowledge Framework',
-    description: 'RAG retrieval, agentic reasoning and Wiki knowledge bases — so your documents are truly understood and put to work',
-    rag: 'RAG Enhanced Generation',
-    agent: 'ReAct Agent',
-    wiki: 'Wiki Knowledge Base',
-    hybridSearch: 'Hybrid Search',
-    multimodalParsing: 'Multimodal Document Parsing',
-    hybridSearchEngine: 'Hybrid Search + Knowledge Graph',
-    ragQandA: 'ReAct Agent Q&A',
+    subtitle: 'Enterprise Intelligence and Operating Analysis',
+    description: 'Connect enterprise knowledge with governed operating data for trusted answers and business insight',
+    rag: 'Employee Assistant',
+    agent: 'Operating Analysis',
+    wiki: 'Enterprise Knowledge',
+    hybridSearch: 'Trusted Evidence',
+    multimodalParsing: 'Managed Enterprise Knowledge',
+    hybridSearchEngine: 'Trusted Retrieval and Citations',
+    ragQandA: 'Governed Operating Analysis',
     independentTenant: 'Independent Workspace',
     fullApiAccess: 'Full API Access',
     knowledgeBaseManagement: 'Knowledge Base Management',
@@ -4585,8 +4586,8 @@ export default {
           desc: 'PaddleOCR-VL Cloud API'
         },
         weknoracloud: {
-          name: 'WeKnora Cloud',
-          desc: 'Document parsing via WeKnora Cloud'
+          name: 'Huanshu Cloud Service',
+          desc: 'Document parsing via Huanshu Cloud Service'
         },
         markitdown: {
           name: 'MarkItDown',
@@ -5418,7 +5419,7 @@ export default {
       capabilityMessageHistory: 'Message history',
       capabilityMessageHistoryHint: 'Let this key search workspace chat history and read chat-history stats. It does not grant workspace configuration access.',
       capabilityManageModels: 'Manage models',
-      capabilityManageModelsHint: 'Manage model definitions, credentials, connectivity checks, and WeKnoraCloud credentials.',
+      capabilityManageModelsHint: 'Manage model definitions, credentials, connectivity checks, and Huanshu Cloud Service credentials.',
       capabilityManageMcpServices: 'Manage MCP services',
       capabilityManageMcpServicesHint: 'Manage MCP services, credentials, tool approval policies, and OAuth state for this principal.',
       capabilityManageDatasources: 'Manage data sources',
@@ -5460,14 +5461,14 @@ export default {
       directWarning: 'Direct user ID trusts the caller-supplied header. Use only for trusted server-to-server calls.',
       directWarningDetail: 'Anyone with the API key can change the user ID header to impersonate another external user and reuse or hijack that user\'s MCP OAuth authorization. Do not use this from browsers or untrusted clients; use Signed token for end-user apps.',
       signedRecommended: 'Recommended for user-facing apps: your backend signs a short-lived HS256 JWT for the external user.',
-      signedFlowDetail: 'Keep the HMAC secret only on WeKnora and your trusted backend—never put it in requests or ship it to browsers. The request header carries the JWT string signed with that secret (it changes on each issuance or after expiry), not the secret itself. JWT must include sub (external user ID), tenant_id, aud=weknora, and exp (max 24h lifetime).',
+      signedFlowDetail: 'Keep the HMAC secret only on Huanshu and your trusted backend—never put it in requests or ship it to browsers. The request header carries the JWT string signed with that secret (it changes on each issuance or after expiry), not the secret itself. JWT must include sub (external user ID), tenant_id, aud=weknora, and exp (max 24h lifetime).',
       directHeader: 'User ID header',
       requireDirectHeader: 'Require user ID header',
       requireDirectHeaderDesc: 'When enabled, API Key requests without the user ID header are rejected; when disabled, all requests are treated as the whole workspace with no per-user distinction.',
       tokenHeader: 'Token header',
       tokenHeaderDesc: 'Clients send the backend-signed JWT in this fixed header.',
       hmacSecret: 'HMAC secret',
-      hmacSecretDesc: 'Same secret stored in WeKnora; used only on your backend to sign JWTs—never send it as a request header.',
+      hmacSecretDesc: 'Same secret stored in Huanshu; used only on your backend to sign JWTs—never send it as a request header.',
       secretConfigured: 'Secret configured (not shown again); enter a new value to rotate',
       secretSavedCopyHint: 'Secret saved. Copy it to your backend now — you will not be able to view it again after leaving this page.',
       generateSecret: 'Generate secret',
@@ -5541,7 +5542,7 @@ export default {
     },
     chrome: {
       title: 'Knowledge Assistant',
-      subtitle: 'For self-hosted WeKnora: ask questions in a sidebar, clip web pages, and save Markdown notes into your knowledge bases while you browse.',
+      subtitle: 'For self-hosted Huanshu: ask questions in a sidebar, clip web pages, and save Markdown notes into your knowledge bases while you browse.',
       capabilitiesTitle: 'Core capabilities',
       capabilities: {
         qa: {
@@ -5575,7 +5576,7 @@ export default {
         },
         port: {
           title: 'Desktop: fixed port (recommended)',
-          desc: 'On WeKnora Desktop, set a fixed API port (e.g. 37841) in API Info so the URL stays stable across restarts.'
+          desc: 'On Huanshu Desktop, set a fixed API port (e.g. 37841) in API Info so the URL stays stable across restarts.'
         },
         install: {
           title: 'Install the extension',
@@ -5594,8 +5595,8 @@ export default {
       storeMeta: 'Chrome Web Store · v1.0.0'
     },
     claw: {
-      title: 'WeKnora Skill',
-      subtitle: 'Import documents and run hybrid retrieval (vector + keyword) via the WeKnora REST API—for uploads, URL imports, Markdown entries, and cross-KB search.',
+      title: 'Huanshu Skill',
+      subtitle: 'Import documents and run hybrid retrieval (vector + keyword) via the Huanshu REST API—for uploads, URL imports, Markdown entries, and cross-KB search.',
       capabilitiesTitle: 'Skill capabilities',
       capabilities: {
         upload: {
@@ -5644,7 +5645,7 @@ export default {
       copyCmdSuccess: 'Install command copied',
       ecosystemNote: 'Skill hosted on ClawHub ({\'@\'}lyingbug/weknora). See the ClawHub page for full API docs and version history.',
       installCta: 'Open ClawHub',
-      installCtaHint: 'Install WeKnora Skill · opens in a new tab',
+      installCtaHint: 'Install Huanshu Skill · opens in a new tab',
       hubMeta: 'ClawHub · {\'@\'}lyingbug/weknora · MIT-0'
     }
   },

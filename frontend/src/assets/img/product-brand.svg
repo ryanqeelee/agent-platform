@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 196 40" role="img" aria-labelledby="title">
+  <title id="title">环枢</title>
+  <g fill="#082f2f">
+    <path d="M2 4h31v8H10v16h23v8H2V4Z"/>
+    <path d="M18 12h15v8H18v8H10V12h8Z"/>
+    <text x="45" y="28" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24" font-weight="700">环枢</text>
+    <rect x="105" y="8" width="1" height="24" opacity=".35"/>
+    <text x="118" y="26" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="14" font-weight="600">零售智能体</text>
+  </g>
+</svg>

@@ -2457,10 +2457,10 @@ const downloadExampleOptions = computed(() => [
 // 示例数据
 const exampleData: FAQEntryPayload[] = [
   {
-    standard_question: '什么是 WeKnora？',
-    answers: ['WeKnora 是一个智能知识库管理系统', '它支持多种知识库类型和导入方式'],
-    similar_questions: ['WeKnora 是什么？', '介绍一下 WeKnora'],
-    negative_questions: ['这不是 WeKnora', '与 WeKnora 无关'],
+    standard_question: '什么是环枢员工助理？',
+    answers: ['环枢员工助理基于企业统一知识回答员工问题', '它支持多种知识类型和导入方式'],
+    similar_questions: ['员工助理是什么？', '介绍一下环枢员工助理'],
+    negative_questions: ['这不是员工助理', '与企业知识无关'],
     tag_name: '产品介绍',
   },
   {

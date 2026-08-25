@@ -251,8 +251,8 @@ export default {
     filterByAgentWithName: '에이전트별 필터: {name}',
     filterAllAgents: '전체 에이전트',
     claw: {
-      title: 'WeKnora Skill',
-      subtitle: 'WeKnora REST API로 문서를 가져오고 하이브리드 검색(벡터+키워드)을 수행합니다. 파일/URL/Markdown 업로드 및 검색에 사용.',
+      title: 'Huanshu Skill',
+      subtitle: 'Huanshu REST API로 문서를 가져오고 하이브리드 검색(벡터+키워드)을 수행합니다. 파일/URL/Markdown 업로드 및 검색에 사용.',
       capabilitiesTitle: 'Skill 기능',
       stepsTitle: '구성 단계',
       openApiSettings: 'API 정보 열기',
@@ -261,7 +261,7 @@ export default {
       copyCmdSuccess: '설치 명령이 복사되었습니다',
       ecosystemNote: 'Skill은 ClawHub({\'@\'}lyingbug/weknora)에 호스팅됩니다. 전체 API 문서는 ClawHub 페이지를 참고하세요.',
       installCta: 'ClawHub 열기',
-      installCtaHint: 'WeKnora Skill 설치 · 새 탭에서 열림',
+      installCtaHint: 'Huanshu Skill 설치 · 새 탭에서 열림',
       hubMeta: 'ClawHub · {\'@\'}lyingbug/weknora · MIT-0',
       steps: {
         verify: {
@@ -306,7 +306,7 @@ export default {
     },
     chrome: {
       title: '지식 관리 어시스턴트',
-      subtitle: '자체 호스팅 WeKnora와 함께: 사이드바에서 질문하고, 웹 페이지를 클리핑하며, Markdown 메모를 지식베이스에 저장하세요.',
+      subtitle: '자체 호스팅 Huanshu와 함께: 사이드바에서 질문하고, 웹 페이지를 클리핑하며, Markdown 메모를 지식베이스에 저장하세요.',
       capabilitiesTitle: '핵심 기능',
       stepsTitle: '구성 단계',
       openApiSettings: 'API 정보 열기',
@@ -326,7 +326,7 @@ export default {
         },
         port: {
           title: '데스크톱: 고정 포트(권장)',
-          desc: 'WeKnora 데스크톱에서는 API 정보에서 고정 포트(예: 37841)를 설정하세요.'
+          desc: 'Huanshu 데스크톱에서는 API 정보에서 고정 포트(예: 37841)를 설정하세요.'
         },
         api: {
           title: 'API 자격 증명',
@@ -414,7 +414,7 @@ export default {
       capabilityMessageHistory: '메시지 기록',
       capabilityMessageHistoryHint: '워크스페이스 채팅 기록 검색과 채팅 기록 통계 조회를 허용합니다. 워크스페이스 설정 권한은 부여하지 않습니다.',
       capabilityManageModels: '모델 관리',
-      capabilityManageModelsHint: '모델 설정, 자격 증명, 연결 테스트 및 WeKnoraCloud 자격 증명을 관리합니다.',
+      capabilityManageModelsHint: '모델 설정, 자격 증명, 연결 테스트 및 Huanshu Cloud Service 자격 증명을 관리합니다.',
       capabilityManageMcpServices: 'MCP 서비스 관리',
       capabilityManageMcpServicesHint: 'MCP 서비스, 자격 증명, 도구 승인 정책 및 이 주체의 OAuth 상태를 관리합니다.',
       capabilityManageDatasources: '데이터 소스 관리',
@@ -456,14 +456,14 @@ export default {
       directWarning: '직접 사용자 ID 모드는 요청 헤더를 신뢰합니다. 신뢰된 서버 간 호출에만 사용하세요.',
       directWarningDetail: 'API Key를 가진 호출자는 사용자 ID 헤더를 바꿔 다른 외부 사용자를 가장하고 해당 사용자의 MCP OAuth 인증을 공유하거나 탈취할 수 있습니다. 브라우저나 신뢰할 수 없는 클라이언트에는 사용하지 마세요. 최종 사용자 앱에는 서명 토큰을 사용하세요.',
       signedRecommended: '사용자 대상 앱에 권장: 비즈니스 백엔드가 외부 사용자용 단기 HS256 JWT를 서명합니다.',
-      signedFlowDetail: 'HMAC secret은 WeKnora와 신뢰할 수 있는 백엔드에만 보관하세요. 요청에 넣거나 브라우저에 배포하지 마세요. 요청 헤더에는 secret이 아니라 해당 secret으로 서명한 JWT 문자열을 넣습니다(발급마다 또는 만료 후 변경). JWT에는 sub(외부 사용자 ID), tenant_id, aud=weknora, exp(최대 24시간)가 필요합니다.',
+      signedFlowDetail: 'HMAC secret은 Huanshu와 신뢰할 수 있는 백엔드에만 보관하세요. 요청에 넣거나 브라우저에 배포하지 마세요. 요청 헤더에는 secret이 아니라 해당 secret으로 서명한 JWT 문자열을 넣습니다(발급마다 또는 만료 후 변경). JWT에는 sub(외부 사용자 ID), tenant_id, aud=weknora, exp(최대 24시간)가 필요합니다.',
       directHeader: '사용자 ID 헤더',
       requireDirectHeader: '사용자 ID 헤더 필수',
       requireDirectHeaderDesc: '켜면 사용자 ID 헤더가 없는 API Key 요청을 거부하고, 끄면 워크스페이스 전체로 통일 처리하며 개별 사용자를 구분하지 않습니다.',
       tokenHeader: '토큰 헤더',
       tokenHeaderDesc: '클라이언트는 이 고정 헤더에 백엔드가 서명한 JWT를 전달합니다.',
       hmacSecret: 'HMAC secret',
-      hmacSecretDesc: 'WeKnora에 저장된 것과 동일한 secret. 백엔드에서 JWT 서명에만 사용하며 요청 헤더로 보내지 않습니다.',
+      hmacSecretDesc: 'Huanshu에 저장된 것과 동일한 secret. 백엔드에서 JWT 서명에만 사용하며 요청 헤더로 보내지 않습니다.',
       secretConfigured: 'Secret configured (not shown again); enter a new value to rotate',
       secretSavedCopyHint: 'Secret saved. Copy it to your backend now — you will not be able to view it again after leaving this page.',
       generateSecret: 'Secret 생성',
@@ -1322,8 +1322,8 @@ export default {
           desc: 'Microsoft MarkItDown 변환기 (PDF/Office/HTML 등)'
         },
         weknoracloud: {
-          name: 'WeKnora Cloud',
-          desc: 'WeKnora Cloud를 통한 문서 파싱'
+          name: 'Huanshu Cloud Service',
+          desc: 'Huanshu Cloud Service를 통한 문서 파싱'
         },
         paddleocr_vl_cloud: {
           name: 'PaddleOCR-VL Cloud',
@@ -2122,15 +2122,15 @@ export default {
     pinned: '고정됨'
   },
   platform: {
-    subtitle: '대규모 언어 모델 기반 엔터프라이즈 지식 프레임워크',
-    description: 'RAG 검색, 에이전트 추론, Wiki 지식베이스로 문서를 진정으로 이해하고 활용합니다',
-    rag: 'RAG 강화 생성',
-    agent: 'ReAct 에이전트',
-    wiki: 'Wiki 지식베이스',
-    hybridSearch: '하이브리드 검색',
-    multimodalParsing: '멀티모달 문서 파싱',
-    hybridSearchEngine: '하이브리드 검색 + 지식 그래프',
-    ragQandA: 'ReAct 에이전트 Q&A',
+    subtitle: '기업 지능형 업무와 경영 분석',
+    description: '기업 지식과 거버넌스된 운영 데이터를 연결해 신뢰할 수 있는 답변과 인사이트를 제공합니다',
+    rag: '직원 도우미',
+    agent: '경영 분석',
+    wiki: '기업 지식',
+    hybridSearch: '신뢰 가능한 근거',
+    multimodalParsing: '기업 지식 통합 관리',
+    hybridSearchEngine: '신뢰 검색과 출처',
+    ragQandA: '거버넌스된 경영 분석',
     independentTenant: '독립 워크스페이스',
     fullApiAccess: '전체 API 접근',
     knowledgeBaseManagement: '지식베이스 관리',
@@ -2503,9 +2503,9 @@ export default {
     loadingInfo: '정보 로딩 중...',
     retry: '재시도',
     versionLabel: '앱 버전',
-    versionDescription: '애플리케이션 서비스(weknora-app)의 버전 번호',
+    versionDescription: '애플리케이션 서비스(agent-server)의 버전 번호',
     frontendVersionLabel: 'UI 버전',
-    frontendVersionDescription: 'UI(weknora-ui) 빌드 버전 번호',
+    frontendVersionDescription: 'UI(agent-web) 빌드 버전 번호',
     versionMismatch: '앱 버전과 일치하지 않음',
     buildTimeLabel: '빌드 시간',
     buildTimeDescription: '시스템이 빌드된 시간',
@@ -4031,10 +4031,10 @@ export default {
     allowFileUpload: '이미지 업로드 버튼 표시',
     allowFileUploadDesc: '활성화하면 방문자 입력창에 이미지 업로드 버튼이 표시됩니다. 연결된 에이전트에서 이미지 업로드가 활성화된 경우에만 버튼이 나타납니다.',
     webhookUrl: 'Webhook URL',
-    webhookUrlPlaceholder: 'https://your-server.example.com/weknora/embed-events',
-    webhookUrlDesc: 'Optional. WeKnora POSTs message_sent / message_received events to this HTTPS endpoint.',
+    webhookUrlPlaceholder: 'https://your-server.example.com/agent/embed-events',
+    webhookUrlDesc: 'Optional. Huanshu POSTs message_sent / message_received events to this HTTPS endpoint.',
     webhookSecret: 'Webhook secret',
-    webhookSecretPlaceholder: 'HMAC-SHA256 secret (X-WeKnora-Signature header)',
+    webhookSecretPlaceholder: 'HMAC-SHA256 서명에 사용할 secret',
     webhookSecretKeep: 'Leave blank to keep the saved secret',
     webhookSecretDesc: 'Optional. When set, request bodies are signed for verification on your server.',
     agentWebSearchDisabledHint: '현재 에이전트에서 웹 검색이 활성화되지 않았습니다. 방문자에게 웹 검색 버튼이 표시되지 않습니다. 에이전트 설정에서 웹 검색을 먼저 활성화하세요.',
@@ -4145,7 +4145,7 @@ export default {
     }
   },
   createChat: {
-    title: '안녕하세요, WeKnora입니다 — 당신의 지식을 손끝에',
+    title: '안녕하세요, Huanshu 기업 도우미입니다',
     newSessionTitle: '새 세션',
     messages: {
       createFailed: '세션 생성 실패',
@@ -4389,11 +4389,11 @@ export default {
     haveAccount: '이미 계정이 있으신가요?',
     backToLogin: '로그인으로 돌아가기',
     loginHint: '로그인하여 계속하세요. 처음이시라면 아래에서 계정을 만드세요.',
-    firstTime: 'WeKnora가 처음이신가요?',
+    firstTime: 'Huanshu가 처음이신가요?',
     registerSuccess: '가입이 완료되었습니다. 로그인해주세요',
     registerFailed: '가입 실패',
     subtitle: 'RAG Q&A, ReAct 에이전트, Wiki 지식베이스 — 대규모 언어 모델 기반 엔터프라이즈 지식 프레임워크',
-    registerSubtitle: '계정을 만들고 WeKnora를 시작하세요',
+    registerSubtitle: '계정을 만들고 Huanshu를 시작하세요',
     emailPlaceholder: '이메일 주소 입력',
     passwordPlaceholder: '비밀번호 입력 (8-32자, 문자와 숫자 포함)',
     confirmPasswordPlaceholder: '비밀번호 다시 입력',
@@ -4615,6 +4615,7 @@ export default {
   },
   settings: {
     modelManagement: '모델 관리',
+    platformCloudService: '플랫폼 클라우드 서비스',
     webSearchConfig: '웹 검색',
     autoCheckUpdate: '업데이트 자동 다운로드',
     autoCheckUpdateDesc: '활성화하면 시작 시 최신 버전을 자동으로 확인하고 백그라운드에서 다운로드합니다.',
@@ -4649,8 +4650,8 @@ export default {
       needsConfig: '구성 필요',
       configurable: '구성 가능',
       pathPrefix: '경로 접두사 (선택)',
-      pathPrefixPlaceholder: '예: weknora/images',
-      prefixPlaceholder: '예: weknora',
+      pathPrefixPlaceholder: '예: agent/images',
+      prefixPlaceholder: '예: agent',
       bucketName: 'Bucket 이름',
       bucketPlaceholder: '버킷 이름',
       minioDesc: 'S3 호환 자체 호스팅 오브젝트 스토리지, 내부 네트워크 및 프라이빗 클라우드 배포에 적합합니다.',
@@ -4795,47 +4796,47 @@ export default {
       paddleocrVlCloudTokenPlaceholder: 'PaddleOCR-VL AI Studio Token'
     },
     weknoraCloud: {
-      title: 'WeKnora Cloud',
-      description: 'WeKnora Cloud APPID 및 APPSECRET 자격 증명을 설정합니다. 자격 증명은 모델 서비스와 문서 파싱 엔진에 사용됩니다.',
+      title: 'Huanshu Cloud Service',
+      description: 'Huanshu Cloud Service APPID 및 APPSECRET 자격 증명을 설정합니다. 자격 증명은 모델 서비스와 문서 파싱 엔진에 사용됩니다.',
       viewDocs: '문서 보기',
       unconfigured: '자격 증명이 설정되지 않았습니다. APPID와 APPSECRET을 입력하세요.',
       configured: '자격 증명이 설정되었으며 정상 작동 중입니다.',
-      expired: 'WeKnora Cloud 자격 증명 만료',
+      expired: 'Huanshu Cloud Service 자격 증명 만료',
       expiredDefault: '서비스 재시작 후 암호화 키가 변경되어 저장된 자격 증명을 복호화할 수 없습니다. 다시 입력하세요.',
       reconfigure: '재설정',
       appIdLabel: 'APPID',
-      appIdDesc: 'WeKnora Cloud 애플리케이션 ID',
+      appIdDesc: 'Huanshu Cloud Service 애플리케이션 ID',
       appIdPlaceholder: 'APPID 입력',
       appSecretLabel: 'APPSECRET',
-      appSecretDesc: 'WeKnora Cloud 애플리케이션 비밀키',
+      appSecretDesc: 'Huanshu Cloud Service 애플리케이션 비밀키',
       appSecretPlaceholder: 'APPSECRET 입력',
       saveHint: '저장 전 서비스 연결 가능 여부를 확인하고 암호화하여 저장합니다.',
       saveBtn: '자격 증명 저장',
       usageTitle: '사용 가이드',
-      usageSteps: '1. APPID / APPSECRET 저장\n2. 아래 「클라우드 모델」에서 chat, embedding, rerank, vlm 추가\n3. 문서 파싱: 지식 베이스 설정 → 파싱 엔진 → WeKnora Cloud',
+      usageSteps: '1. APPID / APPSECRET 저장\n2. 아래 「클라우드 모델」에서 chat, embedding, rerank, vlm 추가\n3. 문서 파싱: 지식 베이스 설정 → 파싱 엔진 → Huanshu Cloud Service',
       fillRequired: 'APPID와 APPSECRET을 입력하세요',
       saveSuccess: '자격 증명 저장 완료',
       saveFailed: '자격 증명 저장 실패',
-      credentialConfigured: 'WeKnoraCloud 자격 증명이 설정되었습니다.',
+      credentialConfigured: 'Huanshu Cloud Service 자격 증명이 설정되었습니다.',
       credentialExpired: '자격 증명이 만료되었습니다. 재설정하세요.',
-      credentialUnconfigured: 'WeKnoraCloud 자격 증명이 설정되지 않았습니다. APPID와 APPSECRET을 먼저 설정하세요.',
+      credentialUnconfigured: 'Huanshu Cloud Service 자격 증명이 설정되지 않았습니다. APPID와 APPSECRET을 먼저 설정하세요.',
       checkingStatus: '자격 증명 상태 확인 중...',
       goToSettings: '설정으로 이동',
-      modelHintConfigured: 'WeKnoraCloud 자격 증명이 설정되었습니다. 지원 모델은',
+      modelHintConfigured: 'Huanshu Cloud Service 자격 증명이 설정되었습니다. 지원 모델은',
       modelHintDocsLink: 'API 문서',
       addModelsSuccess: '{count}개 모델이 추가되었습니다',
       addModelsPartial: '{success}개 추가, {failed}개 실패',
       addModelsFailed: '모델 추가 실패',
       addModelsEmbeddingFailed: 'Embedding 연결 테스트 실패, 벡터 차원을 가져올 수 없습니다',
       addModelsDisplayName: {
-        chat: 'WeKnoraCloud 대화',
-        embedding: 'WeKnoraCloud Embedding',
-        rerank: 'WeKnoraCloud ReRank',
-        vllm: 'WeKnoraCloud 비전'
+        chat: 'Huanshu Cloud Service 대화',
+        embedding: 'Huanshu Cloud Service Embedding',
+        rerank: 'Huanshu Cloud Service ReRank',
+        vllm: 'Huanshu Cloud Service 비전'
       },
       modelsSection: {
         title: '클라우드 모델',
-        descReady: 'WeKnora Cloud의 네 가지 표준 모델을 등록하여 대화, 검색, 재정렬, 비전에 사용합니다.',
+        descReady: 'Huanshu Cloud Service의 네 가지 표준 모델을 등록하여 대화, 검색, 재정렬, 비전에 사용합니다.',
         descPending: '위에서 자격 증명을 먼저 저장한 후 여기서 모델을 추가하세요.',
         statusAdded: '추가됨',
         statusPending: '자격 증명 필요',
@@ -5827,10 +5828,10 @@ export default {
       },
       knowledge: {
         title: '지식 베이스 만들기',
-        desc: '모든 것의 시작점입니다. 문서, 웹페이지, FAQ를 업로드하면 WeKnora가 자동으로 분석하고 색인합니다. 여기를 클릭해 지식 베이스로 이동하세요.'
+        desc: '문서, 웹페이지, FAQ를 업로드하면 시스템이 자동으로 분석하고 색인합니다. 여기를 클릭해 지식 베이스로 이동하세요.'
       },
       welcome: {
-        title: 'WeKnora에 오신 것을 환영합니다',
+        title: 'Huanshu에 오신 것을 환영합니다',
         desc: '몇 단계만으로 지식 베이스, 대화, 에이전트의 핵심 사용법을 안내합니다. \'다음\'을 눌러 시작하세요.'
       }
     }

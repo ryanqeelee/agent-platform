@@ -251,8 +251,8 @@ export default {
     filterByAgentWithName: 'Фильтр по агенту: {name}',
     filterAllAgents: 'Все агенты',
     claw: {
-      title: 'WeKnora Skill',
-      subtitle: 'Импорт документов и гибридный поиск (вектор + ключевые слова) через REST API WeKnora — загрузки, URL, Markdown и поиск.',
+      title: 'Huanshu Skill',
+      subtitle: 'Импорт документов и гибридный поиск (вектор + ключевые слова) через REST API Huanshu — загрузки, URL, Markdown и поиск.',
       capabilitiesTitle: 'Возможности Skill',
       stepsTitle: 'Шаги настройки',
       openApiSettings: 'Открыть API-информацию',
@@ -261,7 +261,7 @@ export default {
       copyCmdSuccess: 'Команда установки скопирована',
       ecosystemNote: 'Skill размещён на ClawHub ({\'@\'}lyingbug/weknora). Полная документация API — на странице ClawHub.',
       installCta: 'Открыть ClawHub',
-      installCtaHint: 'Установка WeKnora Skill · откроется в новой вкладке',
+      installCtaHint: 'Установка Huanshu Skill · откроется в новой вкладке',
       hubMeta: 'ClawHub · {\'@\'}lyingbug/weknora · MIT-0',
       steps: {
         verify: {
@@ -306,7 +306,7 @@ export default {
     },
     chrome: {
       title: 'Помощник по знаниям',
-      subtitle: 'Для self-hosted WeKnora: вопросы в боковой панели, клиппинг страниц и Markdown-заметки в базы знаний прямо при просмотре.',
+      subtitle: 'Для self-hosted Huanshu: вопросы в боковой панели, клиппинг страниц и Markdown-заметки в базы знаний прямо при просмотре.',
       capabilitiesTitle: 'Возможности',
       stepsTitle: 'Шаги настройки',
       openApiSettings: 'Открыть API-информацию',
@@ -326,7 +326,7 @@ export default {
         },
         port: {
           title: 'Десктоп: фиксированный порт',
-          desc: 'В WeKnora Desktop задайте фиксированный порт API (например 37841) в API-информации.'
+          desc: 'В Huanshu Desktop задайте фиксированный порт API (например 37841) в API-информации.'
         },
         api: {
           title: 'Получите API-учётные данные',
@@ -414,7 +414,7 @@ export default {
       capabilityMessageHistory: 'История сообщений',
       capabilityMessageHistoryHint: 'Позволяет искать историю чатов пространства и читать статистику истории. Не даёт доступ к настройкам пространства.',
       capabilityManageModels: 'Управление моделями',
-      capabilityManageModelsHint: 'Управление конфигурациями моделей, учётными данными, проверками подключения и данными WeKnoraCloud.',
+      capabilityManageModelsHint: 'Управление конфигурациями моделей, учётными данными, проверками подключения и данными Huanshu Cloud Service.',
       capabilityManageMcpServices: 'Управление MCP-сервисами',
       capabilityManageMcpServicesHint: 'Управление MCP-сервисами, учётными данными, политиками подтверждения инструментов и OAuth-состоянием этого субъекта.',
       capabilityManageDatasources: 'Управление источниками данных',
@@ -456,14 +456,14 @@ export default {
       directWarning: 'Прямой ID доверяет заголовку вызывающей стороны. Используйте только для доверенных server-to-server вызовов.',
       directWarningDetail: 'Любой, у кого есть API key, может подменить заголовок ID пользователя, выдать себя за другого внешнего пользователя и переиспользовать или перехватить его авторизацию MCP OAuth. Не используйте в браузере или ненадёжных клиентах; для пользовательских приложений выбирайте подписанный token.',
       signedRecommended: 'Рекомендуется для пользовательских приложений: ваш backend подписывает краткоживущий HS256 JWT для внешнего пользователя.',
-      signedFlowDetail: 'HMAC secret храните только в WeKnora и на доверенном backend — не передавайте в запросах и не отдавайте браузеру. В заголовке запроса передаётся JWT, подписанный этим secret (меняется при каждой выдаче или после истечения), а не сам secret. JWT должен содержать sub (ID внешнего пользователя), tenant_id, aud=weknora и exp (не более 24 ч).',
+      signedFlowDetail: 'HMAC secret храните только в Huanshu и на доверенном backend — не передавайте в запросах и не отдавайте браузеру. В заголовке запроса передаётся JWT, подписанный этим secret (меняется при каждой выдаче или после истечения), а не сам secret. JWT должен содержать sub (ID внешнего пользователя), tenant_id, aud=weknora и exp (не более 24 ч).',
       directHeader: 'Заголовок ID пользователя',
       requireDirectHeader: 'Требовать заголовок ID пользователя',
       requireDirectHeaderDesc: 'Если включено, запросы без заголовка ID пользователя отклоняются; иначе все запросы обрабатываются как единое пространство без различия конечных пользователей.',
       tokenHeader: 'Заголовок token',
       tokenHeaderDesc: 'Клиент передаёт JWT, подписанный backend, в этом фиксированном заголовке.',
       hmacSecret: 'HMAC secret',
-      hmacSecretDesc: 'Тот же secret, что в WeKnora; только для подписи JWT на backend — не отправляйте его в заголовке запроса.',
+      hmacSecretDesc: 'Тот же secret, что в Huanshu; только для подписи JWT на backend — не отправляйте его в заголовке запроса.',
       secretConfigured: 'Secret настроен (повторно не показывается); введите новое значение для ротации',
       secretSavedCopyHint: 'Secret сохранён. Скопируйте его в backend сейчас — после ухода со страницы просмотреть его будет нельзя.',
       generateSecret: 'Сгенерировать secret',
@@ -1322,8 +1322,8 @@ export default {
           desc: 'Конвертер Microsoft MarkItDown (PDF/Office/HTML и др.)'
         },
         weknoracloud: {
-          name: 'WeKnora Cloud',
-          desc: 'Парсинг документов через WeKnora Cloud'
+          name: 'Huanshu Cloud Service',
+          desc: 'Парсинг документов через Huanshu Cloud Service'
         },
         paddleocr_vl_cloud: {
           name: 'PaddleOCR-VL Cloud',
@@ -2122,15 +2122,15 @@ export default {
     pinned: 'Закреплено'
   },
   platform: {
-    subtitle: 'Корпоративная платформа знаний на базе больших языковых моделей',
-    description: 'RAG-поиск, агентные рассуждения и Wiki-базы знаний — чтобы документы действительно понимались и приносили пользу',
-    rag: 'RAG расширенная генерация',
-    agent: 'ReAct агент',
-    wiki: 'Wiki-база знаний',
-    hybridSearch: 'Гибридный поиск',
-    multimodalParsing: 'Мультимодальный анализ документов',
-    hybridSearchEngine: 'Гибридный поиск + граф знаний',
-    ragQandA: 'Вопрос-ответ с ReAct агентом',
+    subtitle: 'Интеллектуальная работа и операционный анализ',
+    description: 'Корпоративные знания и управляемые данные для надежных ответов и бизнес-аналитики',
+    rag: 'Помощник сотрудника',
+    agent: 'Операционный анализ',
+    wiki: 'Корпоративные знания',
+    hybridSearch: 'Надежные доказательства',
+    multimodalParsing: 'Единое управление знаниями',
+    hybridSearchEngine: 'Надежный поиск и источники',
+    ragQandA: 'Управляемый операционный анализ',
     independentTenant: 'Независимое рабочее пространство',
     fullApiAccess: 'Полный доступ к API',
     knowledgeBaseManagement: 'Управление базой знаний',
@@ -2503,9 +2503,9 @@ export default {
     loadingInfo: 'Загрузка данных...',
     retry: 'Повторить',
     versionLabel: 'Версия приложения',
-    versionDescription: 'Версия сервиса приложения (weknora-app)',
+    versionDescription: 'Версия сервиса приложения (agent-server)',
     frontendVersionLabel: 'Версия UI',
-    frontendVersionDescription: 'Версия сборки UI (weknora-ui)',
+    frontendVersionDescription: 'Версия сборки UI (agent-web)',
     versionMismatch: 'Не совпадает с версией приложения',
     buildTimeLabel: 'Время сборки',
     buildTimeDescription: 'Время, когда система была собрана',
@@ -4031,10 +4031,10 @@ export default {
     allowFileUpload: 'Показывать кнопку загрузки изображений',
     allowFileUploadDesc: 'При включении посетители видят кнопку загрузки изображений в поле ввода. Кнопка появляется только если у привязанного агента включена загрузка изображений.',
     webhookUrl: 'Webhook URL',
-    webhookUrlPlaceholder: 'https://your-server.example.com/weknora/embed-events',
-    webhookUrlDesc: 'Optional. WeKnora POSTs message_sent / message_received events to this HTTPS endpoint.',
+    webhookUrlPlaceholder: 'https://your-server.example.com/agent/embed-events',
+    webhookUrlDesc: 'Optional. Huanshu POSTs message_sent / message_received events to this HTTPS endpoint.',
     webhookSecret: 'Webhook secret',
-    webhookSecretPlaceholder: 'HMAC-SHA256 secret (X-WeKnora-Signature header)',
+    webhookSecretPlaceholder: 'Secret для подписи HMAC-SHA256',
     webhookSecretKeep: 'Leave blank to keep the saved secret',
     webhookSecretDesc: 'Optional. When set, request bodies are signed for verification on your server.',
     agentWebSearchDisabledHint: 'У этого агента не включён веб-поиск. Посетители не увидят кнопку веб-поиска, пока вы не включите его в настройках агента.',
@@ -4145,7 +4145,7 @@ export default {
     }
   },
   createChat: {
-    title: 'Привет, я WeKnora — ваши знания всегда под рукой',
+    title: 'Привет, я корпоративный помощник Huanshu',
     newSessionTitle: 'Новая сессия',
     messages: {
       createFailed: 'Не удалось создать сессию',
@@ -4389,11 +4389,11 @@ export default {
     haveAccount: 'Уже есть аккаунт?',
     backToLogin: 'Вернуться ко входу',
     loginHint: 'Войдите, чтобы продолжить, или создайте аккаунт ниже, если вы впервые здесь.',
-    firstTime: 'Впервые в WeKnora?',
+    firstTime: 'Впервые в Huanshu?',
     registerSuccess: 'Регистрация завершена. Войдите в систему',
     registerFailed: 'Ошибка регистрации',
     subtitle: 'RAG, ReAct-агент и Wiki — корпоративный фреймворк знаний на основе больших моделей',
-    registerSubtitle: 'Создайте аккаунт и начните работу с WeKnora',
+    registerSubtitle: 'Создайте аккаунт и начните работу с Huanshu',
     emailPlaceholder: 'Введите адрес электронной почты',
     passwordPlaceholder: 'Введите пароль (8-32 символа, включая буквы и цифры)',
     confirmPasswordPlaceholder: 'Введите пароль ещё раз',
@@ -4615,6 +4615,7 @@ export default {
   },
   settings: {
     modelManagement: 'Управление моделями',
+    platformCloudService: 'Облачный сервис платформы',
     webSearchConfig: 'Сетевой поиск',
     autoCheckUpdate: 'Автоматическая загрузка обновлений',
     autoCheckUpdateDesc: 'При включении автоматически проверять и скачивать последнюю версию в фоновом режиме при запуске.',
@@ -4649,8 +4650,8 @@ export default {
       needsConfig: 'Требует настройки',
       configurable: 'Настраиваемое',
       pathPrefix: 'Префикс пути (необязательно)',
-      pathPrefixPlaceholder: 'напр. weknora/images',
-      prefixPlaceholder: 'напр. weknora',
+      pathPrefixPlaceholder: 'напр. agent/images',
+      prefixPlaceholder: 'напр. agent',
       bucketName: 'Имя бакета',
       bucketPlaceholder: 'Имя бакета',
       minioDesc: 'S3-совместимое самостоятельно размещаемое объектное хранилище для внутренних сетей и частного облака.',
@@ -4795,47 +4796,47 @@ export default {
       paddleocrVlCloudTokenPlaceholder: 'Токен PaddleOCR-VL AI Studio'
     },
     weknoraCloud: {
-      title: 'WeKnora Cloud',
-      description: 'Настройте учётные данные APPID и APPSECRET для WeKnora Cloud. Данные используются для модельных сервисов и движка парсинга документов.',
+      title: 'Huanshu Cloud Service',
+      description: 'Настройте учётные данные APPID и APPSECRET для Huanshu Cloud Service. Данные используются для модельных сервисов и движка парсинга документов.',
       viewDocs: 'Документация',
       unconfigured: 'Учётные данные не настроены. Заполните APPID и APPSECRET.',
       configured: 'Учётные данные настроены, статус в норме.',
-      expired: 'Учётные данные WeKnora Cloud истекли',
+      expired: 'Учётные данные Huanshu Cloud Service истекли',
       expiredDefault: 'Ключ шифрования изменился после перезапуска. Сохранённые данные не могут быть расшифрованы. Введите данные заново.',
       reconfigure: 'Перенастроить',
       appIdLabel: 'APPID',
-      appIdDesc: 'ID приложения WeKnora Cloud',
+      appIdDesc: 'ID приложения Huanshu Cloud Service',
       appIdPlaceholder: 'Введите APPID',
       appSecretLabel: 'APPSECRET',
-      appSecretDesc: 'Секрет приложения WeKnora Cloud',
+      appSecretDesc: 'Секрет приложения Huanshu Cloud Service',
       appSecretPlaceholder: 'Введите APPSECRET',
       saveHint: 'Данные будут проверены и зашифрованы перед сохранением.',
       saveBtn: 'Сохранить',
       usageTitle: 'Инструкция',
-      usageSteps: '1. Сохраните APPID и APPSECRET\n2. Добавьте chat, embedding, rerank и vlm в разделе «Облачные модели» ниже\n3. Парсинг: Настройки БЗ → Движок парсинга → WeKnora Cloud',
+      usageSteps: '1. Сохраните APPID и APPSECRET\n2. Добавьте chat, embedding, rerank и vlm в разделе «Облачные модели» ниже\n3. Парсинг: Настройки БЗ → Движок парсинга → Huanshu Cloud Service',
       fillRequired: 'Заполните APPID и APPSECRET',
       saveSuccess: 'Учётные данные сохранены',
       saveFailed: 'Не удалось сохранить данные',
-      credentialConfigured: 'Учётные данные WeKnoraCloud настроены.',
+      credentialConfigured: 'Учётные данные Huanshu Cloud Service настроены.',
       credentialExpired: 'Данные истекли. Перенастройте.',
-      credentialUnconfigured: 'Учётные данные WeKnoraCloud не настроены. Заполните APPID и APPSECRET.',
+      credentialUnconfigured: 'Учётные данные Huanshu Cloud Service не настроены. Заполните APPID и APPSECRET.',
       checkingStatus: 'Проверка статуса...',
       goToSettings: 'Перейти в настройки',
-      modelHintConfigured: 'Учётные данные WeKnoraCloud настроены. Поддерживаемые модели см. в',
+      modelHintConfigured: 'Учётные данные Huanshu Cloud Service настроены. Поддерживаемые модели см. в',
       modelHintDocsLink: 'документации API',
       addModelsSuccess: 'Успешно добавлено моделей: {count}',
       addModelsPartial: 'Добавлено: {success}, ошибок: {failed}',
       addModelsFailed: 'Не удалось добавить модели',
       addModelsEmbeddingFailed: 'Тест подключения Embedding не пройден; не удалось определить размерность вектора',
       addModelsDisplayName: {
-        chat: 'WeKnoraCloud Chat',
-        embedding: 'WeKnoraCloud Embedding',
-        rerank: 'WeKnoraCloud ReRank',
-        vllm: 'WeKnoraCloud Vision'
+        chat: 'Huanshu Cloud Service Chat',
+        embedding: 'Huanshu Cloud Service Embedding',
+        rerank: 'Huanshu Cloud Service ReRank',
+        vllm: 'Huanshu Cloud Service Vision'
       },
       modelsSection: {
         title: 'Облачные модели',
-        descReady: 'Зарегистрируйте четыре стандартные модели WeKnora Cloud для чата, поиска, реранкинга и зрения.',
+        descReady: 'Зарегистрируйте четыре стандартные модели Huanshu Cloud Service для чата, поиска, реранкинга и зрения.',
         descPending: 'Сначала сохраните учётные данные выше, затем добавьте модели здесь.',
         statusAdded: 'Добавлена',
         statusPending: 'Нужны учётные данные',
@@ -5827,10 +5828,10 @@ export default {
       },
       knowledge: {
         title: 'Создайте базу знаний',
-        desc: 'С этого всё начинается: загружайте документы, веб-страницы или FAQ, и WeKnora автоматически разберёт и проиндексирует их. Нажмите здесь, чтобы открыть базы знаний.'
+        desc: 'Загрузите документы, веб-страницы или FAQ, и система автоматически разберёт и проиндексирует их. Нажмите здесь, чтобы открыть базы знаний.'
       },
       welcome: {
-        title: 'Добро пожаловать в WeKnora',
+        title: 'Добро пожаловать в Huanshu',
         desc: 'Несколько простых шагов познакомят вас с базами знаний, чатом и агентами. Нажмите «Далее», чтобы начать.'
       }
     }

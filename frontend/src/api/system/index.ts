@@ -45,6 +45,13 @@ export interface SystemInfo {
   uptime_seconds?: number
 }
 
+export interface ProductBaseDescriptor {
+  schema_version: 'ProductShellBrandV1'
+  type: 'weknora'
+  product_version: string
+  source_commit: string
+}
+
 export interface PlaceholderDefinition {
   name: string
   label: string
@@ -81,6 +88,10 @@ export interface PromptTemplatesConfig {
 
 export function getSystemInfo(): Promise<{ data: SystemInfo }> {
   return get('/api/v1/system/info')
+}
+
+export function getProductBaseDescriptor(): Promise<{ data: ProductBaseDescriptor }> {
+  return get('/api/v1/system/admin/product-base')
 }
 
 export function getPromptTemplates(): Promise<{ data: PromptTemplatesConfig }> {

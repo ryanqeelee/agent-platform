@@ -246,6 +246,9 @@ func RegisterSystemAdminRoutes(
 	// the guard, so adding new endpoints can't accidentally drop the gate.
 	adminRoutes := r.Group("/system/admin", g.SystemAdmin())
 	{
+		// Product-base identity is an operator diagnostic, never tenant UI state.
+		adminRoutes.GET("/product-base", handler.GetProductBaseDescriptor)
+
 		// P0: SystemAdmin role management
 		adminRoutes.POST("/promote", handler.PromoteUserToSystemAdmin)
 		adminRoutes.POST("/revoke", handler.RevokeSystemAdmin)

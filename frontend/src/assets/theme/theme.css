@@ -101,6 +101,35 @@
 :root[theme-mode="dark"] *::-webkit-scrollbar-thumb {
     background-color: #4b4b4b !important;
 }
+
+/* ProductShellBrandV1: restrained shared shell palette. */
+:root:root,
+:root:root[theme-mode="light"] {
+  --product-shell-paper: #f7f2e9;
+  --product-shell-ink: #132d2d;
+  --product-shell-teal: #147b76;
+  --product-shell-risk: #c65b32;
+  --brand-main: var(--product-shell-teal);
+  --td-brand-color-1: #e5f3f1;
+  --td-brand-color-2: #b8ded9;
+  --td-brand-color-3: #74beb7;
+  --td-brand-color-4: #147b76;
+  --td-brand-color-5: #106b67;
+  --td-brand-color-6: #0d5a57;
+  --td-brand-color-7: #0a4b48;
+  --td-brand-color-8: #073d3b;
+  --td-brand-color-9: #052f2e;
+  --td-brand-color-10: #032222;
+  --td-brand-color: var(--td-brand-color-4);
+  --td-brand-color-hover: var(--td-brand-color-3);
+  --td-brand-color-active: var(--td-brand-color-5);
+  --td-bg-color-page: var(--product-shell-paper);
+  --td-bg-color-sidebar: #f1ebe0;
+  --td-font-gray-1: rgba(19, 45, 45, 0.94);
+  --td-font-gray-2: rgba(19, 45, 45, 0.68);
+  --td-font-gray-3: rgba(19, 45, 45, 0.46);
+  --td-font-gray-4: rgba(19, 45, 45, 0.3);
+}
 :root[theme-mode="dark"] *::-webkit-scrollbar-thumb:hover {
     background-color: #5e5e5e !important;
 }
@@ -199,4 +228,15 @@ select:-webkit-autofill {
 .t-textarea__inner.t-is-focused:not(.t-is-disabled):not(.t-is-error):not(.t-is-warning):not(.t-is-success) {
     border-color: var(--td-brand-color);
     box-shadow: none;
+}
+
+:root:root[theme-mode="dark"] {
+    --product-shell-paper: #f7f2e9;
+    --product-shell-ink: #132d2d;
+    --product-shell-teal: #147b76;
+    --product-shell-risk: #c65b32;
+    --brand-main: var(--product-shell-teal);
+    --td-brand-color: var(--product-shell-teal);
+    --td-brand-color-hover: #74beb7;
+    --td-brand-color-active: #106b67;
 }

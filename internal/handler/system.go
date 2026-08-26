@@ -304,6 +304,33 @@ var (
 	GoVersion = "unknown"
 )
 
+const productBaseVersion = "v0.7.2"
+
+// ProductBaseDescriptorResponse is intentionally separate from SystemInfo.
+// It identifies the current implementation base for platform diagnostics
+// without exposing that implementation identity to ordinary tenant users.
+type ProductBaseDescriptorResponse struct {
+	SchemaVersion  string `json:"schema_version"`
+	Type           string `json:"type"`
+	ProductVersion string `json:"product_version"`
+	SourceCommit   string `json:"source_commit"`
+}
+
+// GetProductBaseDescriptor returns the fixed product-base diagnostic for
+// system administrators. The router mounts it only below /system/admin.
+func (h *SystemHandler) GetProductBaseDescriptor(c *gin.Context) {
+	c.JSON(200, gin.H{
+		"code": 0,
+		"msg":  "success",
+		"data": ProductBaseDescriptorResponse{
+			SchemaVersion:  "ProductShellBrandV1",
+			Type:           "weknora",
+			ProductVersion: productBaseVersion,
+			SourceCommit:   CommitID,
+		},
+	})
+}
+
 // GetSystemInfo godoc
 // @Summary      获取系统信息
 // @Description  获取系统版本、构建信息和引擎配置

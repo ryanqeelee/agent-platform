@@ -45,6 +45,19 @@
         </div>
       </div>
 
+      <div v-if="authStore.isSystemAdmin && productBase" class="setting-row">
+        <div class="setting-info">
+          <label>产品基座诊断</label>
+          <p class="desc">仅系统管理员可见</p>
+        </div>
+        <div class="setting-control">
+          <span class="info-value">
+            {{ productBase.type }} · {{ productBase.product_version }}
+            <span v-if="productBase.source_commit" class="commit-info">({{ productBase.source_commit }})</span>
+          </span>
+        </div>
+      </div>
+
       <!-- Frontend version -->
       <div class="setting-row">
         <div class="setting-info">
@@ -196,13 +209,16 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { getSystemInfo, type SystemInfo } from '@/api/system'
+import { getProductBaseDescriptor, getSystemInfo, type ProductBaseDescriptor, type SystemInfo } from '@/api/system'
+import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
 
 const { t, locale } = useI18n()
+const authStore = useAuthStore()
 
 // Reactive state
 const systemInfo = ref<SystemInfo | null>(null)
+const productBase = ref<ProductBaseDescriptor | null>(null)
 const loading = ref(true)
 const error = ref('')
 const frontendVersion = __FRONTEND_VERSION__
@@ -287,6 +303,14 @@ const loadInfo = async () => {
     
     if (systemResponse.data) {
       systemInfo.value = systemResponse.data
+      if (authStore.isSystemAdmin) {
+        try {
+          const productBaseResponse = await getProductBaseDescriptor()
+          productBase.value = productBaseResponse.data || null
+        } catch {
+          productBase.value = null
+        }
+      }
     } else {
       error.value = t('system.messages.fetchFailed')
     }

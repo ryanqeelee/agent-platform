@@ -104,7 +104,7 @@
     <div class="header-links">
       <div class="language-switch">
         <button @click="toggleLanguageMenu" class="header-link" :title="currentLangOption?.label">
-          <span class="lang-flag-icon">{{ currentLangOption?.flag }}</span>
+          <t-icon name="translate" class="lang-icon" />
           <span class="link-text">{{ currentLangOption?.shortLabel }}</span>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
             stroke-linecap="round">
@@ -116,9 +116,9 @@
         <div v-if="showLanguageMenu" class="language-dropdown">
           <div v-for="lang in languageOptions" :key="lang.value" @click="selectLanguage(lang.value)"
             class="language-option" :class="{ active: currentLanguage === lang.value }">
-            <span class="lang-flag">{{ lang.flag }}</span>
+            <span class="lang-short-label">{{ lang.shortLabel }}</span>
             <span class="lang-label">{{ lang.label }}</span>
-            <span v-if="currentLanguage === lang.value" class="check-icon">✓</span>
+            <t-icon v-if="currentLanguage === lang.value" name="check" class="check-icon" />
           </div>
         </div>
       </div>
@@ -394,10 +394,10 @@ const inviteLookupLoading = ref(false)
 
 // Language options
 const languageOptions = [
-  { value: 'zh-CN', label: '简体中文', shortLabel: '中文', flag: '🇨🇳' },
-  { value: 'en-US', label: 'English', shortLabel: 'EN', flag: '🇺🇸' },
-  { value: 'ru-RU', label: 'Русский', shortLabel: 'RU', flag: '🇷🇺' },
-  { value: 'ko-KR', label: '한국어', shortLabel: '한국어', flag: '🇰🇷' }
+  { value: 'zh-CN', label: '简体中文', shortLabel: '中文' },
+  { value: 'en-US', label: 'English', shortLabel: 'EN' },
+  { value: 'ru-RU', label: 'Русский', shortLabel: 'RU' },
+  { value: 'ko-KR', label: '한국어', shortLabel: '한국어' }
 ]
 
 const currentLanguage = computed(() => locale.value)
@@ -1276,9 +1276,8 @@ onMounted(async () => {
     border: 1px solid rgba(255, 255, 255, 0.25);
     color: var(--td-text-color-anti);
 
-    .lang-flag-icon {
+    .lang-icon {
       font-size: 16px;
-      line-height: 1;
       flex-shrink: 0;
     }
 
@@ -1317,8 +1316,11 @@ onMounted(async () => {
   font-family: var(--app-font-family);
   color: var(--td-text-color-primary);
 
-  .lang-flag {
-    font-size: 16px;
+  .lang-short-label {
+    min-width: 32px;
+    color: var(--td-text-color-secondary);
+    font-size: 12px;
+    font-weight: 600;
     flex-shrink: 0;
   }
 

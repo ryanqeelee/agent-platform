@@ -52,15 +52,6 @@
       </div>
       <p class="section-description">
         {{ $t('tenantMember.sectionDescription') }}
-        <a
-          class="doc-link"
-          href="https://github.com/ryanqeelee/agent-platform/blob/agent-v1/docs/RBAC%E8%AF%B4%E6%98%8E.md"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          {{ $t('tenantMember.learnRbacGuide') }}
-          <t-icon name="link" class="link-icon" />
-        </a>
       </p>
     </div>
 

@@ -129,7 +129,10 @@ export const CONTEXTUAL_GUIDE_TOURS: Record<ContextualGuideTourId, ContextualGui
 }
 
 export function isContextualGuideDone(tourId: ContextualGuideTourId): boolean {
-  return localStorage.getItem(CONTEXTUAL_GUIDE_TOURS[tourId].storageKey) === '1'
+  // The product tour already introduces the core workflow. Treat its
+  // completion as opting out of the old cascade of page-level tours.
+  return isGlobalUserGuideDone()
+    || localStorage.getItem(CONTEXTUAL_GUIDE_TOURS[tourId].storageKey) === '1'
 }
 
 export function markContextualGuideDone(tourId: ContextualGuideTourId) {

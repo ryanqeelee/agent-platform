@@ -65,11 +65,15 @@ export default {
     steps: {
       welcome: {
         title: 'Welcome to Huanshu',
-        desc: 'A few quick steps to get you familiar with knowledge bases, chat and agents. Click "Next" to begin.'
+        desc: 'A few quick steps introduce the employee assistant, enterprise knowledge and operating analysis. Click "Next" to begin.'
       },
       knowledge: {
         title: 'Create your knowledge base',
         desc: 'Everything starts here: upload documents, web pages or FAQs and Huanshu parses and indexes them automatically. Click here to open knowledge bases.'
+      },
+      analysis: {
+        title: 'Open operating analysis',
+        desc: 'Explore governed business data, spot exceptions and receive evidence-backed operating insights.'
       },
       chat: {
         title: 'Start an AI chat',
@@ -89,7 +93,7 @@ export default {
       },
       done: {
         title: 'You are all set',
-        desc: 'You now know the essentials — start building your knowledge assistant! Revisit this tour anytime from the help button next to your name in this menu.'
+        desc: 'You now know the employee assistant, enterprise knowledge and operating analysis. Revisit this tour anytime from the help button next to your name.'
       }
     }
   },
@@ -5665,7 +5669,6 @@ export default {
   tenantMember: {
     title: 'Members',
     sectionDescription: 'Invite teammates to the workspace and manage their roles. Only Owner can add or remove members.',
-    learnRbacGuide: 'Learn about RBAC',
     listTitle: 'Workspace members',
     loading: 'Loading members…',
     retry: 'Retry',

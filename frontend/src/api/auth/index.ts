@@ -1,4 +1,5 @@
 import { post, get, put } from '@/utils/request'
+import { getApiBaseUrl } from '@/utils/api-base'
 import i18n from '@/i18n'
 
 const t = (key: string) => i18n.global.t(key)
@@ -220,9 +221,11 @@ export async function login(data: LoginRequest): Promise<LoginResponse> {
 /**
  * 获取 OIDC 登录跳转地址
  */
-export async function getOIDCAuthorizationURL(redirectURI: string): Promise<OIDCAuthURLResponse> {
+export async function getOIDCAuthorizationURL(redirectURI: string, returnTo?: string): Promise<OIDCAuthURLResponse> {
   try {
-    const response = await get(`/api/v1/auth/oidc/url?redirect_uri=${encodeURIComponent(redirectURI)}`)
+    const params = new URLSearchParams({ redirect_uri: redirectURI })
+    if (returnTo) params.set('return_to', returnTo)
+    const response = await get(`/api/v1/auth/oidc/url?${params.toString()}`)
     return response as unknown as OIDCAuthURLResponse
   } catch (error: any) {
     return {
@@ -319,6 +322,37 @@ export interface MembershipInfo {
  */
 export interface AuthCapabilities {
   can_create_tenant: boolean
+}
+
+export interface EnterpriseSessionProjectionV1 {
+  schema: 'EnterpriseSessionProjectionV1'
+  actorId: string
+  tenantId: number
+  role: 'owner' | 'admin' | 'knowledge_administrator' | 'employee'
+  surfaces: {
+    employeeWorkspace: true
+    enterpriseAdministration: boolean
+  }
+}
+
+export class EnterpriseSessionRequestError extends Error {
+  constructor(readonly status: number) {
+    super('Enterprise session is unavailable')
+  }
+}
+
+// This deliberately does not use the generic axios refresh redirect: the
+// enterprise route must retain its validated in-product return destination
+// when the current JWT has expired.
+export async function getEnterpriseSession(): Promise<EnterpriseSessionProjectionV1> {
+  const token = localStorage.getItem('weknora_token')
+  if (!token) throw new EnterpriseSessionRequestError(401)
+  const response = await fetch(`${getApiBaseUrl()}/api/v1/auth/enterprise-session`, {
+    headers: { Authorization: `Bearer ${token}` },
+    credentials: 'same-origin',
+  })
+  if (!response.ok) throw new EnterpriseSessionRequestError(response.status)
+  return response.json() as Promise<EnterpriseSessionProjectionV1>
 }
 
 export async function getCurrentUser(): Promise<{ success: boolean; data?: { user: UserInfo; tenant?: TenantInfo | null; memberships?: MembershipInfo[]; tenant_required?: boolean; capabilities?: AuthCapabilities }; message?: string }> {

@@ -15,6 +15,7 @@ func TestSignAndVerifyOIDCState(t *testing.T) {
 	state, err := SignOIDCState(&OIDCStatePayload{
 		Nonce:       "nonce-abc",
 		RedirectURI: "http://localhost:5173/login",
+		ReturnTo:    "/platform/enterprise?section=members",
 		IssuedAt:    time.Now().Unix(),
 	})
 	if err != nil {
@@ -24,8 +25,28 @@ func TestSignAndVerifyOIDCState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("VerifyOIDCState: %v", err)
 	}
-	if got.Nonce != "nonce-abc" || got.RedirectURI != "http://localhost:5173/login" {
+	if got.Nonce != "nonce-abc" || got.RedirectURI != "http://localhost:5173/login" || got.ReturnTo != "/platform/enterprise?section=members" {
 		t.Fatalf("unexpected payload: %+v", got)
+	}
+}
+
+func TestSignOIDCStateRejectsUnsafeReturnTo(t *testing.T) {
+	for _, returnTo := range []string{
+		"//evil.example",
+		"https://evil.example",
+		"/platform\\evil",
+		"/platform/knowledge-bases\nnext",
+	} {
+		t.Run(returnTo, func(t *testing.T) {
+			if _, err := SignOIDCState(&OIDCStatePayload{
+				Nonce:       "nonce-abc",
+				RedirectURI: "http://localhost:5173/login",
+				ReturnTo:    returnTo,
+				IssuedAt:    time.Now().Unix(),
+			}); err == nil {
+				t.Fatalf("SignOIDCState accepted unsafe return_to %q", returnTo)
+			}
+		})
 	}
 }
 

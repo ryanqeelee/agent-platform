@@ -409,7 +409,7 @@ func synthFallbackMembership(user *types.User, activeTenant *types.Tenant) []typ
 }
 
 // GetOIDCAuthorizationURL builds the OIDC authorization URL.
-func (s *userService) GetOIDCAuthorizationURL(ctx context.Context, redirectURI string) (*types.OIDCAuthURLResponse, error) {
+func (s *userService) GetOIDCAuthorizationURL(ctx context.Context, redirectURI, returnTo string) (*types.OIDCAuthURLResponse, error) {
 	cfg, err := s.getOIDCConfig(ctx)
 	if err != nil {
 		return nil, err
@@ -426,6 +426,7 @@ func (s *userService) GetOIDCAuthorizationURL(ctx context.Context, redirectURI s
 	state, err := secutils.SignOIDCState(&secutils.OIDCStatePayload{
 		Nonce:       nonce,
 		RedirectURI: strings.TrimSpace(redirectURI),
+		ReturnTo:    returnTo,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode OIDC state: %w", err)
@@ -983,6 +984,9 @@ func (s *userService) ValidateToken(ctx context.Context, tokenString string) (*t
 	user, err := s.userRepo.GetUserByID(ctx, userID)
 	if err != nil {
 		return nil, 0, err
+	}
+	if user == nil || !user.IsActive {
+		return nil, 0, errors.New("account is disabled")
 	}
 
 	// Extract active tenant from the JWT. Anything missing or unparseable

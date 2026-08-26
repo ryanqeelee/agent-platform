@@ -29,6 +29,7 @@ const oidcNonceCookieMaxAge = 600
 type AuthHandler struct {
 	userService      interfaces.UserService
 	tenantService    interfaces.TenantService
+	tenantMemberSvc  interfaces.TenantMemberService
 	configInfo       *config.Config
 	systemSettingSvc interfaces.SystemSettingService
 	// invitationSvc is required for the share-link registration path
@@ -51,7 +52,7 @@ type AuthHandler struct {
 //
 // Returns a pointer to the newly created AuthHandler
 func NewAuthHandler(configInfo *config.Config,
-	userService interfaces.UserService, tenantService interfaces.TenantService,
+	userService interfaces.UserService, tenantService interfaces.TenantService, tenantMemberSvc interfaces.TenantMemberService,
 	systemSettingSvc interfaces.SystemSettingService,
 	invitationSvc interfaces.TenantInvitationService,
 ) *AuthHandler {
@@ -69,9 +70,85 @@ func NewAuthHandler(configInfo *config.Config,
 		configInfo:       configInfo,
 		userService:      userService,
 		tenantService:    tenantService,
+		tenantMemberSvc:  tenantMemberSvc,
 		systemSettingSvc: systemSettingSvc,
 		invitationSvc:    invitationSvc,
 	}
+}
+
+// EnterpriseSessionProjectionV1 is the single Product Base projection used by
+// the same-domain Enterprise Administration entry. It intentionally carries
+// only the current enterprise identity and the two allowed product surfaces.
+// It is not a membership listing and must never be cached as an authorization
+// decision by a caller.
+type EnterpriseSessionProjectionV1 struct {
+	Schema   string `json:"schema"`
+	ActorID  string `json:"actorId"`
+	TenantID uint64 `json:"tenantId"`
+	Role     string `json:"role"`
+	Surfaces struct {
+		EmployeeWorkspace        bool `json:"employeeWorkspace"`
+		EnterpriseAdministration bool `json:"enterpriseAdministration"`
+	} `json:"surfaces"`
+}
+
+func enterpriseRoleProjection(role types.TenantRole) (string, bool) {
+	switch role {
+	case types.TenantRoleOwner:
+		return "owner", true
+	case types.TenantRoleAdmin:
+		return "admin", true
+	case types.TenantRoleContributor:
+		return "knowledge_administrator", true
+	case types.TenantRoleViewer:
+		return "employee", true
+	default:
+		return "", false
+	}
+}
+
+// GetEnterpriseSession returns a fresh, deliberately minimal projection of
+// the authenticated user's one home enterprise. Auth middleware has already
+// rejected anonymous, invalid, revoked and API-key principals before this
+// handler runs; these checks deliberately close the remaining privileged,
+// cross-tenant and membership gaps rather than trusting client-side state.
+func (h *AuthHandler) GetEnterpriseSession(c *gin.Context) {
+	ctx := c.Request.Context()
+	user, err := h.userService.GetCurrentUser(ctx)
+	if err != nil || user == nil {
+		c.Error(errors.NewUnauthorizedError("Authentication required"))
+		return
+	}
+	if !user.IsActive || user.IsSystemAdmin || user.CanAccessAllTenants || h.tenantMemberSvc == nil {
+		c.Error(errors.NewForbiddenError("Enterprise session is unavailable"))
+		return
+	}
+
+	activeTenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok || activeTenantID == 0 || activeTenantID != user.TenantID {
+		c.Error(errors.NewForbiddenError("Enterprise session is unavailable"))
+		return
+	}
+	member, err := h.tenantMemberSvc.GetMembership(ctx, user.ID, activeTenantID)
+	if err != nil || member == nil || member.Status != types.TenantMemberStatusActive {
+		c.Error(errors.NewForbiddenError("Enterprise session is unavailable"))
+		return
+	}
+	role, valid := enterpriseRoleProjection(member.Role)
+	if !valid {
+		c.Error(errors.NewForbiddenError("Enterprise session is unavailable"))
+		return
+	}
+
+	projection := EnterpriseSessionProjectionV1{
+		Schema:   "EnterpriseSessionProjectionV1",
+		ActorID:  user.ID,
+		TenantID: user.TenantID,
+		Role:     role,
+	}
+	projection.Surfaces.EmployeeWorkspace = true
+	projection.Surfaces.EnterpriseAdministration = member.Role != types.TenantRoleViewer
+	c.JSON(http.StatusOK, projection)
 }
 
 // resolveRegistrationMode returns the currently active registration mode.
@@ -226,6 +303,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        redirect_uri  query     string  true  "OIDC回调地址"
+// @Param        return_to     query     string  false "登录后站内返回地址"
 // @Success      200           {object}  types.OIDCAuthURLResponse
 // @Failure      400           {object}  errors.AppError  "请求参数错误"
 // @Failure      403           {object}  errors.AppError  "OIDC未启用"
@@ -238,8 +316,13 @@ func (h *AuthHandler) GetOIDCAuthorizationURL(c *gin.Context) {
 		c.Error(appErr)
 		return
 	}
+	returnTo, err := secutils.ValidateOIDCReturnTo(c.Query("return_to"))
+	if err != nil {
+		c.Error(errors.NewValidationError(err.Error()))
+		return
+	}
 
-	resp, err := h.userService.GetOIDCAuthorizationURL(ctx, redirectURI)
+	resp, err := h.userService.GetOIDCAuthorizationURL(ctx, redirectURI, returnTo)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to generate OIDC authorization URL: %v", err)
 		appErr := errors.NewForbiddenError("OIDC authorization unavailable").WithDetails(err.Error())
@@ -340,7 +423,11 @@ func (h *AuthHandler) OIDCRedirectCallback(c *gin.Context) {
 		return
 	}
 
-	c.Redirect(http.StatusFound, frontendRedirectURI+"#oidc_result="+urlQueryEscape(payload))
+	redirectURL := frontendRedirectURI + "#oidc_result=" + urlQueryEscape(payload)
+	if decodedState.ReturnTo != "" {
+		redirectURL += "&returnTo=" + urlQueryEscape(decodedState.ReturnTo)
+	}
+	c.Redirect(http.StatusFound, redirectURL)
 }
 
 func encodeOIDCCallbackPayload(resp *types.OIDCCallbackResponse) (string, error) {
@@ -354,6 +441,7 @@ func encodeOIDCCallbackPayload(resp *types.OIDCCallbackResponse) (string, error)
 type oidcStatePayload struct {
 	Nonce       string
 	RedirectURI string
+	ReturnTo    string
 }
 
 func decodeOIDCState(raw string, req *http.Request) (*oidcStatePayload, error) {
@@ -371,6 +459,7 @@ func decodeOIDCState(raw string, req *http.Request) (*oidcStatePayload, error) {
 	return &oidcStatePayload{
 		Nonce:       payload.Nonce,
 		RedirectURI: strings.TrimSpace(payload.RedirectURI),
+		ReturnTo:    payload.ReturnTo,
 	}, nil
 }
 

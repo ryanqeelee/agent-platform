@@ -192,6 +192,10 @@ func RegisterAuthRoutes(r *gin.RouterGroup, handler *handler.AuthHandler, g *rba
 	r.GET("/auth/oidc/callback", handler.OIDCRedirectCallback)
 	r.POST("/auth/refresh", handler.RefreshToken)
 	r.GET("/auth/validate", handler.ValidateToken)
+	// This is intentionally a direct JWT-only route: the v1 API-key
+	// authorizer default-denies routes not explicitly declared through
+	// apiKeyRoute, while Auth middleware resolves the current web user.
+	r.GET("/auth/enterprise-session", handler.GetEnterpriseSession)
 	r.POST("/auth/logout", handler.Logout)
 	// auth/me returns only the caller's own identity/profile, so it is safe
 	// for any valid API key. Chat clients / MCP call it to discover "who am I";

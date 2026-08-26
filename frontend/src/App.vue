@@ -12,6 +12,7 @@ import { consumePendingTenantSwitchToast } from '@/utils/tenantSwitch'
 import { useRoleLabel } from '@/composables/useRoleLabel'
 import { notifyLoginSuccess } from '@/utils/loginNotify'
 import { renderWorkspaceNotifyContent } from '@/utils/workspaceNotifyContent'
+import { postLoginDestination } from '@/router/safeReturnTo'
 
 // TDesign locale configs
 import enUSConfig from 'tdesign-vue-next/esm/locale/en_US'
@@ -93,7 +94,7 @@ const syncOIDCUserContext = async () => {
   }
 }
 
-const persistOIDCLoginResponse = async (response: any) => {
+const persistOIDCLoginResponse = async (response: any, returnTo: unknown) => {
   if (!response.token) {
     throw new Error(response.message || 'OIDC login failed')
   }
@@ -106,7 +107,7 @@ const persistOIDCLoginResponse = async (response: any) => {
   await syncOIDCUserContext()
 
   await nextTick()
-  router.replace(authStore.hasValidTenant ? '/platform/knowledge-bases' : '/onboarding/workspace')
+  router.replace(postLoginDestination(router, returnTo, authStore.hasValidTenant))
 }
 
 const handleGlobalOIDCCallback = async () => {
@@ -117,6 +118,7 @@ const handleGlobalOIDCCallback = async () => {
   const oidcError = params.get('oidc_error')
   const oidcErrorDescription = params.get('oidc_error_description')
   const oidcResult = params.get('oidc_result')
+  const returnTo = params.get('returnTo')
 
   if (!oidcError && !oidcResult) return
 
@@ -138,7 +140,7 @@ const handleGlobalOIDCCallback = async () => {
     const response = decodeOIDCResult(oidcResult)
     if (response.success) {
       clearOIDCCallbackState('/')
-      await persistOIDCLoginResponse(response)
+      await persistOIDCLoginResponse(response, returnTo)
       notifyLoginSuccess(response, t, tm, formatRole, roleIcon)
       return
     }

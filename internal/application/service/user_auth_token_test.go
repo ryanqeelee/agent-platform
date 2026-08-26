@@ -88,7 +88,7 @@ func newAuthTestUserService(tokenRepo *stubAuthTokenRepo) *userService {
 	return &userService{
 		userRepo: &stubUserRepoForAuth{
 			users: map[string]*types.User{
-				"user-1": {ID: "user-1", TenantID: 1},
+				"user-1": {ID: "user-1", TenantID: 1, IsActive: true},
 			},
 		},
 		tokenRepo: tokenRepo,
@@ -138,6 +138,28 @@ func TestValidateTokenRejectsRefreshToken(t *testing.T) {
 	_, _, err = svc.ValidateToken(ctx, legacyRefresh)
 	if err == nil || err.Error() != "refresh token cannot be used as access token" {
 		t.Fatalf("ValidateToken(legacy refresh in DB) err = %v, want refresh rejection", err)
+	}
+}
+
+func TestValidateTokenRejectsInactiveUser(t *testing.T) {
+	ctx := context.Background()
+	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}
+	svc := newAuthTestUserService(tokenRepo)
+	svc.userRepo.(*stubUserRepoForAuth).users["user-1"].IsActive = false
+
+	accessJWT := signTestJWT(jwt.MapClaims{
+		"user_id": "user-1",
+		"type":    "access",
+		"exp":     time.Now().Add(time.Hour).Unix(),
+	})
+	tokenRepo.tokens[accessJWT] = &types.AuthToken{
+		UserID:    "user-1",
+		Token:     accessJWT,
+		TokenType: "access_token",
+	}
+
+	if _, _, err := svc.ValidateToken(ctx, accessJWT); err == nil || err.Error() != "account is disabled" {
+		t.Fatalf("ValidateToken(inactive user) err = %v, want account disabled rejection", err)
 	}
 }
 

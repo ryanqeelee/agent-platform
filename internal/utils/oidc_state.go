@@ -21,6 +21,7 @@ const oidcStateMaxAge = 10 * time.Minute
 type OIDCStatePayload struct {
 	Nonce       string `json:"nonce"`
 	RedirectURI string `json:"redirect_uri,omitempty"`
+	ReturnTo    string `json:"return_to,omitempty"`
 	IssuedAt    int64  `json:"iat"`
 }
 
@@ -54,6 +55,9 @@ func SignOIDCState(payload *OIDCStatePayload) (string, error) {
 	}
 	if strings.TrimSpace(payload.RedirectURI) == "" {
 		return "", errors.New("oidc state redirect_uri is required")
+	}
+	if _, err := ValidateOIDCReturnTo(payload.ReturnTo); err != nil {
+		return "", err
 	}
 	if payload.IssuedAt == 0 {
 		payload.IssuedAt = time.Now().Unix()
@@ -95,6 +99,9 @@ func VerifyOIDCState(raw string) (*OIDCStatePayload, error) {
 	if strings.TrimSpace(payload.RedirectURI) == "" {
 		return nil, errors.New("state.redirect_uri is required")
 	}
+	if _, err := ValidateOIDCReturnTo(payload.ReturnTo); err != nil {
+		return nil, err
+	}
 	if payload.IssuedAt == 0 {
 		return nil, errors.New("state.iat is required")
 	}
@@ -103,4 +110,22 @@ func VerifyOIDCState(raw string) (*OIDCStatePayload, error) {
 		return nil, errors.New("oidc state expired or invalid timestamp")
 	}
 	return &payload, nil
+}
+
+// ValidateOIDCReturnTo accepts only a same-origin product route for an OIDC
+// round-trip. The SPA performs the final route-resolution check after login;
+// this boundary prevents state from carrying an external or malformed target.
+func ValidateOIDCReturnTo(returnTo string) (string, error) {
+	if returnTo == "" {
+		return "", nil
+	}
+	path := strings.SplitN(returnTo, "?", 2)[0]
+	if strings.TrimSpace(returnTo) != returnTo ||
+		!strings.HasPrefix(returnTo, "/platform/") ||
+		strings.Contains(path, "//") ||
+		strings.Contains(returnTo, "\\") ||
+		strings.ContainsAny(returnTo, "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\x7f") {
+		return "", errors.New("oidc state return_to must be a safe /platform/ path")
+	}
+	return returnTo, nil
 }

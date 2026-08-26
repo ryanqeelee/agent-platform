@@ -106,6 +106,16 @@ function redirectToLogin() {
   if (window.location.pathname === '/login') return;
   // Embed 渠道用 Embed token 鉴权，匿名访问不应被踢到登录页
   if (isEmbedPage()) return;
+  const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  if (
+    returnTo.startsWith('/platform/') &&
+    !returnTo.startsWith('//') &&
+    !returnTo.includes('\\') &&
+    !/[\u0000-\u001f\u007f]/.test(returnTo)
+  ) {
+    window.location.href = `/login?returnTo=${encodeURIComponent(returnTo)}`;
+    return;
+  }
   window.location.href = '/login';
 }
 

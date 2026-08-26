@@ -181,6 +181,7 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
 import { getProductShellLoginCopy, productShellBrand } from '@/config/productShellBrand'
+import { DEFAULT_EMPLOYEE_WORKSPACE_PATH, safeReturnTo } from '@/router/safeReturnTo'
 
 const router = useRouter()
 const route = useRoute()
@@ -384,7 +385,8 @@ const persistLoginResponse = async (response: any) => {
   // briefly when the deployment is invitation-only.
   await authStore.refreshFromAuthMe()
   await nextTick()
-  router.replace(authStore.hasValidTenant ? '/platform/knowledge-bases' : '/onboarding/workspace')
+  const returnTo = safeReturnTo(router, route.query.returnTo)
+  router.replace(returnTo || (authStore.hasValidTenant ? DEFAULT_EMPLOYEE_WORKSPACE_PATH : '/onboarding/workspace'))
 }
 
 const getBackendOIDCRedirectURI = () => `${window.location.origin}/api/v1/auth/oidc/callback`
@@ -414,7 +416,8 @@ const loadAuthConfig = async () => {
 const handleOIDCLogin = async () => {
   try {
     oidcLoading.value = true
-    const response = await getOIDCAuthorizationURL(getBackendOIDCRedirectURI())
+    const returnTo = safeReturnTo(router, route.query.returnTo)
+    const response = await getOIDCAuthorizationURL(getBackendOIDCRedirectURI(), returnTo || undefined)
     const authorizationURL = response.authorization_url
 
     if (!response.success || !authorizationURL) {
@@ -554,8 +557,13 @@ onMounted(async () => {
   }
 
   if (authStore.isLoggedIn) {
-    router.replace('/platform/knowledge-bases')
-    return
+    const confirmed = await authStore.refreshFromAuthMe()
+    if (confirmed) {
+      const returnTo = safeReturnTo(router, route.query.returnTo)
+      router.replace(returnTo || DEFAULT_EMPLOYEE_WORKSPACE_PATH)
+      return
+    }
+    authStore.logout()
   }
 
   const AUTO_SETUP_FAILED_KEY = 'weknora_auto_setup_failed'

@@ -1,8 +1,9 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteLocationNormalized } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { autoSetup, getCurrentUser, userInfoFromApi } from '@/api/auth'
+import { autoSetup, getCurrentUser, getEnterpriseSession, EnterpriseSessionRequestError, userInfoFromApi } from '@/api/auth'
 import { post } from '@/utils/request'
+import { DEFAULT_EMPLOYEE_WORKSPACE_PATH, loginDestination, safeReturnTo } from './safeReturnTo'
 
 /** Lite /桌面 WebView 硬刷新时可能只打开 `/`，用 session 记住上次页面以便恢复 */
 const LITE_LAST_PATH_KEY = 'weknora_lite_last_path'
@@ -105,6 +106,32 @@ const router = createRouter({
           name: "settings",
           component: () => import("../views/settings/Settings.vue"),
           meta: { requiresInit: true, requiresAuth: true }
+        },
+        {
+          // Canonical enterprise-administration entry. The real record (rather
+          // than a static redirect) makes every navigation re-check the server
+          // projection before reusing the existing Settings members UI.
+          path: 'enterprise',
+          name: 'enterpriseAdministration',
+          component: { render: () => null },
+          meta: { requiresInit: true, requiresAuth: true },
+          beforeEnter: async (to) => {
+            try {
+              const projection = await getEnterpriseSession()
+              if (!projection.surfaces.enterpriseAdministration) {
+                return DEFAULT_EMPLOYEE_WORKSPACE_PATH
+              }
+              return {
+                path: '/platform/settings',
+                query: { section: to.query.section === 'tenant' ? 'tenant' : 'members' },
+              }
+            } catch (error) {
+              if (error instanceof EnterpriseSessionRequestError && error.status === 401) {
+                return loginDestination(router, to.fullPath)
+              }
+              return DEFAULT_EMPLOYEE_WORKSPACE_PATH
+            }
+          },
         },
         {
           path: "knowledge-bases",
@@ -344,7 +371,7 @@ router.beforeEach(async (to, from, next) => {
     if (!authStore.isLoggedIn) {
       const restored = await hydrateSessionFromToken(authStore)
       if (!restored) {
-        next('/login')
+        next(loginDestination(router, to.fullPath))
         return
       }
     }
@@ -360,7 +387,14 @@ router.beforeEach(async (to, from, next) => {
   if (to.meta.requiresAuth === false || to.meta.requiresInit === false) {
     // 如果已登录用户访问登录页面，重定向到知识库列表页面
     if (to.path === '/login' && authStore.isLoggedIn) {
-      next(authStore.hasValidTenant ? '/platform/knowledge-bases' : '/onboarding/workspace')
+      const confirmed = await authStore.refreshFromAuthMe()
+      if (!confirmed) {
+        authStore.logout()
+        next()
+        return
+      }
+      const returnTo = safeReturnTo(router, to.query.returnTo)
+      next(returnTo || (authStore.hasValidTenant ? DEFAULT_EMPLOYEE_WORKSPACE_PATH : '/onboarding/workspace'))
       return
     }
     next()
@@ -396,7 +430,7 @@ router.beforeEach(async (to, from, next) => {
           markAutoSetupFailed()
         }
       }
-      next('/login')
+      next(loginDestination(router, to.fullPath))
       return
     }
   }

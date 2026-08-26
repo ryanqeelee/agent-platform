@@ -377,10 +377,9 @@ const isRegisterMode = ref(false)
 const showLanguageMenu = ref(false)
 const oidcEnabled = ref(false)
 const oidcProviderName = ref('')
-// registrationEnabled defaults to true so that on first paint the Register
-// link is visible; the actual mode is fetched from /auth/config in onMounted.
-// In invite_only mode the link/card are hidden.
-const registrationEnabled = ref(true)
+// Keep self-service registration hidden until /auth/config explicitly enables
+// it. Valid invitation links still open the invite-only registration form.
+const registrationEnabled = ref(false)
 
 // invite-link state. When the URL carries ?token=xxx we resolve it to
 // the originating tenant + role and switch the form into a "register
@@ -579,14 +578,13 @@ const loadOIDCConfig = async () => {
 }
 
 // loadAuthConfig fetches /auth/config and caches whether self-service
-// registration is allowed. Failures fall back to "enabled" so a transient
-// network glitch doesn't lock new users out of an open deployment.
+// registration is allowed. Fail closed when the capability is unknown.
 const loadAuthConfig = async () => {
   try {
     const response = await getAuthConfig()
     registrationEnabled.value = response.registration_mode !== 'invite_only'
   } catch {
-    registrationEnabled.value = true
+    registrationEnabled.value = false
   }
 }
 

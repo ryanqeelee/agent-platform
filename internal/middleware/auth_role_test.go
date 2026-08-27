@@ -24,9 +24,10 @@ type fakeMemberService struct {
 		TenantID uint64
 		Role     types.TenantRole
 	}
-	failGet    error
-	failHasAny error
-	failAdd    error
+	ensureOwnerCalls int
+	failGet          error
+	failHasAny       error
+	failAdd          error
 	// 阻止 auto-promote 把 hasAny 翻面：默认 AddMember 成功也会写入 members map。
 }
 
@@ -81,6 +82,7 @@ func (f *fakeMemberService) AddMember(
 func (f *fakeMemberService) EnsureOwner(
 	ctx context.Context, userID string, tenantID uint64,
 ) (*types.TenantMember, error) {
+	f.ensureOwnerCalls++
 	if existing, ok := f.members[memberKey(userID, tenantID)]; ok {
 		return existing, nil
 	}
@@ -135,7 +137,19 @@ func (f *fakeMemberService) UpdateRole(
 ) error {
 	return nil
 }
+func (f *fakeMemberService) UpdateStatus(
+	ctx context.Context, userID string, tenantID uint64, status types.TenantMemberStatus,
+) error {
+	return nil
+}
+
+func (f *fakeMemberService) TransferOwnership(ctx context.Context, targetUserID string, tenantID uint64) error {
+	return nil
+}
 func (f *fakeMemberService) RemoveMember(ctx context.Context, userID string, tenantID uint64) error {
+	return nil
+}
+func (f *fakeMemberService) LeaveTenant(ctx context.Context, userID string, tenantID uint64) error {
 	return nil
 }
 
@@ -214,8 +228,8 @@ func TestResolveTenantRole_AutoPromoteHomeTenant(t *testing.T) {
 	if !ok || got != types.TenantRoleOwner {
 		t.Fatalf("got (%v, %v), want (owner, true)", got, ok)
 	}
-	if len(svc.addCalls) != 1 || svc.addCalls[0].Role != types.TenantRoleOwner {
-		t.Fatalf("expected exactly one Owner AddMember call, got %+v", svc.addCalls)
+	if svc.ensureOwnerCalls != 1 {
+		t.Fatalf("expected exactly one Owner bootstrap, got %d", svc.ensureOwnerCalls)
 	}
 }
 
@@ -279,5 +293,19 @@ func TestResolveTenantRole_DemotedUserCannotReclaimViaOrphan(t *testing.T) {
 	got, ok := resolveTenantRole(context.Background(), svc, user, 5, false, cfgWithRBAC(true))
 	if !ok || got != types.TenantRoleOwner {
 		t.Fatalf("current policy allows orphan-tenant self-heal on home tenant, got (%v, %v)", got, ok)
+	}
+}
+
+func TestResolveTenantRole_SuspendedMembershipCannotBootstrapOrFailOpen(t *testing.T) {
+	svc := newFakeMemberService()
+	user := &types.User{ID: "suspended", TenantID: 5}
+	svc.members[memberKey(user.ID, user.TenantID)] = &types.TenantMember{
+		UserID: user.ID, TenantID: user.TenantID, Role: types.TenantRoleViewer, Status: types.TenantMemberStatusSuspended,
+	}
+	if _, ok := resolveTenantRole(context.Background(), svc, user, 5, false, cfgWithRBAC(false)); ok {
+		t.Fatal("suspended home membership must not bootstrap or fail open")
+	}
+	if svc.ensureOwnerCalls != 0 {
+		t.Fatalf("EnsureOwner called %d times for suspended membership", svc.ensureOwnerCalls)
 	}
 }

@@ -69,6 +69,15 @@ var (
 	// without an active Owner. Demoting the last Owner or removing them
 	// is forbidden; an explicit ownership transfer must happen first.
 	ErrLastOwner = errors.New("cannot demote or remove the last active owner of the tenant")
+
+	// ErrMemberActionForbidden means the actor/target pair is outside the
+	// enterprise membership lifecycle matrix.
+	ErrMemberActionForbidden    = errors.New("you cannot manage this member")
+	ErrCannotManageSelf         = errors.New("you cannot change your own membership")
+	ErrOwnerRoleReserved        = errors.New("owner can only change through ownership transfer")
+	ErrInvalidMemberStatus      = errors.New("status must be active or suspended")
+	ErrOwnershipTransferInvalid = errors.New("ownership transfer requires the current owner and an active admin target")
+	ErrOwnershipInvariant       = errors.New("tenant must have exactly one active owner before ownership transfer")
 )
 
 const (
@@ -137,6 +146,59 @@ func rejectAPIKeyOwnerAssignment(ctx context.Context, role types.TenantRole) err
 	return nil
 }
 
+func actorRole(ctx context.Context) types.TenantRole {
+	return types.TenantRoleFromContext(ctx)
+}
+
+func managedActor(ctx context.Context) types.MemberActorAuthority {
+	if scope, ok := types.TenantAPIKeyScopeFromContext(ctx); ok &&
+		(scope.FullAccess || scope.HasCapability(types.APIKeyCapabilityManageMembers)) {
+		return types.MemberActorAuthority{ServicePrincipal: true}
+	}
+	if types.HasCrossTenantAccessFromContext(ctx) {
+		return types.MemberActorAuthority{ServicePrincipal: true}
+	}
+	id, _ := types.UserIDFromContext(ctx)
+	if id == "" {
+		// Explicit service-internal callers (invitation acceptance and startup
+		// repair) have no request principal; they retain only the machine
+		// non-Owner matrix, never human Owner authority.
+		return types.MemberActorAuthority{ServicePrincipal: true}
+	}
+	return types.MemberActorAuthority{UserID: id}
+}
+
+func mapMemberMutationError(err error) error {
+	switch {
+	case errors.Is(err, apprepo.ErrLastOwner):
+		return ErrLastOwner
+	case errors.Is(err, apprepo.ErrCannotManageSelf):
+		return ErrCannotManageSelf
+	case errors.Is(err, apprepo.ErrMemberActionForbidden):
+		return ErrMemberActionForbidden
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		return ErrMembershipNotFound
+	default:
+		return err
+	}
+}
+
+func requireInviteRole(ctx context.Context, role types.TenantRole) error {
+	if role == types.TenantRoleOwner {
+		return ErrOwnerRoleReserved
+	}
+	if managedActor(ctx).ServicePrincipal {
+		return nil
+	}
+	if auditActor(ctx) == "" {
+		return nil
+	}
+	if !types.CanInviteMemberRole(actorRole(ctx), role) {
+		return ErrMemberActionForbidden
+	}
+	return nil
+}
+
 // AddMember inserts a new active membership row. Returns
 // ErrMembershipAlreadyExists if the user is already an active member of
 // the tenant, and ErrInvalidTenantRole for unknown roles.
@@ -151,6 +213,9 @@ func (s *tenantMemberService) AddMember(
 		return nil, ErrInvalidTenantRole
 	}
 	if err := rejectAPIKeyOwnerAssignment(ctx, role); err != nil {
+		return nil, err
+	}
+	if err := requireInviteRole(ctx, role); err != nil {
 		return nil, err
 	}
 	existing, err := s.repo.Get(ctx, userID, tenantID)
@@ -168,7 +233,7 @@ func (s *tenantMemberService) AddMember(
 		InvitedBy: invitedBy,
 		JoinedAt:  time.Now(),
 	}
-	if err := s.repo.Create(ctx, member); err != nil {
+	if err := s.repo.CreateManaged(ctx, managedActor(ctx), member); err != nil {
 		if errors.Is(err, apprepo.ErrUserBoundToAnotherEnterprise) {
 			return nil, ErrUserBoundToAnotherEnterprise
 		}
@@ -296,9 +361,8 @@ func (s *tenantMemberService) HasAnyMembers(ctx context.Context, tenantID uint64
 	return s.repo.HasAnyMembers(ctx, tenantID)
 }
 
-// UpdateRole enforces the "cannot demote the last Owner" invariant before
-// delegating to the repository. Re-promoting an existing Owner is a no-op
-// from the invariant's perspective.
+// UpdateRole is the ordinary member-role path. Owner is deliberately excluded:
+// ownership changes only through TransferOwnership.
 func (s *tenantMemberService) UpdateRole(
 	ctx context.Context,
 	userID string,
@@ -311,6 +375,9 @@ func (s *tenantMemberService) UpdateRole(
 	if err := rejectAPIKeyOwnerAssignment(ctx, newRole); err != nil {
 		return err
 	}
+	if newRole == types.TenantRoleOwner {
+		return ErrOwnerRoleReserved
+	}
 	current, err := s.repo.Get(ctx, userID, tenantID)
 	if err != nil {
 		return err
@@ -318,29 +385,9 @@ func (s *tenantMemberService) UpdateRole(
 	if current == nil {
 		return ErrMembershipNotFound
 	}
-	if current.Role == newRole {
-		return nil
-	}
 	oldRole := current.Role
-	// Owner demotion is the dangerous path: two concurrent demotions of
-	// two different Owners with the old "Get → Count → Update" sequence
-	// could each observe count=2 and both commit, leaving the tenant
-	// ownerless. Route through the repo's atomic helper instead, which
-	// takes a row-level UPDATE lock on every other active Owner before
-	// committing the role change.
-	if current.Role == types.TenantRoleOwner && newRole != types.TenantRoleOwner {
-		err := s.repo.DemoteOwnerAtomically(ctx, userID, tenantID, newRole)
-		switch {
-		case errors.Is(err, apprepo.ErrLastOwner):
-			return ErrLastOwner
-		case err != nil:
-			return err
-		}
-		s.emitRoleChangeAudit(ctx, tenantID, userID, oldRole, newRole)
-		return nil
-	}
-	if err := s.repo.UpdateRole(ctx, userID, tenantID, newRole); err != nil {
-		return err
+	if err := s.repo.UpdateRole(ctx, managedActor(ctx), userID, tenantID, newRole); err != nil {
+		return mapMemberMutationError(err)
 	}
 	s.emitRoleChangeAudit(ctx, tenantID, userID, oldRole, newRole)
 	return nil
@@ -371,10 +418,9 @@ func (s *tenantMemberService) emitRoleChangeAudit(
 	})
 }
 
-// RemoveMember enforces the "cannot remove the last Owner" invariant
-// before soft-deleting the membership. For Owner removals it routes
-// through the repo's transactional helper so the count + delete commit
-// atomically (no TOCTOU between checking owner count and deleting).
+// RemoveMember is the administrative soft-delete path. Repository authority
+// checks keep Owner outside this path; ownership changes only through the
+// explicit transfer operation.
 //
 // The audit row distinguishes "voluntary leave" (caller == target,
 // driven by POST /leave) from "kicked" (caller != target, driven by
@@ -389,21 +435,77 @@ func (s *tenantMemberService) RemoveMember(ctx context.Context, userID string, t
 	if current == nil {
 		return ErrMembershipNotFound
 	}
-	if current.Role == types.TenantRoleOwner {
-		err := s.repo.RemoveOwnerAtomically(ctx, userID, tenantID)
-		switch {
-		case errors.Is(err, apprepo.ErrLastOwner):
-			return ErrLastOwner
-		case err != nil:
-			return err
-		}
-		s.emitRemovalAudit(ctx, tenantID, userID)
-		return nil
-	}
-	if err := s.repo.SoftDelete(ctx, userID, tenantID); err != nil {
-		return err
+	if err := s.repo.SoftDelete(ctx, managedActor(ctx), userID, tenantID); err != nil {
+		return mapMemberMutationError(err)
 	}
 	s.emitRemovalAudit(ctx, tenantID, userID)
+	return nil
+}
+
+// LeaveTenant is the only self-removal path. It deliberately skips the
+// administrator target matrix but preserves the last-owner invariant.
+func (s *tenantMemberService) LeaveTenant(ctx context.Context, userID string, tenantID uint64) error {
+	current, err := s.repo.Get(ctx, userID, tenantID)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return ErrMembershipNotFound
+	}
+	if err := s.repo.SoftDelete(ctx, types.MemberActorAuthority{ServicePrincipal: true}, userID, tenantID); err != nil {
+		return mapMemberMutationError(err)
+	}
+	s.emitRemovalAudit(ctx, tenantID, userID)
+	return nil
+}
+
+func (s *tenantMemberService) UpdateStatus(
+	ctx context.Context,
+	userID string,
+	tenantID uint64,
+	status types.TenantMemberStatus,
+) error {
+	if status != types.TenantMemberStatusActive && status != types.TenantMemberStatusSuspended {
+		return ErrInvalidMemberStatus
+	}
+	member, err := s.repo.Get(ctx, userID, tenantID)
+	if err != nil {
+		return err
+	}
+	if member == nil {
+		return ErrMembershipNotFound
+	}
+	if err := s.repo.UpdateStatus(ctx, managedActor(ctx), userID, tenantID, status); err != nil {
+		return mapMemberMutationError(err)
+	}
+	s.emitAudit(ctx, &types.AuditLog{
+		TenantID: tenantID, ActorUserID: auditActor(ctx), ActorRole: auditActorRole(ctx),
+		Action: types.AuditActionMemberStatusChanged, TargetType: "tenant_member", TargetUserID: userID,
+		Outcome: types.AuditOutcomeSuccess,
+	})
+	return nil
+}
+
+func (s *tenantMemberService) TransferOwnership(ctx context.Context, targetUserID string, tenantID uint64) error {
+	actorID := auditActor(ctx)
+	if actorID == "" || actorID == targetUserID || actorRole(ctx) != types.TenantRoleOwner {
+		return ErrOwnershipTransferInvalid
+	}
+	err := s.repo.TransferOwnership(ctx, actorID, targetUserID, tenantID)
+	switch {
+	case errors.Is(err, apprepo.ErrOwnershipInvariant):
+		return ErrOwnershipInvariant
+	case errors.Is(err, apprepo.ErrOwnershipTransferInvalid), errors.Is(err, gorm.ErrRecordNotFound):
+		return ErrOwnershipTransferInvalid
+	case err != nil:
+		return err
+	}
+	details, _ := json.Marshal(map[string]string{"previous_owner": actorID, "new_owner": targetUserID})
+	s.emitAudit(ctx, &types.AuditLog{
+		TenantID: tenantID, ActorUserID: actorID, ActorRole: string(types.TenantRoleOwner),
+		Action: types.AuditActionOwnershipTransferred, TargetType: "tenant_member", TargetUserID: targetUserID,
+		Outcome: types.AuditOutcomeSuccess, Details: types.JSON(details),
+	})
 	return nil
 }
 

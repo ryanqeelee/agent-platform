@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -138,6 +139,28 @@ func (h *TenantInvitationHandler) projectInvitationWithLink(
 	return resp
 }
 
+func canManageInvitationRole(ctx context.Context, role types.TenantRole) bool {
+	if scope, ok := types.TenantAPIKeyScopeFromContext(ctx); ok &&
+		(scope.FullAccess || scope.HasCapability(types.APIKeyCapabilityManageMembers)) {
+		return role != types.TenantRoleOwner
+	}
+	if types.HasCrossTenantAccessFromContext(ctx) {
+		return role != types.TenantRoleOwner
+	}
+	return types.CanManageMemberRole(types.TenantRoleFromContext(ctx), role)
+}
+
+func (h *TenantInvitationHandler) projectInvitationForActor(
+	ctx context.Context,
+	inv *types.TenantInvitation,
+	usersByID map[string]*types.User,
+) types.TenantInvitationResponse {
+	if canManageInvitationRole(ctx, inv.Role) {
+		return h.projectInvitationWithLink(inv, usersByID, nil)
+	}
+	return projectInvitation(inv, usersByID, nil)
+}
+
 // hydrateUsers batches GetUsersByIDs over the (invitee, inviter) pairs.
 // Best-effort: a transient lookup failure logs and returns an empty
 // map so the projection falls back to ids.
@@ -219,18 +242,13 @@ func (h *TenantInvitationHandler) ListTenantInvitations(c *gin.Context) {
 	}
 
 	usersByID := h.hydrateUsers(c, rows)
-	showShareLinks := types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleOwner)
 	resp := make([]types.TenantInvitationResponse, 0, len(rows))
 	for _, inv := range rows {
 		// Within the tenant view we don't bother hydrating tenant name
 		// (the caller already knows the tenant). Pass an empty map.
-		// Share-link URLs embed the registration token — only Owners may
-		// re-copy them; other roles see metadata without invite_url.
-		if showShareLinks {
-			resp = append(resp, h.projectInvitationWithLink(inv, usersByID, nil))
-		} else {
-			resp = append(resp, projectInvitation(inv, usersByID, nil))
-		}
+		// Share-link URLs embed the registration token. Reveal each link only
+		// when the current actor may manage that invitation's target role.
+		resp = append(resp, h.projectInvitationForActor(ctx, inv, usersByID))
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -266,8 +284,8 @@ func (h *TenantInvitationHandler) CreateInvitation(c *gin.Context) {
 		c.Error(apperrors.NewValidationError("invalid request body").WithDetails(err.Error()))
 		return
 	}
-	if !req.Role.IsValid() {
-		c.Error(apperrors.NewValidationError("role must be one of owner/admin/contributor/viewer"))
+	if !req.Role.IsValid() || req.Role == types.TenantRoleOwner {
+		c.Error(apperrors.NewValidationError("role must be one of admin/contributor/viewer; ownership uses the transfer endpoint"))
 		return
 	}
 
@@ -296,6 +314,8 @@ func (h *TenantInvitationHandler) CreateInvitation(c *gin.Context) {
 		case errors.Is(err, service.ErrInvalidTenantRole):
 			c.Error(apperrors.NewValidationError(err.Error()))
 		case errors.Is(err, service.ErrAPIKeyCannotAssignOwner):
+			c.Error(apperrors.NewForbiddenError(err.Error()))
+		case errors.Is(err, service.ErrOwnerRoleReserved), errors.Is(err, service.ErrMemberActionForbidden):
 			c.Error(apperrors.NewForbiddenError(err.Error()))
 		case errors.Is(err, service.ErrPendingInvitationExists):
 			c.Error(apperrors.NewConflictError(err.Error()))
@@ -374,6 +394,8 @@ func (h *TenantInvitationHandler) RevokeInvitation(c *gin.Context) {
 			c.Error(apperrors.NewNotFoundError("invitation not found"))
 		case errors.Is(err, service.ErrInvitationNotPending):
 			c.Error(apperrors.NewConflictError(err.Error()))
+		case errors.Is(err, service.ErrOwnerRoleReserved), errors.Is(err, service.ErrMemberActionForbidden):
+			c.Error(apperrors.NewForbiddenError(err.Error()))
 		default:
 			logger.Errorf(ctx, "RevokeInvitation failed: id=%d err=%v", invID, err)
 			c.Error(apperrors.NewInternalServerError("failed to revoke invitation").WithDetails(err.Error()))
@@ -484,7 +506,11 @@ func (h *TenantInvitationHandler) AcceptMyInvitation(c *gin.Context) {
 			c.Error(apperrors.NewConflictError(err.Error()))
 		case errors.Is(err, service.ErrInvitationExpired):
 			c.Error(apperrors.NewConflictError(err.Error()))
+		case errors.Is(err, service.ErrOwnerRoleReserved):
+			c.Error(&apperrors.AppError{Code: apperrors.ErrNotFound, Message: "invitation is no longer valid", HTTPCode: http.StatusGone})
 		case errors.Is(err, service.ErrUserBoundToAnotherEnterprise):
+			c.Error(apperrors.NewConflictError(err.Error()))
+		case errors.Is(err, service.ErrAlreadyMember):
 			c.Error(apperrors.NewConflictError(err.Error()))
 		default:
 			logger.Errorf(ctx, "AcceptMyInvitation failed: id=%d user=%s err=%v",

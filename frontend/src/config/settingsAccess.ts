@@ -29,7 +29,7 @@ export const SETTINGS_SECTION_MIN_ROLE: Record<string, SettingsRoleKey> = {
  * corresponding read-only Settings page.
  */
 export const SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE = {
-  members: 'owner',
+  members: 'admin',
   models: 'admin',
 } as const satisfies Record<string, SettingsRoleKey>
 

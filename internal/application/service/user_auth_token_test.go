@@ -58,7 +58,12 @@ func (s *stubUserRepoForAuth) GetUsersByIDs(context.Context, []string) (map[stri
 	return nil, nil
 }
 func (s *stubUserRepoForAuth) GetUserByEmail(context.Context, string) (*types.User, error) {
-	return nil, nil
+	for _, user := range s.users {
+		if user.Email != "" {
+			return user, nil
+		}
+	}
+	return nil, errors.New("user not found")
 }
 func (s *stubUserRepoForAuth) GetUserByUsername(context.Context, string) (*types.User, error) {
 	return nil, nil
@@ -183,6 +188,67 @@ func TestRefreshTokenRejectsAccessTokenRecord(t *testing.T) {
 	if err == nil || err.Error() != "not a refresh token" {
 		t.Fatalf("RefreshToken(access token record) err = %v, want not a refresh token", err)
 	}
+}
+
+func suspendedAuthTestService(t *testing.T) (*userService, *stubAuthTokenRepo) {
+	t.Helper()
+	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}
+	svc := newAuthTestUserService(tokenRepo)
+	user := svc.userRepo.(*stubUserRepoForAuth).users["user-1"]
+	user.Email = "suspended@example.invalid"
+	hash, err := bcrypt.GenerateFromPassword([]byte("CorrectHorse9"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user.PasswordHash = string(hash)
+	members, repo := newServiceWithRepo()
+	repo.rows = []*types.TenantMember{{
+		UserID: user.ID, TenantID: user.TenantID, Role: types.TenantRoleViewer,
+		Status: types.TenantMemberStatusSuspended,
+	}}
+	svc.memberService = members
+	return svc, tokenRepo
+}
+
+func TestTokenIssuanceRejectsSuspendedMembershipAcrossEntryPoints(t *testing.T) {
+	t.Run("password login", func(t *testing.T) {
+		svc, _ := suspendedAuthTestService(t)
+		resp, err := svc.Login(context.Background(), &types.LoginRequest{
+			Email: "suspended@example.invalid", Password: "CorrectHorse9",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.Success || resp.Token != "" || resp.RefreshToken != "" {
+			t.Fatalf("suspended login issued credentials: %+v", resp)
+		}
+		if resp.Message != "Workspace membership is suspended" {
+			t.Fatalf("suspended login message = %q", resp.Message)
+		}
+	})
+
+	t.Run("refresh", func(t *testing.T) {
+		svc, tokenRepo := suspendedAuthTestService(t)
+		refreshJWT := signTestJWT(jwt.MapClaims{
+			"user_id": "user-1", "type": "refresh", "exp": time.Now().Add(time.Hour).Unix(),
+		})
+		tokenRepo.tokens[refreshJWT] = &types.AuthToken{
+			UserID: "user-1", Token: refreshJWT, TokenType: "refresh_token",
+		}
+		access, rotated, err := svc.RefreshToken(context.Background(), refreshJWT)
+		if !errors.Is(err, ErrMembershipSuspended) || access != "" || rotated != "" {
+			t.Fatalf("suspended refresh = (%q, %q, %v), want rejection", access, rotated, err)
+		}
+	})
+
+	t.Run("Lite AutoSetup issuance seam", func(t *testing.T) {
+		svc, _ := suspendedAuthTestService(t)
+		access, refresh, err := svc.GenerateTokens(
+			context.Background(), svc.userRepo.(*stubUserRepoForAuth).users["user-1"])
+		if !errors.Is(err, ErrMembershipSuspended) || access != "" || refresh != "" {
+			t.Fatalf("suspended AutoSetup issuance = (%q, %q, %v), want rejection", access, refresh, err)
+		}
+	})
 }
 
 func TestLogoutRevokesAllUserTokens(t *testing.T) {

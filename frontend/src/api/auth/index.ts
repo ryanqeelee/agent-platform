@@ -322,6 +322,7 @@ export interface MembershipInfo {
  */
 export interface AuthCapabilities {
   can_create_tenant: boolean
+  can_manage_all_tenant_members?: boolean
 }
 
 export interface EnterpriseSessionProjectionV1 {

@@ -129,6 +129,23 @@ export async function updateMemberRole(
   return (await put(`/api/v1/tenants/${tenantId}/members/${userId}`, { role })) as unknown as SimpleResponse
 }
 
+/** Suspend or restore a member without changing their retained role. */
+export async function updateMemberStatus(
+  tenantId: number,
+  userId: string,
+  status: 'active' | 'suspended',
+): Promise<SimpleResponse> {
+  return (await put(`/api/v1/tenants/${tenantId}/members/${userId}/status`, { status })) as unknown as SimpleResponse
+}
+
+/** Explicit Owner-only ownership transfer; ordinary role updates cannot mint Owner. */
+export async function transferOwnership(
+  tenantId: number,
+  userId: string,
+): Promise<SimpleResponse> {
+  return (await post(`/api/v1/tenants/${tenantId}/members/${userId}/transfer-ownership`)) as unknown as SimpleResponse
+}
+
 /**
  * Remove a member from the tenant.
  * Backend: DELETE /api/v1/tenants/:id/members/:user_id (Owner+).

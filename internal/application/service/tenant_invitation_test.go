@@ -26,7 +26,7 @@ type fakeInvitationRepo struct {
 
 func newFakeInvitationRepo() *fakeInvitationRepo { return &fakeInvitationRepo{} }
 
-func (r *fakeInvitationRepo) Create(ctx context.Context, inv *types.TenantInvitation) error {
+func (r *fakeInvitationRepo) Create(ctx context.Context, _ types.MemberActorAuthority, inv *types.TenantInvitation) error {
 	for _, e := range r.rows {
 		if e.TenantID == inv.TenantID &&
 			e.InviteeUserID == inv.InviteeUserID &&
@@ -166,6 +166,7 @@ func (r *fakeInvitationRepo) CountPendingByInvitee(
 
 func (r *fakeInvitationRepo) MarkStatusIfPending(
 	ctx context.Context,
+	_ types.MemberActorAuthority,
 	id uint64,
 	status types.TenantInvitationStatus,
 	respondedAt time.Time,
@@ -187,6 +188,9 @@ func (r *fakeInvitationRepo) AcceptInvitation(
 	for _, inv := range r.rows {
 		if inv.ID != id || inv.Status != types.TenantInvitationStatusPending {
 			continue
+		}
+		if inv.Role == types.TenantRoleOwner {
+			return nil, apprepo.ErrInvitationOwnerRole
 		}
 		if inv.IsExpired(at) {
 			return nil, apprepo.ErrInvitationExpired
@@ -212,6 +216,9 @@ func (r *fakeInvitationRepo) AcceptShareLink(
 	for _, inv := range r.rows {
 		if inv.ID != id || inv.Status != types.TenantInvitationStatusPending || inv.InviteeUserID != "" {
 			continue
+		}
+		if inv.Role == types.TenantRoleOwner {
+			return nil, apprepo.ErrInvitationOwnerRole
 		}
 		if inv.IsExpired(at) {
 			return nil, apprepo.ErrInvitationExpired
@@ -269,7 +276,14 @@ func newInvitationSvc() (
 	invRepo.acceptMember = func(ctx context.Context, userID string, tenantID uint64, role types.TenantRole, invitedBy *string) (*types.TenantMember, error) {
 		member, err := memberSvc.AddMember(ctx, userID, tenantID, role, invitedBy)
 		if errors.Is(err, ErrMembershipAlreadyExists) {
-			return memberSvc.GetMembership(ctx, userID, tenantID)
+			existing, getErr := memberSvc.GetMembership(ctx, userID, tenantID)
+			if getErr != nil {
+				return nil, getErr
+			}
+			if existing != nil && existing.Status == types.TenantMemberStatusSuspended {
+				return nil, apprepo.ErrInvitationMemberExists
+			}
+			return existing, nil
 		}
 		return member, err
 	}
@@ -313,6 +327,24 @@ func TestInvitationService_Create_RejectsAlreadyActiveMember(t *testing.T) {
 	}
 }
 
+func TestInvitationService_Create_RejectsSuspendedMember(t *testing.T) {
+	svc, repo, memberSvc := newInvitationSvc()
+	ctx := context.Background()
+	if _, err := memberSvc.AddMember(ctx, "u-bob", 1, types.TenantRoleContributor, nil); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := memberSvc.UpdateStatus(ctx, "u-bob", 1, types.TenantMemberStatusSuspended); err != nil {
+		t.Fatalf("suspend: %v", err)
+	}
+	_, err := svc.Create(ctx, 1, "u-bob", types.TenantRoleViewer, nil, "")
+	if !errors.Is(err, ErrAlreadyMember) {
+		t.Fatalf("suspended membership must be restored, not reinvited: %v", err)
+	}
+	if len(repo.rows) != 0 {
+		t.Fatalf("suspended reinvite persisted %d invitation rows", len(repo.rows))
+	}
+}
+
 func TestInvitationService_Create_DedupsPending(t *testing.T) {
 	svc, _, _ := newInvitationSvc()
 	ctx := context.Background()
@@ -334,6 +366,32 @@ func TestInvitationService_Accept_OnlyByInvitee(t *testing.T) {
 	}
 	if _, err := svc.Accept(ctx, inv.ID, "u-eve"); !errors.Is(err, ErrInvitationForbidden) {
 		t.Fatalf("non-invitee must be forbidden, got %v", err)
+	}
+}
+
+func TestInvitationService_LegacyOwnerInvitationsFailClosedButOwnerCanRevoke(t *testing.T) {
+	svc, repo, _ := newInvitationSvc()
+	expires := time.Now().Add(time.Hour)
+	repo.rows = []*types.TenantInvitation{
+		{ID: 41, TenantID: 1, InviteeUserID: "direct", Role: types.TenantRoleOwner, Status: types.TenantInvitationStatusPending, ExpiresAt: expires},
+		{ID: 42, TenantID: 1, Token: "legacy-owner-link", Role: types.TenantRoleOwner, Status: types.TenantInvitationStatusPending, ExpiresAt: expires},
+	}
+	if _, err := svc.Accept(context.Background(), 41, "direct"); !errors.Is(err, ErrOwnerRoleReserved) {
+		t.Fatalf("direct legacy owner accept = %v, want owner reserved", err)
+	}
+	if _, err := svc.AcceptByToken(context.Background(), "legacy-owner-link", "joined"); !errors.Is(err, ErrOwnerRoleReserved) {
+		t.Fatalf("share legacy owner accept = %v, want owner reserved", err)
+	}
+	adminCtx := memberActorCtx("admin", types.TenantRoleAdmin)
+	if err := svc.Revoke(adminCtx, 41); !errors.Is(err, ErrMemberActionForbidden) {
+		t.Fatalf("admin legacy owner revoke = %v, want forbidden", err)
+	}
+	ownerCtx := memberActorCtx("owner", types.TenantRoleOwner)
+	if err := svc.Revoke(ownerCtx, 41); err != nil {
+		t.Fatalf("owner direct legacy revoke: %v", err)
+	}
+	if err := svc.Revoke(ownerCtx, 42); err != nil {
+		t.Fatalf("owner link legacy revoke: %v", err)
 	}
 }
 
@@ -363,35 +421,70 @@ func TestInvitationService_Accept_HappyPath_CreatesMembership(t *testing.T) {
 	}
 }
 
-func TestInvitationService_Accept_IdempotentWhenAlreadyMember(t *testing.T) {
-	// If the invitee somehow became an active member between Create
-	// and Accept (e.g. a parallel direct-add via POST /members), the
-	// Accept call must not 500 — it should fold gracefully into "you
-	// are already in" and flip the invitation to accepted for audit.
+func TestInvitationService_Accept_IdempotentWhenAlreadyActiveMember(t *testing.T) {
 	svc, invRepo, memberSvc := newInvitationSvc()
 	ctx := context.Background()
 	inv, err := svc.Create(ctx, 1, "u-bob", types.TenantRoleContributor, nil, "")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	// Side-effect: mint the membership directly.
 	if _, err := memberSvc.AddMember(ctx, "u-bob", 1, types.TenantRoleViewer, nil); err != nil {
 		t.Fatalf("side-effect AddMember: %v", err)
 	}
-	mb, err := svc.Accept(ctx, inv.ID, "u-bob")
+	member, err := svc.Accept(ctx, inv.ID, "u-bob")
 	if err != nil {
-		t.Fatalf("accept must be idempotent, got %v", err)
+		t.Fatalf("active membership accept must remain idempotent: %v", err)
 	}
-	if mb == nil || mb.Role != types.TenantRoleViewer {
-		// Returns the pre-existing membership; the role on the
-		// invitation does NOT clobber a real membership row.
-		t.Fatalf("unexpected membership after idempotent accept: %+v", mb)
+	if member == nil || member.Role != types.TenantRoleViewer {
+		t.Fatalf("idempotent accept changed the existing role: %+v", member)
 	}
-	// Invitation row must reflect accepted state so the inbox no
-	// longer surfaces it as pending.
 	row, _ := invRepo.GetByID(ctx, inv.ID)
 	if row == nil || row.Status != types.TenantInvitationStatusAccepted {
-		t.Fatalf("invitation must be accepted after idempotent accept, got %+v", row)
+		t.Fatalf("direct invitation must be consumed after idempotent accept: %+v", row)
+	}
+}
+
+func TestInvitationService_AcceptRejectsSuspendedMembershipWithoutConsumingInvitation(t *testing.T) {
+	svc, invRepo, memberSvc := newInvitationSvc()
+	ctx := context.Background()
+	inv, err := svc.Create(ctx, 1, "u-bob", types.TenantRoleContributor, nil, "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := memberSvc.AddMember(ctx, "u-bob", 1, types.TenantRoleViewer, nil); err != nil {
+		t.Fatalf("side-effect AddMember: %v", err)
+	}
+	if err := memberSvc.UpdateStatus(ctx, "u-bob", 1, types.TenantMemberStatusSuspended); err != nil {
+		t.Fatalf("suspend: %v", err)
+	}
+	if _, err := svc.Accept(ctx, inv.ID, "u-bob"); !errors.Is(err, ErrAlreadyMember) {
+		t.Fatalf("accept must reject an existing suspended membership: %v", err)
+	}
+	row, _ := invRepo.GetByID(ctx, inv.ID)
+	if row == nil || row.Status != types.TenantInvitationStatusPending || row.AcceptedCount != 0 {
+		t.Fatalf("rejected invitation was misleadingly consumed: %+v", row)
+	}
+}
+
+func TestInvitationService_AcceptShareLinkRejectsExistingSuspendedMembership(t *testing.T) {
+	svc, repo, memberSvc := newInvitationSvc()
+	ctx := context.Background()
+	inv, token, err := svc.CreateShareLink(ctx, 1, types.TenantRoleViewer, nil, "")
+	if err != nil {
+		t.Fatalf("create share link: %v", err)
+	}
+	if _, err := memberSvc.AddMember(ctx, "u-bob", 1, types.TenantRoleContributor, nil); err != nil {
+		t.Fatalf("seed member: %v", err)
+	}
+	if err := memberSvc.UpdateStatus(ctx, "u-bob", 1, types.TenantMemberStatusSuspended); err != nil {
+		t.Fatalf("suspend: %v", err)
+	}
+	if _, err := svc.AcceptByToken(ctx, token, "u-bob"); !errors.Is(err, ErrAlreadyMember) {
+		t.Fatalf("share-link accept must reject suspended membership: %v", err)
+	}
+	row, _ := repo.GetByID(ctx, inv.ID)
+	if row == nil || row.AcceptedCount != 0 || row.Status != types.TenantInvitationStatusPending {
+		t.Fatalf("rejected share-link acceptance mutated invitation: %+v", row)
 	}
 }
 
@@ -448,7 +541,7 @@ func TestInvitationService_LazySweepExpires(t *testing.T) {
 		Status:        types.TenantInvitationStatusPending,
 		ExpiresAt:     now.Add(-time.Hour),
 	}
-	if err := invRepo.Create(context.Background(), stale); err != nil {
+	if err := invRepo.Create(context.Background(), types.MemberActorAuthority{ServicePrincipal: true}, stale); err != nil {
 		t.Fatalf("seed stale: %v", err)
 	}
 

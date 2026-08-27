@@ -14,7 +14,7 @@ type TenantInvitationRepository interface {
 	// Create inserts a new pending invitation. Returns the conflict
 	// error sentinel (ErrPendingInvitationExists) if the (tenant_id,
 	// invitee) partial unique index rejects the insert.
-	Create(ctx context.Context, inv *types.TenantInvitation) error
+	Create(ctx context.Context, actor types.MemberActorAuthority, inv *types.TenantInvitation) error
 
 	// GetByID fetches an invitation by surrogate id, or (nil, nil) if
 	// missing. Used by Accept/Decline/Revoke handlers.
@@ -68,6 +68,7 @@ type TenantInvitationRepository interface {
 	// the "stale state machine" signal callers care about.
 	MarkStatusIfPending(
 		ctx context.Context,
+		actor types.MemberActorAuthority,
 		id uint64,
 		status types.TenantInvitationStatus,
 		respondedAt time.Time,

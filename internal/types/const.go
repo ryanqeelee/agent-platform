@@ -43,6 +43,10 @@ const (
 	LangfuseTraceContextKey ContextKey = "LangfuseTrace"
 	// SystemAdminContextKey is the context key indicating whether the user is a system administrator
 	SystemAdminContextKey ContextKey = "SystemAdmin"
+	// CrossTenantAccessContextKey carries the auth middleware's effective
+	// cross-tenant decision. It is true only when both the server-side user
+	// attribute and the deployment feature gate are enabled.
+	CrossTenantAccessContextKey ContextKey = "CrossTenantAccess"
 	// BackgroundTaskContextKey marks a context whose model calls originate from
 	// an asynq background worker (document parse / summary / question / graph /
 	// multimodal enrichment) rather than a user-facing HTTP request. The chat

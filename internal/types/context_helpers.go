@@ -150,6 +150,18 @@ func IsSystemAdminFromContext(ctx context.Context) bool {
 	return v
 }
 
+// HasCrossTenantAccessFromContext reports the feature-gated platform
+// authority projected by authentication. Raw User.CanAccessAllTenants is
+// deliberately not consulted here: disabling the deployment gate must revoke
+// effective authority without rewriting user rows or reissuing tokens.
+func HasCrossTenantAccessFromContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	v, ok := ctx.Value(CrossTenantAccessContextKey).(bool)
+	return ok && v
+}
+
 // SessionTenantIDFromContext extracts the session-owner tenant ID from ctx.
 // Falls back to TenantIDFromContext when the session key is absent.
 func SessionTenantIDFromContext(ctx context.Context) (uint64, bool) {

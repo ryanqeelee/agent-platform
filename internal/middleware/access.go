@@ -53,14 +53,16 @@ import (
 // attribute and the cluster-wide flag must be true; either alone is
 // not enough.
 func IsCrossTenantSuperuser(ctx context.Context, cfg *config.Config) bool {
-	if cfg == nil || cfg.Tenant == nil || !cfg.Tenant.EnableCrossTenantAccess {
-		return false
-	}
 	u, ok := ctx.Value(types.UserContextKey).(*types.User)
 	if !ok || u == nil {
 		return false
 	}
-	return u.CanAccessAllTenants
+	return isCrossTenantUser(u, cfg)
+}
+
+func isCrossTenantUser(user *types.User, cfg *config.Config) bool {
+	return user != nil && user.CanAccessAllTenants && cfg != nil && cfg.Tenant != nil &&
+		cfg.Tenant.EnableCrossTenantAccess
 }
 
 // IsTenantAccessible reports whether `user` is allowed to operate inside
@@ -86,7 +88,7 @@ func IsTenantAccessible(
 	if user.TenantID == targetTenantID {
 		return true
 	}
-	if cfg != nil && cfg.Tenant != nil && cfg.Tenant.EnableCrossTenantAccess && user.CanAccessAllTenants {
+	if isCrossTenantUser(user, cfg) {
 		return true
 	}
 	return false

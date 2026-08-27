@@ -77,8 +77,8 @@ func (h *TenantInvitationHandler) CreateInviteLink(c *gin.Context) {
 		c.Error(apperrors.NewValidationError("invalid request body").WithDetails(err.Error()))
 		return
 	}
-	if !req.Role.IsValid() {
-		c.Error(apperrors.NewValidationError("role must be one of owner/admin/contributor/viewer"))
+	if !req.Role.IsValid() || req.Role == types.TenantRoleOwner {
+		c.Error(apperrors.NewValidationError("role must be one of admin/contributor/viewer; ownership uses the transfer endpoint"))
 		return
 	}
 
@@ -90,7 +90,7 @@ func (h *TenantInvitationHandler) CreateInviteLink(c *gin.Context) {
 
 	inv, _, err := h.invitationService.CreateShareLink(ctx, tenantID, req.Role, invitedBy, req.Message)
 	if err != nil {
-		if errors.Is(err, service.ErrAPIKeyCannotAssignOwner) {
+		if errors.Is(err, service.ErrAPIKeyCannotAssignOwner) || errors.Is(err, service.ErrOwnerRoleReserved) || errors.Is(err, service.ErrMemberActionForbidden) {
 			c.Error(apperrors.NewForbiddenError(err.Error()))
 			return
 		}

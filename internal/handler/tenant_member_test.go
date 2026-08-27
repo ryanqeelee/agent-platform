@@ -84,6 +84,10 @@ func (s *stubMemberService) RemoveMember(ctx context.Context, userID string, ten
 	return s.remove(ctx, userID, tenantID)
 }
 
+func (s *stubMemberService) LeaveTenant(ctx context.Context, userID string, tenantID uint64) error {
+	return s.remove(ctx, userID, tenantID)
+}
+
 // stubMemberUserService satisfies just the two UserService methods the
 // handler reaches: GetUserByEmail (AddMember translation) and
 // GetUserByID (ListMembers hydration).
@@ -166,10 +170,10 @@ const defaultTestTenantID uint64 = 1
 // stuffed into the request context. The zero value matches the common
 // case ("authenticated, active in tenant 1, no superuser flag").
 type memberCtxOpts struct {
-	callerID    string
-	tenantID    uint64
-	user        *types.User
-	skipTenant  bool // when true, do NOT set TenantIDContextKey at all
+	callerID   string
+	tenantID   uint64
+	user       *types.User
+	skipTenant bool // when true, do NOT set TenantIDContextKey at all
 }
 
 // withMemberCtx installs the auth-middleware-equivalent values on req's

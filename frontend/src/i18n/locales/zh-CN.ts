@@ -120,7 +120,7 @@ export default {
   },
   tenantMember: {
     title: '成员管理',
-    sectionDescription: '邀请伙伴加入当前空间并分配角色。只有 Owner 可以新增或移除成员。',
+    sectionDescription: '管理员可邀请、停用和恢复员工与知识管理员；所有者可任免管理员并转移所有权。',
     listTitle: '空间成员',
     loading: '正在加载成员…',
     retry: '重试',
@@ -151,6 +151,8 @@ export default {
         'rbac.member_added': '新增成员',
         'rbac.member_removed': '移除成员',
         'rbac.member_role_changed': '角色变更',
+        'rbac.member_status_changed': '成员状态变更',
+        'rbac.ownership_transferred': '所有权转移',
         'rbac.member_left': '成员退出',
         'rbac.access_denied': '访问被拒',
         'rbac.invitation_sent': '发出邀请',
@@ -175,7 +177,7 @@ export default {
       userNotFound: '该邮箱尚未注册，请先邀请对方注册账号。',
       lastOwner: '无法降级、移除或退出最后一位 Owner，请先把其他成员提升为 Owner。',
       notFound: '未找到对应的成员。',
-      invalidRole: '角色必须是 owner / admin / contributor / viewer 之一。',
+      invalidRole: '角色必须是管理员、知识管理员或员工。',
       generic: '操作失败，请稍后重试。'
     },
     roleChange: {
@@ -188,10 +190,15 @@ export default {
       success: '已退出当前空间'
     },
     remove: {
-      button: '移除',
-      confirmBody: '确定要将 {name} 从当前空间中移除吗？该用户会立即失去访问权限。',
-      confirm: '移除',
-      success: '已移除成员'
+      button: '停用',
+      confirmBody: '确定要停用 {name} 吗？该用户会立即失去访问权限，但恢复后将保留原角色。',
+      confirm: '停用',
+      success: '成员状态已更新'
+    },
+    restore: {
+      button: '恢复',
+      confirmBody: '确定恢复 {name} 吗？将恢复其停用前的角色和访问权限。',
+      confirm: '恢复'
     },
     add: {
       button: '邀请成员',
@@ -203,12 +210,23 @@ export default {
     role: {
       owner: '所有者',
       admin: '管理员',
-      contributor: '编辑',
-      viewer: '访客'
+      contributor: '知识管理员',
+      viewer: '员工'
+    },
+    status: {
+      active: '正常',
+      suspended: '已停用'
+    },
+    transfer: {
+      button: '转移所有权',
+      confirmBody: '确定将所有权转移给 {name} 吗？您将成为管理员。',
+      confirm: '转移',
+      success: '所有权已转移'
     },
     columns: {
       member: '姓名与邮箱',
       role: '角色',
+      status: '状态',
       joinedAt: '加入时间',
       operations: '操作'
     },

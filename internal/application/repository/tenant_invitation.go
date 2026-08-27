@@ -18,6 +18,8 @@ var (
 	ErrInvitationNotPending    = errors.New("repository: invitation is not pending")
 	ErrInvitationExpired       = errors.New("repository: invitation is expired")
 	ErrInvitationForbidden     = errors.New("repository: invitation belongs to another user")
+	ErrInvitationOwnerRole     = errors.New("repository: owner invitation is forbidden")
+	ErrInvitationMemberExists  = errors.New("repository: tenant membership already exists")
 )
 
 // tenantInvitationRepository implements interfaces.TenantInvitationRepository.
@@ -50,12 +52,24 @@ func NewTenantInvitationRepository(db *gorm.DB) interfaces.TenantInvitationRepos
 // tenant; pre-checking would falsely reject every additional one.
 func (r *tenantInvitationRepository) Create(
 	ctx context.Context,
+	actor types.MemberActorAuthority,
 	inv *types.TenantInvitation,
 ) error {
 	if inv.Status == "" {
 		inv.Status = types.TenantInvitationStatusPending
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		role, err := lockTenantAuthority(ctx, tx, actor, inv.TenantID)
+		if err != nil {
+			return err
+		}
+		if inv.Role == types.TenantRoleOwner {
+			if actor.ServicePrincipal || role != types.TenantRoleOwner {
+				return ErrMemberActionForbidden
+			}
+		} else if !canManage(actor, role, inv.Role) {
+			return ErrMemberActionForbidden
+		}
 		if inv.InviteeUserID != "" {
 			var probe types.TenantInvitation
 			err := tx.
@@ -249,25 +263,42 @@ func (r *tenantInvitationRepository) CountPendingByInvitee(
 // "already finalised" sentinel).
 func (r *tenantInvitationRepository) MarkStatusIfPending(
 	ctx context.Context,
+	actor types.MemberActorAuthority,
 	id uint64,
 	status types.TenantInvitationStatus,
 	respondedAt time.Time,
 ) error {
-	res := r.db.WithContext(ctx).
-		Model(&types.TenantInvitation{}).
-		Where("id = ? AND status = ?", id, types.TenantInvitationStatusPending).
-		Updates(map[string]any{
-			"status":       status,
-			"responded_at": respondedAt,
-			"updated_at":   time.Now(),
-		})
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return gorm.ErrRecordNotFound
-	}
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var inv types.TenantInvitation
+		if err := tx.WithContext(ctx).Clauses(forUpdateClause()).Where("id = ?", id).Take(&inv).Error; err != nil {
+			return err
+		}
+		role, err := lockTenantAuthority(ctx, tx, actor, inv.TenantID)
+		if err != nil {
+			return err
+		}
+		if inv.Role == types.TenantRoleOwner {
+			if actor.ServicePrincipal || role != types.TenantRoleOwner {
+				return ErrMemberActionForbidden
+			}
+		} else if !canManage(actor, role, inv.Role) {
+			return ErrMemberActionForbidden
+		}
+		res := tx.WithContext(ctx).Model(&types.TenantInvitation{}).
+			Where("id = ? AND status = ?", id, types.TenantInvitationStatusPending).
+			Updates(map[string]any{
+				"status":       status,
+				"responded_at": respondedAt,
+				"updated_at":   time.Now(),
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
 }
 
 func (r *tenantInvitationRepository) AcceptInvitation(
@@ -304,6 +335,12 @@ func (r *tenantInvitationRepository) acceptWithMembership(
 		if inv.Status != types.TenantInvitationStatusPending {
 			return ErrInvitationNotPending
 		}
+		// Old deployments may have persisted Owner invitations before the
+		// lifecycle restriction existed. Reject at the locked persistence
+		// boundary too, so a stale service read can never mint an Owner.
+		if inv.Role == types.TenantRoleOwner {
+			return ErrInvitationOwnerRole
+		}
 		if inv.IsExpired(at) {
 			return ErrInvitationExpired
 		}
@@ -316,11 +353,22 @@ func (r *tenantInvitationRepository) acceptWithMembership(
 		}
 
 		var existing types.TenantMember
-		existingErr := tx.WithContext(ctx).
-			Where(boundEnterpriseMembership).
+		existingErr := tx.WithContext(ctx).Clauses(forUpdateClause()).
 			Where("user_id = ? AND tenant_id = ?", userID, inv.TenantID).
 			First(&existing).Error
 		if existingErr == nil {
+			if err := lockBoundEnterpriseUser(ctx, tx, existing.UserID, inv.TenantID); err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return ErrUserBoundToAnotherEnterprise
+				}
+				return err
+			}
+			// Preserve the established idempotent accept behaviour for an active
+			// member. A suspended row is different: reporting success would leave
+			// access revoked, so restoration remains exclusive to UpdateStatus.
+			if existing.Status == types.TenantMemberStatusSuspended {
+				return ErrInvitationMemberExists
+			}
 			accepted = &existing
 			if shareLink {
 				return nil

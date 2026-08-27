@@ -14,6 +14,8 @@ const TENANT_MEMBER_AUDIT_ACTION_LABELS_EN: Record<string, string> = {
   'rbac.member_added': 'Member added',
   'rbac.member_removed': 'Member removed',
   'rbac.member_role_changed': 'Role changed',
+  'rbac.member_status_changed': 'Member status changed',
+  'rbac.ownership_transferred': 'Ownership transferred',
   'rbac.member_left': 'Member left',
   'rbac.access_denied': 'Access denied',
   'rbac.invitation_sent': 'Invitation sent',

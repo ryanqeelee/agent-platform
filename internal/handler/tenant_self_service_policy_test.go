@@ -189,6 +189,9 @@ func TestAuthMeProjectsTenantCreationCapability(t *testing.T) {
 	if !strings.Contains(w.Body.String(), `"can_create_tenant":false`) {
 		t.Fatalf("response missing capability: %s", w.Body.String())
 	}
+	if !strings.Contains(w.Body.String(), `"can_manage_all_tenant_members":false`) {
+		t.Fatalf("response leaked disabled cross-tenant member authority: %s", w.Body.String())
+	}
 	if !strings.Contains(w.Body.String(), `"can_access_all_tenants":true`) {
 		t.Fatalf("response masked stored cross-tenant privilege: %s", w.Body.String())
 	}

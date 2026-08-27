@@ -63,6 +63,14 @@ func (r TenantRole) HasPermission(required TenantRole) bool {
 // TenantMemberStatus enumerates the lifecycle states of a membership row.
 type TenantMemberStatus string
 
+// MemberActorAuthority is the small authority input for tenant lifecycle
+// mutations. ServicePrincipal is an already route-authorized machine or
+// cross-tenant operator and is still barred from Owner operations.
+type MemberActorAuthority struct {
+	UserID           string
+	ServicePrincipal bool
+}
+
 const (
 	// TenantMemberStatusActive is the normal membership state; the user
 	// can authenticate into the tenant and is subject to their role.

@@ -5,12 +5,14 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/handler/dto"
@@ -558,6 +560,10 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	accessToken, newRefreshToken, err := h.userService.RefreshToken(ctx, req.RefreshToken)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to refresh token: %v", err)
+		if stderrors.Is(err, service.ErrMembershipSuspended) {
+			c.Error(errors.NewUnauthorizedError("Workspace membership is suspended"))
+			return
+		}
 		appErr := errors.NewUnauthorizedError("Token refresh failed").WithDetails(err.Error())
 		c.Error(appErr)
 		return
@@ -623,7 +629,8 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 	// 同步返回当前用户的 memberships，让前端在页面刷新（仅命中 /auth/me）
 	// 后也能恢复 currentTenantRole，避免角色信息只在 login 那一刻可用。
 	memberships := h.userService.BuildLoginMemberships(ctx, user, tenant)
-	canCreateTenant := (user.CanAccessAllTenants && h.configInfo.Tenant.EnableCrossTenantAccess) ||
+	canManageAllTenantMembers := user.CanAccessAllTenants && h.configInfo.Tenant.EnableCrossTenantAccess
+	canCreateTenant := canManageAllTenantMembers ||
 		resolveTenantSelfServiceCreationEnabled(ctx, h.configInfo, h.systemSettingSvc)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -633,7 +640,8 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 			"memberships":     memberships,
 			"tenant_required": tenant == nil,
 			"capabilities": gin.H{
-				"can_create_tenant": canCreateTenant,
+				"can_create_tenant":             canCreateTenant,
+				"can_manage_all_tenant_members": canManageAllTenantMembers,
 			},
 		},
 	})
@@ -876,6 +884,10 @@ func (h *AuthHandler) AutoSetup(c *gin.Context) {
 	accessToken, refreshToken, err := h.userService.GenerateTokens(ctx, user)
 	if err != nil {
 		logger.Errorf(ctx, "Auto-setup: failed to generate tokens: %v", err)
+		if stderrors.Is(err, service.ErrMembershipSuspended) {
+			c.Error(errors.NewUnauthorizedError("Workspace membership is suspended"))
+			return
+		}
 		appErr := errors.NewInternalServerError("auto-setup failed").WithDetails(err.Error())
 		c.Error(appErr)
 		return

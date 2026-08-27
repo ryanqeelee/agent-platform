@@ -5668,7 +5668,7 @@ export default {
   },
   tenantMember: {
     title: 'Members',
-    sectionDescription: 'Invite teammates to the workspace and manage their roles. Only Owner can add or remove members.',
+    sectionDescription: 'Admins can invite, suspend, and restore Employees and Knowledge Administrators. Owners can appoint Admins and transfer ownership.',
     listTitle: 'Workspace members',
     loading: 'Loading members…',
     retry: 'Retry',
@@ -5688,14 +5688,19 @@ export default {
     columns: {
       member: 'Name & email',
       role: 'Role',
+      status: 'Status',
       joinedAt: 'Joined',
       operations: 'Actions'
     },
     role: {
       owner: 'Owner',
       admin: 'Admin',
-      contributor: 'Contributor',
-      viewer: 'Viewer'
+      contributor: 'Knowledge Administrator',
+      viewer: 'Employee'
+    },
+    status: {
+      active: 'Active',
+      suspended: 'Suspended'
     },
     add: {
       button: 'Add Member',
@@ -5705,10 +5710,21 @@ export default {
       roleLabel: 'Role'
     },
     remove: {
-      button: 'Remove',
-      confirmBody: 'Are you sure you want to remove {name} from this workspace? They will lose access immediately.',
-      confirm: 'Remove',
-      success: 'Member removed'
+      button: 'Suspend',
+      confirmBody: 'Suspend {name}? They will lose access immediately and retain their role if restored.',
+      confirm: 'Suspend',
+      success: 'Member status updated'
+    },
+    restore: {
+      button: 'Restore',
+      confirmBody: 'Restore {name} with their previous role?',
+      confirm: 'Restore'
+    },
+    transfer: {
+      button: 'Transfer ownership',
+      confirmBody: 'Transfer ownership to {name}? You will become an Admin.',
+      confirm: 'Transfer',
+      success: 'Ownership transferred'
     },
     leave: {
       confirmTitle: 'Leave this workspace?',
@@ -5726,7 +5742,7 @@ export default {
       userNotFound: 'No registered user with this email. Ask them to sign up first.',
       lastOwner: 'Cannot demote, remove, or leave as the last Owner. Promote another member to Owner first.',
       notFound: 'Membership not found.',
-      invalidRole: 'Role must be one of owner / admin / contributor / viewer.',
+      invalidRole: 'Role must be Admin, Knowledge Administrator, or Employee.',
       generic: 'Something went wrong. Please try again.'
     },
     audit: {
@@ -5750,6 +5766,8 @@ export default {
         'rbac.member_added': 'Member added',
         'rbac.member_removed': 'Member removed',
         'rbac.member_role_changed': 'Role changed',
+        'rbac.member_status_changed': 'Member status changed',
+        'rbac.ownership_transferred': 'Ownership transferred',
         'rbac.member_left': 'Member left',
         'rbac.access_denied': 'Access denied',
         'rbac.invitation_sent': 'Invitation sent',

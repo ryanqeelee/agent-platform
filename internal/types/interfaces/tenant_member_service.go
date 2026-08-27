@@ -23,8 +23,8 @@ type TenantMemberService interface {
 	// Owner of the tenant their account just created.
 	EnsureOwner(ctx context.Context, userID string, tenantID uint64) (*types.TenantMember, error)
 
-	// GetMembership returns the active (user, tenant) membership, or
-	// (nil, nil) if no such row exists.
+	// GetMembership returns the non-deleted (user, tenant) membership,
+	// including suspended rows, or (nil, nil) if no such row exists.
 	GetMembership(ctx context.Context, userID string, tenantID uint64) (*types.TenantMember, error)
 
 	// ListByUser returns every active membership owned by the user.
@@ -48,7 +48,17 @@ type TenantMemberService interface {
 	// enforcing the "cannot demote the last active Owner" invariant.
 	UpdateRole(ctx context.Context, userID string, tenantID uint64, newRole types.TenantRole) error
 
+	// UpdateStatus suspends or restores a member while retaining their role.
+	UpdateStatus(ctx context.Context, userID string, tenantID uint64, status types.TenantMemberStatus) error
+
+	// TransferOwnership is the sole ordinary product path that changes Owner.
+	TransferOwnership(ctx context.Context, targetUserID string, tenantID uint64) error
+
 	// RemoveMember soft-deletes the membership while enforcing the
 	// "cannot remove the last active Owner" invariant.
 	RemoveMember(ctx context.Context, userID string, tenantID uint64) error
+
+	// LeaveTenant is the self-service removal path and is intentionally kept
+	// separate from an administrator changing another member.
+	LeaveTenant(ctx context.Context, userID string, tenantID uint64) error
 }

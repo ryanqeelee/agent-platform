@@ -296,16 +296,16 @@ const canSeeSection = (key: string): boolean => {
   if (isIntegrationSection(key)) {
     const min = INTEGRATION_TAB_MIN_ROLE[integrationTabFromSection(key)]
     if (!min) return true
-    if (authStore.canAccessAllTenants) return true
+    if (authStore.effectiveCrossTenantAccess) return true
     return authStore.hasRole(min)
   }
   if (SYSTEM_ADMIN_SECTIONS.has(key)) {
     return authStore.isSystemAdmin
   }
   const min = SETTINGS_SECTION_MIN_ROLE[key] ?? 'viewer'
-  // canAccessAllTenants（superuser）和路由层一样必须 bypass，否则 cross-tenant
+  // Effective cross-tenant authority 和路由层一样必须 bypass，否则 cross-tenant
   // 管理员看不到自己有权操作的入口（参考 TenantMembers.vue 的 canManage）。
-  if (authStore.canAccessAllTenants) return true
+  if (authStore.effectiveCrossTenantAccess) return true
   return authStore.hasRole(min)
 }
 
@@ -343,7 +343,7 @@ const navItems = computed(() => {
   // currentTenantRole 为空表示「membership 还没加载」—— 比起渲染整套
   // viewer 入口然后角色一返回又消失，先卡住不渲染更稳，跟原先 members
   // 入口的策略一致。
-  if (!authStore.currentTenantRole && !authStore.canAccessAllTenants) {
+  if (!authStore.currentTenantRole && !authStore.effectiveCrossTenantAccess) {
     return [] as NavItem[]
   }
   return all.filter((it) => canSeeSection(it.key))

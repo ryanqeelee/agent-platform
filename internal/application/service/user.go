@@ -37,6 +37,11 @@ var (
 	// It is exported so HTTP handlers can translate the failure to a 400
 	// without exposing bcrypt or persistence errors.
 	ErrPasswordPolicy = errors.New("password must be 8-32 characters and contain at least one letter and one number")
+
+	// ErrMembershipSuspended is returned by the shared token-issuance seam.
+	// Login, refresh, OIDC and Lite AutoSetup must all reject the same durable
+	// suspension state before any new access or refresh token is persisted.
+	ErrMembershipSuspended = errors.New("workspace membership is suspended")
 )
 
 // ValidatePasswordPolicy keeps administrative password resets aligned with
@@ -256,9 +261,13 @@ func (s *userService) Login(ctx context.Context, req *types.LoginRequest) (*type
 	accessToken, refreshToken, err := s.generateTokensForTenant(ctx, user, resolvedTenantID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to generate tokens: %v", err)
+		message := "Login failed"
+		if errors.Is(err, ErrMembershipSuspended) {
+			message = "Workspace membership is suspended"
+		}
 		return &types.LoginResponse{
 			Success: false,
-			Message: "Login failed",
+			Message: message,
 		}, nil
 	}
 	logger.Info(ctx, "Tokens generated successfully")
@@ -371,7 +380,10 @@ func (s *userService) buildMembershipsForUser(
 		})
 	}
 	if len(out) == 0 {
-		return synthFallbackMembership(user, activeTenant)
+		// A persisted suspended membership must never be presented as a
+		// synthetic Viewer membership. Only the earlier len(rows)==0 path is
+		// the genuine pre-membership bootstrap case.
+		return []types.Membership{}
 	}
 	return out
 }
@@ -811,6 +823,9 @@ func (s *userService) generateTokensForTenant(
 	user *types.User,
 	activeTenantID uint64,
 ) (accessToken, refreshToken string, err error) {
+	if err := s.requireAuthenticatableMembership(ctx, user); err != nil {
+		return "", "", err
+	}
 	// Generate access token (expires in 24 hours)
 	accessClaims := jwt.MapClaims{
 		"user_id":   user.ID,
@@ -866,6 +881,28 @@ func (s *userService) generateTokensForTenant(
 	_ = s.tokenRepo.CreateToken(ctx, refreshTokenRecord)
 
 	return accessToken, refreshToken, nil
+}
+
+// requireAuthenticatableMembership is the single durable-status check for
+// every local token issuance path. Tenantless identities remain able to sign
+// in and accept their first invitation; missing rows retain the existing
+// orphan-repair path. An explicit suspended row, however, is an administrator
+// revocation and can only be reversed through UpdateStatus.
+func (s *userService) requireAuthenticatableMembership(ctx context.Context, user *types.User) error {
+	if user == nil {
+		return errors.New("user is required")
+	}
+	if user.TenantID == 0 || s.memberService == nil {
+		return nil
+	}
+	member, err := s.memberService.GetMembership(ctx, user.ID, user.TenantID)
+	if err != nil {
+		return fmt.Errorf("validate workspace membership: %w", err)
+	}
+	if member != nil && member.Status == types.TenantMemberStatusSuspended {
+		return ErrMembershipSuspended
+	}
+	return nil
 }
 
 // SwitchTenant verifies that user has an active membership in

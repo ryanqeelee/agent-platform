@@ -393,6 +393,7 @@ func TestTenantMemberRoutesDeclareManageMembersCapability(t *testing.T) {
 		{http.MethodGet, "/api/v1/tenants/:id/members"},
 		{http.MethodPost, "/api/v1/tenants/:id/members"},
 		{http.MethodPut, "/api/v1/tenants/:id/members/:user_id"},
+		{http.MethodPut, "/api/v1/tenants/:id/members/:user_id/status"},
 		{http.MethodDelete, "/api/v1/tenants/:id/members/:user_id"},
 		{http.MethodGet, "/api/v1/tenants/:id/invitations"},
 		{http.MethodPost, "/api/v1/tenants/:id/invitations"},
@@ -414,6 +415,9 @@ func TestTenantMemberRoutesDeclareManageMembersCapability(t *testing.T) {
 
 	if _, ok := g.apiKeyAuthorizer.Lookup(http.MethodPost, "/api/v1/tenants/:id/leave"); ok {
 		t.Fatal("tenant leave route should remain default-deny for API keys")
+	}
+	if _, ok := g.apiKeyAuthorizer.Lookup(http.MethodPost, "/api/v1/tenants/:id/members/:user_id/transfer-ownership"); ok {
+		t.Fatal("ownership transfer route should remain default-deny for API keys")
 	}
 }
 

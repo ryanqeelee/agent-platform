@@ -67,6 +67,10 @@ type updateMemberRoleRequest struct {
 	Role types.TenantRole `json:"role" binding:"required"`
 }
 
+type updateMemberStatusRequest struct {
+	Status types.TenantMemberStatus `json:"status" binding:"required"`
+}
+
 // parseTenantIDFromPath reads :id from the gin route and validates it as
 // a tenant ID. Returning (0, false) means we already wrote the error to
 // the gin context and the caller should `return` immediately.
@@ -201,8 +205,8 @@ func (h *TenantMemberHandler) AddMember(c *gin.Context) {
 	// Defence in depth — service also re-validates, but rejecting early
 	// gives the client a better error message than the generic service
 	// sentinel-mapped 400.
-	if !req.Role.IsValid() {
-		c.Error(apperrors.NewValidationError("role must be one of owner/admin/contributor/viewer"))
+	if !req.Role.IsValid() || req.Role == types.TenantRoleOwner {
+		c.Error(apperrors.NewValidationError("role must be one of admin/contributor/viewer; ownership uses the transfer endpoint"))
 		return
 	}
 
@@ -241,6 +245,8 @@ func (h *TenantMemberHandler) AddMember(c *gin.Context) {
 			c.Error(apperrors.NewValidationError(err.Error()))
 		case errors.Is(err, service.ErrAPIKeyCannotAssignOwner):
 			c.Error(apperrors.NewForbiddenError(err.Error()))
+		case errors.Is(err, service.ErrOwnerRoleReserved), errors.Is(err, service.ErrMemberActionForbidden), errors.Is(err, service.ErrCannotManageSelf):
+			c.Error(apperrors.NewForbiddenError(err.Error()))
 		case errors.Is(err, service.ErrMembershipAlreadyExists):
 			// 409 reads better than 400 here: the request was syntactically
 			// fine, the conflict is semantic ("already a member").
@@ -274,6 +280,67 @@ func (h *TenantMemberHandler) AddMember(c *gin.Context) {
 	})
 }
 
+// UpdateMemberStatus suspends or restores a member without changing their
+// role. The service is the authority for the actor/target role matrix.
+func (h *TenantMemberHandler) UpdateMemberStatus(c *gin.Context) {
+	ctx := c.Request.Context()
+	tenantID, ok := parseTenantIDFromPath(c)
+	if !ok {
+		return
+	}
+	userID := strings.TrimSpace(c.Param("user_id"))
+	if userID == "" {
+		c.Error(apperrors.NewValidationError("user_id is required"))
+		return
+	}
+	var req updateMemberStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewValidationError("invalid request body").WithDetails(err.Error()))
+		return
+	}
+	if err := h.memberService.UpdateStatus(ctx, userID, tenantID, req.Status); err != nil {
+		switch {
+		case errors.Is(err, service.ErrMembershipNotFound):
+			c.Error(apperrors.NewNotFoundError("membership not found"))
+		case errors.Is(err, service.ErrInvalidMemberStatus):
+			c.Error(apperrors.NewValidationError(err.Error()))
+		case errors.Is(err, service.ErrMemberActionForbidden), errors.Is(err, service.ErrCannotManageSelf):
+			c.Error(apperrors.NewForbiddenError(err.Error()))
+		default:
+			logger.Errorf(ctx, "UpdateStatus failed: user=%s tenant=%d err=%v", userID, tenantID, err)
+			c.Error(apperrors.NewInternalServerError("failed to update member status").WithDetails(err.Error()))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// TransferOwnership is intentionally separate from PUT role: it is the only
+// endpoint allowed to produce an Owner role.
+func (h *TenantMemberHandler) TransferOwnership(c *gin.Context) {
+	ctx := c.Request.Context()
+	tenantID, ok := parseTenantIDFromPath(c)
+	if !ok {
+		return
+	}
+	userID := strings.TrimSpace(c.Param("user_id"))
+	if userID == "" {
+		c.Error(apperrors.NewValidationError("user_id is required"))
+		return
+	}
+	if err := h.memberService.TransferOwnership(ctx, userID, tenantID); err != nil {
+		switch {
+		case errors.Is(err, service.ErrOwnershipTransferInvalid), errors.Is(err, service.ErrOwnershipInvariant):
+			c.Error(apperrors.NewConflictError(err.Error()))
+		default:
+			logger.Errorf(ctx, "TransferOwnership failed: target=%s tenant=%d err=%v", userID, tenantID, err)
+			c.Error(apperrors.NewInternalServerError("failed to transfer ownership").WithDetails(err.Error()))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
 // UpdateMemberRole godoc
 // @Summary      修改空间成员角色
 // @Description  Owner 修改某位成员在当前空间内的角色；不能将最后一位 Owner 降级
@@ -303,8 +370,8 @@ func (h *TenantMemberHandler) UpdateMemberRole(c *gin.Context) {
 		c.Error(apperrors.NewValidationError("invalid request body").WithDetails(err.Error()))
 		return
 	}
-	if !req.Role.IsValid() {
-		c.Error(apperrors.NewValidationError("role must be one of owner/admin/contributor/viewer"))
+	if !req.Role.IsValid() || req.Role == types.TenantRoleOwner {
+		c.Error(apperrors.NewValidationError("role must be one of admin/contributor/viewer; ownership uses the transfer endpoint"))
 		return
 	}
 
@@ -314,6 +381,8 @@ func (h *TenantMemberHandler) UpdateMemberRole(c *gin.Context) {
 			c.Error(apperrors.NewNotFoundError("membership not found"))
 		case errors.Is(err, service.ErrLastOwner):
 			c.Error(apperrors.NewConflictError(err.Error()))
+		case errors.Is(err, service.ErrMemberActionForbidden), errors.Is(err, service.ErrCannotManageSelf):
+			c.Error(apperrors.NewForbiddenError(err.Error()))
 		case errors.Is(err, service.ErrInvalidTenantRole):
 			c.Error(apperrors.NewValidationError(err.Error()))
 		case errors.Is(err, service.ErrAPIKeyCannotAssignOwner):
@@ -357,6 +426,8 @@ func (h *TenantMemberHandler) RemoveMember(c *gin.Context) {
 			c.Error(apperrors.NewNotFoundError("membership not found"))
 		case errors.Is(err, service.ErrLastOwner):
 			c.Error(apperrors.NewConflictError(err.Error()))
+		case errors.Is(err, service.ErrMemberActionForbidden), errors.Is(err, service.ErrCannotManageSelf):
+			c.Error(apperrors.NewForbiddenError(err.Error()))
 		default:
 			logger.Errorf(ctx, "RemoveMember failed: user=%s tenant=%d err=%v",
 				userID, tenantID, err)
@@ -393,7 +464,7 @@ func (h *TenantMemberHandler) LeaveTenant(c *gin.Context) {
 		return
 	}
 
-	if err := h.memberService.RemoveMember(ctx, caller, tenantID); err != nil {
+	if err := h.memberService.LeaveTenant(ctx, caller, tenantID); err != nil {
 		switch {
 		case errors.Is(err, service.ErrMembershipNotFound):
 			c.Error(apperrors.NewNotFoundError("you are not a member of this workspace"))

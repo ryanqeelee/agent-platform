@@ -23,14 +23,15 @@ func TestApplyAuthSessionSetsBothSurfaces(t *testing.T) {
 	principal := types.Principal{Type: types.PrincipalWebUser, ID: "u1"}
 	scope := &types.TenantAPIKeyScope{KeyID: 3}
 	applyAuthSession(c, authSession{
-		User:        user,
-		Principal:   principal,
-		TenantID:    7,
-		Tenant:      tenant,
-		Role:        types.TenantRoleAdmin,
-		SystemAdmin: true,
-		APIKeyScope: scope,
-		Extra:       map[types.ContextKey]any{EmbedChannelContextKey: &types.EmbedChannel{ID: "ch"}},
+		User:              user,
+		Principal:         principal,
+		TenantID:          7,
+		Tenant:            tenant,
+		Role:              types.TenantRoleAdmin,
+		SystemAdmin:       true,
+		CrossTenantAccess: true,
+		APIKeyScope:       scope,
+		Extra:             map[types.ContextKey]any{EmbedChannelContextKey: &types.EmbedChannel{ID: "ch"}},
 	})
 
 	ctx := c.Request.Context()
@@ -60,6 +61,12 @@ func TestApplyAuthSessionSetsBothSurfaces(t *testing.T) {
 	}
 	if !types.IsSystemAdminFromContext(ctx) {
 		t.Fatal("ctx system admin flag lost")
+	}
+	if !types.HasCrossTenantAccessFromContext(ctx) {
+		t.Fatal("ctx cross-tenant authority lost")
+	}
+	if got, ok := c.Get(types.CrossTenantAccessContextKey.String()); !ok || got != true {
+		t.Fatalf("keys cross-tenant authority = %v, ok=%v", got, ok)
 	}
 	if got, ok := types.TenantAPIKeyScopeFromContext(ctx); !ok || got.KeyID != 3 {
 		t.Fatalf("ctx api key scope = %#v, ok=%v", got, ok)
@@ -95,6 +102,9 @@ func TestApplyAuthSessionTenantless(t *testing.T) {
 	}
 	if types.IsSystemAdminFromContext(ctx) {
 		t.Fatal("non-admin user must not be flagged system admin")
+	}
+	if types.HasCrossTenantAccessFromContext(ctx) {
+		t.Fatal("tenantless session must not gain cross-tenant authority")
 	}
 }
 

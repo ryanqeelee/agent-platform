@@ -29,6 +29,10 @@ type authSession struct {
 	// TenantRoleFromContext's fail-closed Viewer default.
 	Role        types.TenantRole
 	SystemAdmin bool
+	// CrossTenantAccess is already resolved from the server-owned user row and
+	// deployment feature gate. Downstream services consume this projection
+	// instead of re-reading the raw user attribute.
+	CrossTenantAccess bool
 	// APIKeyScope marks machine principals; the APIKeyGate authorizes them
 	// per-route from this scope.
 	APIKeyScope *types.TenantAPIKeyScope
@@ -70,6 +74,7 @@ func applyAuthSession(c *gin.Context, s authSession) {
 		set(types.TenantRoleContextKey, s.Role)
 	}
 	set(types.SystemAdminContextKey, s.SystemAdmin)
+	set(types.CrossTenantAccessContextKey, s.CrossTenantAccess)
 	if s.APIKeyScope != nil {
 		ctx = types.WithTenantAPIKeyScope(ctx, *s.APIKeyScope)
 	}

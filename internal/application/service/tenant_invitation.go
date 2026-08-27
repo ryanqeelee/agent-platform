@@ -29,10 +29,10 @@ var (
 	// handler maps this to 409.
 	ErrPendingInvitationExists = errors.New("a pending invitation for this user already exists")
 
-	// ErrAlreadyMember is returned by Create when the invitee is
-	// already an active member of the tenant; sending an invite would
-	// be a no-op at best and a confusing UX at worst.
-	ErrAlreadyMember = errors.New("user is already an active member of the tenant")
+	// ErrAlreadyMember is returned when a non-deleted membership already
+	// exists. Suspended memberships are restored exclusively through
+	// UpdateStatus and must never be reinvited or misleadingly accepted.
+	ErrAlreadyMember = errors.New("user already has a membership in the tenant")
 
 	// ErrInvitationNotPending is returned by Accept / Decline / Revoke
 	// when the row exists but has already been finalised. Maps to 409.
@@ -154,14 +154,17 @@ func (s *tenantInvitationService) Create(
 	if err := rejectAPIKeyOwnerAssignment(ctx, role); err != nil {
 		return nil, err
 	}
-	// Reject early if the invitee is already an active member; the
-	// handler renders this as "they're already in" rather than the
-	// generic conflict.
+	if err := requireInviteRole(ctx, role); err != nil {
+		return nil, err
+	}
+	// Reject every existing non-deleted membership, including suspension.
+	// Restoration is deliberately a separate UpdateStatus operation that
+	// retains the member's current role.
 	existing, err := s.memberSvc.GetMembership(ctx, inviteeUserID, tenantID)
 	if err != nil {
 		return nil, err
 	}
-	if existing != nil && existing.Status == types.TenantMemberStatusActive {
+	if existing != nil {
 		return nil, ErrAlreadyMember
 	}
 
@@ -175,7 +178,7 @@ func (s *tenantInvitationService) Create(
 		Message:       message,
 		ExpiresAt:     now.Add(invitationTTL()),
 	}
-	if err := s.repo.Create(ctx, inv); err != nil {
+	if err := s.repo.Create(ctx, managedActor(ctx), inv); err != nil {
 		if errors.Is(err, apprepo.ErrPendingInvitationExists) {
 			return nil, ErrPendingInvitationExists
 		}
@@ -218,6 +221,9 @@ func (s *tenantInvitationService) Accept(
 	if inv.Status != types.TenantInvitationStatusPending {
 		return nil, ErrInvitationNotPending
 	}
+	if inv.Role == types.TenantRoleOwner {
+		return nil, ErrOwnerRoleReserved
+	}
 	if inv.IsExpired(s.now()) {
 		// The sweep above should have flipped it already, but a row
 		// can age past expires_at between the sweep and this read.
@@ -233,6 +239,10 @@ func (s *tenantInvitationService) Accept(
 			return nil, ErrInvitationExpired
 		case errors.Is(err, apprepo.ErrInvitationForbidden):
 			return nil, ErrInvitationForbidden
+		case errors.Is(err, apprepo.ErrInvitationOwnerRole):
+			return nil, ErrOwnerRoleReserved
+		case errors.Is(err, apprepo.ErrInvitationMemberExists):
+			return nil, ErrAlreadyMember
 		case errors.Is(err, apprepo.ErrUserBoundToAnotherEnterprise):
 			return nil, ErrUserBoundToAnotherEnterprise
 		default:
@@ -299,7 +309,7 @@ func (s *tenantInvitationService) Decline(
 		return ErrInvitationExpired
 	}
 
-	if err := s.repo.MarkStatusIfPending(ctx, invID, types.TenantInvitationStatusDeclined, s.now()); err != nil {
+	if err := s.repo.MarkStatusIfPending(ctx, types.MemberActorAuthority{ServicePrincipal: true}, invID, types.TenantInvitationStatusDeclined, s.now()); err != nil {
 		return ErrInvitationNotPending
 	}
 
@@ -317,9 +327,8 @@ func (s *tenantInvitationService) Decline(
 	return nil
 }
 
-// Revoke transitions the pending row into revoked. Route-layer Owner
-// gate guarantees the caller is allowed to act on this tenant; this
-// method does not re-check role.
+// Revoke transitions the pending row into revoked after applying the same
+// actor/target-role matrix used for creation.
 func (s *tenantInvitationService) Revoke(ctx context.Context, invID uint64) error {
 	s.sweep(ctx)
 
@@ -333,8 +342,18 @@ func (s *tenantInvitationService) Revoke(ctx context.Context, invID uint64) erro
 	if inv.Status != types.TenantInvitationStatusPending {
 		return ErrInvitationNotPending
 	}
+	// Historical pending Owner invitations are unsafe to accept but remain
+	// revocable. Only an Owner can revoke one; Admins retain their ordinary
+	// lower-role invitation authority.
+	if inv.Role == types.TenantRoleOwner {
+		if actorRole(ctx) != types.TenantRoleOwner {
+			return ErrMemberActionForbidden
+		}
+	} else if err := requireInviteRole(ctx, inv.Role); err != nil {
+		return err
+	}
 
-	if err := s.repo.MarkStatusIfPending(ctx, invID, types.TenantInvitationStatusRevoked, s.now()); err != nil {
+	if err := s.repo.MarkStatusIfPending(ctx, managedActor(ctx), invID, types.TenantInvitationStatusRevoked, s.now()); err != nil {
 		return ErrInvitationNotPending
 	}
 
@@ -466,6 +485,9 @@ func (s *tenantInvitationService) CreateShareLink(
 	if err := rejectAPIKeyOwnerAssignment(ctx, role); err != nil {
 		return nil, "", err
 	}
+	if err := requireInviteRole(ctx, role); err != nil {
+		return nil, "", err
+	}
 	token, err := generateShareLinkToken()
 	if err != nil {
 		return nil, "", err
@@ -481,7 +503,7 @@ func (s *tenantInvitationService) CreateShareLink(
 		Message:       message,
 		ExpiresAt:     now.Add(invitationTTL()),
 	}
-	if err := s.repo.Create(ctx, inv); err != nil {
+	if err := s.repo.Create(ctx, managedActor(ctx), inv); err != nil {
 		return nil, "", err
 	}
 	s.emitAudit(ctx, &types.AuditLog{
@@ -526,10 +548,9 @@ func (s *tenantInvitationService) LookupByToken(
 }
 
 // AcceptByToken adds newUserID to the share-link's tenant + role.
-// Unlike Accept, the invitation row itself is NOT mutated — share-link
-// rows stay pending across uses. Idempotent: an existing membership
-// is returned untouched (callers shouldn't see role downgrade just
-// because they clicked the same link twice from different devices).
+// Unlike Accept, the invitation row itself remains pending for other users.
+// Existing active memberships remain idempotent; suspended memberships are
+// rejected and must be restored only through UpdateStatus.
 func (s *tenantInvitationService) AcceptByToken(
 	ctx context.Context,
 	plainToken string,
@@ -542,6 +563,9 @@ func (s *tenantInvitationService) AcceptByToken(
 	if err != nil {
 		return nil, err
 	}
+	if inv.Role == types.TenantRoleOwner {
+		return nil, ErrOwnerRoleReserved
+	}
 	member, err := s.repo.AcceptShareLink(ctx, inv.ID, newUserID, s.now())
 	if err != nil {
 		if errors.Is(err, apprepo.ErrInvitationNotPending) || errors.Is(err, apprepo.ErrInvitationExpired) {
@@ -549,6 +573,12 @@ func (s *tenantInvitationService) AcceptByToken(
 		}
 		if errors.Is(err, apprepo.ErrUserBoundToAnotherEnterprise) {
 			return nil, ErrUserBoundToAnotherEnterprise
+		}
+		if errors.Is(err, apprepo.ErrInvitationOwnerRole) {
+			return nil, ErrOwnerRoleReserved
+		}
+		if errors.Is(err, apprepo.ErrInvitationMemberExists) {
+			return nil, ErrAlreadyMember
 		}
 		logger.Errorf(ctx,
 			"share-link %d accept failed for user %s: %v",

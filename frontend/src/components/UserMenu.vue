@@ -227,7 +227,7 @@ const showTenantIdentityLine = computed(() => {
 // 快捷入口使用“管理能力”而不是页面最低可见角色：成员名册和模型列表允许
 // viewer 浏览，但头像菜单里的“管理”入口只服务实际能执行管理操作的角色。
 const canManageMembers = computed(() =>
-  authStore.canAccessAllTenants || authStore.hasRole(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.members),
+  authStore.effectiveCrossTenantAccess || authStore.hasRole(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.members),
 )
 const canManageModels = computed(() =>
   authStore.canAccessAllTenants ||
@@ -532,6 +532,9 @@ const loadUserInfo = async () => {
       if (typeof canCreateTenant === 'boolean') {
         authStore.setCanCreateTenant(canCreateTenant)
       }
+      authStore.setCanManageAllTenantMembers(
+        response.data.capabilities?.can_manage_all_tenant_members === true,
+      )
     }
   } catch (error) {
     console.error('Failed to load user info:', error)

@@ -364,7 +364,7 @@ const batchDisplayCount = computed(() =>
 )
 
 // 是否可以访问所有空间
-const canAccessAllTenants = computed(() => authStore.canAccessAllTenants);
+const canAccessAllTenants = computed(() => authStore.effectiveCrossTenantAccess);
 
 // 是否处于知识库详情页（不包括全局聊天）
 const isInKnowledgeBase = computed<boolean>(() => {

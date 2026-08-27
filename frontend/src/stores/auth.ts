@@ -58,6 +58,7 @@ export const useAuthStore = defineStore('auth', () => {
   // deployment never briefly flashes a create action the backend would
   // then reject with 403/2005.
   const canCreateTenant = ref(false)
+  const canManageAllTenantMembers = ref(false)
 
   // 计算属性
   const isLoggedIn = computed(() => {
@@ -103,6 +104,11 @@ export const useAuthStore = defineStore('auth', () => {
   const canAccessAllTenants = computed(() => {
     return user.value?.can_access_all_tenants || false
   })
+
+  // Server-owned projection of CanAccessAllTenants AND the deployment gate.
+  // Keep it distinct from canCreateTenant, which may also be true through the
+  // independent self-service workspace policy.
+  const effectiveCrossTenantAccess = computed(() => canManageAllTenantMembers.value)
 
   // isSystemAdmin reflects the platform-wide system-administrator flag
   // (User.IsSystemAdmin on the server). It is independent of per-tenant
@@ -155,7 +161,7 @@ export const useAuthStore = defineStore('auth', () => {
     // surface Owner — the backend caps the temporary grant at Admin too
     // (Owner-only ops like tenant deletion stay reserved for a real
     // Owner inside the target tenant).
-    if (canAccessAllTenants.value) return 'admin'
+    if (effectiveCrossTenantAccess.value) return 'admin'
     return ''
   })
 
@@ -306,6 +312,10 @@ export const useAuthStore = defineStore('auth', () => {
     canCreateTenant.value = allowed
   }
 
+  const setCanManageAllTenantMembers = (allowed: boolean) => {
+    canManageAllTenantMembers.value = allowed
+  }
+
   // fetchPendingInvitationCount hits the dedicated /me/invitations/
   // pending-count endpoint and updates the store. Errors are
   // swallowed — the badge degrades to its last-known value instead
@@ -367,6 +377,8 @@ export const useAuthStore = defineStore('auth', () => {
       if (typeof createCapability === 'boolean') {
         setCanCreateTenant(createCapability)
       }
+      const memberCapability = response.data?.capabilities?.can_manage_all_tenant_members
+      setCanManageAllTenantMembers(memberCapability === true)
 
       return true
     } catch {
@@ -401,6 +413,7 @@ export const useAuthStore = defineStore('auth', () => {
     memberships.value = []
     pendingInvitationCount.value = 0
     canCreateTenant.value = false
+    canManageAllTenantMembers.value = false
     clearSessionResourceCaches()
 
     // 清空localStorage
@@ -524,6 +537,7 @@ export const useAuthStore = defineStore('auth', () => {
     memberships,
     pendingInvitationCount,
     canCreateTenant,
+    canManageAllTenantMembers,
 
     // 计算属性
     isLoggedIn,
@@ -532,6 +546,7 @@ export const useAuthStore = defineStore('auth', () => {
     currentTenantName,
     currentUserId,
     canAccessAllTenants,
+    effectiveCrossTenantAccess,
     isSystemAdmin,
     currentTenantRole,
     hasRole,
@@ -550,6 +565,7 @@ export const useAuthStore = defineStore('auth', () => {
     setMemberships,
     setPendingInvitationCount,
     setCanCreateTenant,
+    setCanManageAllTenantMembers,
     fetchPendingInvitationCount,
     refreshFromAuthMe,
     getSelectedTenant,

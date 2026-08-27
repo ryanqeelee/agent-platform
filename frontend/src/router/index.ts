@@ -330,6 +330,9 @@ async function hydrateSessionFromToken(authStore: ReturnType<typeof useAuthStore
     if (typeof canCreateTenant === 'boolean') {
       authStore.setCanCreateTenant(canCreateTenant)
     }
+    authStore.setCanManageAllTenantMembers(
+      response.data?.capabilities?.can_manage_all_tenant_members === true,
+    )
 
     return true
   } catch {

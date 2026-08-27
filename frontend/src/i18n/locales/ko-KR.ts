@@ -120,7 +120,7 @@ export default {
   },
   tenantMember: {
     title: '멤버 관리',
-    sectionDescription: '워크스페이스에 동료를 초대하고 역할을 관리합니다. 소유자만 멤버를 추가하거나 제거할 수 있습니다.',
+    sectionDescription: '관리자는 직원과 지식 관리자를 초대, 비활성화 및 복원할 수 있습니다. 소유자는 관리자를 임명하거나 해임하고 소유권을 이전할 수 있습니다.',
     listTitle: '워크스페이스 멤버',
     loading: '멤버를 불러오는 중…',
     retry: '다시 시도',
@@ -151,6 +151,8 @@ export default {
         'rbac.member_added': '멤버 추가',
         'rbac.member_removed': '멤버 제거',
         'rbac.member_role_changed': '역할 변경',
+        'rbac.member_status_changed': '멤버 상태 변경',
+        'rbac.ownership_transferred': '소유권 이전',
         'rbac.member_left': '멤버 탈퇴',
         'rbac.access_denied': '접근 거부',
         'rbac.invitation_sent': '초대 전송',
@@ -188,10 +190,21 @@ export default {
       success: '워크스페이스에서 나갔습니다'
     },
     remove: {
-      button: '제거',
-      confirmBody: '{name} 님을 이 워크스페이스에서 제거하시겠어요? 즉시 접근 권한이 해제됩니다.',
-      confirm: '제거',
-      success: '멤버를 제거했습니다'
+      button: '비활성화',
+      confirmBody: '{name} 님을 비활성화하시겠어요? 즉시 접근할 수 없으며 복원하면 기존 역할이 유지됩니다.',
+      confirm: '비활성화',
+      success: '멤버 상태가 업데이트되었습니다'
+    },
+    restore: {
+      button: '복원',
+      confirmBody: '{name} 님을 이전 역할로 복원할까요?',
+      confirm: '복원'
+    },
+    transfer: {
+      button: '소유권 이전',
+      confirmBody: '{name} 님에게 소유권을 이전할까요? 현재 소유자는 관리자가 됩니다.',
+      confirm: '이전',
+      success: '소유권이 이전되었습니다'
     },
     add: {
       button: '멤버 초대',
@@ -203,12 +216,17 @@ export default {
     role: {
       owner: '소유자',
       admin: '관리자',
-      contributor: '기여자',
-      viewer: '뷰어'
+      contributor: '지식 관리자',
+      viewer: '직원'
+    },
+    status: {
+      active: '활성',
+      suspended: '비활성'
     },
     columns: {
       member: '이름 · 이메일',
       role: '역할',
+      status: '상태',
       joinedAt: '가입일',
       operations: '작업'
     },

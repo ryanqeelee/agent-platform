@@ -255,12 +255,13 @@ func authenticateJWTUser(
 		"[auth] resolved role=%s for user=%s in tenant=%d (jwt_tenant=%d, header=%q, cross_switch=%v)",
 		role, user.ID, targetTenantID, jwtTenantID, c.GetHeader("X-Tenant-ID"), crossTenantSwitch)
 	applyAuthSession(c, authSession{
-		User:        user,
-		Principal:   types.Principal{Type: types.PrincipalWebUser, ID: user.ID},
-		TenantID:    targetTenantID,
-		Tenant:      tenant,
-		Role:        role,
-		SystemAdmin: user.IsSystemAdmin,
+		User:              user,
+		Principal:         types.Principal{Type: types.PrincipalWebUser, ID: user.ID},
+		TenantID:          targetTenantID,
+		Tenant:            tenant,
+		Role:              role,
+		SystemAdmin:       user.IsSystemAdmin,
+		CrossTenantAccess: isCrossTenantUser(user, cfg),
 	})
 	return true
 }
@@ -732,6 +733,13 @@ func resolveTenantRole(
 			user.ID, targetTenantID, member.Role, member.Status)
 		return member.Role, true
 	}
+	// A suspended row is evidence of an explicit access revocation, not an
+	// orphan. Check it before HasAnyMembers: a suspended-only tenant must not
+	// self-heal into an Owner, even while compatibility fail-open is enabled.
+	if err == nil && member != nil && member.Status == types.TenantMemberStatusSuspended {
+		logger.Warnf(ctx, "[auth] suspended membership rejected: user=%s tenant=%d", user.ID, targetTenantID)
+		return "", false
+	}
 	if err != nil {
 		logger.Warnf(ctx, "tenant_members lookup failed user=%s tenant=%d: %v",
 			user.ID, targetTenantID, err)
@@ -765,9 +773,8 @@ func resolveTenantRole(
 	if isHomeTenant {
 		hasAny, anyErr := memberService.HasAnyMembers(ctx, targetTenantID)
 		if anyErr == nil && !hasAny {
-			if _, e := memberService.AddMember(
-				ctx, user.ID, targetTenantID, types.TenantRoleOwner, nil,
-			); e == nil {
+			if ensured, e := memberService.EnsureOwner(ctx, user.ID, targetTenantID); e == nil && ensured != nil &&
+				ensured.Status == types.TenantMemberStatusActive && ensured.Role == types.TenantRoleOwner {
 				logger.Infof(ctx,
 					"[audit] Auto-promoted user %s to Owner of orphan tenant %d (home_tenant=true)",
 					user.ID, targetTenantID,

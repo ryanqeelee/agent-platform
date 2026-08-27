@@ -358,6 +358,9 @@ CREATE INDEX IF NOT EXISTS idx_tenant_members_tenant_role
     ON tenant_members(tenant_id, role);
 CREATE INDEX IF NOT EXISTS idx_tenant_members_user
     ON tenant_members(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_members_one_active_owner
+    ON tenant_members(tenant_id)
+    WHERE role = 'owner' AND status = 'active' AND deleted_at IS NULL;
 
 -- audit_logs is the generic per-tenant durability for RBAC events
 -- (and future KB / agent / datasource events). Sqlite mirror of the

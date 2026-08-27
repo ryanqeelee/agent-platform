@@ -137,7 +137,7 @@
                      Icon-only with tooltip so two actions ("copy" +
                      "revoke") fit inside the actions column without
                      clipping; the full label was too wide. -->
-                <t-tooltip v-if="row.status === 'pending' && row.invite_url"
+                <t-tooltip v-if="row.status === 'pending' && row.invite_url && canManageInvitation(row)"
                   :content="$t('tenantInvitation.copyLink')" placement="top">
                   <t-button shape="square" variant="text" size="small"
                     @click="copyText(absoluteInviteURL(row.invite_url))">
@@ -148,7 +148,7 @@
                        Avoids spawning a top-level modal for a simple
                        yes/no decision; the popover stays inside the
                        table cell so the user keeps spatial context. -->
-                <t-popconfirm v-if="row.status === 'pending'" theme="warning"
+                <t-popconfirm v-if="row.status === 'pending' && canManageInvitation(row)" theme="warning"
                   :content="row.is_share_link
                     ? $t('tenantInvitation.shareLink.revokeConfirm')
                     : $t('tenantInvitation.revoke.confirmBody', {
@@ -325,7 +325,7 @@
               </template>
               <template #role="{ row }">
                 <div class="role-cell">
-                  <t-select v-if="canManage && row.user_id !== currentUserId" :model-value="row.role"
+                  <t-select v-if="canManageMember(row)" :model-value="row.role"
                     class="member-role-select" size="small" :popup-props="roleSelectPopupProps"
                     @change="(val: string) => onRoleChange(row, val)">
                     <t-option v-for="opt in roleOptions" :key="opt.value" :value="opt.value" :label="opt.label">
@@ -340,18 +340,34 @@
                   </t-tag>
                 </div>
               </template>
+              <template #status="{ row }">
+                <t-tag :theme="row.status === 'active' ? 'success' : 'warning'" size="small">
+                  {{ $t('tenantMember.status.' + row.status) }}
+                </t-tag>
+              </template>
               <template #joined_at="{ row }">{{ formatDate(row.joined_at) }}</template>
               <template #actions="{ row }">
                 <t-popconfirm
-                  v-if="canManage && row.user_id !== currentUserId"
-                  :content="$t('tenantMember.remove.confirmBody', { name: row.username || row.email })"
-                  :confirm-btn="{ content: $t('tenantMember.remove.confirm'), theme: 'danger' }"
+                  v-if="canManageMember(row)"
+                  :content="$t(row.status === 'active' ? 'tenantMember.remove.confirmBody' : 'tenantMember.restore.confirmBody', { name: row.username || row.email })"
+                  :confirm-btn="{ content: $t(row.status === 'active' ? 'tenantMember.remove.confirm' : 'tenantMember.restore.confirm'), theme: row.status === 'active' ? 'danger' : 'primary' }"
                   :cancel-btn="{ content: $t('common.cancel') }"
                   placement="left"
-                  @confirm="removeRow(row)">
-                  <t-tooltip :content="$t('tenantMember.remove.button')" placement="top">
-                    <t-button theme="danger" shape="square" variant="text" size="small" @click.stop>
-                      <template #icon><t-icon name="user-clear" /></template>
+                  @confirm="toggleMemberStatus(row)">
+                  <t-tooltip :content="$t(row.status === 'active' ? 'tenantMember.remove.button' : 'tenantMember.restore.button')" placement="top">
+                    <t-button :theme="row.status === 'active' ? 'danger' : 'primary'" shape="square" variant="text" size="small" @click.stop>
+                      <template #icon><t-icon :name="row.status === 'active' ? 'user-clear' : 'user-add'" /></template>
+                    </t-button>
+                  </t-tooltip>
+                </t-popconfirm>
+                <t-popconfirm v-if="canTransferOwnership(row)"
+                  :content="$t('tenantMember.transfer.confirmBody', { name: row.username || row.email })"
+                  :confirm-btn="{ content: $t('tenantMember.transfer.confirm'), theme: 'danger' }"
+                  :cancel-btn="{ content: $t('common.cancel') }" placement="left"
+                  @confirm="transferRowOwnership(row)">
+                  <t-tooltip :content="$t('tenantMember.transfer.button')" placement="top">
+                    <t-button theme="warning" shape="square" variant="text" size="small" @click.stop>
+                      <template #icon><t-icon name="swap" /></template>
                     </t-button>
                   </t-tooltip>
                 </t-popconfirm>
@@ -511,10 +527,17 @@ import { auditActionLabel } from '@/i18n/auditActionLabel'
 import {
   listMembers,
   updateMemberRole,
-  removeMember,
+  updateMemberStatus,
+  transferOwnership,
   type TenantMember,
   type TenantRole,
 } from '@/api/tenant/members'
+import {
+  assignableMemberRoles,
+  canManageMemberRole,
+  canTransferMemberOwnership,
+  tenantRoleTranslationKey,
+} from '@/api/tenant/memberLifecycle'
 import {
   listTenantInvitations,
   createInvitation,
@@ -629,14 +652,14 @@ const addForm = reactive<{ email: string; role: TenantRole }>({
 
 // Role-aware gates. The server enforces every mutation; UI gates here
 // are presentational only, matching the security note in stores/auth.ts.
-const currentRole = computed<TenantRole | ''>(() => (authStore.currentTenantRole || '') as TenantRole | '')
-// Cross-tenant superusers (org-level operators) bypass the Owner gate
-// on the server (see middleware/rbac.go RequireRole). The UI must
-// mirror that or the buttons would be invisible to the exact admins
-// who actually need them. Local Owners of their own tenant come in via
-// the role branch.
+const currentRole = computed<TenantRole | ''>(
+  () => (authStore.currentTenantRole || '') as TenantRole | '',
+)
+const effectivePlatformOperator = computed(() => authStore.effectiveCrossTenantAccess === true)
+// All action and role-option decisions flow through memberLifecycle.ts so
+// ordinary Owner/Admin and effective platform operators share one UI matrix.
 const canManage = computed(
-  () => currentRole.value === 'owner' || authStore.canAccessAllTenants === true,
+  () => assignableMemberRoles(currentRole.value, effectivePlatformOperator.value).length > 0,
 )
 // Admin+ (and cross-tenant superusers) can view the audit log. Mirrors
 // the server's g.Admin() guard on /tenants/:id/audit-log so we don't
@@ -645,7 +668,7 @@ const canViewAudit = computed(
   () =>
     currentRole.value === 'owner' ||
     currentRole.value === 'admin' ||
-    authStore.canAccessAllTenants === true,
+    effectivePlatformOperator.value,
 )
 const currentUserId = computed(() => authStore.user?.id ?? '')
 
@@ -654,12 +677,12 @@ const currentUserId = computed(() => authStore.user?.id ?? '')
 // don't expose a tenant picker here.
 const activeTenantId = computed(() => Number(authStore.currentTenantId ?? 0))
 
-const roleOptions = computed(() => [
-  { label: t('tenantMember.role.owner'), value: 'owner' },
-  { label: t('tenantMember.role.admin'), value: 'admin' },
-  { label: t('tenantMember.role.contributor'), value: 'contributor' },
-  { label: t('tenantMember.role.viewer'), value: 'viewer' },
-])
+const roleOptions = computed(() =>
+  assignableMemberRoles(currentRole.value, effectivePlatformOperator.value).map((value) => ({
+    label: t('tenantMember.role.' + value),
+    value,
+  })),
+)
 
 /** 下拉层须高于邀请浮层（3050）与组织设置全屏遮罩，否则会被压住 */
 const roleSelectPopupProps = {
@@ -683,7 +706,7 @@ const roleMatrix: Record<TenantRole, RolePerm[]> = {
     { key: 'readAll', has: true },
   ],
   admin: [
-    { key: 'manageMembers', has: false },
+    { key: 'manageMembers', has: true },
     { key: 'manageTenantConfig', has: false },
     { key: 'manageInfra', has: true },
     { key: 'createOwnKB', has: true },
@@ -721,9 +744,39 @@ function roleMatrixIcon(role: TenantRole): string {
 const columns = computed(() => [
   { colKey: 'member', title: t('tenantMember.columns.member'), ellipsis: true, minWidth: 132 },
   { colKey: 'role', title: t('tenantMember.columns.role'), width: 128 },
+  { colKey: 'status', title: t('tenantMember.columns.status'), width: 88 },
   { colKey: 'joined_at', title: t('tenantMember.columns.joinedAt'), width: 154 },
   { colKey: 'actions', title: t('tenantMember.columns.operations'), width: 88, align: 'left' },
 ])
+
+function canManageMember(row: TenantMember): boolean {
+  return (
+    canManage.value &&
+    canManageMemberRole(
+      currentRole.value,
+      row.role,
+      effectivePlatformOperator.value,
+      row.user_id === currentUserId.value,
+    )
+  )
+}
+
+function canManageInvitation(row: TenantInvitation): boolean {
+  return canManageMemberRole(
+    currentRole.value,
+    row.role,
+    effectivePlatformOperator.value,
+  )
+}
+
+function canTransferOwnership(row: TenantMember): boolean {
+  return canTransferMemberOwnership(
+    currentRole.value,
+    row.role,
+    row.status,
+    row.user_id === currentUserId.value,
+  )
+}
 
 function memberPrimary(row: { username?: string; email?: string }) {
   return row.username?.trim() || row.email?.trim() || '—'
@@ -1084,17 +1137,22 @@ function auditTargetDiff(row: AuditLog): string {
   const d = auditDetailsObject(row)
   if (!d) return ''
   if (row.action === 'rbac.member_role_changed') {
-    if (d.old_role && d.new_role) return `${d.old_role} → ${d.new_role}`
+    if (d.old_role && d.new_role) return `${productRoleLabel(d.old_role)} → ${productRoleLabel(d.new_role)}`
   }
   if (row.action === 'rbac.access_denied') {
     if (typeof d.required_role === 'string') {
-      return t('tenantMember.audit.requiredRole', { role: d.required_role })
+      return t('tenantMember.audit.requiredRole', { role: productRoleLabel(d.required_role) })
     }
   }
   if (row.action === 'rbac.invitation_sent' || row.action === 'rbac.invitation_revoked') {
-    if (typeof d.role === 'string') return String(d.role)
+    if (typeof d.role === 'string') return productRoleLabel(d.role)
   }
   return ''
+}
+
+function productRoleLabel(value: unknown): string {
+  const key = tenantRoleTranslationKey(value)
+  return key ? t(key) : String(value ?? '')
 }
 
 // Expanded row state — local set of ids the user has opened. We keep
@@ -1397,9 +1455,10 @@ async function onRoleChange(row: TenantMember, newRole: string) {
 // 原地 popconfirm 替代 DialogPlugin 模态确认：与"共享资源删除"等其它列表内
 // 的删除入口风格统一，避免一个简单的二次确认打断成员管理表格的浏览节奏。
 // 错误分支保持与旧实现一致（409 last-owner / 404 not-found / 兜底）。
-async function removeRow(row: TenantMember) {
+async function toggleMemberStatus(row: TenantMember) {
+  const next = row.status === 'active' ? 'suspended' : 'active'
   try {
-    const resp = await removeMember(activeTenantId.value, row.user_id)
+    const resp = await updateMemberStatus(activeTenantId.value, row.user_id, next)
     if (resp.success) {
       await loadMembers()
       MessagePlugin.success(t('tenantMember.remove.success'))
@@ -1415,6 +1474,24 @@ async function removeRow(row: TenantMember) {
     } else {
       MessagePlugin.error(err?.message || t('tenantMember.errors.generic'))
     }
+  }
+}
+
+async function transferRowOwnership(row: TenantMember) {
+  try {
+    const resp = await transferOwnership(activeTenantId.value, row.user_id)
+    if (resp.success) {
+		// Ownership changes the role carried by the current auth session; refresh
+		// it before reloading the roster so controls immediately reflect the
+		// caller's new Admin authority.
+      await authStore.refreshFromAuthMe()
+      await loadMembers()
+      MessagePlugin.success(t('tenantMember.transfer.success'))
+    } else {
+      MessagePlugin.error(resp.message || t('tenantMember.errors.generic'))
+    }
+  } catch (err: any) {
+    MessagePlugin.error(err?.message || t('tenantMember.errors.generic'))
   }
 }
 

@@ -14,8 +14,8 @@ import (
 
 // RegisterCustomAgentRoutes registers custom agent routes.
 //
-// Mutating routes use OwnedAgentOrAdmin: the original creator can edit
-// their agent, otherwise Admin+ is required. Built-in agents
+// Mutating routes require Contributor+ and then use OwnedAgentOrAdmin:
+// an active Contributor may edit their agent, otherwise Admin+ is required. Built-in agents
 // (IsBuiltin=true) have an empty creator and are always Admin+. Reads
 // are Viewer+, copy is Contributor+ (the copy is owned by the caller).
 func RegisterCustomAgentRoutes(r *gin.RouterGroup, agentHandler *handler.CustomAgentHandler, g *rbacGuards) {
@@ -38,10 +38,10 @@ func RegisterCustomAgentRoutes(r *gin.RouterGroup, agentHandler *handler.CustomA
 		agentsRead.GET("", g.Viewer(), agentHandler.ListAgents)
 		// Get agent by ID — Viewer+
 		agentsRead.GET("/:id", g.Viewer(), agentHandler.GetAgent)
-		// Update agent — creator OR Admin+
-		agentsWrite.PUT("/:id", g.OwnedAgentOrAdmin(), agentHandler.UpdateAgent)
-		// Delete agent — creator OR Admin+
-		agentsWrite.DELETE("/:id", g.OwnedAgentOrAdmin(), agentHandler.DeleteAgent)
+		// Update agent — Contributor+ and creator OR Admin+
+		agentsWrite.PUT("/:id", g.Contributor(), g.OwnedAgentOrAdmin(), agentHandler.UpdateAgent)
+		// Delete agent — Contributor+ and creator OR Admin+
+		agentsWrite.DELETE("/:id", g.Contributor(), g.OwnedAgentOrAdmin(), agentHandler.DeleteAgent)
 		// Copy agent — Contributor+ (copy is owned by the caller)
 		agentsWrite.POST("/:id/copy", g.Contributor(), agentHandler.CopyAgent)
 	}
@@ -179,7 +179,7 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 	}
 
 	// Agent sharing routes — same rationale as KB shares: 分享/取消分享
-	// 跟修改 agent 同等敏感，挂 OwnedAgentOrAdmin。
+	// 跟修改 agent 同等敏感，先要求 Contributor+，再挂 OwnedAgentOrAdmin。
 	//
 	// GET 走 OwnedAgentOrAdmin 作为 JWT 侧的 owner 校验；service 层
 	// ListSharesByAgent 现在也强制 tenant 归属（与 ListSharesByKnowledgeBase
@@ -189,9 +189,9 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 	// （空间级全权）可管理 agent 分享，scoped key 保持 default-deny。
 	agentShares := g.apiKeyGroup(r.Group("/agents/:id/shares"), apiKeyFullAccess())
 	{
-		agentShares.POST("", g.OwnedAgentOrAdmin(), orgHandler.ShareAgent)
-		agentShares.GET("", g.OwnedAgentOrAdmin(), orgHandler.ListAgentShares)
-		agentShares.DELETE("/:share_id", g.OwnedAgentOrAdmin(), orgHandler.RemoveAgentShare)
+		agentShares.POST("", g.Contributor(), g.OwnedAgentOrAdmin(), orgHandler.ShareAgent)
+		agentShares.GET("", g.Contributor(), g.OwnedAgentOrAdmin(), orgHandler.ListAgentShares)
+		agentShares.DELETE("/:share_id", g.Contributor(), g.OwnedAgentOrAdmin(), orgHandler.RemoveAgentShare)
 	}
 
 	// Shared knowledge bases route — Viewer+

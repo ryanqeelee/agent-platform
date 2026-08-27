@@ -11,7 +11,7 @@ export const SETTINGS_SECTION_MIN_ROLE: Record<string, SettingsRoleKey> = {
   general: 'viewer',
   ollama: 'admin',
   weknoracloud: 'admin',
-  models: 'viewer',
+  models: 'contributor',
   websearch: 'admin',
   chathistory: 'admin',
   vectorstore: 'admin',
@@ -22,6 +22,26 @@ export const SETTINGS_SECTION_MIN_ROLE: Record<string, SettingsRoleKey> = {
   userprofile: 'viewer',
   tenant: 'viewer',
   members: 'viewer',
+}
+
+/**
+ * Product-surface entry policy for routes that are management/catalog
+ * surfaces rather than the employee assistant itself. It deliberately does
+ * not govern the APIs: server route guards are authoritative.
+ */
+export const EMPLOYEE_SURFACE_MIN_ROLE = {
+  knowledgeBases: 'contributor',
+  agents: 'contributor',
+  organizations: 'admin',
+} as const satisfies Record<string, SettingsRoleKey>
+
+export const employeeSurfaceMinRoleForPath = (path: string): SettingsRoleKey | undefined => {
+  if (path === '/platform/agents') return EMPLOYEE_SURFACE_MIN_ROLE.agents
+  if (path === '/platform/organizations') return EMPLOYEE_SURFACE_MIN_ROLE.organizations
+  if (path === '/platform/knowledge-bases') {
+    return EMPLOYEE_SURFACE_MIN_ROLE.knowledgeBases
+  }
+  return undefined
 }
 
 /**

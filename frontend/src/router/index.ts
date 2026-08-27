@@ -3,6 +3,7 @@ import type { RouteLocationNormalized } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { autoSetup, getCurrentUser, getEnterpriseSession, EnterpriseSessionRequestError, userInfoFromApi } from '@/api/auth'
 import { post } from '@/utils/request'
+import { employeeSurfaceMinRoleForPath, SETTINGS_SECTION_MIN_ROLE } from '@/config/settingsAccess'
 import { DEFAULT_EMPLOYEE_WORKSPACE_PATH, loginDestination, safeReturnTo } from './safeReturnTo'
 
 /** Lite /桌面 WebView 硬刷新时可能只打开 `/`，用 session 记住上次页面以便恢复 */
@@ -40,12 +41,21 @@ function hasPendingOIDCCallback() {
   return hash.includes('oidc_result=') || hash.includes('oidc_error=')
 }
 
+function employeeWorkspaceMinRole(to: RouteLocationNormalized) {
+  const surfaceMinimum = employeeSurfaceMinRoleForPath(to.path)
+  if (surfaceMinimum) return surfaceMinimum
+  if (to.path === '/platform/settings' && typeof to.query.section === 'string') {
+    return SETTINGS_SECTION_MIN_ROLE[to.query.section] ?? 'viewer'
+  }
+  return undefined
+}
+
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     {
       path: "/",
-      redirect: "/platform/knowledge-bases",
+      redirect: DEFAULT_EMPLOYEE_WORKSPACE_PATH,
     },
     {
       path: "/login",
@@ -93,7 +103,7 @@ const router = createRouter({
     {
       path: "/platform",
       name: "Platform",
-      redirect: "/platform/knowledge-bases",
+      redirect: DEFAULT_EMPLOYEE_WORKSPACE_PATH,
       component: () => import("../views/platform/index.vue"),
       meta: { requiresInit: true, requiresAuth: true },
       children: [
@@ -379,7 +389,7 @@ router.beforeEach(async (to, from, next) => {
       }
     }
     if (authStore.hasValidTenant) {
-      next('/platform/knowledge-bases')
+      next(DEFAULT_EMPLOYEE_WORKSPACE_PATH)
     } else {
       next()
     }
@@ -443,13 +453,21 @@ router.beforeEach(async (to, from, next) => {
     return
   }
 
+  // This only keeps the employee UI coherent with the product-surface policy.
+  // API route guards remain the authority for every read and mutation.
+  const minimumRole = employeeWorkspaceMinRole(to)
+  if (minimumRole && !authStore.hasRole(minimumRole)) {
+    next(DEFAULT_EMPLOYEE_WORKSPACE_PATH)
+    return
+  }
+
   // SystemAdmin gate — checked AFTER auth so a non-admin who's logged
   // out gets redirected to /login first (consistent with how the rest
   // of the auth flow works), and only an authenticated non-admin sees
   // the bounce. This is UI-only; the server enforces the real check.
   if (to.meta.requiresSystemAdmin === true) {
     if (!authStore.isSystemAdmin) {
-      next('/platform/knowledge-bases')
+      next(DEFAULT_EMPLOYEE_WORKSPACE_PATH)
       return
     }
   }

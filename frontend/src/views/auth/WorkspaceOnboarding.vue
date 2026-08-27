@@ -88,6 +88,7 @@ import MyInvitationsDialog from '@/components/MyInvitationsDialog.vue'
 import { logout as logoutApi } from '@/api/auth'
 import type { TenantInfo } from '@/api/tenant'
 import { useAuthStore } from '@/stores/auth'
+import { DEFAULT_EMPLOYEE_WORKSPACE_PATH } from '@/router/safeReturnTo'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -118,14 +119,14 @@ onMounted(async () => {
 watch(
   () => authStore.hasValidTenant,
   (ready) => {
-    if (ready) router.replace('/platform/knowledge-bases')
+    if (ready) router.replace(DEFAULT_EMPLOYEE_WORKSPACE_PATH)
   },
 )
 
 async function onTenantCreated(tenant: TenantInfo) {
   await authStore.refreshFromAuthMe()
   authStore.setSelectedTenant(tenant.id, tenant.name)
-  await router.replace('/platform/knowledge-bases')
+  await router.replace(DEFAULT_EMPLOYEE_WORKSPACE_PATH)
 }
 
 async function handleLogout() {

@@ -42,6 +42,8 @@ import {
 } from '@/utils/agent-readiness';
 import { formatLocalizedList } from '@/utils/format-list';
 import type { MentionItem, MentionItemType, MentionRequestItem } from '@/types/mention';
+import { useAuthStore } from '@/stores/auth';
+import { EMPLOYEE_SURFACE_MIN_ROLE, SETTINGS_SECTION_MIN_ROLE } from '@/config/settingsAccess';
 
 const route = useRoute();
 const router = useRouter();
@@ -51,6 +53,7 @@ const orgStore = useOrganizationStore();
 const menuStore = useMenuStore();
 const chatResources = useChatResourcesStore();
 const editorResources = useEditorResourcesStore();
+const authStore = useAuthStore();
 const {
   agents,
   disabledOwnAgentIds,
@@ -59,6 +62,9 @@ const {
   webSearchProviders,
 } = storeToRefs(chatResources);
 const { t, locale } = useI18n();
+
+const canManageAgents = computed(() => authStore.hasRole(EMPLOYEE_SURFACE_MIN_ROLE.agents));
+const canConfigureWebSearchSettings = computed(() => authStore.hasRole(SETTINGS_SECTION_MIN_ROLE.websearch));
 
 let query = ref("");
 const showKbSelector = ref(false);
@@ -686,6 +692,7 @@ const modelsLoading = ref(false);
 const showModelSelector = ref(false);
 const modelButtonRef = ref<HTMLElement>();
 const modelDropdownStyle = ref<Record<string, string>>({});
+const canSelectChatModel = computed(() => authStore.hasRole('contributor'));
 
 // 显示的知识库标签（最多显示2个）
 const displayedKbs = computed(() => selectedKbs.value.slice(0, 2));
@@ -1707,6 +1714,7 @@ const removeFile = (id: string) => {
 };
 
 const toggleModelSelector = () => {
+  if (!canSelectChatModel.value) return;
   // 如果智能体锁定了模型，不允许打开选择器
   if (isModelLockedByAgent.value) {
     MessagePlugin.warning(t('input.modelLockedByAgent'));
@@ -2269,6 +2277,7 @@ const onDragOver = (e: DragEvent) => {
 };
 
 const handleGoToWebSearchSettings = () => {
+  if (!canConfigureWebSearchSettings.value) return;
   uiStore.openSettings('websearch');
   if (route.path !== '/platform/settings') {
     router.push('/platform/settings');
@@ -2284,6 +2293,7 @@ const handleGoToWebSearchConfig = () => {
 };
 
 const handleGoToAgentSettings = (section?: string) => {
+  if (!canManageAgents.value) return;
   const agent = selectedAgent.value;
   if (!agent) {
     router.push('/platform/agents');
@@ -2337,6 +2347,7 @@ const goToAgentEditor = (
   highlight?: AgentNotReadyReasonKey,
   sourceTenantId?: string,
 ) => {
+  if (!canManageAgents.value) return;
   router.push({
     path: '/platform/agents',
     query: {
@@ -2366,7 +2377,7 @@ const showAgentNotReadyMessage = (
         ? t('input.sharedAgentNotReadyDetail', { agentName: agent.name, reasons: reasonsText })
         : t('input.agentNotReadyDetail', { agentName: agent.name, reasons: reasonsText }),
     ),
-    ...(isRemoteShared ? [] : [
+    ...(isRemoteShared || !canManageAgents.value ? [] : [
       h('a', {
         href: '#',
         onClick: (e: Event) => {
@@ -2407,7 +2418,7 @@ const toggleWebSearch = () => {
   if (!isWebSearchConfigured.value) {
     const messageContent = h('div', { style: 'display: flex; flex-direction: column; gap: 6px; max-width: 280px;' }, [
       h('span', { style: 'color: var(--td-text-color-primary); line-height: 1.5;' }, t('input.messages.webSearchNotConfigured')),
-      h('a', {
+      ...(canConfigureWebSearchSettings.value || (hasAgentConfig.value && canManageAgents.value) ? [h('a', {
         href: '#',
         onClick: (e: Event) => {
           e.preventDefault();
@@ -2420,7 +2431,7 @@ const toggleWebSearch = () => {
         onMouseleave: (e: Event) => {
           (e.target as HTMLElement).style.textDecoration = 'none';
         }
-      }, t('input.goToAgentSettings'))
+      }, t('input.goToAgentSettings'))] : []),
     ]);
     MessagePlugin.warning({
       content: () => messageContent,
@@ -2564,7 +2575,8 @@ defineExpose({
                 $t('input.webSearch.toggleOn') }}</span>
               <div v-else class="tooltip-with-link">
                 <span>{{ $t('input.webSearch.notConfigured') }}</span>
-                <a href="#" @click.prevent="handleGoToWebSearchConfig">{{ $t('input.goToAgentSettings') }}</a>
+                <a v-if="canConfigureWebSearchSettings || (hasAgentConfig && canManageAgents)" href="#"
+                  @click.prevent="handleGoToWebSearchConfig">{{ $t('input.goToAgentSettings') }}</a>
               </div>
             </template>
             <div class="control-btn websearch-btn" :class="{
@@ -2628,7 +2640,7 @@ defineExpose({
             <template #content>
               <div v-if="isMentionDisabled && isKnowledgeBaseDisabledByAgent" class="tooltip-with-link">
                 <span>{{ $t('input.kbDisabledByAgent') }}</span>
-                <a href="#" @click.prevent="handleGoToAgentSettings('knowledge')">{{ $t('input.goToAgentSettings')
+                <a v-if="canManageAgents" href="#" @click.prevent="handleGoToAgentSettings('knowledge')">{{ $t('input.goToAgentSettings')
                 }}</a>
               </div>
               <span v-else>{{ allSelectedItems.length > 0 ? $t('input.knowledgeBaseWithCount', {
@@ -2652,7 +2664,7 @@ defineExpose({
           </t-tooltip>
 
           <!-- 模型显示 -->
-          <t-tooltip :content="isModelLockedByAgent ? $t('input.modelLockedByAgent') : ''"
+          <t-tooltip v-if="canSelectChatModel" :content="isModelLockedByAgent ? $t('input.modelLockedByAgent') : ''"
             :disabled="!isModelLockedByAgent">
             <div class="model-display" :class="{ 'agent-controlled': isModelLockedByAgent }">
               <div ref="modelButtonRef" class="model-selector-trigger" @click.stop="toggleModelSelector">
@@ -2669,7 +2681,7 @@ defineExpose({
         </div>
 
         <Teleport to="body">
-          <div v-if="showModelSelector" class="model-selector-overlay" @click="closeModelSelector">
+          <div v-if="canSelectChatModel && showModelSelector" class="model-selector-overlay" @click="closeModelSelector">
             <div class="model-selector-dropdown" :style="modelDropdownStyle" @click.stop>
               <div class="model-selector-header">
                 <span>{{ $t('conversationSettings.models.chatGroupLabel') }}</span>

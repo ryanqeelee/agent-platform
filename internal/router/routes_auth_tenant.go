@@ -60,16 +60,19 @@ func RegisterTenantRoutes(
 	// 空间路由组
 	tenantRoutes := r.Group("/tenants")
 	{
-		// 创建空间对所有已登录用户开放：用户可以为自己再开一个工作区，
-		// handler 内部会调 EnsureOwner 把调用者写成新空间的 Owner。
+		// Tenantless onboarding may create its first workspace. Once a user is
+		// operating in a tenant, Contributor+ is required so a Viewer cannot
+		// create another workspace and become its Owner. Platform callers keep
+		// their explicitly authorized catalog-management path.
 		// 跨空间超管走同一个端点，但能携带 storage_quota / status 等
 		// 全字段（见 handler.CreateTenant 内部分支）。
 		// 安全说明：这里不挂 g.CrossTenant()，因为 self-service 创建
 		// 不需要跨空间特权；handler 也不读写 X-Tenant-ID 指向的现有
 		// 空间，所以越过 PathTenantMatch 守卫不会扩大攻击面。
-		// 创建空间不对 API key 开放（注册在原始 group，默认拒绝）。
+		// Only platform API keys may create tenants; workspace keys remain
+		// default-denied by the declared platform-only policy.
 		g.apiKeyRoute(tenantRoutes, http.MethodPost, "",
-			apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage), handler.CreateTenant)
+			apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage), g.TenantCreator(), handler.CreateTenant)
 		g.apiKeyRoute(tenantRoutes, http.MethodGet, "", apiKeyManageTenantSettings(apiKeyFullAccess()), handler.ListTenants)
 
 		// Generic KV configuration management (tenant-level). Tenant ID

@@ -630,8 +630,12 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 	// 后也能恢复 currentTenantRole，避免角色信息只在 login 那一刻可用。
 	memberships := h.userService.BuildLoginMemberships(ctx, user, tenant)
 	canManageAllTenantMembers := user.CanAccessAllTenants && h.configInfo.Tenant.EnableCrossTenantAccess
+	// Tenantless users still need a path through onboarding. Once a user is
+	// active in a workspace, keep the projection aligned with the route guard:
+	// Viewer cannot create another tenant and thereby self-promote to Owner.
 	canCreateTenant := canManageAllTenantMembers ||
-		resolveTenantSelfServiceCreationEnabled(ctx, h.configInfo, h.systemSettingSvc)
+		((activeTenantID == 0 || types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleContributor)) &&
+			resolveTenantSelfServiceCreationEnabled(ctx, h.configInfo, h.systemSettingSvc))
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{

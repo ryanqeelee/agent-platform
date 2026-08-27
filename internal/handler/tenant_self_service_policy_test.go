@@ -75,6 +75,10 @@ func (s *tenantPolicyTenantService) CreateTenant(_ context.Context, tenant *type
 	return tenant, nil
 }
 
+func (s *tenantPolicyTenantService) GetTenantByID(_ context.Context, id uint64) (*types.Tenant, error) {
+	return &types.Tenant{ID: id, Name: "workspace"}, nil
+}
+
 func TestCreateTenantRejectsRegularUserWhenSelfServiceDisabled(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tenants := &tenantPolicyTenantService{}
@@ -194,5 +198,32 @@ func TestAuthMeProjectsTenantCreationCapability(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), `"can_access_all_tenants":true`) {
 		t.Fatalf("response masked stored cross-tenant privilege: %s", w.Body.String())
+	}
+}
+
+func TestAuthMeDoesNotAdvertiseTenantCreationToViewer(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := &AuthHandler{
+		userService:      &tenantPolicyUserService{user: &types.User{ID: "viewer", TenantID: 7}},
+		tenantService:    &tenantPolicyTenantService{},
+		configInfo:       &config.Config{Tenant: &config.TenantConfig{}},
+		systemSettingSvc: &tenantPolicySettingService{enabled: true},
+	}
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, uint64(7))
+		ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleViewer)
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	})
+	r.GET("/auth/me", h.GetCurrentUser)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/auth/me", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"can_create_tenant":false`) {
+		t.Fatalf("viewer response advertised tenant creation: %s", w.Body.String())
 	}
 }

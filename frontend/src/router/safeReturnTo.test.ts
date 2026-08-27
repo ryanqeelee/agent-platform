@@ -9,6 +9,7 @@ const router = createRouter({
     { path: '/login', component: { template: '<div />' } },
     { path: '/register', component: { template: '<div />' } },
     { path: '/onboarding/workspace', component: { template: '<div />' } },
+    { path: '/platform/creatChat', component: { template: '<div />' } },
     { path: '/platform/knowledge-bases', component: { template: '<div />' } },
     { path: '/platform/enterprise', component: { template: '<div />' } },
   ],
@@ -33,4 +34,5 @@ test('postLoginDestination restores a verified OIDC enterprise deep link', () =>
 
 test('postLoginDestination falls back after an invalid OIDC return target', () => {
   assert.equal(postLoginDestination(router, 'https://evil.example', true), DEFAULT_EMPLOYEE_WORKSPACE_PATH)
+  assert.equal(DEFAULT_EMPLOYEE_WORKSPACE_PATH, '/platform/creatChat')
 })

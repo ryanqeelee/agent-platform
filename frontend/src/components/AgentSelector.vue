@@ -4,7 +4,7 @@
       <div class="agent-selector-dropdown" :style="dropdownStyle" @click.stop>
         <div class="agent-selector-header">
           <span>{{ $t('agent.selectAgent') }}</span>
-          <router-link to="/platform/agents" class="agent-selector-add" @click="$emit('close')">
+          <router-link v-if="canManageAgents" to="/platform/agents" class="agent-selector-add" @click="$emit('close')">
             <span class="add-icon">+</span>
             <span class="add-text">{{ $t('agent.manageAgents') }}</span>
           </router-link>
@@ -200,6 +200,8 @@ import {
 } from '@/utils/agent-readiness';
 import { formatLocalizedList } from '@/utils/format-list';
 import { useChatResourcesStore } from '@/stores/chatResources';
+import { useAuthStore } from '@/stores/auth';
+import { EMPLOYEE_SURFACE_MIN_ROLE } from '@/config/settingsAccess';
 import {
   isAgentWebSearchEnabled,
   isAgentWebSearchReady,
@@ -210,6 +212,7 @@ const router = useRouter();
 const orgStore = useOrganizationStore();
 const settingsStore = useSettingsStore();
 const chatResources = useChatResourcesStore();
+const authStore = useAuthStore();
 
 const props = defineProps<{
   visible: boolean;
@@ -300,7 +303,10 @@ const activeDetailNotReadyLabels = computed(() => {
   return getAgentNotReadyLabels(detail.agent, detail.sourceTenantId);
 });
 
+const canManageAgents = computed(() => authStore.hasRole(EMPLOYEE_SURFACE_MIN_ROLE.agents));
+
 const canShowDetailHeaderAction = computed(() => {
+  if (!canManageAgents.value) return false;
   const detail = activeDetail.value;
   if (!detail) return false;
   if (canLocallyConfigureAgent(detail.sourceTenantId)) return true;

@@ -19,7 +19,7 @@
         <span v-if="loading" class="cmdk__input-spinner">
           <t-loading size="small" />
         </span>
-        <t-tooltip :content="t('commandPalette.retrieval')" placement="bottom">
+        <t-tooltip v-if="canConfigureRetrieval" :content="t('commandPalette.retrieval')" placement="bottom">
           <button type="button" class="cmdk__icon-btn" :class="{ active: drawerVisible }" @click="drawerVisible = true">
             <t-icon name="setting" size="16px" />
           </button>
@@ -130,7 +130,7 @@
                 <template #icon><t-icon name="chat" size="14px" /></template>
                 {{ t('commandPalette.empty.askAi') }}
               </t-button>
-              <t-button variant="outline" size="small" @click="drawerVisible = true">
+              <t-button v-if="canConfigureRetrieval" variant="outline" size="small" @click="drawerVisible = true">
                 <template #icon><t-icon name="setting" size="14px" /></template>
                 {{ t('commandPalette.empty.adjustRetrieval') }}
               </t-button>
@@ -151,7 +151,7 @@
     </div>
 
     <!-- Retrieval settings drawer (layered on top of the palette) -->
-    <t-drawer v-model:visible="drawerVisible" :header="t('retrievalSettings.title')" size="420px" :footer="false"
+    <t-drawer v-if="canConfigureRetrieval" v-model:visible="drawerVisible" :header="t('retrievalSettings.title')" size="420px" :footer="false"
       :close-on-overlay-click="true" class="cmdk-retrieval-drawer">
       <RetrievalSettings />
     </t-drawer>
@@ -173,6 +173,7 @@ import ResultGroup from './GlobalCommandPalette/ResultGroup.vue'
 import ResultItem from './GlobalCommandPalette/ResultItem.vue'
 import RetrievalSettings from '@/views/settings/RetrievalSettings.vue'
 import type { MessageSearchGroupItem } from '@/api/chat-history'
+import { EMPLOYEE_SURFACE_MIN_ROLE } from '@/config/settingsAccess'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -203,6 +204,7 @@ const {
 })
 
 const drawerVisible = ref(false)
+const canConfigureRetrieval = computed(() => authStore.hasRole('admin'))
 const inputRef = ref<HTMLInputElement | null>(null)
 const scrollRef = ref<HTMLElement | null>(null)
 
@@ -256,11 +258,18 @@ const allCommands = computed(() => {
     t,
     close: () => commandPaletteStore.closePalette(),
   })
-  // 共享空间入口与侧栏菜单保持一致：viewer / contributor 看不到。
-  if (!authStore.hasRole('admin')) {
-    return cmds.filter((c) => c.id !== 'open-organizations')
-  }
-  return cmds
+  return cmds.filter((command) => {
+    if (command.id === 'open-kb-list') {
+      return authStore.hasRole(EMPLOYEE_SURFACE_MIN_ROLE.knowledgeBases)
+    }
+    if (command.id === 'open-agents') {
+      return authStore.hasRole(EMPLOYEE_SURFACE_MIN_ROLE.agents)
+    }
+    if (command.id === 'open-organizations') {
+      return authStore.hasRole(EMPLOYEE_SURFACE_MIN_ROLE.organizations)
+    }
+    return true
+  })
 })
 
 const filteredCommands = computed(() => filterCommands(allCommands.value, query.value))

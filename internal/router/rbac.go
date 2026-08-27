@@ -212,6 +212,27 @@ func (g *rbacGuards) Owner() gin.HandlerFunc {
 	return middleware.RequireRole(types.TenantRoleOwner, g.cfg)
 }
 
+// TenantCreator permits tenantless onboarding while requiring Contributor+
+// for a member who is already operating inside a tenant. API-key callers are
+// still governed by the platform-only route policy. This keeps a Viewer from
+// self-promoting into an Owner by creating another tenant without breaking
+// invitation-first tenantless admission.
+func (g *rbacGuards) TenantCreator() gin.HandlerFunc {
+	contributor := g.Contributor()
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		if _, apiKey := types.TenantAPIKeyScopeFromContext(ctx); apiKey {
+			c.Next()
+			return
+		}
+		if tenantID, ok := types.TenantIDFromContext(ctx); !ok || tenantID == 0 {
+			c.Next()
+			return
+		}
+		contributor(c)
+	}
+}
+
 // API-key authorization — a SEPARATE authority from the JWT role/ownership
 // guards above. Instead of stacking a per-route guard that also had to know
 // the caller's ownership, every API-key-accessible route declares one

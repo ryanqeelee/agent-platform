@@ -15,6 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/errors"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -60,8 +61,8 @@ func NewKnowledgeBaseHandler(
 
 // buildKBResponse turns a knowledge base into a JSON-ready response shape,
 // merging the bound vector store's display metadata and any caller-supplied
-// extras (e.g., my_permission for shared KBs). Returns the kb pointer
-// unchanged on serialization failure so the request still succeeds.
+// extras (e.g., my_permission for shared KBs). A serialization failure is
+// represented by nil so the response-redaction boundary can fail closed.
 //
 // The map-merge approach (rather than a wrapper struct embedding the kb)
 // is deliberate: KnowledgeBase has a custom MarshalJSON, and embedding
@@ -82,11 +83,11 @@ func buildKBResponse(
 ) interface{} {
 	b, err := json.Marshal(kb)
 	if err != nil {
-		return kb
+		return nil
 	}
 	var m map[string]interface{}
 	if err := json.Unmarshal(b, &m); err != nil || m == nil {
-		return kb
+		return nil
 	}
 	if storeView.Source == types.StoreSourceShared {
 		delete(m, "vector_store_id")
@@ -107,6 +108,70 @@ func buildKBResponse(
 		m[k] = v
 	}
 	return m
+}
+
+func knowledgeBaseResponse(ctx context.Context, value interface{}) interface{} {
+	if types.IsSystemAdminFromContext(ctx) {
+		return value
+	}
+	return redactKBInfrastructure(value)
+}
+
+// redactKBInfrastructure keeps platform-owned operational wiring out of
+// workspace responses. Values that cannot be safely normalized fail closed
+// instead of returning a raw KnowledgeBase object.
+func redactKBInfrastructure(value interface{}) interface{} {
+	switch v := value.(type) {
+	case map[string]interface{}:
+		copy := make(map[string]interface{}, len(v))
+		for key, item := range v {
+			copy[key] = item
+		}
+		for _, key := range []string{
+			"chunking_config", "image_processing_config", "embedding_model_id", "summary_model_id",
+			"storage_backend_id", "storage_provider_config", "storage_config", "extract_config",
+			"indexing_strategy", "vector_store_id", "vector_store_name", "vector_store_source",
+			"vector_store_engine_type", "vector_store_status",
+		} {
+			delete(copy, key)
+		}
+		for key := range copy {
+			if strings.HasPrefix(key, "vector_store_") {
+				delete(copy, key)
+			}
+		}
+		redactNestedKBInfrastructure(copy)
+		return copy
+	case []interface{}:
+		out := make([]interface{}, len(v))
+		for i := range v {
+			out[i] = redactKBInfrastructure(v[i])
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func redactNestedKBInfrastructure(value map[string]interface{}) {
+	if vlm, ok := value["vlm_config"].(map[string]interface{}); ok {
+		for _, key := range []string{"model_id", "model_name", "base_url", "api_key", "interface_type"} {
+			delete(vlm, key)
+		}
+	}
+	if asr, ok := value["asr_config"].(map[string]interface{}); ok {
+		delete(asr, "model_id")
+	}
+	if wiki, ok := value["wiki_config"].(map[string]interface{}); ok {
+		for _, key := range []string{
+			"model_id", "model_name", "base_url", "api_key", "interface_type",
+			"synthesis_model_id", "summary_model_id", "provider", "concurrency",
+			"max_concurrency", "worker_concurrency", "ingest_batch_size",
+			"ingest_map_parallel", "ingest_reduce_parallel", "ingest_max_inflight",
+		} {
+			delete(wiki, key)
+		}
+	}
 }
 
 // buildKBListResponse turns a slice of knowledge bases into a JSON-ready
@@ -166,9 +231,9 @@ func (h *KnowledgeBaseHandler) buildKBListResponse(
 // or duplicating the lookup logic — both larger than the security fix
 // warrants and easy to follow up on once needed.
 func sharedKBRow(
-	info *types.SharedKnowledgeBaseInfo, extras map[string]interface{},
+	ctx context.Context, info *types.SharedKnowledgeBaseInfo, extras map[string]interface{},
 ) map[string]interface{} {
-	kbView := buildKBResponse(info.KnowledgeBase, types.SharedStoreDisplay(), nil)
+	kbView := knowledgeBaseResponse(ctx, buildKBResponse(info.KnowledgeBase, types.SharedStoreDisplay(), nil))
 	row := map[string]interface{}{
 		"knowledge_base":   kbView,
 		"share_id":         info.ShareID,
@@ -337,6 +402,31 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 	})
 }
 
+func enterpriseKnowledgeBaseCreateProjection(req types.KnowledgeBase) types.KnowledgeBase {
+	chunking := req.ChunkingConfig
+	chunking.ParserEngineRules = nil
+
+	var wikiConfig *types.WikiConfig
+	if req.WikiConfig != nil {
+		wikiConfig = &types.WikiConfig{
+			MaxPagesPerIngest:      req.WikiConfig.MaxPagesPerIngest,
+			ExtractionGranularity:  req.WikiConfig.ExtractionGranularity,
+			ContentInstructions:    req.WikiConfig.ContentInstructions,
+			ExtractionInstructions: req.WikiConfig.ExtractionInstructions,
+		}
+	}
+
+	return types.KnowledgeBase{
+		Name:                     req.Name,
+		Description:              req.Description,
+		Type:                     req.Type,
+		ChunkingConfig:           chunking,
+		FAQConfig:                req.FAQConfig,
+		QuestionGenerationConfig: req.QuestionGenerationConfig,
+		WikiConfig:               wikiConfig,
+	}
+}
+
 // CreateKnowledgeBase godoc
 // @Summary      创建知识库
 // @Description  创建新的知识库
@@ -360,6 +450,9 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 		logger.Error(ctx, "Failed to parse request parameters", err)
 		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
+	}
+	if !types.IsSystemAdminFromContext(ctx) {
+		req = enterpriseKnowledgeBaseCreateProjection(req)
 	}
 	if err := validateExtractConfig(req.ExtractConfig); err != nil {
 		logger.Error(ctx, "Invalid extract configuration", err)
@@ -401,7 +494,7 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
-		"data":    buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), nil),
+		"data":    knowledgeBaseResponse(ctx, buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), nil)),
 	})
 }
 
@@ -411,114 +504,15 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 // For owned KBs, effectiveTenantID is the caller's tenant ID
 // For shared KBs, effectiveTenantID is the source tenant ID (owner's tenant)
 func (h *KnowledgeBaseHandler) validateAndGetKnowledgeBase(c *gin.Context) (*types.KnowledgeBase, string, uint64, types.OrgMemberRole, error) {
-	ctx := c.Request.Context()
-
-	// Get tenant ID from context
-	tenantID, exists := c.Get(types.TenantIDContextKey.String())
-	if !exists {
-		logger.Error(ctx, "Failed to get tenant ID")
-		return nil, "", 0, "", apperrors.NewUnauthorizedError("Unauthorized")
-	}
-
-	// Get user ID from context (needed for shared KB permission check)
-	userID, userExists := c.Get(types.UserIDContextKey.String())
-	callerTenantRole := types.TenantRoleFromContext(ctx)
-
-	// Get knowledge base ID from URL parameter
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
-		logger.Error(ctx, "Knowledge base ID is empty")
 		return nil, "", 0, "", apperrors.NewBadRequestError("Knowledge base ID cannot be empty")
 	}
-	if err := requireTenantAPIKeyKnowledgeBase(ctx, id); err != nil {
-		return nil, id, 0, "", err
+	access, ok := middleware.KBAccessFromContext(c)
+	if !ok || access == nil || access.KnowledgeBase == nil || access.KnowledgeBase.ID != id {
+		return nil, id, 0, "", apperrors.NewForbiddenError("Knowledge base access was not resolved")
 	}
-
-	// Verify tenant has permission to access this knowledge base
-	kb, err := h.service.GetKnowledgeBaseByID(ctx, id)
-	if err != nil {
-		// repo.GetKnowledgeBaseByID surfaces ErrKnowledgeBaseNotFound for
-		// missing or cross-tenant rows. Map it to 404 here so the four
-		// callers (Get / Update / Delete / TogglePin / Copy / Hybrid-search
-		// path) don't have to wrap NewInternalServerError into a 500 for
-		// every probe of a non-existent id.
-		if stderrors.Is(err, repository.ErrKnowledgeBaseNotFound) {
-			return nil, id, 0, "", apperrors.NewNotFoundError("knowledge base not found")
-		}
-		logger.ErrorWithFields(ctx, err, nil)
-		return nil, id, 0, "", apperrors.NewInternalServerError(err.Error())
-	}
-
-	// Check 1: Verify tenant ownership (owner has full access)
-	if kb.TenantID == tenantID.(uint64) {
-		return kb, id, tenantID.(uint64), types.OrgRoleAdmin, nil
-	}
-
-	// Check 2: If not owner, check organization shared access
-	if h.kbShareService != nil {
-		// Check if caller's tenant has shared access through organization
-		permission, isShared, permErr := h.kbShareService.CheckTenantKBPermission(ctx, id, tenantID.(uint64), callerTenantRole)
-		if permErr == nil && isShared {
-			// Tenant has shared access, get the source tenant ID for embedding queries
-			sourceTenantID, srcErr := h.kbShareService.GetKBSourceTenant(ctx, id)
-			if srcErr == nil {
-				logger.Infof(ctx, "Tenant %d accessing shared KB %s with permission %s, source tenant: %d",
-					tenantID.(uint64), id, permission, sourceTenantID)
-				return kb, id, sourceTenantID, permission, nil
-			}
-		}
-	}
-
-	// Check 3: Shared agent — allow if request has agent_id (and agent can access this KB) OR caller's tenant has any shared agent that can access this KB (e.g. opened from "通过智能体可见" list without agent_id)
-	if h.agentShareService != nil {
-		currentTenantID := tenantID.(uint64)
-		agentID := c.Query("agent_id")
-		if agentID != "" {
-			sourceTenantID, parseErr := types.ParseAgentSourceTenantID(c.Query(types.AgentSourceTenantIDParam))
-			if parseErr != nil {
-				return kb, id, 0, types.OrgMemberRole(""), apperrors.NewBadRequestError(parseErr.Error())
-			}
-			agent, err := h.agentShareService.GetSharedAgentForTenant(ctx, currentTenantID, callerTenantRole, agentID, sourceTenantID)
-			if err == nil && agent != nil {
-				if kb.TenantID != agent.TenantID {
-					logger.Warnf(ctx, "Shared agent workspace mismatch, KB %s tenant: %d, agent tenant: %d", id, kb.TenantID, agent.TenantID)
-				} else {
-					mode := agent.Config.KBSelectionMode
-					if mode == "none" {
-						// no-op, fall through
-					} else if mode == "all" {
-						logger.Infof(ctx, "Tenant %d accessing KB %s via shared agent %s (mode=all)", currentTenantID, id, agentID)
-						return kb, id, kb.TenantID, types.OrgRoleViewer, nil
-					} else if mode == "selected" {
-						for _, allowedID := range agent.Config.KnowledgeBases {
-							if allowedID == id {
-								logger.Infof(ctx, "Tenant %d accessing KB %s via shared agent %s (mode=selected)", currentTenantID, id, agentID)
-								return kb, id, kb.TenantID, types.OrgRoleViewer, nil
-							}
-						}
-					}
-				}
-			}
-		} else {
-			// No agent_id in query: allow if caller's tenant has any shared agent that can access this KB (e.g. from space list "通过智能体可见")
-			can, err := h.agentShareService.TenantCanAccessKBViaSomeSharedAgent(ctx, currentTenantID, callerTenantRole, kb)
-			if err == nil && can {
-				logger.Infof(ctx, "Tenant %d accessing KB %s via some shared agent (no agent_id in query)", currentTenantID, id)
-				return kb, id, kb.TenantID, types.OrgRoleViewer, nil
-			}
-		}
-	}
-	_ = userID
-	_ = userExists
-
-	// No permission: not owner and no shared access
-	logger.Warnf(
-		ctx,
-		"Tenant has no permission to access this knowledge base, knowledge base ID: %s, "+
-			"request tenant ID: %d, knowledge base tenant ID: %d",
-		id, tenantID.(uint64), kb.TenantID,
-	)
-	return nil, id, 0, "", apperrors.NewForbiddenError("No permission to operate")
+	return access.KnowledgeBase, id, access.EffectiveTenantID, access.Permission, nil
 }
 
 // GetKnowledgeBase godoc
@@ -553,7 +547,7 @@ func (h *KnowledgeBaseHandler) GetKnowledgeBase(c *gin.Context) {
 		// Include my_permission in data so frontend can show role (e.g. "只读") instead of "--" for agent-visible KBs
 		extras = map[string]interface{}{"my_permission": permission}
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": buildKBResponse(kb, storeView, extras)})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": knowledgeBaseResponse(c.Request.Context(), buildKBResponse(kb, storeView, extras))})
 }
 
 // ListKnowledgeBases godoc
@@ -612,50 +606,18 @@ func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 			c.Error(apperrors.NewInternalServerError(err.Error()))
 			return
 		}
-		if mode == "selected" && len(agent.Config.KnowledgeBases) > 0 {
-			allowed := make(map[string]bool)
-			for _, id := range agent.Config.KnowledgeBases {
-				allowed[id] = true
+		filtered := make([]*types.KnowledgeBase, 0, len(kbs))
+		for _, kb := range kbs {
+			if tools.SharedAgentAllowsKnowledgeBase(agent, kb) {
+				filtered = append(filtered, kb)
 			}
-			filtered := make([]*types.KnowledgeBase, 0, len(kbs))
-			for _, kb := range kbs {
-				if allowed[kb.ID] {
-					filtered = append(filtered, kb)
-				}
-			}
-			kbs = filtered
 		}
+		kbs = filtered
 		kbs = filterKnowledgeBasesForAPIKeyScope(ctx, kbs)
-
-		// `all` mode: authoritative server-side capability filter so a client
-		// that bypassed the frontend (old tab, curl, rogue plugin) can't @ a
-		// KB whose capabilities don't match this agent. The filter combines
-		// tool-derived requirements (smart-reasoning) with the implicit
-		// RAG-only requirement of quick-answer mode (which has no
-		// `allowed_tools` but still needs vector/keyword chunks to work).
-		// Non-`all` modes already constrain the scope explicitly.
-		if mode == "all" {
-			filter := tools.DeriveKBFilterForAgent(agent.Config.AgentMode, agent.Config.AllowedTools)
-			if !filter.IsEmpty() {
-				before := len(kbs)
-				kept := make([]*types.KnowledgeBase, 0, before)
-				for _, kb := range kbs {
-					if tools.KBSatisfiesAgentRequirements(kb.Capabilities(), agent.Config.AgentMode, agent.Config.AllowedTools) {
-						kept = append(kept, kb)
-					}
-				}
-				if removed := before - len(kept); removed > 0 {
-					logger.Infof(ctx,
-						"ListKnowledgeBases(agent=%s, mode=all): capability filter removed %d of %d KBs",
-						agentID, removed, before)
-				}
-				kbs = kept
-			}
-		}
 
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
-			"data":    h.buildKBListResponse(ctx, kbs, currentTenantID),
+			"data":    knowledgeBaseResponse(ctx, h.buildKBListResponse(ctx, kbs, currentTenantID)),
 		})
 		return
 	}
@@ -722,7 +684,7 @@ func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    h.buildKBListResponse(ctx, kbs, callerTenantID),
+		"data":    knowledgeBaseResponse(ctx, h.buildKBListResponse(ctx, kbs, callerTenantID)),
 	})
 }
 
@@ -824,7 +786,7 @@ func (h *KnowledgeBaseHandler) TogglePinKnowledgeBase(c *gin.Context) {
 	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), nil),
+		"data":    knowledgeBaseResponse(ctx, buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), nil)),
 	})
 }
 
@@ -872,7 +834,12 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
-	if req.Config != nil {
+	if req.Config != nil && !types.IsSystemAdminFromContext(ctx) {
+		// Workspace users maintain business content behavior only. Model,
+		// parser, indexing, Wiki extraction, and image runtime stay platform-owned.
+		req.Config = &types.KnowledgeBaseConfig{FAQConfig: req.Config.FAQConfig}
+	}
+	if req.Config != nil && types.IsSystemAdminFromContext(ctx) {
 		probe := &types.KnowledgeBase{
 			ChunkingConfig:        req.Config.ChunkingConfig,
 			ImageProcessingConfig: req.Config.ImageProcessingConfig,
@@ -900,7 +867,7 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), nil),
+		"data":    knowledgeBaseResponse(ctx, buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), nil)),
 	})
 }
 
@@ -1209,10 +1176,11 @@ func (h *KnowledgeBaseHandler) DuplicateKnowledgeBase(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
 		"data": DuplicateKnowledgeBaseResponse{
-			SourceID:      sourceID,
-			TargetID:      targetKB.ID,
-			Message:       "Knowledge base duplicate created",
-			KnowledgeBase: buildKBResponse(targetKB, h.resolveKBStoreView(ctx, targetKB, callerTenantID), nil),
+			SourceID: sourceID,
+			TargetID: targetKB.ID,
+			Message:  "Knowledge base duplicate created",
+			KnowledgeBase: knowledgeBaseResponse(ctx,
+				buildKBResponse(targetKB, h.resolveKBStoreView(ctx, targetKB, callerTenantID), nil)),
 		},
 	})
 }
@@ -1401,6 +1369,6 @@ func (h *KnowledgeBaseHandler) ListMoveTargets(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    targets,
+		"data":    knowledgeBaseResponse(ctx, h.buildKBListResponse(ctx, targets, tenantID.(uint64))),
 	})
 }

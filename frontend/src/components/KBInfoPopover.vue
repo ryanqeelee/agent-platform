@@ -123,7 +123,7 @@
             </div>
           </section>
           <section
-            v-if="kbInfo.vector_store_source || kbInfo.storage_provider_config?.provider"
+            v-if="canViewInfrastructure && (kbInfo.vector_store_source || kbInfo.storage_provider_config?.provider)"
             class="setting-drawer__section"
           >
             <h4 class="setting-drawer__section-title">
@@ -188,18 +188,7 @@ const { t } = useI18n()
 const orgStore = useOrganizationStore()
 const authStore = useAuthStore()
 
-// "Owner" here mirrors the per-page guards: the original creator
-// (creator_id) — not "in my tenant". creator_id is unset for legacy
-// KBs created before that gate existed; those fall through to the
-// role/share check.
-const isOwner = computed<boolean>(() => {
-  const kb = props.kbInfo
-  if (!kb) return false
-  const creatorId = kb.creator_id || ''
-  const userId = authStore.user?.id || ''
-  if (!creatorId) return false
-  return creatorId === userId
-})
+const canViewInfrastructure = computed(() => authStore.isSystemAdmin)
 
 const currentSharedKb = computed(() => {
   const id = props.kbInfo?.id
@@ -215,14 +204,16 @@ const effectiveKBPermission = computed<string>(() => {
 })
 
 const accessRoleLabel = computed<string>(() => {
-  if (!isViaShare.value && isOwner.value) return t('knowledgeBase.accessInfo.roleOwner')
+  if (!isViaShare.value && authStore.hasRole('owner')) return t('knowledgeBase.accessInfo.roleOwner')
+  if (!isViaShare.value && authStore.hasRole('admin')) return t('organization.role.admin')
   const perm = effectiveKBPermission.value
   if (perm) return t(`organization.role.${perm}`)
   return '--'
 })
 
 const accessPermissionSummary = computed<string>(() => {
-  if (!isViaShare.value && isOwner.value) return t('knowledgeBase.accessInfo.permissionOwner')
+  if (!isViaShare.value && authStore.hasRole('owner')) return t('knowledgeBase.accessInfo.permissionOwner')
+  if (!isViaShare.value && authStore.hasRole('admin')) return t('knowledgeBase.accessInfo.permissionAdmin')
   const perm = effectiveKBPermission.value
   if (perm === 'admin') return t('knowledgeBase.accessInfo.permissionAdmin')
   if (perm === 'editor') return t('knowledgeBase.accessInfo.permissionEditor')
@@ -232,7 +223,8 @@ const accessPermissionSummary = computed<string>(() => {
 
 type RoleTheme = 'success' | 'primary' | 'warning' | 'default'
 const roleTagTheme = computed<RoleTheme>(() => {
-  if (!isViaShare.value && isOwner.value) return 'success'
+  if (!isViaShare.value && authStore.hasRole('owner')) return 'success'
+  if (!isViaShare.value && authStore.hasRole('admin')) return 'primary'
   const perm = effectiveKBPermission.value
   if (perm === 'admin') return 'primary'
   if (perm === 'editor') return 'warning'

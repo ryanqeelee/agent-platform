@@ -3193,7 +3193,7 @@ definitions:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SessionLastRequestState'
         description: |-
           LastRequestState records the input-bar state used the last time this
-          session sent a question (agent, model, KB scope, web search, MCPs).
+          session sent a question (Agent, knowledge scope, web search, MCPs).
           Persisted on every successful POST to /knowledge-chat or /agent-chat so
           that reopening the session can restore the original request context to
           the chat UI. Stored in the legacy sessions.agent_config JSONB column to
@@ -3237,8 +3237,6 @@ definitions:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MentionedItem'
         type: array
-      model_id:
-        type: string
       skill_names:
         items:
           type: string

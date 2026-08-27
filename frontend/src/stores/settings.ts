@@ -518,10 +518,6 @@ export const useSettingsStore = defineStore("settings", {
           // 与 selectAgent() 不同，这里**不**重置 KB/文件选择 —— 因为我们紧接着
           // 就要用 state 里的 KB/文件覆盖，不需要先清空再写。
         }
-        if (state.model_id !== undefined) {
-          const current = this.settings.conversationModels || defaultSettings.conversationModels;
-          this.settings.conversationModels = { ...current, selectedChatModelId: state.model_id || "" };
-        }
         if (Array.isArray(state.knowledge_base_ids)) {
           this.settings.selectedKnowledgeBases = [...state.knowledge_base_ids];
         }
@@ -585,7 +581,6 @@ export const useSettingsStore = defineStore("settings", {
 export interface SessionLastRequestStatePayload {
   agent_id?: string;
   agent_enabled?: boolean;
-  model_id?: string;
   knowledge_base_ids?: string[];
   knowledge_ids?: string[];
   tag_ids?: string[];

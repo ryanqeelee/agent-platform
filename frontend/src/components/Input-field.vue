@@ -692,7 +692,7 @@ const modelsLoading = ref(false);
 const showModelSelector = ref(false);
 const modelButtonRef = ref<HTMLElement>();
 const modelDropdownStyle = ref<Record<string, string>>({});
-const canSelectChatModel = computed(() => authStore.hasRole('contributor'));
+const canSelectChatModel = computed(() => authStore.isSystemAdmin);
 
 // 显示的知识库标签（最多显示2个）
 const displayedKbs = computed(() => selectedKbs.value.slice(0, 2));
@@ -1770,14 +1770,17 @@ onMounted(() => {
   if (props.embeddedMode) return;
 
   // 并行拉取；若 platform 已预取且缓存未过期则直接复用
-  initChatModelSelection();
-  void Promise.all([
+  const resources = [
     loadKnowledgeBases(),
     loadWebSearchConfig(),
-    loadChatModels(),
     loadAgents(),
     loadMCPServices(),
-  ]);
+  ];
+  if (canSelectChatModel.value) {
+    initChatModelSelection();
+    resources.push(loadChatModels());
+  }
+  void Promise.all(resources);
   window.addEventListener(CHAT_FILE_DROP_EVENT, handleChatFileDrop as EventListener);
 
   // 从持久化恢复 fileId -> kbId，刷新后共享知识库文件可带 kb_id 拉取（仅保留当前仍选中的文件）
@@ -1856,7 +1859,7 @@ watch(() => route.params.kbId, (newKbId) => {
 watch(() => uiStore.showSettingsModal, (visible, prevVisible) => {
   if (prevVisible && !visible) {
     loadWebSearchConfig(true);
-    loadChatModels(true);
+    if (canSelectChatModel.value) loadChatModels(true);
   }
 });
 
@@ -1917,7 +1920,7 @@ const createSession = async (val: string) => {
     return;
   }
 
-  if (!chatResources.isFresh('models')) {
+  if (canSelectChatModel.value && !chatResources.isFresh('models')) {
     await loadChatModels()
   }
 
@@ -2087,7 +2090,7 @@ const toggleAgentModeSelector = () => {
 }
 
 const selectAgentMode = async (mode: 'quick-answer' | 'smart-reasoning') => {
-  if (!chatResources.isFresh('models')) {
+  if (canSelectChatModel.value && !chatResources.isFresh('models')) {
     await loadChatModels()
   }
 
@@ -2127,7 +2130,7 @@ const handleAgentNotReady = (
 };
 
 const handleSelectAgent = async (agent: CustomAgent, sourceTenantId?: string) => {
-  if (!chatResources.isFresh('models')) {
+  if (canSelectChatModel.value && !chatResources.isFresh('models')) {
     await loadChatModels()
   }
 
@@ -2334,6 +2337,7 @@ const collectAgentNotReadyReasons = (
   const keys = getAgentNotReadyReasonKeys(agent.config, allModels.value, {
     isAgentMode,
     isSharedAgent,
+    platformManagedModels: !authStore.isSystemAdmin,
   });
   return {
     keys,

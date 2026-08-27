@@ -345,6 +345,13 @@
                   {{ $t('tenantMember.status.' + row.status) }}
                 </t-tag>
               </template>
+              <template #businessRoles="{ row }">
+                <t-select v-if="canManageBusinessRoles" :model-value="row.business_role_ids || []" multiple clearable size="small"
+                  :placeholder="$t('tenantMember.businessRoles.none')" @change="(value: string[]) => saveBusinessRoles(row, value)">
+                  <t-option v-for="role in businessRoles" :key="role.id" :value="role.id" :label="role.name" :disabled="!role.enabled && !(row.business_role_ids || []).includes(role.id)" />
+                </t-select>
+                <span v-else>{{ memberBusinessRoleNames(row).join('、') || $t('tenantMember.businessRoles.none') }}</span>
+              </template>
               <template #joined_at="{ row }">{{ formatDate(row.joined_at) }}</template>
               <template #actions="{ row }">
                 <t-popconfirm
@@ -551,6 +558,7 @@ import {
   type AuditAction,
   type AuditOutcome,
 } from '@/api/tenant/audit-log'
+import { listBusinessRoles, updateMemberBusinessRoles, type BusinessRole } from '@/api/business-role'
 
 const { t, tm, locale } = useI18n()
 const authStore = useAuthStore()
@@ -567,6 +575,7 @@ const permissionsPopupInnerStyle = {
 
 // State
 const members = ref<TenantMember[]>([])
+const businessRoles = ref<BusinessRole[]>([])
 const loading = ref(false)
 const error = ref('')
 const adding = ref(false)
@@ -670,6 +679,7 @@ const canViewAudit = computed(
     currentRole.value === 'admin' ||
     effectivePlatformOperator.value,
 )
+const canManageBusinessRoles = computed(() => currentRole.value === 'owner' || currentRole.value === 'admin' || effectivePlatformOperator.value)
 const currentUserId = computed(() => authStore.user?.id ?? '')
 
 // Use the active tenant id from the auth store; the route only allows
@@ -745,9 +755,26 @@ const columns = computed(() => [
   { colKey: 'member', title: t('tenantMember.columns.member'), ellipsis: true, minWidth: 132 },
   { colKey: 'role', title: t('tenantMember.columns.role'), width: 128 },
   { colKey: 'status', title: t('tenantMember.columns.status'), width: 88 },
+  { colKey: 'businessRoles', title: t('tenantMember.businessRoles.title'), minWidth: 180 },
   { colKey: 'joined_at', title: t('tenantMember.columns.joinedAt'), width: 154 },
   { colKey: 'actions', title: t('tenantMember.columns.operations'), width: 88, align: 'left' },
 ])
+
+function memberBusinessRoleNames(row: TenantMember): string[] {
+  const selected = new Set(row.business_role_ids || [])
+  return businessRoles.value.filter((role) => selected.has(role.id)).map((role) => role.name)
+}
+
+async function saveBusinessRoles(row: TenantMember, roleIDs: string[]) {
+  if (!activeTenantId.value) return
+  try {
+    await updateMemberBusinessRoles(activeTenantId.value, row.user_id, roleIDs)
+    row.business_role_ids = roleIDs
+    MessagePlugin.success(t('tenantMember.businessRoles.saved'))
+  } catch {
+    MessagePlugin.error(t('tenantMember.businessRoles.saveFailed'))
+  }
+}
 
 function canManageMember(row: TenantMember): boolean {
   return (
@@ -849,11 +876,12 @@ async function loadMembers() {
   loading.value = true
   error.value = ''
   try {
-    const resp = await listMembers(activeTenantId.value, {
+    const [resp, rolesResponse] = await Promise.all([listMembers(activeTenantId.value, {
       page: membersPage.value,
       page_size: membersPageSize.value,
       q: memberSearchQ.value || undefined,
-    })
+    }), canManageBusinessRoles.value ? listBusinessRoles() : Promise.resolve(undefined)])
+    businessRoles.value = rolesResponse?.data || []
     if (resp.success && resp.data) {
       const total = resp.data.total ?? 0
       const ps = resp.data.page_size ?? membersPageSize.value

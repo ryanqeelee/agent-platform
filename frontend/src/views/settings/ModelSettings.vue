@@ -7,7 +7,7 @@
           <p class="section-description">{{ $t('modelSettings.description') }}</p>
         </div>
         <t-button
-          v-if="authStore.hasRole('admin')"
+          v-if="authStore.isSystemAdmin"
           type="button"
           theme="primary"
           variant="text"
@@ -46,7 +46,7 @@
     </t-tabs>
 
     <t-loading :loading="loading" size="small" class="model-list-loading">
-      <div v-if="!loading && filteredModels.length === 0 && !authStore.hasRole('admin')" class="empty-state">
+      <div v-if="!loading && filteredModels.length === 0 && !authStore.isSystemAdmin" class="empty-state">
         <t-empty :description="emptyHint" />
       </div>
       <div v-else-if="!loading" class="model-grid">
@@ -118,7 +118,7 @@
           </div>
         </div>
         <button
-          v-if="authStore.hasRole('admin')"
+          v-if="authStore.isSystemAdmin"
           type="button"
           class="model-card model-card--add"
           data-guide="settings-add-model"
@@ -315,10 +315,8 @@ const openAddDialog = () => {
   showDialog.value = true
 }
 
-// Tenant Admin+ manages tenant models; only SystemAdmin manages shared
-// built-in models. The backend repeats this distinction authoritatively.
-const canEditModel = (model: any) =>
-  model.isBuiltin ? authStore.isSystemAdmin : authStore.hasRole('admin')
+// Concrete model configuration belongs to the platform control plane.
+const canEditModel = (_model: any) => authStore.isSystemAdmin
 
 const isModelCardClickable = (model: any) => canEditModel(model)
 
@@ -327,7 +325,7 @@ const canManageModel = (model: any) => canEditModel(model)
 // Built-in lifecycle remains deployment-managed (YAML / SQL). The UI only
 // exposes configuration and credential editing to SystemAdmin.
 const canDeleteModel = (model: any) =>
-  authStore.hasRole('admin') && !model.isBuiltin
+  authStore.isSystemAdmin && !model.isBuiltin
 
 const onModelCardClick = (event: Event, type: ModelType, model: any) => {
   if (!isModelCardClickable(model)) return
@@ -347,7 +345,7 @@ const editModel = (type: ModelType, model: any) => {
     MessagePlugin.warning(t('modelSettings.toasts.builtinCannotEdit'))
     return
   }
-  if (!model.isBuiltin && !authStore.hasRole('admin')) {
+  if (!model.isBuiltin && !authStore.isSystemAdmin) {
     return
   }
   currentModelType.value = type
@@ -513,11 +511,7 @@ const getModelOptions = (type: ModelType, model: any) => {
     return options
   }
 
-  // Models are tenant-wide infrastructure (LLM credentials); the
-  // backend gates every mutation behind Admin+ (see RegisterModelRoutes).
-  // Non-Admins get an empty action menu — viewing is fine, but editing,
-  // copying (also goes through createModel), and deleting are not.
-  if (!authStore.hasRole('admin')) {
+  if (!authStore.isSystemAdmin) {
     return options
   }
 

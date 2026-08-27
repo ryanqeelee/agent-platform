@@ -91,7 +91,7 @@ type Session struct {
 	PinnedAt *time.Time `json:"pinned_at,omitempty"`
 
 	// LastRequestState records the input-bar state used the last time this
-	// session sent a question (agent, model, KB scope, web search, MCPs).
+	// session sent a question (Agent, knowledge scope, web search, MCPs).
 	// Persisted on every successful POST to /knowledge-chat or /agent-chat so
 	// that reopening the session can restore the original request context to
 	// the chat UI. Stored in the legacy sessions.agent_config JSONB column to
@@ -239,12 +239,11 @@ func (c *SummaryConfig) Scan(value interface{}) error {
 // SessionLastRequestState captures the user-facing input-bar state at the
 // time of the most recent QA request on a session. It is purely a UI memory
 // aid — none of the fields here drive backend behaviour. They are echoed back
-// to the frontend by GetSession so the chat input can restore the same agent,
-// model, KB scope, etc. the user had selected last time.
+// to the frontend by GetSession so the chat input can restore the same Agent,
+// knowledge scope and tools without exposing platform model bindings.
 type SessionLastRequestState struct {
 	AgentID          string         `json:"agent_id,omitempty"`
 	AgentEnabled     bool           `json:"agent_enabled"`
-	ModelID          string         `json:"model_id,omitempty"`
 	KnowledgeBaseIDs []string       `json:"knowledge_base_ids,omitempty"`
 	KnowledgeIDs     []string       `json:"knowledge_ids,omitempty"`
 	TagIDs           []string       `json:"tag_ids,omitempty"`

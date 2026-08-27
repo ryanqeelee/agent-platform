@@ -48,6 +48,7 @@ type knowledgeBaseService struct {
 	syncLogRepo     interfaces.SyncLogRepository
 	dsScheduler     *datasource.Scheduler
 	audit           interfaces.AuditLogService
+	governance      interfaces.KnowledgeGovernanceService
 }
 
 // NewKnowledgeBaseService creates a new knowledge base service
@@ -70,6 +71,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	syncLogRepo interfaces.SyncLogRepository,
 	dsScheduler *datasource.Scheduler,
 	audit interfaces.AuditLogService,
+	governance interfaces.KnowledgeGovernanceService,
 ) interfaces.KnowledgeBaseService {
 	return &knowledgeBaseService{
 		repo:            repo,
@@ -91,6 +93,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 		syncLogRepo:     syncLogRepo,
 		dsScheduler:     dsScheduler,
 		audit:           audit,
+		governance:      governance,
 	}
 }
 
@@ -120,18 +123,18 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	kb.CreatedAt = time.Now()
 	kb.TenantID = types.MustTenantIDFromContext(ctx)
 	kb.UpdatedAt = time.Now()
-	// Record the creator so RBAC's RequireOwnershipOrRole can let
-	// Contributors edit their own KBs without granting them tenant-wide
-	// edit rights. The X-API-Key auth path attaches a synthetic
-	// `system-<tenantID>` user; we deliberately skip those so the KB
-	// stays tenant-owned (CreatorID == ""), which matches the original
-	// API-key semantics (any human Admin can manage it) and prevents a
-	// later "list KBs by creator" feature from surfacing rows nobody can
-	// re-attribute.
+	// Record the creator for display and audit. Knowledge maintenance authority
+	// comes from the current role and access policy, not creator identity.
 	if uid, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(uid) {
 		kb.CreatorID = uid
 	}
 	kb.EnsureDefaults()
+	_, authenticatedPrincipal := types.UserIDFromContext(ctx)
+	if authenticatedPrincipal && !types.IsSystemAdminFromContext(ctx) {
+		if err := s.applyPlatformModelDefaults(ctx, kb); err != nil {
+			return nil, err
+		}
+	}
 	applyTenantDefaultStorageProvider(ctx, kb)
 	if err := s.applyAndValidateStorageBackend(ctx, kb); err != nil {
 		return nil, err
@@ -169,6 +172,48 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 
 	logger.Infof(ctx, "Knowledge base created successfully, ID: %s, name: %s", kb.ID, kb.Name)
 	return kb, nil
+}
+
+func (s *knowledgeBaseService) applyPlatformModelDefaults(ctx context.Context, kb *types.KnowledgeBase) error {
+	models, err := s.modelService.ListModels(ctx)
+	if err != nil {
+		return apperrors.NewServiceUnavailableError("知识能力暂不可用，请联系平台管理员")
+	}
+	kb.SummaryModelID = activePlatformModelID(models, types.ModelTypeKnowledgeQA)
+	if kb.SummaryModelID == "" {
+		return apperrors.NewServiceUnavailableError("知识能力暂不可用，请联系平台管理员")
+	}
+	if kb.IsVectorEnabled() || kb.IsKeywordEnabled() {
+		kb.EmbeddingModelID = activePlatformModelID(models, types.ModelTypeEmbedding)
+		if kb.EmbeddingModelID == "" {
+			return apperrors.NewServiceUnavailableError("知识能力暂不可用，请联系平台管理员")
+		}
+	}
+	if kb.WikiConfig != nil {
+		kb.WikiConfig.SynthesisModelID = kb.SummaryModelID
+	}
+	kb.VLMConfig = types.VLMConfig{}
+	kb.ASRConfig = types.ASRConfig{}
+	kb.VectorStoreID = nil
+	kb.StorageBackendID = nil
+	kb.StorageProviderConfig = nil
+	kb.StorageConfig = types.StorageConfig{}
+	kb.ChunkingConfig.ParserEngineRules = nil
+	return nil
+}
+
+func activePlatformModelID(models []*types.Model, modelType types.ModelType) string {
+	for _, model := range models {
+		if model != nil && model.Type == modelType && model.Status == types.ModelStatusActive && model.IsDefault {
+			return model.ID
+		}
+	}
+	for _, model := range models {
+		if model != nil && model.Type == modelType && model.Status == types.ModelStatusActive {
+			return model.ID
+		}
+	}
+	return ""
 }
 
 func (s *knowledgeBaseService) applyAndValidateStorageBackend(ctx context.Context, kb *types.KnowledgeBase) error {
@@ -301,7 +346,39 @@ func (s *knowledgeBaseService) GetKnowledgeBaseByID(ctx context.Context, id stri
 	}
 
 	kb.EnsureDefaults()
+	if err := s.authorizeOwnKnowledgeBase(ctx, kb); err != nil {
+		return nil, err
+	}
 	return kb, nil
+}
+
+// authorizeOwnKnowledgeBase applies the employee-facing business-role policy
+// only to an in-tenant human request. Cross-tenant share resolution and
+// system/repository paths keep their existing explicit authority boundaries.
+func (s *knowledgeBaseService) authorizeOwnKnowledgeBase(ctx context.Context, kb *types.KnowledgeBase) error {
+	if s.governance == nil || kb == nil {
+		return nil
+	}
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok || tenantID == 0 || kb.TenantID != tenantID {
+		return nil
+	}
+	// RequireKBAccess records this exact marker only after it has authorized a
+	// cross-tenant share (or shared-agent read) and rewritten the request to
+	// the source tenant. A direct source-tenant context has no marker and must
+	// still pass ordinary membership/governance checks.
+	if types.HasAuthorizedSharedKnowledgeBase(ctx, tenantID, kb.ID) {
+		return nil
+	}
+	userID, _ := types.UserIDFromContext(ctx)
+	okAccess, err := s.governance.CanAccessKnowledgeBase(ctx, tenantID, userID, types.TenantRoleFromContext(ctx), kb.ID)
+	if err != nil {
+		return err
+	}
+	if !okAccess {
+		return apperrors.NewNotFoundError("knowledge base not found")
+	}
+	return nil
 }
 
 // GetKnowledgeBaseByIDOnly retrieves knowledge base by ID without tenant filter
@@ -355,6 +432,13 @@ func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types
 			"tenant_id": tenantID,
 		})
 		return nil, err
+	}
+	if s.governance != nil {
+		userID, _ := types.UserIDFromContext(ctx)
+		kbs, err = s.governance.FilterKnowledgeBases(ctx, tenantID, userID, types.TenantRoleFromContext(ctx), kbs)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Query knowledge count and chunk count for each knowledge base
@@ -413,6 +497,13 @@ func (s *knowledgeBaseService) ListKnowledgeBasesByTenantID(ctx context.Context,
 			"tenant_id": tenantID,
 		})
 		return nil, err
+	}
+	if currentTenantID, ok := types.TenantIDFromContext(ctx); ok && currentTenantID == tenantID && s.governance != nil {
+		userID, _ := types.UserIDFromContext(ctx)
+		kbs, err = s.governance.FilterKnowledgeBases(ctx, tenantID, userID, types.TenantRoleFromContext(ctx), kbs)
+		if err != nil {
+			return nil, err
+		}
 	}
 	for _, kb := range kbs {
 		kb.EnsureDefaults()
@@ -527,7 +618,11 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 			kb.FAQConfig = config.FAQConfig
 		}
 		if config.WikiConfig != nil {
-			kb.WikiConfig = config.WikiConfig
+			wikiConfig := *config.WikiConfig
+			if !types.IsSystemAdminFromContext(ctx) && kb.WikiConfig != nil {
+				wikiConfig.SynthesisModelID = kb.WikiConfig.SynthesisModelID
+			}
+			kb.WikiConfig = &wikiConfig
 		}
 		// Update indexing strategy — syncs to ExtractConfig for backward compat
 		if config.IndexingStrategy != nil {
@@ -567,18 +662,10 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 	return kb, nil
 }
 
-// TogglePinKnowledgeBase toggles whether the calling user has pinned
-// this knowledge base. Pin state is per-(user, kb) as of migration
-// 000050; previously this method flipped a tenant-wide column on the
-// KB row which broke down under RBAC (only Admin/creator could pin,
-// and the pin reordered the list for everyone in the tenant). The
-// public signature is unchanged so the HTTP handler / CLI / SDK don't
-// move.
+// TogglePinKnowledgeBase toggles the calling user's per-knowledge-base pin.
 //
-// The KB still has to belong to the caller's tenant — the route is
-// already gated behind KBAccessRead, but we re-check via
-// GetKnowledgeBaseByIDAndTenant so a stale param survives a tenant
-// switch cleanly.
+// The route's KBAccessRead guard authorizes access; the service scopes the
+// lookup to the active tenant before changing the user's pin.
 func (s *knowledgeBaseService) TogglePinKnowledgeBase(
 	ctx context.Context, id string,
 ) (*types.KnowledgeBase, error) {
@@ -1182,10 +1269,8 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 			FAQConfig:             faqConfig,
 			VectorStoreID:         sourceKB.VectorStoreID,
 		}
-		// The clone is owned by the caller, not the original creator —
-		// otherwise a Contributor copying someone else's KB would still
-		// not be able to edit the result. Skip synthetic API-key users
-		// (see CreateKnowledgeBase for the same reasoning).
+		// Record the caller as creator metadata. Synthetic API-key users do not
+		// represent a human creator.
 		if uid, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(uid) {
 			targetKB.CreatorID = uid
 		}

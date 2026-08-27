@@ -28,7 +28,7 @@ const (
 	// actor and target are the same user.
 	AuditActionMemberLeft AuditAction = "rbac.member_left"
 	// AuditActionAccessDenied fires when middleware/rbac.go's
-	// RequireRole or RequireOwnershipOrRole rejects a request under
+	// RequireRole rejects a request under
 	// EnableRBAC=true. Subject to 1-minute sliding-window dedup so a
 	// probing client cannot fill the table.
 	AuditActionAccessDenied AuditAction = "rbac.access_denied"
@@ -52,6 +52,12 @@ const (
 	// AuditActionInvitationExpired fires when the lazy sweep transitions
 	// an overdue pending row to expired. Actor is empty (system).
 	AuditActionInvitationExpired AuditAction = "rbac.invitation_expired"
+
+	// Knowledge access governance is separate from tenant lifecycle roles.
+	AuditActionKnowledgeRoleCreated        AuditAction = "knowledge_role.created"
+	AuditActionKnowledgeRoleUpdated        AuditAction = "knowledge_role.updated"
+	AuditActionKnowledgeRoleMemberAssigned AuditAction = "knowledge_role.member_assigned"
+	AuditActionKnowledgeAccessUpdated      AuditAction = "knowledge_access.updated"
 
 	// VectorStore lifecycle actions. Emitted by VectorStoreService.
 	// Cover both env-store-derived (__env_*) and DB store create /

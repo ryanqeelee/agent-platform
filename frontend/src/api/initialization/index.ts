@@ -79,6 +79,10 @@ export interface InitializationConfig {
         tokenLimit?: number;
         // Language hints for heuristic patterns ("de", "en", "zh"). Empty = auto-detect.
         languages?: string[];
+		enableParentChild?: boolean;
+		parentChunkSize?: number;
+		childChunkSize?: number;
+		tableMetadataInstructions?: string;
     };
     // Frontend-only hint for storage selection UI
     storageType?: 'cos' | 'minio';

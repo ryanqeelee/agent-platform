@@ -48,15 +48,15 @@ export function getAgentNotReadyReasonKeys(
     'model_id' | 'rerank_model_id' | 'kb_selection_mode' | 'allowed_tools' | 'agent_mode'
   > | undefined,
   models: Pick<ModelConfig, 'id' | 'type'>[],
-  options: { isAgentMode: boolean; isSharedAgent: boolean },
+  options: { isAgentMode: boolean; isSharedAgent: boolean; platformManagedModels?: boolean },
 ): AgentNotReadyReasonKey[] {
   const reasons: AgentNotReadyReasonKey[] = []
 
-  if (!agentHasConfiguredChatModel(config, models, options.isSharedAgent)) {
+  if (!options.platformManagedModels && !agentHasConfiguredChatModel(config, models, options.isSharedAgent)) {
     reasons.push('summary_model')
   }
 
-  if (options.isAgentMode && agentRequiresRerankModel(config)) {
+  if (!options.platformManagedModels && options.isAgentMode && agentRequiresRerankModel(config)) {
     const rerankModelID = config?.rerank_model_id?.trim()
     const rerankExists = !!rerankModelID && (
       options.isSharedAgent

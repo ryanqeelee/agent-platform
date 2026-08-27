@@ -511,7 +511,6 @@ func buildIMLastRequestState(agentID string, customAgent *types.CustomAgent, kbI
 		state.AgentID = customAgent.ID
 	}
 	state.AgentEnabled = customAgent.IsAgentMode()
-	state.ModelID = customAgent.Config.ModelID
 	state.WebSearchEnabled = customAgent.Config.WebSearchEnabled
 	if len(state.KnowledgeBaseIDs) == 0 && len(customAgent.Config.KnowledgeBases) > 0 {
 		state.KnowledgeBaseIDs = append([]string(nil), customAgent.Config.KnowledgeBases...)

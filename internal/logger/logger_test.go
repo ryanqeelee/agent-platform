@@ -212,3 +212,18 @@ func TestCloneContextPreservesTenantAPIKeyScope(t *testing.T) {
 		t.Fatalf("cloned scope = %#v, want key_id=7 scoped to kb-1", got)
 	}
 }
+
+func TestCloneContextPreservesPrivateAuthorizationProvenance(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.UserIDContextKey, "human-1")
+	ctx = types.WithAuthorizedSharedKnowledgeBase(ctx, 10, 20, "kb-1", types.OrgRoleViewer)
+	ctx = types.WithAuthorizedSharedAgentExecution(ctx, 10, 20, "agent-1")
+
+	cloned := CloneContext(ctx)
+	if !types.HasAuthorizedSharedKnowledgeBase(cloned, 20, "kb-1") {
+		t.Fatal("shared knowledge provenance was lost while cloning context")
+	}
+	caller, source, agentID, ok := types.AuthorizedSharedAgentExecutionFromContext(cloned)
+	if !ok || caller != 10 || source != 20 || agentID != "agent-1" {
+		t.Fatalf("shared agent provenance = (%d, %d, %q, %v), want (10, 20, agent-1, true)", caller, source, agentID, ok)
+	}
+}

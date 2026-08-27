@@ -45,7 +45,7 @@ func NewWikiPageHandler(
 func (h *WikiPageHandler) validateWikiKB(c *gin.Context) (string, uint64, error) {
 	ctx := c.Request.Context()
 	kbID := secutils.SanitizeForLog(c.Param("kb_id"))
-	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	tenantID, _ := types.TenantIDFromContext(ctx)
 
 	if kbID == "" {
 		return "", 0, errors.NewBadRequestError("Knowledge base ID is required")
@@ -59,6 +59,9 @@ func (h *WikiPageHandler) validateWikiKB(c *gin.Context) (string, uint64, error)
 
 	if !kb.IsWikiEnabled() {
 		return "", 0, errors.NewBadRequestError("Wiki feature is not enabled for this knowledge base")
+	}
+	if tenantID == 0 || kb.TenantID != tenantID {
+		return "", 0, errors.NewForbiddenError("Knowledge base workspace mismatch")
 	}
 
 	return kbID, tenantID, nil

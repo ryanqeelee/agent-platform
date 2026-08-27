@@ -33,6 +33,18 @@ type stubMemberService struct {
 	remove          func(ctx context.Context, userID string, tenantID uint64) error
 }
 
+type stubMemberGovernanceService struct {
+	interfaces.KnowledgeGovernanceService
+	listMemberRoleIDs func(context.Context, uint64, string) ([]string, error)
+}
+
+func (s stubMemberGovernanceService) ListMemberBusinessRoleIDs(ctx context.Context, tenantID uint64, userID string) ([]string, error) {
+	if s.listMemberRoleIDs != nil {
+		return s.listMemberRoleIDs(ctx, tenantID, userID)
+	}
+	return nil, nil
+}
+
 func (s *stubMemberService) ListMembersPage(
 	ctx context.Context,
 	tenantID uint64,
@@ -130,7 +142,7 @@ func (s *stubMemberUserService) GetUsersByIDs(ctx context.Context, ids []string)
 // middleware via memberTestRouter rather than threading a cfg through
 // the handler.
 func newTestMemberHandler(ms interfaces.TenantMemberService, us interfaces.UserService) *TenantMemberHandler {
-	return NewTenantMemberHandler(ms, us)
+	return NewTenantMemberHandler(ms, us, stubMemberGovernanceService{})
 }
 
 // memberTestRouter wires the handler with the same errorCapture middleware
@@ -262,6 +274,54 @@ func TestTenantMember_ListMembers_HappyPath(t *testing.T) {
 	// Hydration must have populated email so the UI can render avatars.
 	if resp.Data.Members[0].Email == "" {
 		t.Fatalf("expected hydrated email, got empty")
+	}
+}
+
+func TestTenantMember_ListMembersLoadsBusinessRolesForAdminOnly(t *testing.T) {
+	memberService := &stubMemberService{listTenant: func(_ context.Context, _ uint64) ([]*types.TenantMember, error) {
+		return []*types.TenantMember{{UserID: "u-member", TenantID: 1, Role: types.TenantRoleViewer}}, nil
+	}}
+	userService := &stubMemberUserService{getByID: func(_ context.Context, id string) (*types.User, error) {
+		return &types.User{ID: id}, nil
+	}}
+	calls := 0
+	h := NewTenantMemberHandler(memberService, userService, stubMemberGovernanceService{
+		listMemberRoleIDs: func(_ context.Context, tenantID uint64, userID string) ([]string, error) {
+			calls++
+			if tenantID != 1 || userID != "u-member" {
+				t.Fatalf("unexpected business-role lookup tenant=%d user=%s", tenantID, userID)
+			}
+			return []string{"store-manager"}, nil
+		},
+	})
+
+	for _, tc := range []struct {
+		name      string
+		role      types.TenantRole
+		wantCalls int
+		wantRoles bool
+	}{
+		{name: "admin", role: types.TenantRoleAdmin, wantCalls: 1, wantRoles: true},
+		{name: "contributor", role: types.TenantRoleContributor, wantCalls: 0, wantRoles: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := calls
+			req := httptest.NewRequest(http.MethodGet, "/tenants/1/members", nil)
+			ctx := context.WithValue(req.Context(), types.TenantIDContextKey, uint64(1))
+			ctx = context.WithValue(ctx, types.TenantRoleContextKey, tc.role)
+			req = req.WithContext(ctx)
+			w := httptest.NewRecorder()
+			memberTestRouter(h).ServeHTTP(w, req)
+			if got, want := w.Code, http.StatusOK; got != want {
+				t.Fatalf("status = %d, want %d body=%s", got, want, w.Body.String())
+			}
+			if got, want := calls-before, tc.wantCalls; got != want {
+				t.Fatalf("business-role lookups = %d, want %d", got, want)
+			}
+			if got := strings.Contains(w.Body.String(), "store-manager"); got != tc.wantRoles {
+				t.Fatalf("response contains business role = %t, want %t: %s", got, tc.wantRoles, w.Body.String())
+			}
+		})
 	}
 }
 
@@ -689,7 +749,7 @@ func TestTenantMember_SuperuserBypassRequiresFeatureFlag(t *testing.T) {
 	// Build the router with the flag explicitly off — the carve-out
 	// now lives in middleware.RequirePathTenantMatch, which the router
 	// helper mounts.
-	h := NewTenantMemberHandler(ms, &stubMemberUserService{})
+	h := NewTenantMemberHandler(ms, &stubMemberUserService{}, stubMemberGovernanceService{})
 	router := memberTestRouterWithCfg(h, &config.Config{
 		Tenant: &config.TenantConfig{EnableCrossTenantAccess: false},
 	})

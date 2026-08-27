@@ -39,6 +39,25 @@ func newInitializationRouteTestEngine(t *testing.T, callerTenantID uint64, kbLoo
 	})
 }
 
+func newInitializationRouteTestEngineForRole(t *testing.T, callerTenantID uint64, role types.TenantRole, kbLookup *stubWikiKBLookup) *gin.Engine {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	enabled := true
+	guards := &rbacGuards{cfg: &config.Config{Tenant: &config.TenantConfig{EnableRBAC: &enabled}}, kbService: kbLookup}
+	r := gin.New()
+	r.Use(middleware.ErrorHandler())
+	r.Use(func(c *gin.Context) {
+		ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, callerTenantID)
+		ctx = context.WithValue(ctx, types.UserIDContextKey, "u-test")
+		ctx = context.WithValue(ctx, types.TenantRoleContextKey, role)
+		c.Request = c.Request.WithContext(ctx)
+		c.Set(types.TenantIDContextKey.String(), callerTenantID)
+		c.Next()
+	})
+	RegisterInitializationRoutes(r.Group("/api/v1"), &handler.InitializationHandler{}, guards)
+	return r
+}
+
 func newKBRouteTestEngine(
 	t *testing.T,
 	callerTenantID uint64,
@@ -172,6 +191,28 @@ func TestInitializationWriteRoutesDenyOutOfScopeAPIKeyKB(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 			engine.ServeHTTP(rec, req)
 			require.Equal(t, http.StatusForbidden, rec.Code, "body=%s", rec.Body.String())
+		})
+	}
+}
+
+func TestInitializationWriteRoutesRequireAdminForHumanEvenWhenCreator(t *testing.T) {
+	kbLookup := &stubWikiKBLookup{kbs: map[string]*types.KnowledgeBase{
+		"kb-allowed": {ID: "kb-allowed", TenantID: 1, Type: types.KnowledgeBaseTypeWiki, CreatorID: "u-test"},
+	}}
+	engine := newInitializationRouteTestEngineForRole(t, 1, types.TenantRoleContributor, kbLookup)
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/api/v1/initialization/initialize/kb-allowed"},
+		{http.MethodPut, "/api/v1/initialization/config/kb-allowed"},
+	} {
+		t.Run(tc.method, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(`{}`))
+			req.Header.Set("Content-Type", "application/json")
+			engine.ServeHTTP(w, req)
+			require.Equal(t, http.StatusForbidden, w.Code, "body=%s", w.Body.String())
 		})
 	}
 }

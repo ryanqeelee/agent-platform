@@ -14,10 +14,10 @@ import (
 
 // RegisterCustomAgentRoutes registers custom agent routes.
 //
-// Mutating routes require Contributor+ and then use OwnedAgentOrAdmin:
-// an active Contributor may edit their agent, otherwise Admin+ is required. Built-in agents
-// (IsBuiltin=true) have an empty creator and are always Admin+. Reads
-// are Viewer+, copy is Contributor+ (the copy is owned by the caller).
+// Agent authoring is an Admin+ capability. Knowledge Administrators use the
+// Contributor role only for knowledge content and grants; it must not confer
+// Agent or data-analysis configuration authority. Reads remain Viewer+ so
+// employees can inspect and run the assistants made available to them.
 func RegisterCustomAgentRoutes(r *gin.RouterGroup, agentHandler *handler.CustomAgentHandler, g *rbacGuards) {
 	agents := g.apiKeyGroup(r.Group("/agents"), apiKeyFullAccess())
 	// agentsRead are the agent read endpoints. They stay full-access only for
@@ -32,18 +32,16 @@ func RegisterCustomAgentRoutes(r *gin.RouterGroup, agentHandler *handler.CustomA
 		agentsRead.GET("/placeholders", g.Viewer(), agentHandler.GetPlaceholders)
 		// List smart-reasoning agent type presets (rag-qa / wiki-qa / hybrid / custom) — Viewer+
 		agentsRead.GET("/type-presets", g.Viewer(), agentHandler.GetAgentTypePresets)
-		// Create custom agent — Contributor+
-		agentsWrite.POST("", g.Contributor(), agentHandler.CreateAgent)
+		// Create custom agent — Admin+
+		agentsWrite.POST("", g.Admin(), agentHandler.CreateAgent)
 		// List all agents (including built-in) — Viewer+
 		agentsRead.GET("", g.Viewer(), agentHandler.ListAgents)
 		// Get agent by ID — Viewer+
 		agentsRead.GET("/:id", g.Viewer(), agentHandler.GetAgent)
-		// Update agent — Contributor+ and creator OR Admin+
-		agentsWrite.PUT("/:id", g.Contributor(), g.OwnedAgentOrAdmin(), agentHandler.UpdateAgent)
-		// Delete agent — Contributor+ and creator OR Admin+
-		agentsWrite.DELETE("/:id", g.Contributor(), g.OwnedAgentOrAdmin(), agentHandler.DeleteAgent)
-		// Copy agent — Contributor+ (copy is owned by the caller)
-		agentsWrite.POST("/:id/copy", g.Contributor(), agentHandler.CopyAgent)
+		// Update/delete/copy agent — Admin+
+		agentsWrite.PUT("/:id", g.Admin(), agentHandler.UpdateAgent)
+		agentsWrite.DELETE("/:id", g.Admin(), agentHandler.DeleteAgent)
+		agentsWrite.POST("/:id/copy", g.Admin(), agentHandler.CopyAgent)
 	}
 	// Registered outside the group to avoid Gin route conflict with /agents/:id/shares in organization routes
 	g.apiKeyRoute(r, http.MethodGet, "/agents/:id/suggested-questions",
@@ -69,14 +67,11 @@ func RegisterUserFavoriteRoutes(r *gin.RouterGroup, h *handler.UserResourceFavor
 
 // RegisterSkillRoutes registers skill routes.
 //
-// PR 2 currently only exposes a read-only `ListSkills`; gated to
-// Viewer+. Future skill upload / enable endpoints must use Admin+ since
-// skills run sandboxed code on tenant resources.
+// Installed skill metadata and sandbox state are platform runtime details.
 func RegisterSkillRoutes(r *gin.RouterGroup, skillHandler *handler.SkillHandler, g *rbacGuards) {
 	skills := r.Group("/skills")
 	{
-		// List all preloaded skills — Viewer+
-		skills.GET("", g.Viewer(), skillHandler.ListSkills)
+		skills.GET("", g.SystemAdmin(), skillHandler.ListSkills)
 	}
 }
 
@@ -161,43 +156,34 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 	}
 
 	// Knowledge base sharing routes (add to existing kb routes).
-	// 分享 KB 到组织 = 让组织里所有人能读这个 KB；这跟"修改 KB 元信息"
-	// 同等敏感，所以挂同款 OwnedKBOrAdmin 矩阵。Viewer 在自己空间里
-	// 也不能私自把 KB 暴露出去。
+	// 分享 KB 到组织 = 让组织里所有人能读这个 KB。Creator 是审计身份，
+	// 不是当前治理授权；分享变更统一要求源租户当前 Admin+。
 	// 分享管理不通过 capability 授予（manage_spaces 也不含）；仅 full-access
 	// key（空间级全权）可管理分享，scoped key 保持 default-deny。
 	kbShares := g.apiKeyGroup(r.Group("/knowledge-bases/:id/shares"), apiKeyFullAccess())
 	{
 		// Share knowledge base
-		kbShares.POST("", g.OwnedKBOrAdmin(), orgHandler.ShareKnowledgeBase)
+		kbShares.POST("", g.Admin(), orgHandler.ShareKnowledgeBase)
 		// List shares — Viewer+ 即可，纯读取
 		kbShares.GET("", g.Viewer(), orgHandler.ListKBShares)
 		// Update share permission
-		kbShares.PUT("/:share_id", g.OwnedKBOrAdmin(), orgHandler.UpdateSharePermission)
+		kbShares.PUT("/:share_id", g.Admin(), orgHandler.UpdateSharePermission)
 		// Remove share
-		kbShares.DELETE("/:share_id", g.OwnedKBOrAdmin(), orgHandler.RemoveShare)
+		kbShares.DELETE("/:share_id", g.Admin(), orgHandler.RemoveShare)
 	}
 
-	// Agent sharing routes — same rationale as KB shares: 分享/取消分享
-	// 跟修改 agent 同等敏感，先要求 Contributor+，再挂 OwnedAgentOrAdmin。
+	// Agent sharing routes require current source-tenant Admin+.
 	//
-	// GET 走 OwnedAgentOrAdmin 作为 JWT 侧的 owner 校验；service 层
-	// ListSharesByAgent 现在也强制 tenant 归属（与 ListSharesByKnowledgeBase
-	// 对齐），这样 full-access API key（会短路路由 guard）也无法跨空间
-	// 枚举他人 agent 的分享。
-	// 同 KB 分享：分享管理不通过 capability 授予；仅 full-access key
-	// （空间级全权）可管理 agent 分享，scoped key 保持 default-deny。
-	agentShares := g.apiKeyGroup(r.Group("/agents/:id/shares"), apiKeyFullAccess())
+	agentShares := r.Group("/agents/:id/shares")
 	{
-		agentShares.POST("", g.Contributor(), g.OwnedAgentOrAdmin(), orgHandler.ShareAgent)
-		agentShares.GET("", g.Contributor(), g.OwnedAgentOrAdmin(), orgHandler.ListAgentShares)
-		agentShares.DELETE("/:share_id", g.Contributor(), g.OwnedAgentOrAdmin(), orgHandler.RemoveAgentShare)
+		agentShares.POST("", g.Admin(), orgHandler.ShareAgent)
+		agentShares.GET("", g.Admin(), orgHandler.ListAgentShares)
+		agentShares.DELETE("/:share_id", g.Admin(), orgHandler.RemoveAgentShare)
 	}
 
-	// Shared knowledge bases route — Viewer+
-	g.apiKeyRoute(r, http.MethodGet, "/shared-knowledge-bases", apiKeyManageSpaces(apiKeyFullAccess()), g.Viewer(), orgHandler.ListSharedKnowledgeBases)
-	// Shared agents route — Viewer+
-	g.apiKeyRoute(r, http.MethodGet, "/shared-agents", apiKeyManageSpaces(apiKeyFullAccess()), g.Viewer(), orgHandler.ListSharedAgents)
+	// Human sharing views are JWT-only; tenant API keys never inherit human shares.
+	r.GET("/shared-knowledge-bases", g.Viewer(), orgHandler.ListSharedKnowledgeBases)
+	r.GET("/shared-agents", g.Viewer(), orgHandler.ListSharedAgents)
 	// "Disable by me" 是空间级偏好（写到 tenant_disabled_shared_agents），
 	// 影响整个空间在会话下拉里看到的 agent 列表。任何 Viewer 改这个表就
 	// 等于替整个空间做决定 — 必须 Admin+ 才允许调整。
@@ -213,7 +199,7 @@ func RegisterEmbedPublicRoutes(
 	redisClient *redis.Client,
 	fileService interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
-	resourceCatalogs ...interfaces.ResourceCatalog,
+	resourceCatalog interfaces.ResourceCatalog,
 ) {
 	if embedHandler == nil || embedService == nil {
 		return
@@ -241,7 +227,7 @@ func RegisterEmbedPublicRoutes(
 		// Serve images embedded in bot replies (e.g. chart exports). EmbedAuth
 		// injects the channel's tenant, and the handler enforces that the
 		// requested path belongs to that tenant.
-		embed.GET("/files", newFileServeHandler(fileService, storageResolver, resourceCatalogs...))
+		embed.GET("/files", newFileServeHandler(fileService, storageResolver, resourceCatalog, nil, nil))
 	}
 }
 

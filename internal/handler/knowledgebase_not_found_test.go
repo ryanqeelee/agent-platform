@@ -108,6 +108,24 @@ func TestKBHandlerHonoursWrappedErrKnowledgeBaseNotFound(t *testing.T) {
 	}
 }
 
+func TestKnowledgeBaseDirectResolverRejectsForeignKBForAPIKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Params = gin.Params{{Key: "id", Value: "foreign"}}
+	c.Set(types.TenantIDContextKey.String(), uint64(1))
+	c.Request = httptest.NewRequest(http.MethodGet, "/knowledge-bases/foreign", nil)
+	ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, uint64(1))
+	ctx = types.WithTenantAPIKeyScope(ctx, types.TenantAPIKeyScope{FullAccess: true})
+	c.Request = c.Request.WithContext(ctx)
+	h := &KnowledgeBaseHandler{service: &stubKBOnlyService{getByID: func(context.Context, string) (*types.KnowledgeBase, error) {
+		return &types.KnowledgeBase{ID: "foreign", TenantID: 2}, nil
+	}}}
+
+	if _, _, _, _, err := h.validateAndGetKnowledgeBase(c); err == nil {
+		t.Fatal("API key must not inherit a foreign KB share in the direct knowledge-base resolver")
+	}
+}
+
 func TestKBHandlerKeeps500ForGenuineInfraErrors(t *testing.T) {
 	// The mapping is *only* for the not-found sentinel — every other
 	// error must still surface as a real 5xx so monitoring catches

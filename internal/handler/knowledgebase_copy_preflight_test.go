@@ -43,6 +43,7 @@ func newDuplicateRouter(svc interfaces.KnowledgeBaseService) *gin.Engine {
 	r.Use(func(c *gin.Context) {
 		c.Set(types.TenantIDContextKey.String(), uint64(1))
 		c.Set(types.UserIDContextKey.String(), "u-test")
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), types.TenantRoleContextKey, types.TenantRoleAdmin))
 		c.Next()
 	})
 	h := &KnowledgeBaseHandler{service: svc}
@@ -85,6 +86,32 @@ func TestDuplicateHandler_ReturnsCreatedKnowledgeBase(t *testing.T) {
 	for _, want := range []string{`"source_id":"src"`, `"target_id":"copy-id"`, `"knowledge_base"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("response missing %s: %s", want, body)
+		}
+	}
+}
+
+func TestDuplicateHandler_RedactsInfrastructureForHumanAdmin(t *testing.T) {
+	storageID := "storage-credential"
+	svc := &stubKBCopyService{
+		byID: func(_ context.Context, id string) (*types.KnowledgeBase, error) {
+			return &types.KnowledgeBase{ID: id, TenantID: 1}, nil
+		},
+		duplicate: func(_ context.Context, _ string) (*types.KnowledgeBase, error) {
+			return &types.KnowledgeBase{
+				ID: "copy", TenantID: 1, Name: "Copy", EmbeddingModelID: "embedding-secret",
+				SummaryModelID: "summary-secret", StorageBackendID: &storageID, VectorStoreID: &storageID,
+			}, nil
+		},
+	}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/knowledge-bases/src/duplicate", nil)
+	newDuplicateRouter(svc).ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	for _, platformDetail := range []string{"embedding-secret", "summary-secret", "storage-credential"} {
+		if strings.Contains(w.Body.String(), platformDetail) {
+			t.Fatalf("human duplicate response leaked %q: %s", platformDetail, w.Body.String())
 		}
 	}
 }

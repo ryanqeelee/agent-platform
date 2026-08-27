@@ -208,6 +208,27 @@ func KBSatisfiesAgentRequirements(caps types.KBCapabilities, agentMode string, a
 	return false
 }
 
+// SharedAgentAllowsKnowledgeBase applies one shared Agent's exact source,
+// selection-mode, and all-mode capability boundary to a durable KB.
+func SharedAgentAllowsKnowledgeBase(agent *types.CustomAgent, kb *types.KnowledgeBase) bool {
+	if agent == nil || kb == nil || agent.TenantID == 0 || kb.TenantID != agent.TenantID {
+		return false
+	}
+	switch agent.Config.KBSelectionMode {
+	case "all":
+		return KBSatisfiesAgentRequirements(
+			kb.Capabilities(), agent.Config.AgentMode, agent.Config.AllowedTools,
+		)
+	case "selected", "":
+		for _, kbID := range agent.Config.KnowledgeBases {
+			if kbID == kb.ID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // ToolsConsumeFiles reports whether any tool in the allowed-tools list can
 // use user-provided file references. Used to gate the `@file` listing in
 // the chat input (and potentially SearchKnowledge defensively on the

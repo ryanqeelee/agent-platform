@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -22,6 +23,14 @@ import (
 type stubResourceFileService struct {
 	interfaces.FileService
 	url string
+}
+
+type chatHistoryStatsService struct {
+	interfaces.MessageService
+}
+
+func (chatHistoryStatsService) GetChatHistoryKBStats(context.Context) (*types.ChatHistoryKBStats, error) {
+	return &types.ChatHistoryKBStats{Enabled: true, EmbeddingModelID: "model-secret"}, nil
 }
 
 func (s *stubResourceFileService) GetFileURL(context.Context, string) (string, error) {
@@ -83,6 +92,60 @@ func TestLoadMessages_DefaultsToHandles(t *testing.T) {
 		{Content: "see ![fig](" + testResourceHandle + ")"},
 	})
 	assert.Equal(t, "see ![fig]("+testResourceHandle+")", loadMessageContent(t, router, ""))
+}
+
+func TestLoadMessagesProjectsModelBindingByPlatformRole(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		systemAdmin bool
+		wantModelID bool
+	}{
+		{name: "workspace"},
+		{name: "platform", systemAdmin: true, wantModelID: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			router := newResourceURLTestRouter(t, []*types.Message{{ModelID: "model-secret"}})
+			req := httptest.NewRequest(http.MethodGet, "/messages/sess1/load", nil)
+			if test.systemAdmin {
+				req = req.WithContext(context.WithValue(req.Context(), types.SystemAdminContextKey, true))
+			}
+
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+			assert.Equal(t, test.wantModelID, strings.Contains(w.Body.String(), `"model_id":"model-secret"`))
+		})
+	}
+}
+
+func TestChatHistoryStatsProjectsModelBindingByPlatformRole(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		systemAdmin bool
+		wantModelID bool
+	}{
+		{name: "workspace"},
+		{name: "platform", systemAdmin: true, wantModelID: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			router := gin.New()
+			router.GET("/messages/chat-history-stats", (&MessageHandler{
+				MessageService: chatHistoryStatsService{},
+			}).GetChatHistoryKBStats)
+			req := httptest.NewRequest(http.MethodGet, "/messages/chat-history-stats", nil)
+			if test.systemAdmin {
+				req = req.WithContext(context.WithValue(req.Context(), types.SystemAdminContextKey, true))
+			}
+
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+			assert.Equal(t, test.wantModelID, strings.Contains(w.Body.String(), `"embedding_model_id":"model-secret"`))
+		})
+	}
 }
 
 func TestLoadMessages_PublicModeReturnsLoadableURLs(t *testing.T) {

@@ -1,6 +1,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useUIStore } from '@/stores/ui'
 import { useChatResourcesStore } from '@/stores/chatResources'
+import { useAuthStore } from '@/stores/auth'
 import {
   evaluateTenantModelReadiness,
   type TenantModelReadiness,
@@ -9,11 +10,16 @@ import {
 export function useTenantModelReadiness() {
   const uiStore = useUIStore()
   const chatResources = useChatResourcesStore()
+  const authStore = useAuthStore()
   const readiness = ref<TenantModelReadiness | null>(null)
   const loaded = ref(false)
   const loading = ref(false)
 
   const refresh = async (force = false) => {
+    if (!authStore.isSystemAdmin) {
+      loaded.value = true
+      return
+    }
     loading.value = true
     try {
       await chatResources.ensureModels(force)
@@ -31,19 +37,23 @@ export function useTenantModelReadiness() {
   watch(
     () => uiStore.showSettingsModal,
     (open, wasOpen) => {
-      if (wasOpen && !open) {
+      if (authStore.isSystemAdmin && wasOpen && !open) {
         refresh(true)
       }
     },
   )
 
   const isReadyForDocumentKb = computed(
-    () => readiness.value?.isReadyForDocumentKb ?? false,
+    () => !authStore.isSystemAdmin || (readiness.value?.isReadyForDocumentKb ?? false),
   )
 
-  const isReadyForAgent = computed(() => readiness.value?.isReadyForAgent ?? false)
+  const isReadyForAgent = computed(
+    () => !authStore.isSystemAdmin || (readiness.value?.isReadyForAgent ?? false),
+  )
 
-  const hasChat = computed(() => readiness.value?.hasChat ?? false)
+  const hasChat = computed(
+    () => !authStore.isSystemAdmin || (readiness.value?.hasChat ?? false),
+  )
 
   return {
     readiness,

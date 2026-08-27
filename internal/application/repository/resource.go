@@ -62,6 +62,15 @@ func (r *resourceRepository) GetByTenantLocation(
 	return &resource, err
 }
 
+func (r *resourceRepository) ListBindings(ctx context.Context, resourceID string, ownerType string) ([]*types.ResourceBinding, error) {
+	var bindings []*types.ResourceBinding
+	db := r.db.WithContext(ctx).Where("resource_id = ?", resourceID)
+	if ownerType != "" {
+		db = db.Where("owner_type = ?", ownerType)
+	}
+	return bindings, db.Order("id ASC").Find(&bindings).Error
+}
+
 func (r *resourceRepository) MarkDeleted(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Model(&types.StoredResource{}).Where("id = ?", id).
 		Updates(map[string]interface{}{"state": types.ResourceStateDeleted, "deleted_at": time.Now()}).Error

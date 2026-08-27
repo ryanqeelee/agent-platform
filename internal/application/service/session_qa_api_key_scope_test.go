@@ -22,7 +22,7 @@ func TestResolveKnowledgeBasesFiltersImplicitAgentDefaultsForRestrictedAPIKey(t 
 				KnowledgeBases:  []string{"kb-allowed", "kb-blocked"},
 			},
 		},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("resolveKnowledgeBases returned error: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestResolveKnowledgeBasesRejectsExplicitOutOfScopeKBForRestrictedAPIKey(t *
 				KnowledgeBases:  []string{"kb-allowed", "kb-blocked"},
 			},
 		},
-	})
+	}, nil)
 	if err == nil {
 		t.Fatal("expected forbidden for explicit out-of-scope knowledge_base_ids")
 	}

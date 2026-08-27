@@ -16,6 +16,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useChatResourcesStore } from '@/stores/chatResources';
 import { useEditorResourcesStore } from '@/stores/editorResources';
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue';
+import KnowledgeAccessScopeDialog from './components/KnowledgeAccessScopeDialog.vue';
 const usemenuStore = useMenuStore();
 const uiStore = useUIStore();
 const orgStore = useOrganizationStore();
@@ -169,7 +170,7 @@ onUnmounted(() => {
   clearWikiStatusProbes()
 })
 const missingStorageEngine = computed(() => {
-  if (!kbInfo.value || isFAQ.value) return false
+  if (!authStore.isSystemAdmin || !kbInfo.value || isFAQ.value) return false
   // storage_backend_id is authoritative; storage_provider_config.provider is a
   // compatibility projection for older clients. Either being present means the
   // KB has a bound storage instance and uploads should not be blocked.
@@ -234,26 +235,6 @@ const goToParserSettings = () => {
   }
 }
 
-// Permission control: check if current user owns this KB or has edit/manage permission
-//
-// "Owner" here is "the original creator of this KB" (PR 5 introduced
-// CreatorID). The previous version compared kb.tenant_id to the active
-// tenant id, which only answers "is this KB inside our tenant" — that
-// is true even for a Viewer in someone else's tenant, so the gate
-// silently bypassed every role check below. Now we require an explicit
-// creator match, and the role-aware fallbacks below decide whether a
-// non-creator may edit / manage.
-const isOwner = computed(() => {
-  if (!kbInfo.value) return false;
-  const creatorId = (kbInfo.value as any).creator_id || '';
-  const userId = authStore.user?.id || '';
-  // creator_id may be empty for legacy KBs created before PR 5; treat
-  // those as tenant-owned so the role gate applies (Admin+ can manage,
-  // Viewer cannot).
-  if (!creatorId) return false;
-  return creatorId === userId;
-});
-
 // Current KB's shared record (when accessed via organization share)
 const currentSharedKb = computed(() =>
   orgStore.sharedKnowledgeBases.find((s) => s.knowledge_base?.id === kbId.value) ?? null,
@@ -272,46 +253,37 @@ const currentSharedKb = computed(() =>
 // in the share list is the authoritative signal.
 const isViaShare = computed(() => !!currentSharedKb.value);
 
-// Can edit: when accessed via an organization share, ONLY the share grant
-// counts — even if the current user happens to be the original creator of
-// the KB. The backend's RBAC middleware authorizes based on the active
-// tenant, not on creator_id, so a creator viewing their own KB from a
-// different tenant context will be 403'd on write. Otherwise: KB creator
-// (any role) or tenant Admin+ in the home tenant.
-//
-// hasRole('contributor') is intentionally NOT here — being a Contributor
-// in a tenant does not by itself grant edit on someone else's KB.
+// Knowledge Administrators maintain existing own-tenant content. A shared KB
+// additionally requires local Admin+ and the existing share edit grant; the
+// source creator identity is never authority.
 const canEdit = computed(() => {
-  if (isViaShare.value) return orgStore.canEditKB(kbId.value, false);
-  if (isOwner.value) return true;
-  if (authStore.hasRole('admin')) return true;
+  if (isViaShare.value) return authStore.hasRole('admin') && orgStore.canEditKB(kbId.value, false);
+  if (authStore.hasRole('contributor')) return true;
   return orgStore.canEditKB(kbId.value, false);
 });
 
-// Can manage (delete, settings, etc.): same isViaShare-first rule. For
-// shared KBs only an 'admin' share grant qualifies — editor/viewer (and
-// even being the creator viewed via share) never grant delete/settings.
+// Lifecycle/settings require Admin+ in every tenant context; shared KBs also
+// require the existing share-management grant.
 const canManage = computed(() => {
-  if (isViaShare.value) return orgStore.canManageKB(kbId.value, false);
-  if (isOwner.value) return true;
+  if (isViaShare.value) return authStore.hasRole('admin') && orgStore.canManageKB(kbId.value, false);
   if (authStore.hasRole('admin')) return true;
   return orgStore.canManageKB(kbId.value, false);
 });
 
+// Knowledge administrators maintain existing content and access scope without
+// entering the infrastructure-heavy KB editor. Tenant Admin/Owner keep their
+// existing settings surface; contributors get only this focused dialog.
+const canManageKnowledgeAccess = computed(() => !isViaShare.value && authStore.hasRole('contributor'));
+const showKnowledgeAccessScope = ref(false);
+
 // The activity feed exposes owner-side actor and configuration summaries.
 // It lives in KB settings (KnowledgeBaseEditorModal) for Owner/Admin in the home tenant.
 
-// Can mutate knowledge (move / batch-delete): the backend gate for these
-// two endpoints is g.Contributor(), so the caller MUST be Contributor+
-// in their tenant on top of having KB edit permission. Without the extra
-// role check, an org-share-editor whose tenant role is Viewer would see
-// the "Move" / "Batch manage" entries and 403 on click. For shared KBs
-// the local tenant role is irrelevant — canEdit already encodes the share
-// grant, so trust it.
+// Move/batch content actions share the same current-role and share predicate.
 const canMutateKnowledge = computed(() => {
   if (!canEdit.value) return false;
-  if (isViaShare.value) return true;
-  if (isOwner.value) return true;
+  if (isViaShare.value) return authStore.hasRole('admin');
+  if (authStore.hasRole('contributor')) return true;
   if (authStore.hasRole('admin')) return true;
   return authStore.hasRole('contributor');
 });
@@ -1562,7 +1534,10 @@ const ensureDocumentKbReady = () => {
     MessagePlugin.warning(t('knowledgeEditor.messages.missingId'));
     return false;
   }
-  if (!kbInfo.value || !kbInfo.value.summary_model_id) {
+	if (!authStore.isSystemAdmin) {
+		return true;
+	}
+	if (!kbInfo.value || !kbInfo.value.summary_model_id) {
     MessagePlugin.warning(t('knowledgeBase.notInitialized'));
     return false;
   }
@@ -2305,6 +2280,11 @@ async function createNewSession(value: string): Promise<void> {
             <div class="kb-title-actions">
               <KBInfoPopover v-if="kbInfo && !authStore.isLiteMode" :kb-info="kbInfo"
                 :supported-file-types="[...supportedFileTypes]" />
+              <t-tooltip v-if="canManageKnowledgeAccess" :content="$t('knowledgeAccess.title')" placement="top">
+                <button type="button" class="kb-settings-button" :disabled="!kbId" @click="showKnowledgeAccessScope = true">
+                  <t-icon name="usergroup" size="18px" />
+                </button>
+              </t-tooltip>
               <t-tooltip v-if="canManage" :content="$t('knowledgeBase.settings')" placement="top">
                 <button type="button" class="kb-settings-button" :disabled="!kbId" @click="handleOpenKBSettings">
                   <t-icon name="setting" size="16px" />
@@ -2657,6 +2637,7 @@ async function createNewSession(value: string): Promise<void> {
   <KnowledgeBaseEditorModal :visible="uiStore.showKBEditorModal" :mode="uiStore.kbEditorMode"
     :kb-id="uiStore.currentKBId || undefined" :initial-type="uiStore.kbEditorType"
     @update:visible="(val) => val ? null : uiStore.closeKBEditor()" @success="handleKBEditorSuccess" />
+  <KnowledgeAccessScopeDialog v-model:visible="showKnowledgeAccessScope" :kb-id="kbId" />
 
   <ContextualGuide tour="kbDetail" :when="showKbDetailContextualGuide" />
 

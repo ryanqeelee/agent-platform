@@ -90,8 +90,9 @@ func (w *Rewriter) Enabled() bool {
 
 // String replaces every storage reference in content with an HTTP URL.
 // References that are already HTTP, that no backend claims, or that resolve to
-// a non-HTTP location are left untouched so the caller degrades to the
-// authenticated file proxy rather than emitting an unfetchable URL.
+// a non-HTTP location are left untouched so the caller uses its authenticated
+// scoped file proxy. Knowledge-bound resources deliberately stay in this form:
+// they must never become anonymous /r grants.
 func (w *Rewriter) String(ctx context.Context, content string) string {
 	if !w.Enabled() || content == "" {
 		return content

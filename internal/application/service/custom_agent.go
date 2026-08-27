@@ -33,6 +33,59 @@ const (
 	suggestionMaxLimit = 30
 )
 
+// AgentView exposes raw platform bindings only to SystemAdmin. Every workspace
+// principal receives the same enterprise-safe Agent projection.
+func AgentView(ctx context.Context, agent *types.CustomAgent) *types.CustomAgent {
+	if agent == nil {
+		return nil
+	}
+	if types.IsSystemAdminFromContext(ctx) {
+		return agent
+	}
+	view := *agent
+	view.Config = types.CustomAgentConfig{}
+	applyWorkspaceAgentConfig(&view.Config, agent.Config)
+	return &view
+}
+
+// applyWorkspaceAgentConfig is the enterprise-authorable Agent contract. New
+// runtime fields stay platform-only by default until deliberately added here.
+func applyWorkspaceAgentConfig(dst *types.CustomAgentConfig, src types.CustomAgentConfig) {
+	dst.AgentMode = src.AgentMode
+	dst.AgentType = src.AgentType
+	dst.SystemPrompt = src.SystemPrompt
+	dst.ContextTemplate = src.ContextTemplate
+	dst.CitationEnabled = src.CitationEnabled
+	dst.KBSelectionMode = src.KBSelectionMode
+	dst.KnowledgeBases = src.KnowledgeBases
+	dst.RetrieveKBOnlyWhenMentioned = src.RetrieveKBOnlyWhenMentioned
+	dst.SupportedFileTypes = src.SupportedFileTypes
+	dst.FallbackStrategy = src.FallbackStrategy
+	dst.FallbackResponse = src.FallbackResponse
+	dst.FallbackPrompt = src.FallbackPrompt
+	dst.IntentPrompts = src.IntentPrompts
+	dst.QuestionSuggestions = nil
+	if src.QuestionSuggestions != nil {
+		copy := *src.QuestionSuggestions
+		copy.FollowUps.ModelID = ""
+		dst.QuestionSuggestions = &copy
+	}
+}
+
+func preserveAgentPlatformBindings(next *types.CustomAgentConfig, current types.CustomAgentConfig) {
+	business := types.CustomAgentConfig{}
+	applyWorkspaceAgentConfig(&business, *next)
+	*next = current
+	currentModelID := ""
+	if current.QuestionSuggestions != nil {
+		currentModelID = current.QuestionSuggestions.FollowUps.ModelID
+	}
+	applyWorkspaceAgentConfig(next, business)
+	if next.QuestionSuggestions != nil && current.QuestionSuggestions != nil {
+		next.QuestionSuggestions.FollowUps.ModelID = currentModelID
+	}
+}
+
 // customAgentService implements the CustomAgentService interface
 type customAgentService struct {
 	repo           interfaces.CustomAgentRepository
@@ -84,11 +137,8 @@ func (s *customAgentService) CreateAgent(ctx context.Context, agent *types.Custo
 	}
 	agent.TenantID = tenantID
 
-	// Record the creator. Mirrors KnowledgeBase.CreatorID — needed by
-	// RBAC's RequireOwnershipOrRole so Contributors can edit their own
-	// agents. Synthetic system-{tenantID} users (X-API-Key path) leave
-	// the field empty via IsSyntheticUserID, which makes the agent
-	// tenant-owned (Admin+ only).
+	// Record the creator for display and audit. Agent authoring itself is
+	// Admin+; ownership no longer grants a Contributor mutation authority.
 	if uid, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(uid) {
 		agent.CreatedBy = uid
 	}
@@ -104,6 +154,11 @@ func (s *customAgentService) CreateAgent(ctx context.Context, agent *types.Custo
 
 	// Cannot create built-in agents
 	agent.IsBuiltin = false
+	if !types.IsSystemAdminFromContext(ctx) {
+		business := agent.Config
+		agent.Config = types.CustomAgentConfig{}
+		applyWorkspaceAgentConfig(&agent.Config, business)
+	}
 
 	// Set defaults
 	agent.EnsureDefaults()
@@ -285,6 +340,9 @@ func (s *customAgentService) UpdateAgent(ctx context.Context, agent *types.Custo
 	existingAgent.Name = agent.Name
 	existingAgent.Description = agent.Description
 	existingAgent.Avatar = agent.Avatar
+	if !types.IsSystemAdminFromContext(ctx) {
+		preserveAgentPlatformBindings(&agent.Config, existingAgent.Config)
+	}
 	existingAgent.Config = agent.Config
 	existingAgent.UpdatedAt = time.Now()
 
@@ -323,6 +381,9 @@ func (s *customAgentService) updateBuiltinAgent(ctx context.Context, agent *type
 
 	if existingAgent != nil {
 		// Update existing record - only update config, keep basic info unchanged
+		if !types.IsSystemAdminFromContext(ctx) {
+			preserveAgentPlatformBindings(&agent.Config, existingAgent.Config)
+		}
 		existingAgent.Config = agent.Config
 		existingAgent.UpdatedAt = time.Now()
 		existingAgent.EnsureDefaults()
@@ -344,6 +405,9 @@ func (s *customAgentService) updateBuiltinAgent(ctx context.Context, agent *type
 	}
 
 	// Create new record for built-in agent with customized config
+	if !types.IsSystemAdminFromContext(ctx) {
+		preserveAgentPlatformBindings(&agent.Config, defaultAgent.Config)
+	}
 	newAgent := &types.CustomAgent{
 		ID:          defaultAgent.ID,
 		Name:        defaultAgent.Name,
@@ -585,6 +649,39 @@ func (s *customAgentService) getSuggestedQuestions(
 		knowledgeIDs = mergeUniqueStrings(knowledgeIDs, resolvedTags.KnowledgeIDs)
 		if len(knowledgeIDs) == 0 && len(resolvedTags.TagIDsByTenant) == 0 {
 			return finalizeStarterSuggestions(curated, nil, starterMode, limit), nil
+		}
+	}
+
+	// Explicit document IDs must inherit their KB's current authorization.
+	// The chunk queries below accept document IDs directly, so validating only
+	// kbIDs would let a revoked same-tenant Business Role grant be bypassed.
+	if len(knowledgeIDs) > 0 {
+		if s.knowledgeRepo == nil {
+			knowledgeIDs = nil
+		} else {
+			knowledgeByID := make(map[string]*types.Knowledge, len(knowledgeIDs))
+			var parentKBIDs []string
+			for _, knowledgeID := range knowledgeIDs {
+				knowledge, err := s.knowledgeRepo.GetKnowledgeByIDOnly(ctx, knowledgeID)
+				if err != nil || knowledge == nil || knowledge.KnowledgeBaseID == "" {
+					continue
+				}
+				knowledgeByID[knowledgeID] = knowledge
+				parentKBIDs = mergeUniqueStrings(parentKBIDs, []string{knowledge.KnowledgeBaseID})
+			}
+			allowedKBs := make(map[string]bool, len(parentKBIDs))
+			for _, group := range s.groupKBIDsByEffectiveTenant(ctx, tenantID, parentKBIDs) {
+				for _, kbID := range group {
+					allowedKBs[kbID] = true
+				}
+			}
+			filtered := make([]string, 0, len(knowledgeIDs))
+			for _, knowledgeID := range knowledgeIDs {
+				if knowledge := knowledgeByID[knowledgeID]; knowledge != nil && allowedKBs[knowledge.KnowledgeBaseID] {
+					filtered = append(filtered, knowledgeID)
+				}
+			}
+			knowledgeIDs = filtered
 		}
 	}
 
@@ -1090,9 +1187,6 @@ func (s *customAgentService) groupKBIDsByEffectiveTenant(
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"kb_ids": kbIDs,
 		})
-		// Fall back to caller's tenant so at least in-tenant KBs are queryable;
-		// chunk repo filtering will drop anything that doesn't match.
-		out[callerTenantID] = append(out[callerTenantID], kbIDs...)
 		return out
 	}
 	kbByID := make(map[string]*types.KnowledgeBase, len(kbs))
@@ -1108,7 +1202,10 @@ func (s *customAgentService) groupKBIDsByEffectiveTenant(
 			continue
 		}
 		if kb.TenantID == callerTenantID {
-			out[callerTenantID] = append(out[callerTenantID], kbID)
+			governed, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
+			if err == nil && governed != nil && governed.TenantID == callerTenantID {
+				out[callerTenantID] = append(out[callerTenantID], kbID)
+			}
 			continue
 		}
 		if s.kbShareService == nil {

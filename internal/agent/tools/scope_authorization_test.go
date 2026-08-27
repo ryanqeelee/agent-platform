@@ -2,11 +2,139 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/stretchr/testify/require"
 )
+
+type liveAccessKBStub struct {
+	interfaces.KnowledgeBaseService
+	allowed  bool
+	tenantID uint64
+}
+
+func (s liveAccessKBStub) GetKnowledgeBaseByID(_ context.Context, id string) (*types.KnowledgeBase, error) {
+	if !s.allowed {
+		return nil, fmt.Errorf("revoked")
+	}
+	tenantID := s.tenantID
+	if tenantID == 0 {
+		tenantID = 1
+	}
+	return &types.KnowledgeBase{ID: id, TenantID: tenantID}, nil
+}
+
+type liveAccessProbeTool struct{ called bool }
+
+func (t *liveAccessProbeTool) Name() string                { return "probe" }
+func (t *liveAccessProbeTool) Description() string         { return "probe" }
+func (t *liveAccessProbeTool) Parameters() json.RawMessage { return json.RawMessage(`{}`) }
+func (t *liveAccessProbeTool) Execute(context.Context, json.RawMessage) (*types.ToolResult, error) {
+	t.called = true
+	return &types.ToolResult{Success: true}, nil
+}
+
+type liveAccessKBMapStub struct {
+	interfaces.KnowledgeBaseService
+	allowed map[string]bool
+}
+
+func (s liveAccessKBMapStub) GetKnowledgeBaseByID(_ context.Context, id string) (*types.KnowledgeBase, error) {
+	if !s.allowed[id] {
+		return nil, fmt.Errorf("revoked")
+	}
+	return &types.KnowledgeBase{ID: id, TenantID: 1}, nil
+}
+
+func TestLiveKnowledgeAccessToolRejectsWholeCallWhenAnyTargetIsDenied(t *testing.T) {
+	probe := &liveAccessProbeTool{}
+	tool := NewLiveKnowledgeAccessTool(
+		probe,
+		types.SearchTargets{
+			{KnowledgeBaseID: "allowed", TenantID: 1},
+			{KnowledgeBaseID: "denied", TenantID: 1},
+		},
+		liveAccessKBMapStub{allowed: map[string]bool{"allowed": true}},
+		nil,
+		false,
+	)
+
+	result, err := tool.Execute(liveWriteContext("human"), json.RawMessage(`{}`))
+
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	require.False(t, probe.called)
+}
+
+type liveMembershipStub struct {
+	interfaces.TenantMemberService
+	membership *types.TenantMember
+}
+
+func (s liveMembershipStub) GetMembership(context.Context, string, uint64) (*types.TenantMember, error) {
+	return s.membership, nil
+}
+
+func liveWriteContext(userID string) context.Context {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+	ctx = context.WithValue(ctx, types.UserIDContextKey, userID)
+	return context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleAdmin)
+}
+
+func TestLiveKnowledgeAccessToolWikiWriteUsesCurrentMembership(t *testing.T) {
+	probe := &liveAccessProbeTool{}
+	tool := NewLiveKnowledgeAccessTool(
+		probe,
+		types.SearchTargets{{KnowledgeBaseID: "kb", TenantID: 1}},
+		liveAccessKBStub{allowed: true},
+		liveMembershipStub{membership: &types.TenantMember{
+			UserID: "human", TenantID: 1, Role: types.TenantRoleViewer, Status: types.TenantMemberStatusActive,
+		}},
+		true,
+	)
+	result, err := tool.Execute(liveWriteContext("human"), json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	require.False(t, probe.called)
+}
+
+func TestLiveKnowledgeAccessToolTrustsExactSharedProvenance(t *testing.T) {
+	probe := &liveAccessProbeTool{}
+	tool := NewLiveKnowledgeAccessTool(
+		probe,
+		types.SearchTargets{{KnowledgeBaseID: "foreign", TenantID: 2}},
+		liveAccessKBStub{},
+		nil,
+		false,
+	)
+	ctx := types.WithAuthorizedSharedKnowledgeBase(liveWriteContext("human"), 1, 2, "foreign", types.OrgRoleViewer)
+	result, err := tool.Execute(ctx, json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.True(t, probe.called)
+}
+
+func TestLiveKnowledgeAccessToolAllowsExactEditorShareWrite(t *testing.T) {
+	probe := &liveAccessProbeTool{}
+	tool := NewLiveKnowledgeAccessTool(
+		probe,
+		types.SearchTargets{{KnowledgeBaseID: "foreign", TenantID: 2}},
+		liveAccessKBStub{},
+		nil,
+		true,
+	)
+	ctx := types.WithAuthorizedSharedKnowledgeBase(
+		liveWriteContext("human"), 1, 2, "foreign", types.OrgRoleEditor,
+	)
+	result, err := tool.Execute(ctx, json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.True(t, probe.called)
+}
 
 type scopeKnowledgeService struct {
 	interfaces.KnowledgeService

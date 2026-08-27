@@ -135,6 +135,35 @@ func (s *resourceCatalog) ResolvePath(ctx context.Context, value string) (string
 	return resource.PhysicalPath, resource, nil
 }
 
+// ResolveTenantPath also recognizes legacy physical paths registered in the
+// catalog. File proxies use it so a caller cannot downgrade a knowledge-bound
+// resource:// handle to its old provider path and bypass its binding policy.
+func (s *resourceCatalog) ResolveTenantPath(ctx context.Context, tenantID uint64, value string) (string, *types.StoredResource, error) {
+	if _, ok := types.ParseResourcePath(value); ok {
+		resource, err := s.Resolve(ctx, value)
+		if err != nil {
+			return "", nil, err
+		}
+		if resource.TenantID != tenantID {
+			return "", resource, fmt.Errorf("resource tenant mismatch")
+		}
+		return resource.PhysicalPath, resource, nil
+	}
+	resource, err := s.repo.GetByTenantLocation(ctx, tenantID, resourceLocationHash(value))
+	if err != nil || resource == nil {
+		return value, resource, err
+	}
+	return resource.PhysicalPath, resource, nil
+}
+
+func (s *resourceCatalog) ListKnowledgeBindings(ctx context.Context, reference string) ([]*types.ResourceBinding, error) {
+	resource, err := s.Resolve(ctx, reference)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.ListBindings(ctx, resource.ID, "knowledge")
+}
+
 func (s *resourceCatalog) Bind(ctx context.Context, reference, ownerType, ownerID, relation string) error {
 	resource, err := s.Resolve(ctx, reference)
 	if err != nil {

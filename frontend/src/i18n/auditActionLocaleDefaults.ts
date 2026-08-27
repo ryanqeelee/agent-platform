@@ -23,6 +23,10 @@ const TENANT_MEMBER_AUDIT_ACTION_LABELS_EN: Record<string, string> = {
   'rbac.invitation_declined': 'Invitation declined',
   'rbac.invitation_revoked': 'Invitation revoked',
   'rbac.invitation_expired': 'Invitation expired',
+  'knowledge_role.created': 'Business role created',
+  'knowledge_role.updated': 'Business role updated',
+  'knowledge_role.member_assigned': 'Member business roles updated',
+  'knowledge_access.updated': 'Knowledge access updated',
 }
 
 const SYSTEM_GLOBAL_AUDIT_ACTION_LABELS_EN: Record<string, string> = {

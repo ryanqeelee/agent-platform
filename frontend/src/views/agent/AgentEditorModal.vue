@@ -377,8 +377,7 @@
                     </div>
 
                     <!-- 改写提示词（多轮对话 + 问题改写开启时） -->
-                    <template
-                      v-if="!isAgentMode && formData.config.multi_turn_enabled && formData.config.enable_rewrite">
+                    <template v-if="authStore.isSystemAdmin && showRewritePrompts">
                       <div v-show="activePromptAnchor === 'rewrite-system'"
                         class="setting-row setting-row-vertical prompts-panel__pane">
                         <div class="setting-info">
@@ -557,7 +556,7 @@
                 </div>
 
                 <!-- 模型配置 -->
-                <div v-show="currentSection === 'model'" class="section">
+                <div v-if="authStore.isSystemAdmin" v-show="currentSection === 'model'" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agent.editor.modelConfig') }}</h2>
                     <p class="section-description">{{ $t('agent.editor.modelConfigDesc') }}</p>
@@ -705,7 +704,7 @@
                 </div>
 
                 <!-- 附件上传 -->
-                <div v-show="currentSection === 'multimodal'" class="section">
+                <div v-if="authStore.isSystemAdmin" v-show="currentSection === 'multimodal'" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agentEditor.imageUpload.sectionTitle') }}</h2>
                     <p class="section-description">{{ $t('agentEditor.imageUpload.sectionDesc') }}</p>
@@ -724,7 +723,7 @@
                     </div>
 
                     <!-- VLM 模型（图片上传启用时） -->
-                    <div v-if="formData.config.image_upload_enabled" class="setting-row">
+                    <div v-if="authStore.isSystemAdmin && formData.config.image_upload_enabled" class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agentEditor.imageUpload.vlmModel') }} <span class="required">*</span></label>
                         <p class="desc">{{ $t('agentEditor.imageUpload.vlmModelDesc') }}</p>
@@ -739,7 +738,7 @@
                     </div>
 
                     <!-- 附件图片理解 / 扫描件 OCR（图片上传启用时） -->
-                    <div v-if="formData.config.image_upload_enabled" class="setting-row">
+                    <div v-if="authStore.isSystemAdmin && formData.config.image_upload_enabled" class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agentEditor.imageUpload.imageUnderstandingLabel') }}</label>
                         <p class="desc">{{ $t('agentEditor.imageUpload.imageUnderstandingDesc') }}</p>
@@ -750,7 +749,7 @@
                     </div>
 
                     <!-- 扫描件 OCR 最大页数（开启附件图片理解时） -->
-                    <div v-if="formData.config.image_upload_enabled && formData.config.attachment_image_understanding"
+                    <div v-if="authStore.isSystemAdmin && formData.config.image_upload_enabled && formData.config.attachment_image_understanding"
                       class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agentEditor.imageUpload.ocrMaxPagesLabel') }}</label>
@@ -764,7 +763,7 @@
                     </div>
 
                     <!-- 图片存储 Provider（图片上传启用时） -->
-                    <div v-if="formData.config.image_upload_enabled" class="setting-row">
+                    <div v-if="authStore.isSystemAdmin && formData.config.image_upload_enabled" class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agentEditor.imageUpload.storageProvider') }}</label>
                         <p class="desc">{{ $t('agentEditor.imageUpload.storageProviderDesc') }}</p>
@@ -801,7 +800,7 @@
                     </div>
 
                     <!-- ASR 模型（音频上传启用时） -->
-                    <div v-if="formData.config.audio_upload_enabled" class="setting-row">
+                    <div v-if="authStore.isSystemAdmin && formData.config.audio_upload_enabled" class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agentEditor.audioUpload.asrModel') }}</label>
                         <p class="desc">{{ $t('agentEditor.audioUpload.asrModelDesc') }}</p>
@@ -816,7 +815,7 @@
                     </div>
 
                     <!-- 单轮等待附件解析超时（秒） -->
-                    <div class="setting-row">
+                    <div v-if="authStore.isSystemAdmin" class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agentEditor.chatParser.waitTimeoutLabel') }}</label>
                         <p class="desc">{{ $t('agentEditor.chatParser.waitTimeoutDesc') }}</p>
@@ -829,7 +828,7 @@
                     </div>
 
                     <!-- 聊天附件解析策略 -->
-                    <div class="parser-policy-block">
+                    <div v-if="authStore.isSystemAdmin" class="parser-policy-block">
                       <div class="parser-policy-block__header">
                         <label>{{ $t('agentEditor.chatParser.label') }}</label>
                         <p class="desc">{{ $t('agentEditor.chatParser.desc') }}</p>
@@ -846,7 +845,7 @@
                 </div>
 
                 <!-- 多轮对话（仅普通模式显示，Agent模式内部自动控制） -->
-                <div v-show="currentSection === 'conversation' && !isAgentMode" class="section">
+                <div v-if="authStore.isSystemAdmin" v-show="currentSection === 'conversation' && !isAgentMode" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agent.editor.conversationSettings') }}</h2>
                     <p class="section-description">{{ $t('agentEditor.desc.conversationSection') }}</p>
@@ -1001,7 +1000,7 @@
                         </div>
                       </div>
 
-                      <div v-if="formData.config.question_suggestions.follow_ups.mode !== 'knowledge'"
+                      <div v-if="authStore.isSystemAdmin && formData.config.question_suggestions.follow_ups.mode !== 'knowledge'"
                         class="setting-row">
                         <div class="setting-info">
                           <label>{{ $t('agentEditor.questionSuggestions.model') }}</label>
@@ -1071,7 +1070,7 @@
                 </div>
 
                 <!-- 工具配置（仅 Agent 模式） -->
-                <div v-show="currentSection === 'tools' && isAgentMode" class="section">
+                <div v-if="authStore.isSystemAdmin" v-show="currentSection === 'tools' && isAgentMode" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agent.editor.toolsConfig') }}</h2>
                     <p class="section-description">{{ $t('agent.editor.toolsConfigDesc') }}</p>
@@ -1177,7 +1176,7 @@
                 </div>
 
                 <!-- MCP 服务配置（仅 Agent 模式） -->
-                <div v-show="currentSection === 'mcp' && isAgentMode" class="section">
+                <div v-if="authStore.isSystemAdmin" v-show="currentSection === 'mcp' && isAgentMode" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agentEditor.mcp.label') }}</h2>
                     <p class="section-description">{{ $t('agentEditor.mcp.desc') }}</p>
@@ -1229,7 +1228,7 @@
                 </div>
 
                 <!-- Skills 配置（仅 Agent 模式） -->
-                <div v-show="currentSection === 'skills' && isAgentMode" class="section">
+                <div v-if="authStore.isSystemAdmin" v-show="currentSection === 'skills' && isAgentMode" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agent.editor.skillsConfig') }}</h2>
                     <p class="section-description">{{ $t('agent.editor.skillsConfigDesc') }}</p>
@@ -1389,7 +1388,7 @@
                 </div>
 
                 <!-- 网络搜索配置 -->
-                <div v-show="currentSection === 'websearch'" class="section">
+                <div v-if="authStore.isSystemAdmin" v-show="currentSection === 'websearch'" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agent.editor.webSearchConfig') }}</h2>
                     <p class="section-description">{{ $t('agent.editor.webSearchConfigDesc') }}</p>
@@ -1408,7 +1407,7 @@
                     </div>
 
                     <!-- 网络搜索最大结果数 -->
-                    <div v-if="formData.config.web_search_enabled" class="setting-row">
+                    <div v-if="authStore.isSystemAdmin && formData.config.web_search_enabled" class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.webSearchProvider') }}</label>
                         <p class="desc">{{ $t('agentEditor.desc.webSearchProvider') }}</p>
@@ -1469,7 +1468,7 @@
                 </div>
 
                 <!-- 检索策略（仅在有知识库能力时显示） -->
-                <div v-show="currentSection === 'retrieval' && hasKnowledgeBase" class="section">
+                <div v-if="authStore.isSystemAdmin" v-show="currentSection === 'retrieval' && hasKnowledgeBase" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agent.editor.retrievalStrategy') }}</h2>
                     <p class="section-description">{{ $t('agentEditor.desc.retrievalSection') }}</p>
@@ -1604,7 +1603,7 @@
                 </div>
 
                 <!-- 共享管理（仅编辑模式且非内置智能体） -->
-                <div v-if="editorMode === 'edit' && editorAgent?.id && !editorAgent?.is_builtin"
+                <div v-if="editorMode === 'edit' && editorAgent?.id && !editorAgent?.is_builtin && authStore.hasRole('admin')"
                   v-show="currentSection === 'share'" class="section">
                   <AgentShareSettings :agent-id="editorAgent.id" :agent="editorAgent" />
                 </div>
@@ -2226,30 +2225,33 @@ const navItems = computed(() => {
   const items: { key: string; icon: string; label: string }[] = [
     { key: 'basic', icon: 'info-circle', label: t('agent.editor.basicInfo') },
     { key: 'prompts', icon: 'file-paste', label: t('agent.editor.promptsConfig') },
-    { key: 'model', icon: 'control-platform', label: t('agent.editor.modelConfig') },
     { key: 'suggestions', icon: 'help-circle', label: t('agentEditor.questionSuggestions.navLabel') },
   ];
-  // 多轮对话（仅普通模式显示，Agent模式内部自动控制）
-  if (!isAgentMode.value) {
-    items.push({ key: 'conversation', icon: 'chat', label: t('agent.editor.conversationSettings') });
+  if (authStore.isSystemAdmin) {
+    items.splice(2, 0, { key: 'model', icon: 'control-platform', label: t('agent.editor.modelConfig') });
   }
   // 知识库与检索
   items.push({ key: 'knowledge', icon: 'folder', label: t('agent.editor.knowledgeConfig') });
-  if (hasKnowledgeBase.value) {
-    items.push({ key: 'retrieval', icon: 'search', label: t('agent.editor.retrievalStrategy') });
-  }
-  items.push({ key: 'websearch', icon: 'internet', label: t('agent.editor.webSearchConfig') });
-  items.push({ key: 'multimodal', icon: 'attach', label: t('agentEditor.imageUpload.navLabel') });
-  // Agent 模式能力
-  if (isAgentMode.value) {
-    items.push({ key: 'tools', icon: 'tools', label: t('agent.editor.toolsConfig') });
-    items.push({ key: 'mcp', icon: 'server', label: t('agentEditor.mcp.label') });
-  }
-  if (isAgentMode.value && skillsAvailable.value) {
-    items.push({ key: 'skills', icon: 'lightbulb', label: t('agent.editor.skillsConfig') });
+
+  if (authStore.isSystemAdmin) {
+    if (!isAgentMode.value) {
+      items.push({ key: 'conversation', icon: 'chat', label: t('agent.editor.conversationSettings') });
+    }
+    if (hasKnowledgeBase.value) {
+      items.push({ key: 'retrieval', icon: 'search', label: t('agent.editor.retrievalStrategy') });
+    }
+    items.push({ key: 'websearch', icon: 'internet', label: t('agent.editor.webSearchConfig') });
+    items.push({ key: 'multimodal', icon: 'attach', label: t('agentEditor.imageUpload.navLabel') });
+    if (isAgentMode.value) {
+      items.push({ key: 'tools', icon: 'tools', label: t('agent.editor.toolsConfig') });
+      items.push({ key: 'mcp', icon: 'server', label: t('agentEditor.mcp.label') });
+    }
+    if (isAgentMode.value && skillsAvailable.value) {
+      items.push({ key: 'skills', icon: 'lightbulb', label: t('agent.editor.skillsConfig') });
+    }
   }
   // 发布（仅编辑模式）
-  if (editorMode.value === 'edit' && editorAgent.value?.id && !editorAgent.value?.is_builtin && !authStore.isLiteMode) {
+  if (editorMode.value === 'edit' && editorAgent.value?.id && !editorAgent.value?.is_builtin && !authStore.isLiteMode && authStore.hasRole('admin')) {
     items.push({ key: 'share', icon: 'share', label: t('knowledgeEditor.sidebar.share') });
   }
   return items;
@@ -2418,7 +2420,7 @@ const removeStarterSuggestion = (index: number) => {
 };
 
 const applyDefaultChatModelIfEmpty = () => {
-  if (props.mode !== 'create' || !formData.value) return
+  if (!authStore.isSystemAdmin || props.mode !== 'create' || !formData.value) return
   const chat =
     allModels.value.find((m) => m.type === 'KnowledgeQA' && m.is_default)
     || allModels.value.find((m) => m.type === 'KnowledgeQA')
@@ -2472,17 +2474,17 @@ const promptNavItems = computed(() => {
     },
   ];
   if (!isAgentMode.value) {
-    items.push({
-      key: 'context',
-      label: t('agentEditor.promptNav.context'),
-      customized: !!formData.value.config.context_template?.trim(),
-    });
+	items.push({
+	  key: 'context',
+	  label: t('agentEditor.promptNav.context'),
+	  customized: !!formData.value.config.context_template?.trim(),
+	});
     items.push({
       key: 'intent',
       label: t('agentEditor.promptNav.intent'),
       customized: hasAnyIntentCustomized.value,
     });
-    if (showRewritePrompts.value) {
+    if (authStore.isSystemAdmin && showRewritePrompts.value) {
       items.push(
         {
           key: 'rewrite-system',
@@ -3271,7 +3273,7 @@ watch(isAgentMode, (isAgent) => {
 
 // 监听设置弹窗关闭，刷新模型列表
 watch(() => uiStore.showSettingsModal, async (visible, prevVisible) => {
-  if (prevVisible && !visible && props.visible) {
+  if (authStore.isSystemAdmin && prevVisible && !visible && props.visible) {
     try {
       await Promise.all([
         chatResources.ensureModels(true),
@@ -3338,12 +3340,18 @@ const applyPromptTemplateDefaults = (cfg: PromptTemplatesConfig | null) => {
 // 加载依赖数据（复用空间级缓存，避免重复请求）
 const loadDependencies = async () => {
   try {
-    await Promise.all([
-      chatResources.ensureModels(),
+    const dependencies = [
       chatResources.ensureKnowledgeBases(),
-      chatResources.ensureWebSearchProviders(),
-      editorResources.prefetchAgentEditorDeps(),
-    ]);
+	  editorResources.prefetchAgentEditorDeps(false, authStore.isSystemAdmin),
+    ];
+    if (authStore.isSystemAdmin) {
+      dependencies.push(
+        chatResources.ensureModels(),
+        chatResources.ensureWebSearchProviders(),
+        editorResources.ensureStorageEngine(),
+      );
+    }
+    await Promise.all(dependencies);
 
     if (chatResources.allModels.length > 0) {
       allModels.value = chatResources.allModels;
@@ -4246,14 +4254,14 @@ const handleSave = async () => {
     }
   }
 
-  if (!formData.value.config.model_id) {
+  if (authStore.isSystemAdmin && !formData.value.config.model_id) {
     MessagePlugin.error(t('agent.editor.modelRequired'));
     currentSection.value = 'model';
     return;
   }
 
   // 校验 VLM 模型（当图片上传启用时必填）
-  if (formData.value.config.image_upload_enabled && !formData.value.config.vlm_model_id) {
+  if (authStore.isSystemAdmin && formData.value.config.image_upload_enabled && !formData.value.config.vlm_model_id) {
     MessagePlugin.error(t('agentEditor.imageUpload.vlmModelRequired'));
     currentSection.value = 'multimodal';
     return;

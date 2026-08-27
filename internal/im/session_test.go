@@ -170,9 +170,6 @@ func TestBuildIMLastRequestStateFromAgent(t *testing.T) {
 	if !state.AgentEnabled {
 		t.Fatal("AgentEnabled = false, want true")
 	}
-	if state.ModelID != "model-1" {
-		t.Fatalf("ModelID = %q, want model-1", state.ModelID)
-	}
 	if !state.WebSearchEnabled {
 		t.Fatal("WebSearchEnabled = false, want true")
 	}

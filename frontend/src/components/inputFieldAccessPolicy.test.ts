@@ -2,10 +2,10 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
-test('viewer model controls are absent from the chat input', async () => {
+test('workspace users cannot select a concrete chat model', async () => {
   const source = await readFile(new URL('./Input-field.vue', import.meta.url), 'utf8')
 
-  assert.match(source, /const canSelectChatModel = computed\(\(\) => authStore\.hasRole\('contributor'\)\);/)
+  assert.match(source, /const canSelectChatModel = computed\(\(\) => authStore\.isSystemAdmin\);/)
   assert.match(source, /<t-tooltip v-if="canSelectChatModel"/)
   assert.match(source, /<div v-if="canSelectChatModel && showModelSelector" class="model-selector-overlay"/)
   assert.match(source, /const toggleModelSelector = \(\) => \{\s*if \(!canSelectChatModel\.value\) return;/)

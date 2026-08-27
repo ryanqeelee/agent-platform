@@ -23,8 +23,141 @@ func DefaultLanguage() string {
 // TenantIDFromContext extracts the tenant ID from ctx.
 // Returns (0, false) when the key is absent or the value is not uint64.
 func TenantIDFromContext(ctx context.Context) (uint64, bool) {
+	if ctx == nil {
+		return 0, false
+	}
 	v, ok := ctx.Value(TenantIDContextKey).(uint64)
 	return v, ok
+}
+
+// authorizedSharedKnowledgeBase carries the exact successful cross-tenant
+// route resolution. It is deliberately private so callers cannot forge a
+// broader source-tenant membership bypass with an exported context key.
+type authorizedSharedKnowledgeBase struct {
+	callerTenantID  uint64
+	sourceTenantID  uint64
+	knowledgeBaseID string
+	permission      OrgMemberRole
+}
+
+type authorizedSharedKnowledgeBaseContextKey struct{}
+
+// authorizedSharedAgentExecution records the human caller workspace that was
+// replaced by a shared Agent's source workspace for one execution. The type
+// and key stay private so only the narrow helpers below can create or inspect
+// this provenance.
+type authorizedSharedAgentExecution struct {
+	callerTenantID uint64
+	sourceTenantID uint64
+	agentID        string
+}
+
+type authorizedSharedAgentExecutionContextKey struct{}
+
+// WithAuthorizedSharedKnowledgeBase records route-authorized provenance for
+// one cross-tenant KB. Invalid, incomplete, or same-tenant values leave ctx
+// unchanged so they never create an authorization marker.
+func WithAuthorizedSharedKnowledgeBase(
+	ctx context.Context, callerTenantID, sourceTenantID uint64, knowledgeBaseID string, permission OrgMemberRole,
+) context.Context {
+	if ctx == nil || callerTenantID == 0 || sourceTenantID == 0 ||
+		callerTenantID == sourceTenantID || strings.TrimSpace(knowledgeBaseID) == "" || permission == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, authorizedSharedKnowledgeBaseContextKey{}, authorizedSharedKnowledgeBase{
+		callerTenantID:  callerTenantID,
+		sourceTenantID:  sourceTenantID,
+		knowledgeBaseID: strings.TrimSpace(knowledgeBaseID),
+		permission:      permission,
+	})
+}
+
+// HasAuthorizedSharedKnowledgeBase reports whether ctx carries the exact
+// route-authorized source KB provenance. It never treats a source-tenant
+// rewrite alone as a membership grant.
+func HasAuthorizedSharedKnowledgeBase(ctx context.Context, sourceTenantID uint64, knowledgeBaseID string) bool {
+	_, authorizedSourceTenantID, authorizedKnowledgeBaseID, _, ok := AuthorizedSharedKnowledgeBaseFromContext(ctx)
+	return ok && authorizedSourceTenantID == sourceTenantID &&
+		authorizedKnowledgeBaseID == strings.TrimSpace(knowledgeBaseID)
+}
+
+// AuthorizedSharedKnowledgeBaseFromContext returns the exact direct-share
+// provenance recorded before a request switches to the source tenant.
+func AuthorizedSharedKnowledgeBaseFromContext(ctx context.Context) (callerTenantID, sourceTenantID uint64, knowledgeBaseID string, permission OrgMemberRole, ok bool) {
+	if ctx == nil {
+		return 0, 0, "", "", false
+	}
+	provenance, ok := ctx.Value(authorizedSharedKnowledgeBaseContextKey{}).(authorizedSharedKnowledgeBase)
+	if !ok || provenance.callerTenantID == 0 || provenance.sourceTenantID == 0 ||
+		provenance.callerTenantID == provenance.sourceTenantID || strings.TrimSpace(provenance.knowledgeBaseID) == "" || provenance.permission == "" {
+		return 0, 0, "", "", false
+	}
+	return provenance.callerTenantID, provenance.sourceTenantID, provenance.knowledgeBaseID, provenance.permission, true
+}
+
+// WithAuthorizedSharedAgentExecution records one successfully resolved
+// cross-tenant shared-Agent execution before the request context is rewritten
+// to the source tenant. Machine principals never receive this provenance.
+func WithAuthorizedSharedAgentExecution(
+	ctx context.Context, callerTenantID, sourceTenantID uint64, agentID string,
+) context.Context {
+	agentID = strings.TrimSpace(agentID)
+	if ctx == nil || callerTenantID == 0 || sourceTenantID == 0 ||
+		callerTenantID == sourceTenantID || agentID == "" {
+		return ctx
+	}
+	if _, isAPIKey := TenantAPIKeyScopeFromContext(ctx); isAPIKey {
+		return ctx
+	}
+	if userID, ok := UserIDFromContext(ctx); ok && IsSyntheticUserID(userID) {
+		return ctx
+	}
+	return context.WithValue(ctx, authorizedSharedAgentExecutionContextKey{}, authorizedSharedAgentExecution{
+		callerTenantID: callerTenantID,
+		sourceTenantID: sourceTenantID,
+		agentID:        agentID,
+	})
+}
+
+// AuthorizedSharedAgentExecutionFromContext returns the exact shared-Agent
+// provenance used for live re-authorization. Invalid or machine-principal
+// contexts fail closed.
+func AuthorizedSharedAgentExecutionFromContext(ctx context.Context) (callerTenantID, sourceTenantID uint64, agentID string, ok bool) {
+	if ctx == nil {
+		return 0, 0, "", false
+	}
+	if _, isAPIKey := TenantAPIKeyScopeFromContext(ctx); isAPIKey {
+		return 0, 0, "", false
+	}
+	if userID, hasUser := UserIDFromContext(ctx); hasUser && IsSyntheticUserID(userID) {
+		return 0, 0, "", false
+	}
+	provenance, ok := ctx.Value(authorizedSharedAgentExecutionContextKey{}).(authorizedSharedAgentExecution)
+	if !ok || provenance.callerTenantID == 0 || provenance.sourceTenantID == 0 ||
+		provenance.callerTenantID == provenance.sourceTenantID || strings.TrimSpace(provenance.agentID) == "" {
+		return 0, 0, "", false
+	}
+	return provenance.callerTenantID, provenance.sourceTenantID, provenance.agentID, true
+}
+
+// CopyPrivateAuthorizationContext preserves authorization provenance when a
+// subsystem intentionally rebuilds a context instead of deriving from it.
+// The private value types and keys remain unexported, so callers can copy an
+// already-authorized decision but cannot construct or broaden one.
+func CopyPrivateAuthorizationContext(dst, src context.Context) context.Context {
+	if dst == nil {
+		dst = context.Background()
+	}
+	if src == nil {
+		return dst
+	}
+	if provenance, ok := src.Value(authorizedSharedKnowledgeBaseContextKey{}).(authorizedSharedKnowledgeBase); ok {
+		dst = context.WithValue(dst, authorizedSharedKnowledgeBaseContextKey{}, provenance)
+	}
+	if provenance, ok := src.Value(authorizedSharedAgentExecutionContextKey{}).(authorizedSharedAgentExecution); ok {
+		dst = context.WithValue(dst, authorizedSharedAgentExecutionContextKey{}, provenance)
+	}
+	return dst
 }
 
 // MustTenantIDFromContext extracts the tenant ID from ctx, panicking if missing.

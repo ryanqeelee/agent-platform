@@ -341,6 +341,15 @@ func (h *SystemHandler) GetProductBaseDescriptor(c *gin.Context) {
 // @Router       /system/info [get]
 func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
+	scope, apiKeyPrincipal := types.TenantAPIKeyScopeFromContext(ctx)
+	if !types.IsSystemAdminFromContext(ctx) && (!apiKeyPrincipal || !scope.IsPlatform()) {
+		c.JSON(200, gin.H{
+			"code": 0,
+			"msg":  "success",
+			"data": gin.H{"edition": Edition},
+		})
+		return
+	}
 
 	// Get keyword index engine from RETRIEVE_DRIVER
 	keywordIndexEngine := h.getKeywordIndexEngine()

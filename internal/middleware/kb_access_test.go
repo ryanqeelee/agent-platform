@@ -98,7 +98,7 @@ func (s *stubKBShareForGuard) CountByOrganizations(context.Context, []string) (m
 
 // stubAgentShareForGuard implements just the two methods the guard
 // touches: GetSharedAgentForTenant (when ?agent_id=X is supplied) and
-// TenantCanAccessKBViaSomeSharedAgent (the any-shared-agent fallback).
+// FindSharedAgentForKnowledgeBase (the any-shared-agent fallback).
 // Every other method panics so unintended new dependencies surface
 // immediately.
 type stubAgentShareForGuard struct {
@@ -114,8 +114,11 @@ func (s *stubAgentShareForGuard) GetSharedAgentForTenant(_ context.Context, _ ui
 	return s.agents[agentID], nil
 }
 
-func (s *stubAgentShareForGuard) TenantCanAccessKBViaSomeSharedAgent(_ context.Context, _ uint64, _ types.TenantRole, kb *types.KnowledgeBase) (bool, error) {
-	return s.kbsViaSomeAgent[kb.ID], nil
+func (s *stubAgentShareForGuard) FindSharedAgentForKnowledgeBase(_ context.Context, _ uint64, _ types.TenantRole, kb *types.KnowledgeBase) (*types.CustomAgent, error) {
+	if !s.kbsViaSomeAgent[kb.ID] {
+		return nil, nil
+	}
+	return &types.CustomAgent{ID: "some-agent", TenantID: kb.TenantID}, nil
 }
 
 func (s *stubAgentShareForGuard) ShareAgent(context.Context, string, string, string, uint64, types.OrgMemberRole) (*types.AgentShare, error) {
@@ -158,9 +161,10 @@ func (s *stubAgentShareForGuard) CountByOrganizations(context.Context, []string)
 // guardOpts collects optional knobs for runGuard. Keeps the call site
 // readable when most tests only care about a couple of dimensions.
 type guardOpts struct {
-	agentID             string // ?agent_id query param
-	agentSourceTenantID string // ?agent_source_tenant_id query param
+	agentID             string                  // ?agent_id query param
+	agentSourceTenantID string                  // ?agent_source_tenant_id query param
 	agentShare          *stubAgentShareForGuard // nil means "no agent-share service"
+	apiKeyScope         *types.TenantAPIKeyScope
 }
 
 // runGuard fires a single request through the guard and returns the
@@ -195,6 +199,9 @@ func runGuard(
 	}
 	req := httptest.NewRequest("GET", url, nil)
 	ctx := context.WithValue(req.Context(), types.TenantIDContextKey, tenantID)
+	if opts.apiKeyScope != nil {
+		ctx = types.WithTenantAPIKeyScope(ctx, *opts.apiKeyScope)
+	}
 	c.Request = req.WithContext(ctx)
 
 	kbsvc := &stubKBLookup{kbs: map[string]*types.KnowledgeBase{}}
@@ -221,7 +228,7 @@ func runGuard(
 		kbsvc,
 		shareSvc,
 		agentSvc,
-		cfgRBAC(true),
+		nil,
 	)
 	guard(c)
 	return rec, c
@@ -259,8 +266,6 @@ func TestIsResourceNotFound_RecognisesKnowledgeSentinel(t *testing.T) {
 		"missing KB must still classify as not-found")
 	require.True(t, isResourceNotFound(apprepo.ErrChunkNotFound),
 		"missing chunk (ErrChunkNotFound) must classify as not-found — chunk view/by-id resolved a missing chunk into a raw 500 (exit 7) otherwise")
-	require.True(t, isResourceNotFound(ErrResourceNotFound),
-		"generic resource-not-found sentinel must still classify as not-found")
 	require.False(t, isResourceNotFound(errors.New("connection refused")),
 		"a genuine transient error must NOT be classified as not-found")
 }
@@ -291,6 +296,30 @@ func TestRequireKBAccess_SharedKB_RewritesTenantContext(t *testing.T) {
 	require.Equal(t, uint64(200), access.EffectiveTenantID)
 	got, _ := types.TenantIDFromContext(c.Request.Context())
 	require.Equal(t, uint64(200), got, "guard must rewrite context to source tenant")
+	require.True(t, types.HasAuthorizedSharedKnowledgeBase(c.Request.Context(), 200, "kb-shared"),
+		"successful cross-tenant resolution must carry exact KB provenance")
+	require.False(t, types.HasAuthorizedSharedKnowledgeBase(c.Request.Context(), 200, "kb-other"),
+		"the marker must not authorize a sibling KB")
+}
+
+func TestRequireKBAccess_APIKeyCannotInheritForeignShares(t *testing.T) {
+	share := &stubKBShareForGuard{
+		permission: map[string]types.OrgMemberRole{"kb-shared": types.OrgRoleEditor},
+		shared:     map[string]bool{"kb-shared": true},
+		source:     map[string]uint64{"kb-shared": 200},
+	}
+	fullAccess := types.TenantAPIKeyScope{FullAccess: true}
+	agent := &stubAgentShareForGuard{kbsViaSomeAgent: map[string]bool{"kb-shared": true}}
+	_, c := runGuard(t, 100, "kb-shared",
+		types.OrgRoleViewer,
+		&types.KnowledgeBase{ID: "kb-shared", TenantID: 200},
+		share,
+		guardOpts{apiKeyScope: &fullAccess, agentShare: agent},
+	)
+	require.True(t, c.IsAborted())
+	require.NotEmpty(t, c.Errors)
+	_, ok := KBAccessFromContext(c)
+	require.False(t, ok)
 }
 
 func TestRequireKBAccess_SharedKB_PermissionBelowMin_Aborts(t *testing.T) {
@@ -320,7 +349,7 @@ func TestRequireKBAccess_NoTenant_Aborts(t *testing.T) {
 		&stubKBLookup{},
 		nil,
 		nil,
-		cfgRBAC(true),
+		nil,
 	)
 	guard(c)
 	require.True(t, c.IsAborted())
@@ -485,42 +514,7 @@ func TestRequireKBAccess_AgentShare_SpecificAgent_TenantMismatch(t *testing.T) {
 	require.True(t, c.IsAborted())
 }
 
-// ---------- EnableRBAC=false rollout window ----------
-
-func TestRequireKBAccess_Forbidden_FailOpenWhenRBACDisabled(t *testing.T) {
-	// Same scenario as PermissionBelowMin (which aborts when enforcing),
-	// but with EnableRBAC=false the guard logs and passes through.
-	gin.SetMode(gin.TestMode)
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Params = gin.Params{{Key: "id", Value: "kb-shared"}}
-	req := httptest.NewRequest("GET", "/", nil)
-	c.Request = req.WithContext(context.WithValue(req.Context(), types.TenantIDContextKey, uint64(100)))
-
-	share := &stubKBShareForGuard{
-		permission: map[string]types.OrgMemberRole{"kb-shared": types.OrgRoleViewer},
-		shared:     map[string]bool{"kb-shared": true},
-		source:     map[string]uint64{"kb-shared": 200},
-	}
-	kbsvc := &stubKBLookup{kbs: map[string]*types.KnowledgeBase{
-		"kb-shared": {ID: "kb-shared", TenantID: 200},
-	}}
-
-	guard := RequireKBAccess(
-		KBIDFromParam("id"),
-		types.OrgRoleEditor, // would-deny
-		kbsvc, share, nil,
-		cfgRBAC(false), // enforcement off
-	)
-	guard(c)
-	require.False(t, c.IsAborted(), "guard must pass through when EnableRBAC is off")
-	_ = rec
-}
-
-func TestRequireKBAccess_NotFound_FiresEvenWhenRBACDisabled(t *testing.T) {
-	// Not-found is not an authorisation event; the client asked for a
-	// resource that genuinely isn't there. We surface 404 regardless of
-	// the rollout flag (matches the comment in RequireKBAccess).
+func TestRequireKBAccess_NotFound(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -532,11 +526,10 @@ func TestRequireKBAccess_NotFound_FiresEvenWhenRBACDisabled(t *testing.T) {
 		KBIDFromParam("id"),
 		types.OrgRoleViewer,
 		&stubKBLookup{kbs: map[string]*types.KnowledgeBase{}},
-		nil, nil,
-		cfgRBAC(false),
+		nil, nil, nil,
 	)
 	guard(c)
-	require.True(t, c.IsAborted(), "404 still fires with enforcement off")
+	require.True(t, c.IsAborted())
 	_ = rec
 }
 

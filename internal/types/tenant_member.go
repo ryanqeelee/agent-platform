@@ -19,16 +19,16 @@ const (
 	// TenantRoleOwner has full control over the tenant, including tenant
 	// deletion, ownership transfer, and managing tenant API keys.
 	TenantRoleOwner TenantRole = "owner"
-	// TenantRoleAdmin manages users, integrations, and tenant-scoped
-	// configuration such as model providers, vector stores, MCP services
-	// and IM channels, but cannot delete the tenant or change Owners.
+	// TenantRoleAdmin manages members and enterprise resources, but cannot
+	// delete the tenant, change Owners, or configure platform infrastructure.
 	TenantRoleAdmin TenantRole = "admin"
-	// TenantRoleContributor can create knowledge bases and agents, and edit
-	// the ones they created. They have read access to everything else in
-	// the tenant.
+	// TenantRoleContributor is presented as Knowledge Administrator. It can
+	// maintain content and access grants on existing knowledge bases, but does
+	// not create KBs or Agents or gain member, license, device, analysis, model,
+	// vector-store, or storage administration.
 	TenantRoleContributor TenantRole = "contributor"
-	// TenantRoleViewer has read-only access to tenant resources and can
-	// run agents that are explicitly marked as runnable by viewers.
+	// TenantRoleViewer is presented as Employee and consumes only resources
+	// allowed by the current knowledge-access policy.
 	TenantRoleViewer TenantRole = "viewer"
 )
 
@@ -133,12 +133,13 @@ type Membership struct {
 // the model directly would leak DeletedAt/UpdatedAt and lock the DB
 // schema into the public API. Use this for `/tenants/:id/members` only.
 type TenantMemberResponse struct {
-	UserID    string             `json:"user_id"`
-	Email     string             `json:"email"`
-	Username  string             `json:"username"`
-	Avatar    string             `json:"avatar,omitempty"`
-	Role      TenantRole         `json:"role"`
-	Status    TenantMemberStatus `json:"status"`
-	InvitedBy *string            `json:"invited_by,omitempty"`
-	JoinedAt  time.Time          `json:"joined_at"`
+	UserID          string             `json:"user_id"`
+	Email           string             `json:"email"`
+	Username        string             `json:"username"`
+	Avatar          string             `json:"avatar,omitempty"`
+	Role            TenantRole         `json:"role"`
+	Status          TenantMemberStatus `json:"status"`
+	InvitedBy       *string            `json:"invited_by,omitempty"`
+	JoinedAt        time.Time          `json:"joined_at"`
+	BusinessRoleIDs []string           `json:"business_role_ids"`
 }

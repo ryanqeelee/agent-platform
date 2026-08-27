@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
@@ -3343,7 +3344,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		}
 
 		fileSvc := s.resolveFileService(ctx, kb)
-		filePath, err := fileSvc.SaveBytes(ctx, contentBytes, payload.TenantID, resolvedFileName, true)
+		filePath, err := fileSvc.SaveBytes(filesvc.WithKnowledgeBinding(ctx, knowledge.ID), contentBytes, payload.TenantID, resolvedFileName, true)
 		if err != nil {
 			if isLastRetry {
 				knowledge.ParseStatus = "failed"
@@ -3476,9 +3477,10 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	var storedImages []docparser.StoredImage
 
 	if s.imageResolver != nil && convertResult != nil {
+		imageCtx := filesvc.WithKnowledgeBinding(ctx, knowledge.ID)
 		fileSvc := s.resolveFileService(ctx, kb)
 		tenantID, _ := ctx.Value(types.TenantIDContextKey).(uint64)
-		updatedMarkdown, images, resolveErr := s.imageResolver.ResolveAndStore(ctx, convertResult, fileSvc, tenantID)
+		updatedMarkdown, images, resolveErr := s.imageResolver.ResolveAndStore(imageCtx, convertResult, fileSvc, tenantID)
 		if resolveErr != nil {
 			logger.Warnf(ctx, "Image resolution partially failed: %v", resolveErr)
 		}
@@ -3489,7 +3491,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 
 		// Resolve remote http(s) images (e.g. markdown external URLs) → download + upload to storage.
 		// ResolveAndStore handles inline bytes and base64; ResolveRemoteImages handles http/https URLs.
-		updatedContent, remoteImages, remoteErr := s.imageResolver.ResolveRemoteImages(ctx, convertResult.MarkdownContent, fileSvc, tenantID)
+		updatedContent, remoteImages, remoteErr := s.imageResolver.ResolveRemoteImages(imageCtx, convertResult.MarkdownContent, fileSvc, tenantID)
 		if remoteErr != nil {
 			logger.Warnf(ctx, "Remote image resolution partially failed: %v", remoteErr)
 		}
@@ -3570,6 +3572,7 @@ func (s *knowledgeService) convert(
 	eff types.EffectiveProcessConfig,
 	isLastRetry bool,
 ) (*types.ReadResult, error) {
+	ctx = filesvc.WithKnowledgeBinding(ctx, knowledge.ID)
 	// Stage tracking: docreader. Mark the stage as running here so the
 	// timeline reflects "DocReader" the moment a worker picks the task
 	// up — before that, the stage stays "pending" from the initial

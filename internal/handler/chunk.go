@@ -22,11 +22,8 @@ import (
 // carry the effective tenant ID, so the handler reads tenant from
 // context the way it always did.
 //
-// kgService is retained because the route-level *creator-ownership*
-// lookup KBCreatorLookupFromKnowledgeIDParam still walks
-// knowledge_id -> kb_id to resolve creator_id (separate axis from
-// access — that lookup answers "is the caller the creator of THIS
-// resource", not "does the caller's tenant have access").
+// kgService loads the parent knowledge used by chunk mutations and generated
+// question operations after the route-level KB access check.
 type ChunkHandler struct {
 	service   interfaces.ChunkService
 	kgService interfaces.KnowledgeService

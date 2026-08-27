@@ -53,7 +53,7 @@ func (s *stubTenantService) GetWeKnoraCloudCredentials(context.Context) *types.W
 	return nil
 }
 
-func newTenantHandlerTestEngine(t *testing.T, role types.TenantRole, tenant *types.Tenant) *gin.Engine {
+func newTenantHandlerTestEngine(t *testing.T, role types.TenantRole, systemAdmin bool, tenant *types.Tenant) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	h := &TenantHandler{service: &stubTenantService{tenant: tenant}}
@@ -65,6 +65,7 @@ func newTenantHandlerTestEngine(t *testing.T, role types.TenantRole, tenant *typ
 		ctx = context.WithValue(ctx, types.TenantIDContextKey, tenant.ID)
 		ctx = context.WithValue(ctx, types.TenantRoleContextKey, role)
 		ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
+		ctx = context.WithValue(ctx, types.SystemAdminContextKey, systemAdmin)
 		c.Request = c.Request.WithContext(ctx)
 		c.Set(types.TenantIDContextKey.String(), tenant.ID)
 		c.Next()
@@ -78,7 +79,7 @@ func newTenantHandlerTestEngine(t *testing.T, role types.TenantRole, tenant *typ
 
 func TestListTenantsViewerDoesNotLeakSecrets(t *testing.T) {
 	tenant := secretTenantFixture()
-	engine := newTenantHandlerTestEngine(t, types.TenantRoleViewer, tenant)
+	engine := newTenantHandlerTestEngine(t, types.TenantRoleViewer, false, tenant)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/tenants", nil)
@@ -92,7 +93,7 @@ func TestListTenantsViewerDoesNotLeakSecrets(t *testing.T) {
 
 func TestGetTenantViewerDoesNotLeakSecrets(t *testing.T) {
 	tenant := secretTenantFixture()
-	engine := newTenantHandlerTestEngine(t, types.TenantRoleViewer, tenant)
+	engine := newTenantHandlerTestEngine(t, types.TenantRoleViewer, false, tenant)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/tenants/42", nil)
@@ -103,9 +104,9 @@ func TestGetTenantViewerDoesNotLeakSecrets(t *testing.T) {
 
 func TestGetTenantKVViewerForbiddenForSecretKeys(t *testing.T) {
 	tenant := secretTenantFixture()
-	engine := newTenantHandlerTestEngine(t, types.TenantRoleViewer, tenant)
+	engine := newTenantHandlerTestEngine(t, types.TenantRoleViewer, false, tenant)
 
-	for _, key := range []string{"web-search-config", "parser-engine-config", "storage-engine-config"} {
+	for _, key := range []string{"web-search-config", "parser-engine-config", "storage-engine-config", "chat-history-config", "retrieval-config"} {
 		t.Run(key, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodGet, "/tenants/kv/"+key, nil)
@@ -115,9 +116,9 @@ func TestGetTenantKVViewerForbiddenForSecretKeys(t *testing.T) {
 	}
 }
 
-func TestGetTenantKVAdminReturnsRedactedSecrets(t *testing.T) {
+func TestGetTenantKVSystemAdminReturnsRedactedSecrets(t *testing.T) {
 	tenant := secretTenantFixture()
-	engine := newTenantHandlerTestEngine(t, types.TenantRoleAdmin, tenant)
+	engine := newTenantHandlerTestEngine(t, types.TenantRoleAdmin, true, tenant)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/tenants/kv/parser-engine-config", nil)
@@ -151,22 +152,22 @@ func secretTenantFixture() *types.Tenant {
 	}
 }
 
-func TestGetTenantKVViewerAllowedForNonSecretKey(t *testing.T) {
+func TestGetTenantKVRetrievalConfigRequiresSystemAdmin(t *testing.T) {
 	tenant := secretTenantFixture()
 	tenant.RetrievalConfig = &types.RetrievalConfig{}
-	engine := newTenantHandlerTestEngine(t, types.TenantRoleViewer, tenant)
+	engine := newTenantHandlerTestEngine(t, types.TenantRoleViewer, false, tenant)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/tenants/kv/retrieval-config", nil)
 	engine.ServeHTTP(rec, req)
-	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, http.StatusForbidden, rec.Code)
 }
 
-func TestPutTenantParserConfigAdminPreservesRedactedSecrets(t *testing.T) {
+func TestPutTenantParserConfigSystemAdminPreservesRedactedSecrets(t *testing.T) {
 	tenant := secretTenantFixture()
-	engine := newTenantHandlerTestEngine(t, types.TenantRoleAdmin, tenant)
+	engine := newTenantHandlerTestEngine(t, types.TenantRoleAdmin, true, tenant)
 
-	body := `{"mineru_api_key":"***","mineru_endpoint":"https://example.com/mineru"}`
+	body := `{"mineru_api_key":"***"}`
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPut, "/tenants/kv/parser-engine-config", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -174,5 +175,4 @@ func TestPutTenantParserConfigAdminPreservesRedactedSecrets(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.NotNil(t, tenant.ParserEngineConfig)
 	assert.Equal(t, "parser-secret-123", tenant.ParserEngineConfig.MinerUAPIKey)
-	assert.Equal(t, "https://example.com/mineru", tenant.ParserEngineConfig.MinerUEndpoint)
 }

@@ -22,6 +22,7 @@ func TestTenantResponse_ViewerOmitsSecrets(t *testing.T) {
 	assert.NotContains(t, s, "web_search_config")
 	assert.NotContains(t, s, "parser_engine_config")
 	assert.NotContains(t, s, "storage_engine_config")
+	assert.NotContains(t, s, "chat_history_config")
 	assert.NotContains(t, s, "credentials")
 }
 
@@ -33,19 +34,23 @@ func TestTenantResponse_OwnerOmitsLegacyTenantAPIKey(t *testing.T) {
 	assert.NotContains(t, s, `"api_key"`)
 	assert.NotContains(t, s, "legacy-search-secret-999")
 	assert.NotContains(t, s, "parser-secret-123")
-	assert.Contains(t, s, "web_search_config")
+	assert.NotContains(t, s, "web_search_config")
+	assert.NotContains(t, s, "retriever_engines")
+	assert.NotContains(t, s, "retrieval_config")
 }
 
-func TestTenantResponse_AdminGetsRedactedIntegrationConfigs(t *testing.T) {
+func TestTenantResponse_AdminOmitsPlatformRuntimeConfigs(t *testing.T) {
 	tenant := sampleSecretTenant()
-	resp := NewTenantResponse(adminContext(), tenant)
-	require.NotNil(t, resp.WebSearchConfig)
-	assert.Equal(t, types.RedactedSecretPlaceholder, resp.WebSearchConfig.ProxyURL)
-	assert.Empty(t, resp.WebSearchConfig.APIKey)
-	require.NotNil(t, resp.ParserEngineConfig)
-	assert.Equal(t, types.RedactedSecretPlaceholder, resp.ParserEngineConfig.MinerUAPIKey)
-	require.NotNil(t, resp.StorageEngineConfig.MinIO)
-	assert.Equal(t, types.RedactedSecretPlaceholder, resp.StorageEngineConfig.MinIO.SecretAccessKey)
+	body, err := json.Marshal(NewTenantResponse(adminContext(), tenant))
+	require.NoError(t, err)
+	s := string(body)
+	for _, field := range []string{
+		"web_search_config", "parser_engine_config", "storage_engine_config",
+		"credentials", "retriever_engines", "retrieval_config", "context_config",
+		"chat_history_config",
+	} {
+		assert.NotContains(t, s, field)
+	}
 }
 
 func TestTenantResponsesCrossTenant_RedactsEvenForOwnerContext(t *testing.T) {

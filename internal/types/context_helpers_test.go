@@ -34,6 +34,60 @@ func TestIsSyntheticUserID(t *testing.T) {
 	}
 }
 
+func TestAuthorizedSharedKnowledgeBaseContextRequiresExactCrossTenantProvenance(t *testing.T) {
+	base := context.Background()
+	marked := WithAuthorizedSharedKnowledgeBase(base, 10, 20, "kb-1", OrgRoleViewer)
+	if !HasAuthorizedSharedKnowledgeBase(marked, 20, "kb-1") {
+		t.Fatal("exact authorized shared KB provenance must be present")
+	}
+	for _, tc := range []struct {
+		name   string
+		ctx    context.Context
+		source uint64
+		kbID   string
+	}{
+		{"wrong source", marked, 21, "kb-1"},
+		{"wrong KB", marked, 20, "kb-2"},
+		{"blank KB", marked, 20, ""},
+		{"no marker", base, 20, "kb-1"},
+		{"same tenant rejected", WithAuthorizedSharedKnowledgeBase(base, 10, 10, "kb-1", OrgRoleViewer), 10, "kb-1"},
+		{"zero source rejected", WithAuthorizedSharedKnowledgeBase(base, 10, 0, "kb-1", OrgRoleViewer), 0, "kb-1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if HasAuthorizedSharedKnowledgeBase(tc.ctx, tc.source, tc.kbID) {
+				t.Fatal("non-exact or invalid provenance must never authorize")
+			}
+		})
+	}
+}
+
+func TestAuthorizedSharedAgentExecutionContextRequiresExactHumanCrossTenantProvenance(t *testing.T) {
+	base := context.WithValue(context.Background(), UserIDContextKey, "human-1")
+	marked := WithAuthorizedSharedAgentExecution(base, 10, 20, " agent-1 ")
+	caller, source, agentID, ok := AuthorizedSharedAgentExecutionFromContext(marked)
+	if !ok || caller != 10 || source != 20 || agentID != "agent-1" {
+		t.Fatalf("provenance = (%d, %d, %q, %v), want (10, 20, agent-1, true)", caller, source, agentID, ok)
+	}
+
+	apiKeyCtx := WithTenantAPIKeyScope(base, TenantAPIKeyScope{FullAccess: true})
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+	}{
+		{"same tenant rejected", WithAuthorizedSharedAgentExecution(base, 10, 10, "agent-1")},
+		{"blank agent rejected", WithAuthorizedSharedAgentExecution(base, 10, 20, " ")},
+		{"API key cannot create provenance", WithAuthorizedSharedAgentExecution(apiKeyCtx, 10, 20, "agent-1")},
+		{"API key cannot use inherited provenance", WithTenantAPIKeyScope(marked, TenantAPIKeyScope{FullAccess: true})},
+		{"synthetic principal rejected", WithAuthorizedSharedAgentExecution(context.WithValue(context.Background(), UserIDContextKey, "system-10"), 10, 20, "agent-1")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, _, ok := AuthorizedSharedAgentExecutionFromContext(tc.ctx); ok {
+				t.Fatal("invalid or machine-principal provenance must not be usable")
+			}
+		})
+	}
+}
+
 func TestLanguageLocaleName(t *testing.T) {
 	tests := []struct {
 		name     string

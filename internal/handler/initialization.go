@@ -95,7 +95,7 @@ func NewInitializationHandler(
 
 // KBModelConfigRequest 知识库模型配置请求（简化版，只传模型ID）
 type KBModelConfigRequest struct {
-	LLMModelID       string           `json:"llmModelId"       binding:"required"`
+	LLMModelID       string           `json:"llmModelId"`
 	EmbeddingModelID string           `json:"embeddingModelId"` // optional when RAG indexing is disabled
 	VLMConfig        *types.VLMConfig `json:"vlm_config"`
 	ASRConfig        *types.ASRConfig `json:"asr_config"`
@@ -245,12 +245,19 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-
+	if types.IsSystemAdminFromContext(ctx) && strings.TrimSpace(req.LLMModelID) == "" {
+		c.Error(errors.NewBadRequestError("llmModelId is required"))
+		return
+	}
 	// 获取知识库信息
 	kb, err := h.kbService.GetKnowledgeBaseByID(ctx, kbIdStr)
 	if err != nil || kb == nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"kbId": utils.SanitizeForLog(kbIdStr)})
 		c.Error(errors.NewNotFoundError("知识库不存在"))
+		return
+	}
+	if !types.IsSystemAdminFromContext(ctx) {
+		h.updateEnterpriseKnowledgeConfig(c, kb, &req)
 		return
 	}
 
@@ -321,39 +328,8 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		}
 	}
 
-	// 更新文档分块配置
-	if req.DocumentSplitting.ChunkSize > 0 {
-		kb.ChunkingConfig.ChunkSize = req.DocumentSplitting.ChunkSize
-	}
-	if req.DocumentSplitting.ChunkOverlap >= 0 {
-		kb.ChunkingConfig.ChunkOverlap = req.DocumentSplitting.ChunkOverlap
-	}
-	if len(req.DocumentSplitting.Separators) > 0 {
-		kb.ChunkingConfig.Separators = req.DocumentSplitting.Separators
-	}
+	applyKnowledgeChunkingConfig(kb, &req)
 	kb.ChunkingConfig.ParserEngineRules = req.DocumentSplitting.ParserEngineRules
-	kb.ChunkingConfig.EnableParentChild = req.DocumentSplitting.EnableParentChild
-	if req.DocumentSplitting.ParentChunkSize > 0 {
-		kb.ChunkingConfig.ParentChunkSize = req.DocumentSplitting.ParentChunkSize
-	}
-	if req.DocumentSplitting.ChildChunkSize > 0 {
-		kb.ChunkingConfig.ChildChunkSize = req.DocumentSplitting.ChildChunkSize
-	}
-	// Pointer-based fields support clearing (empty string / 0 / empty slice
-	// is a valid "user picked default again" signal; absent in payload means
-	// "no change").
-	if req.DocumentSplitting.Strategy != nil {
-		kb.ChunkingConfig.Strategy = *req.DocumentSplitting.Strategy
-	}
-	if req.DocumentSplitting.TokenLimit != nil {
-		kb.ChunkingConfig.TokenLimit = *req.DocumentSplitting.TokenLimit
-	}
-	if req.DocumentSplitting.Languages != nil {
-		kb.ChunkingConfig.Languages = *req.DocumentSplitting.Languages
-	}
-	if req.DocumentSplitting.TableMetadataInstructions != nil {
-		kb.ChunkingConfig.TableMetadataInstructions = strings.TrimSpace(*req.DocumentSplitting.TableMetadataInstructions)
-	}
 
 	// 更新多模态配置
 	if req.Multimodal.Enabled {
@@ -481,6 +457,55 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	})
 }
 
+func (h *InitializationHandler) updateEnterpriseKnowledgeConfig(
+	c *gin.Context,
+	kb *types.KnowledgeBase,
+	req *KBModelConfigRequest,
+) {
+	applyKnowledgeChunkingConfig(kb, req)
+	types.NormalizeKnowledgeBasePromptInstructions(kb)
+	if err := validateKnowledgeBasePromptInstructions(kb); err != nil {
+		c.Error(err)
+		return
+	}
+	if err := h.kbRepository.UpdateKnowledgeBase(c.Request.Context(), kb); err != nil {
+		c.Error(errors.NewInternalServerError("更新知识库失败"))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "配置更新成功"})
+}
+
+func applyKnowledgeChunkingConfig(kb *types.KnowledgeBase, req *KBModelConfigRequest) {
+	if req.DocumentSplitting.ChunkSize > 0 {
+		kb.ChunkingConfig.ChunkSize = req.DocumentSplitting.ChunkSize
+	}
+	if req.DocumentSplitting.ChunkOverlap >= 0 {
+		kb.ChunkingConfig.ChunkOverlap = req.DocumentSplitting.ChunkOverlap
+	}
+	if len(req.DocumentSplitting.Separators) > 0 {
+		kb.ChunkingConfig.Separators = req.DocumentSplitting.Separators
+	}
+	kb.ChunkingConfig.EnableParentChild = req.DocumentSplitting.EnableParentChild
+	if req.DocumentSplitting.ParentChunkSize > 0 {
+		kb.ChunkingConfig.ParentChunkSize = req.DocumentSplitting.ParentChunkSize
+	}
+	if req.DocumentSplitting.ChildChunkSize > 0 {
+		kb.ChunkingConfig.ChildChunkSize = req.DocumentSplitting.ChildChunkSize
+	}
+	if req.DocumentSplitting.Strategy != nil {
+		kb.ChunkingConfig.Strategy = *req.DocumentSplitting.Strategy
+	}
+	if req.DocumentSplitting.TokenLimit != nil {
+		kb.ChunkingConfig.TokenLimit = *req.DocumentSplitting.TokenLimit
+	}
+	if req.DocumentSplitting.Languages != nil {
+		kb.ChunkingConfig.Languages = *req.DocumentSplitting.Languages
+	}
+	if req.DocumentSplitting.TableMetadataInstructions != nil {
+		kb.ChunkingConfig.TableMetadataInstructions = strings.TrimSpace(*req.DocumentSplitting.TableMetadataInstructions)
+	}
+}
+
 // InitializeByKB godoc
 // @Summary      初始化知识库配置
 // @Description  根据知识库ID执行完整配置更新
@@ -506,9 +531,8 @@ func (h *InitializationHandler) InitializeByKB(c *gin.Context) {
 
 	logger.Infof(
 		ctx,
-		"Starting knowledge base configuration update, kbId: %s, request: %s",
+		"Starting knowledge base configuration update, kbId: %s",
 		utils.SanitizeForLog(kbIdStr),
-		utils.SanitizeForLog(utils.ToJSON(req)),
 	)
 
 	kb, err := h.getKnowledgeBaseForInitialization(ctx, kbIdStr)
@@ -536,13 +560,18 @@ func (h *InitializationHandler) InitializeByKB(c *gin.Context) {
 		return
 	}
 
+	data := gin.H{
+		"knowledge_base": knowledgeBaseResponse(ctx,
+			buildKBResponse(kb, types.StoreDisplay{}, nil),
+		),
+	}
+	if types.IsSystemAdminFromContext(ctx) {
+		data["models"] = dto.NewModelResponses(ctx, processedModels)
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "知识库配置更新成功",
-		"data": gin.H{
-			"models":         processedModels,
-			"knowledge_base": kb,
-		},
+		"data":    data,
 	})
 }
 
@@ -1427,16 +1456,29 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 	config := map[string]interface{}{
 		"hasFiles": hasFiles,
 	}
-	includeIntegrationDetail := dto.CanViewIntegrationSecrets(ctx)
+	includeInfrastructureDetail := types.IsSystemAdminFromContext(ctx)
 
 	// 按类型分组模型
 	for _, model := range models {
 		if model == nil {
 			continue
 		}
+		if !includeInfrastructureDetail {
+			switch model.Type {
+			case types.ModelTypeKnowledgeQA:
+				config["llm"] = map[string]interface{}{"configured": true}
+			case types.ModelTypeEmbedding:
+				config["embedding"] = map[string]interface{}{"configured": true}
+			case types.ModelTypeRerank:
+				config["rerank"] = map[string]interface{}{"enabled": true}
+			case types.ModelTypeVLLM:
+				config["multimodal"] = map[string]interface{}{"enabled": true}
+			}
+			continue
+		}
 		// Hide sensitive information for builtin models and viewers.
 		baseURL := model.Parameters.BaseURL
-		if model.IsBuiltin || !includeIntegrationDetail {
+		if model.IsBuiltin {
 			baseURL = ""
 		}
 
@@ -1500,7 +1542,7 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 	} else {
 		config["multimodal"].(map[string]interface{})["enabled"] = hasMultimodal
 	}
-	if kb.VLMConfig.DescriptionLanguage != "" || kb.VLMConfig.CustomInstructions != "" {
+	if includeInfrastructureDetail && (kb.VLMConfig.DescriptionLanguage != "" || kb.VLMConfig.CustomInstructions != "") {
 		if config["multimodal"] == nil {
 			config["multimodal"] = map[string]interface{}{
 				"enabled": hasMultimodal,
@@ -1517,22 +1559,18 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 
 	// 如果没有Rerank模型，设置rerank为disabled
 	if config["rerank"] == nil {
-		config["rerank"] = map[string]interface{}{
-			"enabled":   false,
-			"modelName": "",
-			"baseUrl":   "",
-			"credentials": map[string]bool{
-				"apiKey": false,
-			},
-		}
+		config["rerank"] = map[string]interface{}{"enabled": false}
 	}
 
 	// 添加知识库的文档分割配置
 	if kb != nil {
 		ds := map[string]interface{}{
-			"chunkSize":    kb.ChunkingConfig.ChunkSize,
-			"chunkOverlap": kb.ChunkingConfig.ChunkOverlap,
-			"separators":   kb.ChunkingConfig.Separators,
+			"chunkSize":         kb.ChunkingConfig.ChunkSize,
+			"chunkOverlap":      kb.ChunkingConfig.ChunkOverlap,
+			"separators":        kb.ChunkingConfig.Separators,
+			"enableParentChild": kb.ChunkingConfig.EnableParentChild,
+			"parentChunkSize":   kb.ChunkingConfig.ParentChunkSize,
+			"childChunkSize":    kb.ChunkingConfig.ChildChunkSize,
 		}
 		if kb.ChunkingConfig.Strategy != "" {
 			ds["strategy"] = kb.ChunkingConfig.Strategy
@@ -1550,7 +1588,7 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 
 		// 添加多模态的存储配置信息（优先读新字段，兼容旧 cos_config）
 		effectiveProvider := kb.GetStorageProvider()
-		if kb.StorageConfig.SecretID != "" || (effectiveProvider != "" && effectiveProvider != "local") {
+		if includeInfrastructureDetail && (kb.StorageConfig.SecretID != "" || (effectiveProvider != "" && effectiveProvider != "local")) {
 			if config["multimodal"] == nil {
 				config["multimodal"] = map[string]interface{}{
 					"enabled": true,
@@ -1579,33 +1617,31 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 		}
 	}
 
-	if kb.ExtractConfig != nil {
-		nodeExtract := map[string]interface{}{
-			"enabled":   kb.ExtractConfig.Enabled,
-			"text":      kb.ExtractConfig.Text,
-			"tags":      kb.ExtractConfig.Tags,
-			"nodes":     kb.ExtractConfig.Nodes,
-			"relations": kb.ExtractConfig.Relations,
+	if includeInfrastructureDetail {
+		if kb.ExtractConfig != nil {
+			nodeExtract := map[string]interface{}{
+				"enabled":   kb.ExtractConfig.Enabled,
+				"text":      kb.ExtractConfig.Text,
+				"tags":      kb.ExtractConfig.Tags,
+				"nodes":     kb.ExtractConfig.Nodes,
+				"relations": kb.ExtractConfig.Relations,
+			}
+			if kb.ExtractConfig.CustomInstructions != "" {
+				nodeExtract["customInstructions"] = kb.ExtractConfig.CustomInstructions
+			}
+			config["nodeExtract"] = nodeExtract
+		} else {
+			config["nodeExtract"] = map[string]interface{}{"enabled": false}
 		}
-		if kb.ExtractConfig.CustomInstructions != "" {
-			nodeExtract["customInstructions"] = kb.ExtractConfig.CustomInstructions
-		}
-		config["nodeExtract"] = nodeExtract
-	} else {
-		config["nodeExtract"] = map[string]interface{}{
-			"enabled": false,
-		}
-	}
 
-	if kb.QuestionGenerationConfig != nil {
-		config["questionGeneration"] = map[string]interface{}{
-			"enabled":            kb.QuestionGenerationConfig.Enabled,
-			"questionCount":      kb.QuestionGenerationConfig.QuestionCount,
-			"customInstructions": kb.QuestionGenerationConfig.CustomInstructions,
-		}
-	} else {
-		config["questionGeneration"] = map[string]interface{}{
-			"enabled": false,
+		if kb.QuestionGenerationConfig != nil {
+			config["questionGeneration"] = map[string]interface{}{
+				"enabled":            kb.QuestionGenerationConfig.Enabled,
+				"questionCount":      kb.QuestionGenerationConfig.QuestionCount,
+				"customInstructions": kb.QuestionGenerationConfig.CustomInstructions,
+			}
+		} else {
+			config["questionGeneration"] = map[string]interface{}{"enabled": false}
 		}
 	}
 

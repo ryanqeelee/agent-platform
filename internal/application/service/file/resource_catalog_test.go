@@ -16,6 +16,8 @@ import (
 type catalogStub struct {
 	resource *types.StoredResource
 	ref      string
+	boundID  string
+	grants   int
 }
 
 func (c *catalogStub) Register(
@@ -45,10 +47,34 @@ func (c *catalogStub) ResolvePath(_ context.Context, value string) (string, *typ
 	}
 	return value, nil, nil
 }
-func (c *catalogStub) Bind(context.Context, string, string, string, string) error { return nil }
-func (c *catalogStub) MarkDeleted(context.Context, string) error                  { return nil }
+func (c *catalogStub) ResolveTenantPath(_ context.Context, _ uint64, value string) (string, *types.StoredResource, error) {
+	return c.ResolvePath(context.Background(), value)
+}
+func (c *catalogStub) ListKnowledgeBindings(context.Context, string) ([]*types.ResourceBinding, error) {
+	if c.boundID != "" {
+		return []*types.ResourceBinding{{OwnerType: "knowledge", OwnerID: c.boundID}}, nil
+	}
+	return nil, nil
+}
+func (c *catalogStub) Bind(_ context.Context, _ string, ownerType, ownerID, _ string) error {
+	if ownerType == "knowledge" {
+		c.boundID = ownerID
+	}
+	return nil
+}
+func (c *catalogStub) MarkDeleted(context.Context, string) error { return nil }
 func (c *catalogStub) CreateAccessGrant(context.Context, string, time.Duration) (string, error) {
+	c.grants++
 	return "GrantTokenAbCdEfGhIjKl", nil
+}
+
+func TestResourceCatalogFileServiceBindsDerivedKnowledgeBytes(t *testing.T) {
+	inner := &physicalFileStub{savedPath: "local://7/exports/image.png"}
+	catalog := &catalogStub{}
+	svc := NewResourceCatalogFileService(inner, catalog)
+	_, err := svc.SaveBytes(WithKnowledgeBinding(context.Background(), "knowledge-1"), []byte("image"), 7, "image.png", false)
+	require.NoError(t, err)
+	require.Equal(t, "knowledge-1", catalog.boundID)
 }
 
 func (c *catalogStub) ResolveAccessGrant(context.Context, string) (*types.StoredResource, error) {
@@ -58,6 +84,7 @@ func (c *catalogStub) ResolveAccessGrant(context.Context, string) (*types.Stored
 type physicalFileStub struct {
 	savedPath string
 	readPath  string
+	urlCalls  int
 }
 
 func (s *physicalFileStub) CheckConnectivity(context.Context) error { return nil }
@@ -73,8 +100,11 @@ func (s *physicalFileStub) GetFile(_ context.Context, path string) (io.ReadClose
 	s.readPath = path
 	return io.NopCloser(strings.NewReader("body")), nil
 }
-func (s *physicalFileStub) GetFileURL(context.Context, string) (string, error) { return "", nil }
-func (s *physicalFileStub) DeleteFile(context.Context, string) error           { return nil }
+func (s *physicalFileStub) GetFileURL(context.Context, string) (string, error) {
+	s.urlCalls++
+	return "https://provider.example.com/presigned", nil
+}
+func (s *physicalFileStub) DeleteFile(context.Context, string) error { return nil }
 func (s *physicalFileStub) CopyFile(context.Context, string, uint64, string) (string, error) {
 	return "", nil
 }
@@ -104,4 +134,39 @@ func TestResourceCatalogFileServiceReturnsShortExternalGrantURL(t *testing.T) {
 	externalURL, err := svc.GetFileURL(context.Background(), ref)
 	require.NoError(t, err)
 	require.Equal(t, "https://weknora.example.com/r/GrantTokenAbCdEfGhIjKl", externalURL)
+	require.Equal(t, 1, catalog.grants)
+}
+
+func TestResourceCatalogFileServiceKeepsBoundKnowledgeResourceAuthenticated(t *testing.T) {
+	t.Setenv("APP_EXTERNAL_URL", "https://weknora.example.com/")
+	inner := &physicalFileStub{savedPath: "local://7/exports/a.png"}
+	catalog := &catalogStub{}
+	svc := NewResourceCatalogFileService(inner, catalog)
+
+	ref, err := svc.SaveBytes(
+		WithKnowledgeBinding(context.Background(), "knowledge-1"), []byte("image"), 7, "a.png", false,
+	)
+	require.NoError(t, err)
+	externalURL, err := svc.GetFileURL(context.Background(), ref)
+	require.NoError(t, err)
+	require.Equal(t, ref, externalURL)
+	require.Zero(t, catalog.grants, "knowledge resources must not receive anonymous grants")
+	require.Zero(t, inner.urlCalls)
+}
+
+func TestResourceCatalogFileServiceKeepsBoundKnowledgeResourceAuthenticatedWithoutExternalURL(t *testing.T) {
+	t.Setenv("APP_EXTERNAL_URL", "")
+	inner := &physicalFileStub{savedPath: "minio://7/exports/a.png"}
+	catalog := &catalogStub{}
+	svc := NewResourceCatalogFileService(inner, catalog)
+
+	ref, err := svc.SaveBytes(
+		WithKnowledgeBinding(context.Background(), "knowledge-1"), []byte("image"), 7, "a.png", false,
+	)
+	require.NoError(t, err)
+	url, err := svc.GetFileURL(context.Background(), ref)
+	require.NoError(t, err)
+	require.Equal(t, ref, url)
+	require.Zero(t, catalog.grants)
+	require.Zero(t, inner.urlCalls, "protected resources must not reach provider presigning")
 }

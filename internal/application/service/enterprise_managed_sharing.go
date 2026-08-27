@@ -84,8 +84,8 @@ func (enterpriseManagedAgentShareService) SetSharedAgentDisabledByMe(context.Con
 func (enterpriseManagedAgentShareService) GetSharedAgentForTenant(context.Context, uint64, types.TenantRole, string, ...uint64) (*types.CustomAgent, error) {
 	return nil, policy.ErrSharingUnavailable
 }
-func (enterpriseManagedAgentShareService) TenantCanAccessKBViaSomeSharedAgent(context.Context, uint64, types.TenantRole, *types.KnowledgeBase) (bool, error) {
-	return false, nil
+func (enterpriseManagedAgentShareService) FindSharedAgentForKnowledgeBase(context.Context, uint64, types.TenantRole, *types.KnowledgeBase) (*types.CustomAgent, error) {
+	return nil, nil
 }
 func (enterpriseManagedAgentShareService) GetShare(context.Context, string) (*types.AgentShare, error) {
 	return nil, policy.ErrSharingUnavailable

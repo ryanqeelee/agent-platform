@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -43,7 +44,6 @@ func copyOwnedObject(
 	tenantID uint64,
 	knowledgeID string,
 ) (string, error) {
-	_ = knowledgeID // exports objects are tenant-scoped, not knowledge-scoped
 	rc, err := srcSvc.GetFile(ctx, srcPath)
 	if err != nil {
 		return "", fmt.Errorf("read source image %q: %w", srcPath, err)
@@ -55,7 +55,7 @@ func copyOwnedObject(
 	}
 
 	fileName := uuid.New().String() + imageExtForCopy(srcPath, data)
-	newPath, err := dstSvc.SaveBytes(ctx, data, tenantID, fileName, false)
+	newPath, err := dstSvc.SaveBytes(filesvc.WithKnowledgeBinding(ctx, knowledgeID), data, tenantID, fileName, false)
 	if err != nil {
 		return "", fmt.Errorf("save copied image for %q: %w", srcPath, err)
 	}

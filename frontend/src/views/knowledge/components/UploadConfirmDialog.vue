@@ -191,7 +191,7 @@
                     </div>
                   </div>
 
-                  <div v-show="activeSection === 'parser'" class="section">
+                  <div v-if="authStore.isSystemAdmin" v-show="activeSection === 'parser'" class="section">
                     <KBParserSettings
                       :relevant-extensions="batchFileExts"
                       :parser-engine-rules="uiState.chunkingConfig.parserEngineRules"
@@ -351,7 +351,7 @@
                     </div>
                   </div>
 
-                  <div v-show="activeSection === 'multimodal'" class="section" data-section="multimodal">
+                  <div v-if="authStore.isSystemAdmin" v-show="activeSection === 'multimodal'" class="section" data-section="multimodal">
                     <div class="kb-settings-block">
                       <div class="section-header">
                         <h2 class="section-title">{{ t('knowledgeEditor.multimodal.title') }}</h2>
@@ -425,7 +425,7 @@
                     </div>
                   </div>
 
-                  <div v-show="activeSection === 'asr'" class="section" data-section="asr">
+                  <div v-if="authStore.isSystemAdmin" v-show="activeSection === 'asr'" class="section" data-section="asr">
                     <div class="kb-settings-block">
                       <div class="section-header">
                         <h2 class="section-title">{{ t('knowledgeEditor.asr.title') }}</h2>
@@ -523,7 +523,7 @@
                     </div>
                   </div>
 
-                  <div v-if="isGraphSectionAvailable" v-show="activeSection === 'graph'" class="section">
+                  <div v-if="authStore.isSystemAdmin && isGraphSectionAvailable" v-show="activeSection === 'graph'" class="section">
                     <GraphSettings
                       :graph-extract="uiState.nodeExtractConfig"
                       :model-id="llmModelId"
@@ -559,6 +559,7 @@ import GraphSettings from '../settings/GraphSettings.vue'
 import { useChatResourcesStore } from '@/stores/chatResources'
 import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useUIStore } from '@/stores/ui'
+import { useAuthStore } from '@/stores/auth'
 import { formatFileSize, getFileIcon } from '@/utils/files'
 import { getUploadFileKey } from '../utils/uploadSources'
 import { listKnowledgeTags } from '@/api/knowledge-base'
@@ -653,6 +654,7 @@ const { t } = useI18n()
 const chatResources = useChatResourcesStore()
 const editorResources = useEditorResourcesStore()
 const uiStore = useUIStore()
+const authStore = useAuthStore()
 
 const allModels = ref<any[]>([])
 const localFiles = ref<File[]>([])
@@ -877,6 +879,7 @@ const showAsrModelError = computed(() => {
 
 const issueSectionKeys = computed(() => {
   const keys = new Set<IssueSectionKey>()
+  if (!authStore.isSystemAdmin) return keys
   if (hasImages.value) {
     if (!uiState.value.multimodalConfig.enabled || !uiState.value.multimodalConfig.vllmModelId) {
       keys.add('multimodal')
@@ -922,22 +925,26 @@ const navItems = computed(() => {
   if (props.mode !== 'reparse') {
     push('tags', 'tag', t('uploadConfirm.tabTags'))
   }
-  push('parser', 'file-search', t('settings.parserEngine'))
+  if (authStore.isSystemAdmin) {
+    push('parser', 'file-search', t('settings.parserEngine'))
+  }
   push('chunking', 'file-copy', t('knowledgeEditor.sidebar.chunking'))
-  push(
-    'multimodal',
-    'image',
-    t('knowledgeEditor.sidebar.multimodal'),
-    issueSectionKeys.value.has('multimodal'),
-  )
-  push(
-    'asr',
-    'sound',
-    t('knowledgeEditor.sidebar.asr'),
-    issueSectionKeys.value.has('asr'),
-  )
+  if (authStore.isSystemAdmin) {
+    push(
+      'multimodal',
+      'image',
+      t('knowledgeEditor.sidebar.multimodal'),
+      issueSectionKeys.value.has('multimodal'),
+    )
+    push(
+      'asr',
+      'sound',
+      t('knowledgeEditor.sidebar.asr'),
+      issueSectionKeys.value.has('asr'),
+    )
+  }
   push('question', 'chat', t('knowledgeEditor.advanced.questionGeneration.label'))
-  if (isGraphSectionAvailable.value) {
+  if (authStore.isSystemAdmin && isGraphSectionAvailable.value) {
     push('graph', 'chart-bubble', t('knowledgeEditor.sidebar.graph'))
   }
   return items
@@ -1142,7 +1149,6 @@ function buildProcessOverrides(): KnowledgeProcessOverrides {
   const chunking = state.chunkingConfig
 
   const overrides: KnowledgeProcessOverrides = {
-    parser_engine_rules: chunking.parserEngineRules,
     chunking_config: {
       chunk_size: chunking.chunkSize,
       chunk_overlap: chunking.chunkOverlap,
@@ -1155,32 +1161,35 @@ function buildProcessOverrides(): KnowledgeProcessOverrides {
       languages: chunking.languages,
       table_metadata_instructions: chunking.tableMetadataInstructions,
     },
-    enable_multimodel: state.multimodalConfig.enabled,
-    vlm_config: {
-      enabled: state.multimodalConfig.enabled,
-      model_id: state.multimodalConfig.vllmModelId,
-      description_language: state.multimodalConfig.descriptionLanguage,
-      custom_instructions: state.multimodalConfig.customInstructions,
-    },
-    asr_config: {
-      enabled: state.asrConfig.enabled,
-      model_id: state.asrConfig.modelId,
-      language: state.asrConfig.language,
-    },
     question_generation_config: {
       enabled: state.questionGenerationConfig.enabled,
       question_count: state.questionGenerationConfig.questionCount,
       custom_instructions: state.questionGenerationConfig.customInstructions,
     },
-    graph_enabled: state.nodeExtractConfig.enabled && state.graphEnabled,
-    extract_config: {
+  }
+  if (authStore.isSystemAdmin) {
+    overrides.parser_engine_rules = chunking.parserEngineRules
+    overrides.enable_multimodel = state.multimodalConfig.enabled
+    overrides.vlm_config = {
+      enabled: state.multimodalConfig.enabled,
+      model_id: state.multimodalConfig.vllmModelId,
+      description_language: state.multimodalConfig.descriptionLanguage,
+      custom_instructions: state.multimodalConfig.customInstructions,
+    }
+    overrides.asr_config = {
+      enabled: state.asrConfig.enabled,
+      model_id: state.asrConfig.modelId,
+      language: state.asrConfig.language,
+    }
+    overrides.graph_enabled = state.nodeExtractConfig.enabled && state.graphEnabled
+    overrides.extract_config = {
       enabled: state.nodeExtractConfig.enabled,
       text: state.nodeExtractConfig.text,
       tags: state.nodeExtractConfig.tags,
       nodes: state.nodeExtractConfig.nodes,
       relations: state.nodeExtractConfig.relations,
       custom_instructions: state.nodeExtractConfig.customInstructions,
-    },
+    }
   }
 
   if (state.pdfForceScanned) {
@@ -1300,8 +1309,10 @@ watch(
     }
     activeSection.value = getDefaultSection()
     chunkingMoreOpen.value = false
-    loadModels()
-    loadSystemInfo()
+    if (authStore.isSystemAdmin) {
+      loadModels()
+      loadSystemInfo()
+    }
     loadTags()
   },
 )
@@ -1378,6 +1389,7 @@ const handleNodeExtractUpdate = (config: UploadUIState['nodeExtractConfig']) => 
 }
 
 const validateBeforeConfirm = (): boolean => {
+  if (!authStore.isSystemAdmin) return true
   if (hasImages.value) {
     if (!uiState.value.multimodalConfig.enabled || !uiState.value.multimodalConfig.vllmModelId) {
       MessagePlugin.warning(t('uploadConfirm.vlmModelRequired'))

@@ -16,6 +16,23 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
+type knowledgeBindingContextKey struct{}
+
+// WithKnowledgeBinding preserves the owning document through parser calls
+// that only receive a FileService, so every derived resource is bound before
+// it can be served through a KB path.
+func WithKnowledgeBinding(ctx context.Context, knowledgeID string) context.Context {
+	if strings.TrimSpace(knowledgeID) == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, knowledgeBindingContextKey{}, knowledgeID)
+}
+
+func knowledgeBindingFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(knowledgeBindingContextKey{}).(string)
+	return strings.TrimSpace(id)
+}
+
 // resourceCatalogFileService keeps provider drivers physical-path-only while
 // exposing stable resource:// references to the application layer.
 type resourceCatalogFileService struct {
@@ -118,7 +135,17 @@ func (s *resourceCatalogFileService) SaveBytes(
 		return "", err
 	}
 	sum := sha256.Sum256(data)
-	return s.register(ctx, physical, tenantID, fileName, int64(len(data)), temp, hex.EncodeToString(sum[:]))
+	ref, err := s.register(ctx, physical, tenantID, fileName, int64(len(data)), temp, hex.EncodeToString(sum[:]))
+	if err != nil {
+		return "", err
+	}
+	if knowledgeID := knowledgeBindingFromContext(ctx); knowledgeID != "" {
+		if err := s.catalog.Bind(ctx, ref, "knowledge", knowledgeID, "derived_file"); err != nil {
+			_ = s.DeleteFile(ctx, ref)
+			return "", fmt.Errorf("bind stored bytes: %w", err)
+		}
+	}
+	return ref, nil
 }
 
 func (s *resourceCatalogFileService) resolve(ctx context.Context, value string) (string, bool, error) {
@@ -139,7 +166,17 @@ func (s *resourceCatalogFileService) GetFileURL(ctx context.Context, filePath st
 	if err != nil {
 		return "", err
 	}
-	if isResource && s.externalURL != "" {
+	if isResource {
+		bindings, bindingErr := s.catalog.ListKnowledgeBindings(ctx, filePath)
+		if bindingErr != nil {
+			return "", bindingErr
+		}
+		if len(bindings) > 0 {
+			return filePath, nil
+		}
+		if s.externalURL == "" {
+			return s.inner.GetFileURL(ctx, physical)
+		}
 		token, grantErr := s.catalog.CreateAccessGrant(ctx, filePath, 2*time.Hour)
 		if grantErr != nil {
 			return "", grantErr

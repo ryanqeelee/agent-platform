@@ -15,13 +15,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-// ListKnowledgeBases store-enrichment — every KB in the list response
-// carries the same resolved vector_store_* metadata as the single-KB
-// endpoint. The list path funnels the resolution through
-// BatchResolveStoreView so an N-KB list costs one service call rather
-// than N. Cross-tenant shared KBs still render via SharedStoreDisplay
-// so the owner-tenant's store inventory cannot be correlated across
-// rows in the same response.
+// ListKnowledgeBases resolves store views in batch, but human responses never
+// expose vector_store_* infrastructure. The list path still avoids an N+1
+// lookup; explicit technical API-key authority is tested at the shared
+// redaction boundary.
 
 // stubListKBService returns a fixed slice from ListKnowledgeBases. Only
 // the methods exercised by ListKnowledgeBases are implemented; embedding
@@ -33,6 +30,39 @@ type stubListKBService struct {
 
 func (s *stubListKBService) ListKnowledgeBases(context.Context) ([]*types.KnowledgeBase, error) {
 	return s.kbs, nil
+}
+
+type stubMoveTargetKBService struct {
+	interfaces.KnowledgeBaseService
+	source *types.KnowledgeBase
+	kbs    []*types.KnowledgeBase
+}
+
+func (s *stubMoveTargetKBService) GetKnowledgeBaseByID(_ context.Context, id string) (*types.KnowledgeBase, error) {
+	if s.source != nil && s.source.ID == id {
+		return s.source, nil
+	}
+	return nil, errSentinel("knowledge base not found")
+}
+
+func (s *stubMoveTargetKBService) ListKnowledgeBases(context.Context) ([]*types.KnowledgeBase, error) {
+	return s.kbs, nil
+}
+
+func newMoveTargetsRouter(t *testing.T, svc interfaces.KnowledgeBaseService) *gin.Engine {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(middleware.ErrorHandler())
+	r.Use(func(c *gin.Context) {
+		c.Set(types.TenantIDContextKey.String(), uint64(1))
+		ctx := context.WithValue(c.Request.Context(), types.TenantRoleContextKey, types.TenantRoleAdmin)
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	})
+	h := &KnowledgeBaseHandler{service: svc}
+	r.GET("/knowledge-bases/:id/move-targets", h.ListMoveTargets)
+	return r
 }
 
 // stubVectorStoreService satisfies the two service methods the list
@@ -79,6 +109,15 @@ func newListKBRouter(
 	svc interfaces.KnowledgeBaseService,
 	vss interfaces.VectorStoreService,
 ) *gin.Engine {
+	return newListKBRouterForRole(t, svc, vss, types.TenantRoleAdmin)
+}
+
+func newListKBRouterForRole(
+	t *testing.T,
+	svc interfaces.KnowledgeBaseService,
+	vss interfaces.VectorStoreService,
+	role types.TenantRole,
+) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -86,6 +125,8 @@ func newListKBRouter(
 	r.Use(func(c *gin.Context) {
 		c.Set(types.TenantIDContextKey.String(), uint64(1))
 		c.Set(types.UserIDContextKey.String(), "u-test")
+		ctx := context.WithValue(c.Request.Context(), types.TenantRoleContextKey, role)
+		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	})
 	h := &KnowledgeBaseHandler{service: svc, vectorStoreService: vss}
@@ -93,7 +134,31 @@ func newListKBRouter(
 	return r
 }
 
-func TestListKB_EnrichesEnvBoundAndSharedDistinctly(t *testing.T) {
+func TestListKB_RedactsInfrastructureForAllHumanRoles(t *testing.T) {
+	storeID := "store-secret"
+	kb := &types.KnowledgeBase{
+		ID: "kb", TenantID: 1, EmbeddingModelID: "embed-secret",
+		SummaryModelID: "summary-secret", StorageBackendID: &storeID, VectorStoreID: &storeID,
+	}
+	vss := &stubVectorStoreService{batch: map[string]types.StoreDisplay{
+		storeID: {Name: "private-store", Source: types.StoreSourceUser, EngineType: "qdrant", Status: "available"},
+	}}
+	for _, role := range []types.TenantRole{types.TenantRoleViewer, types.TenantRoleContributor, types.TenantRoleAdmin, types.TenantRoleOwner} {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/knowledge-bases", nil)
+		newListKBRouterForRole(t, &stubListKBService{kbs: []*types.KnowledgeBase{kb}}, vss, role).ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("role %s: status=%d body=%s", role, w.Code, w.Body.String())
+		}
+		for _, platformDetail := range []string{"embed-secret", "summary-secret", "store-secret", "private-store", "qdrant"} {
+			if strings.Contains(w.Body.String(), platformDetail) {
+				t.Fatalf("role %s: response leaked %q: %s", role, platformDetail, w.Body.String())
+			}
+		}
+	}
+}
+
+func TestListKB_HidesInfrastructureForHumanAdminAcrossStoreKinds(t *testing.T) {
 	storeUserA := "aaaa-bbbb-cccc-dddd"
 	storeForeign := "ffff-eeee-dddd-cccc"
 
@@ -140,43 +205,17 @@ func TestListKB_EnrichesEnvBoundAndSharedDistinctly(t *testing.T) {
 		byID[row["id"].(string)] = row
 	}
 
-	// 1) env-store KB — System default labelling, no engine type.
-	envRow := byID["kb-env"]
-	if envRow["vector_store_source"] != string(types.StoreSourceEnv) {
-		t.Errorf("env KB: expected source=env, got %v", envRow["vector_store_source"])
+	for id, row := range byID {
+		for key := range row {
+			if strings.HasPrefix(key, "vector_store_") {
+				t.Fatalf("human admin row %s leaked %s: %v", id, key, row[key])
+			}
+		}
 	}
-	if name, _ := envRow["vector_store_name"].(string); name == "" {
-		t.Errorf("env KB: expected non-empty system-default name")
-	}
-
-	// 2) own-tenant bound KB — name + engine surfaced.
-	boundRow := byID["kb-bound"]
-	if boundRow["vector_store_source"] != string(types.StoreSourceUser) {
-		t.Errorf("bound KB: expected source=user, got %v", boundRow["vector_store_source"])
-	}
-	if boundRow["vector_store_name"] != "prod-qdrant" {
-		t.Errorf("bound KB: expected name=prod-qdrant, got %v", boundRow["vector_store_name"])
-	}
-	if boundRow["vector_store_engine_type"] != "qdrant" {
-		t.Errorf("bound KB: expected engine=qdrant, got %v", boundRow["vector_store_engine_type"])
-	}
-
-	// 3) cross-tenant shared KB — UUID stripped, source=shared, no name.
-	sharedRow := byID["kb-shared"]
-	if _, exists := sharedRow["vector_store_id"]; exists {
-		t.Errorf("shared KB must NOT expose vector_store_id, got %v", sharedRow["vector_store_id"])
-	}
-	if sharedRow["vector_store_source"] != string(types.StoreSourceShared) {
-		t.Errorf("shared KB: expected source=shared, got %v", sharedRow["vector_store_source"])
-	}
-	if name, ok := sharedRow["vector_store_name"]; ok && name != "" {
-		t.Errorf("shared KB must not surface a name, got %v", name)
-	}
-	// Defensive: the foreign store UUID must not appear anywhere in the
-	// shared row's serialized payload.
-	serialized, _ := json.Marshal(sharedRow)
-	if strings.Contains(string(serialized), storeForeign) {
-		t.Fatalf("shared row leaked foreign store UUID: %s", serialized)
+	for _, platformDetail := range []string{storeUserA, storeForeign, "prod-qdrant", "qdrant"} {
+		if strings.Contains(w.Body.String(), platformDetail) {
+			t.Fatalf("human admin list leaked %q: %s", platformDetail, w.Body.String())
+		}
 	}
 }
 
@@ -238,7 +277,29 @@ func TestListKB_GracefullyDegradesWhenBatchResolveFails(t *testing.T) {
 	if len(envelope.Data) != 1 {
 		t.Fatalf("expected 1 row, got %d", len(envelope.Data))
 	}
-	if envelope.Data[0]["vector_store_source"] != string(types.StoreSourceUnavailable) {
-		t.Errorf("expected fallback source=unavailable, got %v", envelope.Data[0]["vector_store_source"])
+	for key := range envelope.Data[0] {
+		if strings.HasPrefix(key, "vector_store_") {
+			t.Errorf("human response must not expose fallback infrastructure %s", key)
+		}
+	}
+}
+
+func TestListMoveTargets_RedactsInfrastructureForHumanAdmin(t *testing.T) {
+	storageID := "move-target-storage-secret"
+	source := &types.KnowledgeBase{ID: "source", TenantID: 1, Type: "document", EmbeddingModelID: "embedding-secret"}
+	target := &types.KnowledgeBase{
+		ID: "target", TenantID: 1, Type: "document", EmbeddingModelID: "embedding-secret",
+		SummaryModelID: "summary-secret", StorageBackendID: &storageID, VectorStoreID: &storageID,
+	}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/knowledge-bases/source/move-targets", nil)
+	newMoveTargetsRouter(t, &stubMoveTargetKBService{source: source, kbs: []*types.KnowledgeBase{source, target}}).ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	for _, platformDetail := range []string{"embedding-secret", "summary-secret", "move-target-storage-secret"} {
+		if strings.Contains(w.Body.String(), platformDetail) {
+			t.Fatalf("human move-target response leaked %q: %s", platformDetail, w.Body.String())
+		}
 	}
 }

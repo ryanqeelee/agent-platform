@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	stderrors "errors"
 	"net/http"
 	"strconv"
@@ -131,6 +132,7 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 			"Successfully retrieved recent messages, session ID: %s, message count: %d",
 			sessionID, len(messages),
 		)
+		hideMessageModelIDs(ctx, messages)
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"data":    rewriter.RewriteMessagesResponse(ctx, messages),
@@ -171,10 +173,22 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 		"Successfully retrieved messages before time, session ID: %s, message count: %d",
 		sessionID, len(messages),
 	)
+	hideMessageModelIDs(ctx, messages)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    rewriter.RewriteMessagesResponse(ctx, messages),
 	})
+}
+
+func hideMessageModelIDs(ctx context.Context, messages []*types.Message) {
+	if types.IsSystemAdminFromContext(ctx) {
+		return
+	}
+	for _, message := range messages {
+		if message != nil {
+			message.ModelID = ""
+		}
+	}
 }
 
 // DeleteMessage godoc
@@ -318,6 +332,9 @@ func (h *MessageHandler) GetChatHistoryKBStats(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
+	}
+	if stats != nil && !types.IsSystemAdminFromContext(ctx) {
+		stats.EmbeddingModelID = ""
 	}
 
 	c.JSON(http.StatusOK, gin.H{

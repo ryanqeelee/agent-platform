@@ -127,6 +127,7 @@ export default {
     empty: '아직 멤버가 없습니다. 동료를 초대해 시작하세요.',
     emptySearch: '"{q}"와 일치하는 멤버가 없습니다.',
     searchPlaceholder: '이름 또는 이메일로 검색',
+    businessRoles: { title: '업무 역할', none: '할당되지 않음', saved: '업무 역할을 저장했습니다', saveFailed: '업무 역할을 저장하지 못했습니다' },
     audit: {
       tabLabel: '감사 로그',
       description: '이 워크스페이스의 멤버 변경 및 접근 거부 이벤트를 최신순으로 기록합니다. 1분 이내의 반복 거부는 자동으로 중복 제거됩니다.',
@@ -159,7 +160,8 @@ export default {
         'rbac.invitation_accepted': '초대 수락',
         'rbac.invitation_declined': '초대 거절',
         'rbac.invitation_revoked': '초대 취소',
-        'rbac.invitation_expired': '초대 만료'
+        'rbac.invitation_expired': '초대 만료',
+        'knowledge_role.created': '업무 역할 생성', 'knowledge_role.updated': '업무 역할 업데이트', 'knowledge_role.member_assigned': '구성원 업무 역할 업데이트', 'knowledge_access.updated': '지식 접근 범위 업데이트'
       },
       columns: {
         time: '시간',
@@ -240,6 +242,13 @@ export default {
       createOwnKB: '내 지식 베이스 및 에이전트 생성/편집',
       readAll: '워크스페이스 콘텐츠 조회'
     }
+  },
+  businessRoles: {
+    title: '업무 역할', description: '업무 역할은 직원이 사용할 수 있는 지식만 제어하며 시스템 역할은 변경하지 않습니다.', create: '역할 추가', rename: '역할 이름 변경', nameRequired: '역할 이름을 입력하세요', createFailed: '역할을 추가하지 못했습니다', saveFailed: '역할을 저장하지 못했습니다',
+    columns: { name: '역할 이름', enabled: '사용', actions: '작업' }
+  },
+  knowledgeAccess: {
+    title: '지식 접근 범위', description: '역할을 선택하지 않으면 이 조직의 모든 직원이 이 지식을 사용할 수 있습니다. 역할을 선택하면 해당 역할 구성원만 사용할 수 있습니다.', all: '모든 직원', roles: '선택한 업무 역할', noRoles: '사용 가능한 업무 역할이 없습니다. 관리자에게 먼저 역할 생성을 요청하세요.', disabled: '사용 중지됨', loadFailed: '지식 접근 범위를 불러올 수 없습니다', roleRequired: '업무 역할을 하나 이상 선택하세요', saved: '지식 접근 범위를 저장했습니다', saveFailed: '지식 접근 범위를 저장하지 못했습니다'
   },
   userProfile: {
     title: '사용자 정보',

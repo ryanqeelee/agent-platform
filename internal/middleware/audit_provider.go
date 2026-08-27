@@ -7,7 +7,7 @@ import (
 
 // auditServiceContextKey is the gin context key used by
 // AuditServiceProvider to stash the running AuditLogService so that
-// middleware functions (rbac.go's RequireRole / RequireOwnershipOrRole)
+// middleware functions (for example rbac.go's RequireRole)
 // can pull it out without needing the service threaded into their
 // signatures. Same pattern as the langfuse gin middleware.
 const auditServiceContextKey = "weknora.audit_service"

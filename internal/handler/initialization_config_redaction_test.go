@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBuildConfigResponse_ViewerOmitsModelBaseURL(t *testing.T) {
+func TestBuildConfigResponse_ViewerOmitsModelInfrastructure(t *testing.T) {
 	h := &InitializationHandler{}
 	ctx := context.WithValue(context.Background(), types.TenantRoleContextKey, types.TenantRoleViewer)
 	models := []*types.Model{{
@@ -21,7 +21,12 @@ func TestBuildConfigResponse_ViewerOmitsModelBaseURL(t *testing.T) {
 			APIKey:  "sk-secret-do-not-leak",
 		},
 	}}
-	kb := &types.KnowledgeBase{}
+	kb := &types.KnowledgeBase{
+		ExtractConfig: &types.ExtractConfig{Enabled: true, CustomInstructions: "platform graph prompt"},
+		QuestionGenerationConfig: &types.QuestionGenerationConfig{
+			Enabled: true, CustomInstructions: "platform question prompt",
+		},
+	}
 
 	config := h.buildConfigResponse(ctx, models, kb, false)
 	llm, ok := config["llm"].(map[string]interface{})
@@ -32,9 +37,12 @@ func TestBuildConfigResponse_ViewerOmitsModelBaseURL(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, string(body), "tenant-private.example.com")
 	assert.NotContains(t, string(body), "sk-secret-do-not-leak")
+	assert.NotContains(t, string(body), "custom-llm")
+	assert.NotContains(t, config, "nodeExtract")
+	assert.NotContains(t, config, "questionGeneration")
 }
 
-func TestBuildConfigResponse_AdminKeepsModelBaseURL(t *testing.T) {
+func TestBuildConfigResponse_EnterpriseAdminOmitsModelInfrastructure(t *testing.T) {
 	h := &InitializationHandler{}
 	ctx := context.WithValue(context.Background(), types.TenantRoleContextKey, types.TenantRoleAdmin)
 	models := []*types.Model{{
@@ -50,9 +58,28 @@ func TestBuildConfigResponse_AdminKeepsModelBaseURL(t *testing.T) {
 	config := h.buildConfigResponse(ctx, models, kb, false)
 	llm, ok := config["llm"].(map[string]interface{})
 	require.True(t, ok)
-	assert.Equal(t, "https://tenant-private.example.com", llm["baseUrl"])
+	assert.Equal(t, true, llm["configured"])
 
 	body, err := json.Marshal(config)
 	require.NoError(t, err)
+	assert.NotContains(t, string(body), "tenant-private.example.com")
 	assert.NotContains(t, string(body), "sk-secret-do-not-leak")
+	assert.NotContains(t, string(body), "custom-llm")
+}
+
+func TestBuildConfigResponse_SystemAdminKeepsModelInfrastructure(t *testing.T) {
+	h := &InitializationHandler{}
+	ctx := context.WithValue(context.Background(), types.SystemAdminContextKey, true)
+	models := []*types.Model{{
+		Type: types.ModelTypeKnowledgeQA,
+		Name: "custom-llm",
+		Parameters: types.ModelParameters{
+			BaseURL: "https://platform.example.com",
+		},
+	}}
+
+	config := h.buildConfigResponse(ctx, models, &types.KnowledgeBase{}, false)
+	llm := config["llm"].(map[string]interface{})
+	assert.Equal(t, "custom-llm", llm["modelName"])
+	assert.Equal(t, "https://platform.example.com", llm["baseUrl"])
 }

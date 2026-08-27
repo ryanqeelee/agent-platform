@@ -108,6 +108,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		logger.Error(ctx, "Failed to parse request data", err)
 		return nil, nil, errors.NewBadRequestError(err.Error())
 	}
+	request.SummaryModelID = platformModelOverride(ctx, request.SummaryModelID)
 
 	// Validate query content
 	if request.Query == "" {
@@ -152,15 +153,24 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		return nil, nil, errors.NewNotFoundError("Session not found")
 	}
 
-	// Get custom agent if agent_id is provided. Backend resolves shared agent from share relation (no client-provided tenant).
+	// Get custom agent if agent_id is provided. Backend resolves shared agent from
+	// the exact share relation; API keys cannot inherit human workspace shares.
 	customAgent, effectiveTenantID, sharedAgentReadOnly := h.resolveAgent(ctx, c, request.AgentID, request.AgentSourceTenantID)
 	if request.AgentSourceTenantID != 0 && customAgent == nil {
 		return nil, nil, errors.NewNotFoundError("Shared agent not found")
 	}
 
-	// Merge @mentioned items into knowledge_base_ids and knowledge_ids
+	// Merge @mentioned items into knowledge_base_ids and knowledge_ids.
 	kbIDs, knowledgeIDs := mergeKnowledgeTargets(request.KnowledgeBaseIDs, request.KnowledgeIds, request.MentionedItems)
-	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, knowledgeIDs); err != nil {
+	mentionScopes := tagScopesFromMentionedItems(request.MentionedItems)
+	requestTagIDs := dedupRequestStrings(request.TagIDs)
+	if err := validateUnscopedTagIDs(orphanTagIDsForScope(requestTagIDs, mentionScopes), secutils.SanitizeForLogArray(kbIDs)); err != nil {
+		return nil, nil, errors.NewBadRequestError(err.Error())
+	}
+	tagScopes := mergeTagScopesFromRequestIDs(mentionScopes, requestTagIDs, secutils.SanitizeForLogArray(kbIDs))
+	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(
+		ctx, appendTagScopeKnowledgeBaseIDs(kbIDs, tagScopes), knowledgeIDs,
+	); err != nil {
 		return nil, nil, err
 	}
 
@@ -179,6 +189,9 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 			customAgent = scopedAgent
 			effectiveTenantID = scopedTenantID
 			sharedAgentReadOnly = false
+			ctx = types.WithAuthorizedSharedKnowledgeBase(
+				ctx, c.GetUint64(types.TenantIDContextKey.String()), scopedTenantID, kbIDs[0], types.OrgRoleEditor,
+			)
 		}
 	}
 
@@ -310,12 +323,6 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		attachmentIDs = normalizedIDs
 	}
 
-	mentionScopes := tagScopesFromMentionedItems(request.MentionedItems)
-	requestTagIDs := dedupRequestStrings(request.TagIDs)
-	if err := validateUnscopedTagIDs(orphanTagIDsForScope(requestTagIDs, mentionScopes), secutils.SanitizeForLogArray(kbIDs)); err != nil {
-		return nil, nil, errors.NewBadRequestError(err.Error())
-	}
-	tagScopes := mergeTagScopesFromRequestIDs(mentionScopes, requestTagIDs, secutils.SanitizeForLogArray(kbIDs))
 	tagIDs := dedupRequestStrings(append(request.TagIDs, mentionedIDsByType(request.MentionedItems, "tag")...))
 	mcpServiceIDs := dedupRequestStrings(append(request.MCPServiceIDs, mentionedIDsByType(request.MentionedItems, "mcp")...))
 	skillNames := dedupRequestStrings(append(request.SkillNames, mentionedIDsByType(request.MentionedItems, "skill")...))
@@ -377,6 +384,13 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	}
 
 	return reqCtx, &request, nil
+}
+
+func platformModelOverride(ctx context.Context, modelID string) string {
+	if !types.IsSystemAdminFromContext(ctx) {
+		return ""
+	}
+	return modelID
 }
 
 func buildMessageExecutionContext(
@@ -467,6 +481,27 @@ func cloneTagScopes(scopes []types.TagScope) []types.TagScope {
 	return cloned
 }
 
+func appendTagScopeKnowledgeBaseIDs(kbIDs []string, scopes []types.TagScope) []string {
+	combined := append([]string(nil), kbIDs...)
+	for _, scope := range scopes {
+		combined = append(combined, scope.KnowledgeBaseID)
+	}
+	return dedupRequestStrings(combined)
+}
+
+func attachSharedAgentExecutionProvenance(
+	ctx context.Context, sharedAgentReadOnly bool, effectiveTenantID uint64, agent *types.CustomAgent,
+) context.Context {
+	if !sharedAgentReadOnly || agent == nil {
+		return ctx
+	}
+	callerTenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok {
+		return ctx
+	}
+	return types.WithAuthorizedSharedAgentExecution(ctx, callerTenantID, effectiveTenantID, agent.ID)
+}
+
 // resolveAgent resolves the custom agent by ID, trying shared agent first, then own agent.
 // Returns (nil, 0) if agentID is empty or not found.
 func (h *Handler) resolveAgent(
@@ -487,7 +522,8 @@ func (h *Handler) resolveAgent(
 	var sharedAgentReadOnly bool
 	userIDVal, _ := c.Get(types.UserIDContextKey.String())
 	currentTenantID := c.GetUint64(types.TenantIDContextKey.String())
-	if h.agentShareService != nil && userIDVal != nil && currentTenantID != 0 {
+	_, isAPIKey := types.TenantAPIKeyScopeFromContext(ctx)
+	if !isAPIKey && h.agentShareService != nil && userIDVal != nil && currentTenantID != 0 {
 		callerTenantRole := types.TenantRoleFromContext(ctx)
 		var agent *types.CustomAgent
 		var err error
@@ -577,11 +613,15 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool) *
 	// Write initial agent_query event
 	h.writeAgentQueryEvent(reqCtx.ctx, reqCtx.sessionID, reqCtx.assistantMessage.ID)
 
-	// Base context for async work: when using shared agent, use source tenant for model/KB/MCP resolution
-	baseCtx := reqCtx.ctx
+	// Base context for async work: preserve the exact human caller + shared
+	// Agent provenance before switching model/KB/MCP resolution to the source
+	// tenant. Live tool authorization uses it to replay that exact share.
+	baseCtx := attachSharedAgentExecutionProvenance(
+		reqCtx.ctx, reqCtx.sharedAgentReadOnly, reqCtx.effectiveTenantID, reqCtx.customAgent,
+	)
 	if reqCtx.effectiveTenantID != 0 && h.tenantService != nil {
 		if tenant, err := h.tenantService.GetTenantByID(reqCtx.ctx, reqCtx.effectiveTenantID); err == nil && tenant != nil {
-			baseCtx = context.WithValue(context.WithValue(reqCtx.ctx, types.TenantIDContextKey, reqCtx.effectiveTenantID), types.TenantInfoContextKey, tenant)
+			baseCtx = context.WithValue(context.WithValue(baseCtx, types.TenantIDContextKey, reqCtx.effectiveTenantID), types.TenantInfoContextKey, tenant)
 			logger.Infof(reqCtx.ctx, "Using effective tenant %d for shared agent (model/KB/MCP)", reqCtx.effectiveTenantID)
 		}
 	}
@@ -700,7 +740,9 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("At least one knowledge_base_id, knowledge_base_ids, knowledge_ids, or scoped tag must be provided"))
 		return
 	}
-	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, knowledgeBaseIDs, request.KnowledgeIDs); err != nil {
+	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(
+		ctx, appendTagScopeKnowledgeBaseIDs(knowledgeBaseIDs, tagScopes), request.KnowledgeIDs,
+	); err != nil {
 		c.Error(err)
 		return
 	}
@@ -1332,7 +1374,6 @@ func (h *Handler) persistLastRequestState(parentCtx context.Context, reqCtx *qaR
 	state := &types.SessionLastRequestState{
 		AgentID:          reqCtx.reqAgentID,
 		AgentEnabled:     agentEnabled,
-		ModelID:          reqCtx.summaryModelID,
 		KnowledgeBaseIDs: reqCtx.knowledgeBaseIDs,
 		KnowledgeIDs:     reqCtx.knowledgeIDs,
 		TagIDs:           reqCtx.tagIDs,

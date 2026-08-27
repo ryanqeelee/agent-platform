@@ -181,7 +181,7 @@
                 </div>
 
                 <!-- 模型配置 -->
-                <div v-show="currentSection === 'models'" class="section">
+                <div v-if="authStore.isSystemAdmin" v-show="currentSection === 'models'" class="section">
                   <KBModelConfig
                     ref="modelConfigRef"
                     v-if="formData"
@@ -195,7 +195,7 @@
                 </div>
 
                 <!-- VectorStore 绑定 -->
-                <div v-show="currentSection === 'vectorStore'" class="section">
+                <div v-if="authStore.isSystemAdmin" v-show="currentSection === 'vectorStore'" class="section">
                   <KBVectorStoreSettings
                     v-if="formData"
                     :mode="editorMode"
@@ -244,7 +244,7 @@
                 </div>
 
                 <!-- 解析引擎 -->
-                <div v-if="!isFAQ && formData && currentSection === 'parser'" class="section">
+                <div v-if="authStore.isSystemAdmin && !isFAQ && formData && currentSection === 'parser'" class="section">
                   <KBParserSettings
                     :parser-engine-rules="formData.chunkingConfig.parserEngineRules"
                     @update:parser-engine-rules="handleParserEngineRulesUpdate"
@@ -252,7 +252,7 @@
                 </div>
 
                 <!-- 存储引擎 -->
-                <div v-if="!isFAQ && formData && currentSection === 'storage'" class="section">
+                <div v-if="authStore.isSystemAdmin && !isFAQ && formData && currentSection === 'storage'" class="section">
                   <KBStorageSettings
                     :storage-backend-id="formData.storageBackendId"
                     :storage-provider="formData.storageProvider"
@@ -272,7 +272,7 @@
                 </div>
 
                 <!-- 多模态配置 -->
-                <div v-if="!isFAQ" v-show="currentSection === 'multimodal'" class="section">
+                <div v-if="authStore.isSystemAdmin && !isFAQ" v-show="currentSection === 'multimodal'" class="section">
                   <div v-if="formData" class="kb-multimodal-settings">
                     <div class="section-header">
                       <h2>{{ $t('knowledgeEditor.multimodal.title') }}</h2>
@@ -346,7 +346,7 @@
                 </div>
 
                 <!-- 音频处理（ASR）设置 -->
-                <div v-if="!isFAQ" v-show="currentSection === 'asr'" class="section">
+                <div v-if="authStore.isSystemAdmin && !isFAQ" v-show="currentSection === 'asr'" class="section">
                   <div v-if="formData" class="kb-multimodal-settings">
                     <div class="section-header">
                       <h2>{{ $t('knowledgeEditor.asr.title') }}</h2>
@@ -390,7 +390,7 @@
                 </div>
 
                 <!-- 知识图谱 -->
-                <div v-if="!isFAQ && currentSection === 'graph'" class="section">
+                <div v-if="authStore.isSystemAdmin && !isFAQ && currentSection === 'graph'" class="section">
                   <GraphSettings
                     v-if="formData"
                     :graph-extract="formData.nodeExtractConfig"
@@ -401,7 +401,7 @@
                 </div>
 
                 <!-- 高级设置 -->
-                <div v-if="!isFAQ" v-show="currentSection === 'advanced'" class="section">
+                <div v-if="authStore.isSystemAdmin && !isFAQ" v-show="currentSection === 'advanced'" class="section">
                   <KBAdvancedSettings
                     ref="advancedSettingsRef"
                     v-if="formData"
@@ -465,7 +465,7 @@ import KbCreateContextualGuide from '@/components/KbCreateContextualGuide.vue'
 import { KB_EDITOR_FOCUS_SECTION_EVENT, markContextualGuideDone } from '@/config/contextualGuides'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { createKnowledgeBase, getKnowledgeBaseById, listKnowledgeFiles, updateKnowledgeBase, rebuildKBIndex } from '@/api/knowledge-base'
-import { updateKBConfig, type KBModelConfigRequest } from '@/api/initialization'
+import { getCurrentConfigByKB, updateKBConfig, type KBModelConfigRequest } from '@/api/initialization'
 import { type ModelConfig } from '@/api/model'
 import { useChatResourcesStore } from '@/stores/chatResources'
 import { useEditorResourcesStore } from '@/stores/editorResources'
@@ -564,33 +564,19 @@ const initialStorageProvider = ref<string>('')
 const tenantDefaultStorageProvider = ref('local')
 const initialIndexingStrategy = ref<any>(null)
 const dsCount = ref(0)
-// Identifier of the user who created this KB. Empty for older rows
-// that predate per-KB ownership tracking; those KBs have no "owner" and
-// only tenant Admin+ can mutate their share settings.
-const kbCreatorId = ref<string>('')
 const kbTenantId = ref<number>(0)
 
 // Backend gate for /knowledge-bases/:id/shares (POST/PUT/DELETE) is
-// g.OwnedKBOrAdmin(): only the KB creator or tenant Admin+ may mutate
-// shares. Org-admins on a shared KB do NOT pass this guard, so they
-// would only see 403s if we let them try. Mirror the matrix here so
-// the buttons disappear instead of failing.
+// current Admin+ in the KB's source tenant. Receiving-tenant org Admins and
+// historical creators do not receive mutation controls.
 const canShareKB = computed(() => {
-  if (!activeKbId.value) return false
-  const userId = authStore.user?.id || ''
-  if (kbCreatorId.value && userId && kbCreatorId.value === userId) return true
+  if (editorMode.value !== 'edit' || !activeKbId.value) return false
+  if (Number(kbTenantId.value || 0) !== Number(authStore.currentTenantId || 0)) return false
   return authStore.hasRole('admin')
 })
 
-const isKbOwner = computed(() => {
-  const userId = authStore.user?.id || ''
-  return Boolean(kbCreatorId.value && userId && kbCreatorId.value === userId)
-})
-
 const canViewActivity = computed(() => {
-  if (editorMode.value !== 'edit' || !activeKbId.value) return false
-  if (Number(kbTenantId.value || 0) !== Number(authStore.currentTenantId || 0)) return false
-  return isKbOwner.value || authStore.hasRole('admin')
+  return canShareKB.value
 })
 // 用户是否在分块设置中手动改过任何值。一旦为 true，就不再根据索引策略自动调整默认分块参数。
 const chunkingDirty = ref(false)
@@ -616,24 +602,27 @@ const DEFAULT_CHUNKING_PRESET = {
 const navItems = computed(() => {
   const items: { key: string; icon: string; label: string; badge?: number }[] = [
     { key: 'basic', icon: 'info-circle', label: t('knowledgeEditor.sidebar.basic') },
-    { key: 'models', icon: 'control-platform', label: t('knowledgeEditor.sidebar.models') },
-    // VectorStore binding section — present in both create and edit
-    // modes. Create mode shows a dropdown; edit mode shows the bound
-    // store read-only with an immutability hint.
-    { key: 'vectorStore', icon: 'data-base', label: t('knowledgeEditor.sidebar.vectorStore') }
   ]
+  if (authStore.isSystemAdmin) {
+    items.push(
+      { key: 'models', icon: 'control-platform', label: t('knowledgeEditor.sidebar.models') },
+      { key: 'vectorStore', icon: 'data-base', label: t('knowledgeEditor.sidebar.vectorStore') },
+    )
+  }
   if (formData.value?.type === 'faq') {
     items.push({ key: 'faq', icon: 'help-circle', label: t('knowledgeEditor.sidebar.faq') })
   } else {
-    items.push(
-      { key: 'parser', icon: 'file-search', label: t('settings.parserEngine') },
-      { key: 'multimodal', icon: 'image', label: t('knowledgeEditor.sidebar.multimodal') },
-      { key: 'asr', icon: 'sound', label: t('knowledgeEditor.sidebar.asr') },
-      { key: 'storage', icon: 'cloud', label: t('knowledgeEditor.sidebar.storage') },
-      { key: 'chunking', icon: 'file-copy', label: t('knowledgeEditor.sidebar.chunking') },
-      { key: 'graph', icon: 'chart-bubble', label: t('knowledgeEditor.sidebar.graph') },
-      { key: 'advanced', icon: 'setting', label: t('knowledgeEditor.sidebar.advanced') }
-    )
+    if (authStore.isSystemAdmin) {
+      items.push(
+        { key: 'parser', icon: 'file-search', label: t('settings.parserEngine') },
+        { key: 'multimodal', icon: 'image', label: t('knowledgeEditor.sidebar.multimodal') },
+        { key: 'asr', icon: 'sound', label: t('knowledgeEditor.sidebar.asr') },
+        { key: 'storage', icon: 'cloud', label: t('knowledgeEditor.sidebar.storage') },
+        { key: 'graph', icon: 'chart-bubble', label: t('knowledgeEditor.sidebar.graph') },
+        { key: 'advanced', icon: 'setting', label: t('knowledgeEditor.sidebar.advanced') },
+      )
+    }
+    items.push({ key: 'chunking', icon: 'file-copy', label: t('knowledgeEditor.sidebar.chunking') })
     if (editorMode.value === 'edit' && activeKbId.value) {
       items.push({ key: 'datasource', icon: 'cloud-download', label: t('knowledgeEditor.sidebar.datasource'), badge: dsCount.value || undefined })
     }
@@ -837,9 +826,10 @@ const loadKBData = async (kbIdOverride?: string) => {
   
   loading.value = true
   try {
-    const [kbInfo, filesResult] = await Promise.all([
+    const [kbInfo, filesResult, currentConfig] = await Promise.all([
       getKnowledgeBaseById(kbId),
-      listKnowledgeFiles(kbId, { page: 1, page_size: 1 })
+	  listKnowledgeFiles(kbId, { page: 1, page_size: 1 }),
+	  getCurrentConfigByKB(kbId),
     ])
     
     if (!kbInfo || !kbInfo.data) {
@@ -847,8 +837,8 @@ const loadKBData = async (kbIdOverride?: string) => {
     }
 
     const kb = kbInfo.data
+	const splitting = currentConfig.documentSplitting || {}
     hasFiles.value = (filesResult as any)?.total > 0
-    kbCreatorId.value = (kb as any).creator_id || ''
     kbTenantId.value = Number((kb as any).tenant_id || 0)
 
     // 设置表单数据
@@ -867,21 +857,21 @@ const loadKBData = async (kbIdOverride?: string) => {
         wikiSynthesisModelId: kb.wiki_config?.synthesis_model_id || ''
       },
       chunkingConfig: {
-        chunkSize: kb.chunking_config?.chunk_size || 512,
+		chunkSize: splitting.chunkSize ?? kb.chunking_config?.chunk_size ?? 512,
         // Fallback only used when the loaded KB has no chunk_overlap stored.
         // Aligned with chunker.DefaultChunkOverlap on the backend.
-        chunkOverlap: kb.chunking_config?.chunk_overlap || 80,
-        separators: kb.chunking_config?.separators || ['\n\n', '\n', '。', '！', '？', ';', '；'],
+		chunkOverlap: splitting.chunkOverlap ?? kb.chunking_config?.chunk_overlap ?? 80,
+		separators: splitting.separators ?? kb.chunking_config?.separators ?? ['\n\n', '\n', '。', '！', '？', ';', '；'],
         parserEngineRules: kb.chunking_config?.parser_engine_rules || undefined,
-        enableParentChild: kb.chunking_config?.enable_parent_child || false,
-        parentChunkSize: kb.chunking_config?.parent_chunk_size || 4096,
-        childChunkSize: kb.chunking_config?.child_chunk_size || 384,
+		enableParentChild: splitting.enableParentChild ?? kb.chunking_config?.enable_parent_child ?? false,
+		parentChunkSize: splitting.parentChunkSize ?? kb.chunking_config?.parent_chunk_size ?? 4096,
+		childChunkSize: splitting.childChunkSize ?? kb.chunking_config?.child_chunk_size ?? 384,
         // Existing KBs without strategy field render as empty (= legacy behavior).
         // The user has to actively pick a value to opt in to the new tiers.
-        strategy: kb.chunking_config?.strategy || '',
-        tokenLimit: kb.chunking_config?.token_limit || 0,
-        languages: kb.chunking_config?.languages || [],
-        tableMetadataInstructions: kb.chunking_config?.table_metadata_instructions || ''
+		strategy: splitting.strategy ?? kb.chunking_config?.strategy ?? '',
+		tokenLimit: splitting.tokenLimit ?? kb.chunking_config?.token_limit ?? 0,
+		languages: splitting.languages ?? kb.chunking_config?.languages ?? [],
+		tableMetadataInstructions: splitting.tableMetadataInstructions ?? kb.chunking_config?.table_metadata_instructions ?? ''
       },
       storageBackendId: (kb.storage_backend_id || '') as string,
       storageProvider: (kb.storage_provider_config?.provider || kb.storage_config?.provider || 'local') as string,
@@ -1147,25 +1137,23 @@ const validateForm = (): boolean => {
     }
   }
 
-  // 验证模型配置 - embedding 模型仅在检索索引启用时必须
-  const needsEmbedding = formData.value.indexingStrategy?.vectorEnabled || formData.value.indexingStrategy?.keywordEnabled
-  if (needsEmbedding && !formData.value.modelConfig.embeddingModelId) {
-    MessagePlugin.warning(t('knowledgeEditor.indexing.embeddingRequired'))
-    currentSection.value = 'models'
-    return false
-  }
-
-  if (!formData.value.modelConfig.llmModelId) {
-    MessagePlugin.warning(t('knowledgeEditor.messages.summaryRequired'))
-    currentSection.value = 'models'
-    return false
-  }
-
-  // 验证多模态配置（如果启用）
-  if (formData.value.multimodalConfig.enabled && !formData.value.multimodalConfig.vllmModelId) {
-    MessagePlugin.warning(t('knowledgeEditor.messages.multimodalInvalid'))
-    currentSection.value = 'multimodal'
-    return false
+  if (authStore.isSystemAdmin) {
+    const needsEmbedding = formData.value.indexingStrategy?.vectorEnabled || formData.value.indexingStrategy?.keywordEnabled
+    if (needsEmbedding && !formData.value.modelConfig.embeddingModelId) {
+      MessagePlugin.warning(t('knowledgeEditor.indexing.embeddingRequired'))
+      currentSection.value = 'models'
+      return false
+    }
+    if (!formData.value.modelConfig.llmModelId) {
+      MessagePlugin.warning(t('knowledgeEditor.messages.summaryRequired'))
+      currentSection.value = 'models'
+      return false
+    }
+    if (formData.value.multimodalConfig.enabled && !formData.value.multimodalConfig.vllmModelId) {
+      MessagePlugin.warning(t('knowledgeEditor.messages.multimodalInvalid'))
+      currentSection.value = 'multimodal'
+      return false
+    }
   }
 
   if (formData.value.type === 'faq' && !formData.value.faqConfig?.indexMode) {
@@ -1203,49 +1191,35 @@ const buildSubmitData = () => {
         ? { parser_engine_rules: formData.value.chunkingConfig.parserEngineRules }
         : {})
     },
-    embedding_model_id: formData.value.modelConfig.embeddingModelId,
-    summary_model_id: formData.value.modelConfig.llmModelId
   }
 
-  // Vector-store binding. Only attach the field when the user actively
-  // selected a non-default store. The server treats an empty string as
-  // NULL, but keeping the field absent on the wire matches what a
-  // client that doesn't know about this binding would send — which
-  // makes A/B response diffs easier to read.
-  if (formData.value.vectorStoreId) {
-    data.vector_store_id = formData.value.vectorStoreId
-  }
-
-  // 添加多模态配置
-  data.vlm_config = {
-    enabled: formData.value.multimodalConfig.enabled,
-    model_id: formData.value.multimodalConfig.enabled
-      ? (formData.value.multimodalConfig.vllmModelId || '')
-      : '',
-    description_language: formData.value.multimodalConfig.descriptionLanguage || '',
-    custom_instructions: formData.value.multimodalConfig.customInstructions || ''
-  }
-
-  // 添加ASR语音识别配置
-  data.asr_config = {
-    enabled: formData.value.asrConfig?.enabled || false,
-    model_id: formData.value.asrConfig?.enabled
-      ? (formData.value.asrConfig?.modelId || '')
-      : '',
-    language: formData.value.asrConfig?.language || ''
-  }
-
-  // storage_backend_id is authoritative. Keep provider projection for old clients
-  // and for rolling upgrades where a node has not picked up the new schema yet.
-  if (formData.value.storageBackendId) {
-    data.storage_backend_id = formData.value.storageBackendId
-  }
-  const storageProvider = resolvedStorageProvider()
-  data.storage_provider_config = {
-    provider: storageProvider
-  }
-  data.storage_config = {
-    provider: storageProvider
+  if (authStore.isSystemAdmin) {
+    data.embedding_model_id = formData.value.modelConfig.embeddingModelId
+    data.summary_model_id = formData.value.modelConfig.llmModelId
+    if (formData.value.vectorStoreId) {
+      data.vector_store_id = formData.value.vectorStoreId
+    }
+    data.vlm_config = {
+      enabled: formData.value.multimodalConfig.enabled,
+      model_id: formData.value.multimodalConfig.enabled
+        ? (formData.value.multimodalConfig.vllmModelId || '')
+        : '',
+      description_language: formData.value.multimodalConfig.descriptionLanguage || '',
+      custom_instructions: formData.value.multimodalConfig.customInstructions || ''
+    }
+    data.asr_config = {
+      enabled: formData.value.asrConfig?.enabled || false,
+      model_id: formData.value.asrConfig?.enabled
+        ? (formData.value.asrConfig?.modelId || '')
+        : '',
+      language: formData.value.asrConfig?.language || ''
+    }
+    if (formData.value.storageBackendId) {
+      data.storage_backend_id = formData.value.storageBackendId
+    }
+    const storageProvider = resolvedStorageProvider()
+    data.storage_provider_config = { provider: storageProvider }
+    data.storage_config = { provider: storageProvider }
   }
 
   // 添加知识图谱配置 — now synced via indexingStrategy.graphEnabled
@@ -1277,7 +1251,9 @@ const buildSubmitData = () => {
   // wiki_config only holds wiki-specific tunables.
   if (formData.value.type !== 'faq') {
     data.wiki_config = {
-      synthesis_model_id: formData.value.modelConfig?.wikiSynthesisModelId || '',
+      ...(authStore.isSystemAdmin
+        ? { synthesis_model_id: formData.value.modelConfig?.wikiSynthesisModelId || '' }
+        : {}),
       max_pages_per_ingest: formData.value.wikiConfig?.maxPagesPerIngest || 0,
       extraction_granularity: formData.value.wikiConfig?.extractionGranularity || 'standard',
       content_instructions: formData.value.wikiConfig?.contentInstructions || '',
@@ -1319,6 +1295,7 @@ const handleSubmit = async () => {
 
   // 编辑模式下，若已有文件且存储引擎发生了变化，弹窗确认
   if (
+    authStore.isSystemAdmin &&
     editorMode.value === 'edit' &&
     hasFiles.value &&
     formData.value &&
@@ -1380,16 +1357,18 @@ const doSubmit = async () => {
           question_index_mode: formData.value.faqConfig.questionIndexMode || 'separate'
         }
       }
-      if (formData.value.wikiConfig && formData.value.type !== 'faq') {
+	  if (authStore.isSystemAdmin && formData.value.wikiConfig && formData.value.type !== 'faq') {
         updateConfig.wiki_config = {
-          synthesis_model_id: formData.value.modelConfig?.wikiSynthesisModelId || '',
+          ...(authStore.isSystemAdmin
+            ? { synthesis_model_id: formData.value.modelConfig?.wikiSynthesisModelId || '' }
+            : {}),
           max_pages_per_ingest: formData.value.wikiConfig.maxPagesPerIngest || 0,
           extraction_granularity: formData.value.wikiConfig.extractionGranularity || 'standard',
           content_instructions: formData.value.wikiConfig.contentInstructions || '',
           extraction_instructions: formData.value.wikiConfig.extractionInstructions || '',
         }
       }
-      if (formData.value.type !== 'faq') {
+	  if (authStore.isSystemAdmin && formData.value.type !== 'faq') {
         updateConfig.indexing_strategy = {
           vector_enabled: formData.value.indexingStrategy?.vectorEnabled ?? true,
           keyword_enabled: formData.value.indexingStrategy?.keywordEnabled ?? true,
@@ -1405,8 +1384,8 @@ const doSubmit = async () => {
 
       // 2. 更新完整配置（模型、分块、多模态、存储引擎、知识图谱等）
       const config: KBModelConfigRequest = {
-        llmModelId: data.summary_model_id,
-        embeddingModelId: data.embedding_model_id,
+        llmModelId: data.summary_model_id || '',
+        embeddingModelId: data.embedding_model_id || '',
         vlm_config: data.vlm_config,
         asr_config: data.asr_config,
         documentSplitting: {
@@ -1429,7 +1408,7 @@ const doSubmit = async () => {
           enabled: !!data.vlm_config?.enabled
         },
         storageBackendId: formData.value?.storageBackendId || '',
-        storageProvider: data.storage_provider_config?.provider || data.storage_config?.provider || 'local',
+        storageProvider: data.storage_provider_config?.provider || data.storage_config?.provider || '',
         nodeExtract: {
           enabled: data.extract_config?.enabled || false,
           text: data.extract_config?.text || '',
@@ -1521,7 +1500,6 @@ const resetState = () => {
   saving.value = false
   loading.value = false
   chunkingDirty.value = false
-  kbCreatorId.value = ''
   kbTenantId.value = 0
 }
 
@@ -1540,12 +1518,13 @@ watch(() => props.visible, async (newVal) => {
     resetState()
     
     // 检查是否有初始 section，如果有则跳转
-    if (uiStore.kbEditorInitialSection) {
+    if (uiStore.kbEditorInitialSection && navItems.value.some((item) => item.key === uiStore.kbEditorInitialSection)) {
       currentSection.value = uiStore.kbEditorInitialSection
     }
     
-    // 加载模型列表与空间默认存储引擎（创建 KB 时即使用，不依赖是否打开「存储引擎」Tab）
-    await Promise.all([loadAllModels(), loadTenantDefaultStorageProvider()])
+    if (authStore.isSystemAdmin) {
+      await Promise.all([loadAllModels(), loadTenantDefaultStorageProvider()])
+    }
     
     // 根据模式加载数据
     if (props.mode === 'edit' && props.kbId) {
@@ -1553,9 +1532,13 @@ watch(() => props.visible, async (newVal) => {
     } else {
       // 创建模式：初始化空表单，并预填空间默认存储引擎
       formData.value = initFormData(props.initialType || 'document')
-      formData.value.storageProvider = tenantDefaultStorageProvider.value
+      if (authStore.isSystemAdmin) {
+        formData.value.storageProvider = tenantDefaultStorageProvider.value
+      }
       hasFiles.value = false
-      applyDefaultModelsIfEmpty()
+      if (authStore.isSystemAdmin) {
+        applyDefaultModelsIfEmpty()
+      }
     }
   } else {
     // 关闭弹窗时，延迟重置状态（等待动画结束）
@@ -1570,7 +1553,7 @@ watch(() => props.visible, async (newVal) => {
 watch(
   () => uiStore.showSettingsModal,
   async (visible, previous) => {
-    if (!visible && previous && props.visible) {
+    if (authStore.isSystemAdmin && !visible && previous && props.visible) {
       await loadAllModels(true)
     }
   }

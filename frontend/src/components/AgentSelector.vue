@@ -399,6 +399,7 @@ const getAgentNotReadyReasonKeysFor = (agent: CustomAgent, sourceTenantId?: stri
   return getAgentNotReadyReasonKeys(agent.config, modelsList.value, {
     isAgentMode,
     isSharedAgent,
+    platformManagedModels: !authStore.isSystemAdmin,
   });
 };
 

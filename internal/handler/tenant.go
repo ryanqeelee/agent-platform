@@ -1231,9 +1231,9 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 	key := secutils.SanitizeForLog(c.Param("key"))
 
 	switch key {
-	case "web-search-config", "parser-engine-config", "storage-engine-config":
-		if !dto.CanViewIntegrationSecrets(ctx) {
-			c.Error(errors.NewForbiddenError("integration configuration requires admin access"))
+	case "web-search-config", "parser-engine-config", "storage-engine-config", "chat-history-config", "retrieval-config":
+		if !types.IsSystemAdminFromContext(ctx) {
+			c.Error(errors.NewForbiddenError("platform configuration requires system administrator access"))
 			return
 		}
 	}
@@ -1282,9 +1282,9 @@ func (h *TenantHandler) UpdateTenantKV(c *gin.Context) {
 	key := secutils.SanitizeForLog(c.Param("key"))
 
 	switch key {
-	case "web-search-config", "parser-engine-config", "storage-engine-config":
-		if !dto.CanViewIntegrationSecrets(ctx) {
-			c.Error(errors.NewForbiddenError("integration configuration requires admin access"))
+	case "web-search-config", "parser-engine-config", "storage-engine-config", "chat-history-config", "retrieval-config":
+		if !types.IsSystemAdminFromContext(ctx) {
+			c.Error(errors.NewForbiddenError("platform configuration requires system administrator access"))
 			return
 		}
 	}

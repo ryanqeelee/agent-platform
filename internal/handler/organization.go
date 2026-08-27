@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/application/service"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -1317,7 +1318,7 @@ func (h *OrganizationHandler) ListSharedKnowledgeBases(c *gin.Context) {
 	// metadata (share_id, organization_id, etc.) is preserved as-is.
 	rows := make([]map[string]interface{}, 0, len(sharedKBs))
 	for _, info := range sharedKBs {
-		rows = append(rows, sharedKBRow(info, nil))
+		rows = append(rows, sharedKBRow(ctx, info, nil))
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -1604,6 +1605,9 @@ func (h *OrganizationHandler) listSpaceKnowledgeBasesInOrganization(ctx context.
 			if kb.TenantID != sourceTenantID {
 				continue
 			}
+			if !tools.SharedAgentAllowsKnowledgeBase(agent, kb) {
+				continue
+			}
 			directKbIDs[kbID] = true
 
 			switch kb.Type {
@@ -1684,7 +1688,7 @@ func (h *OrganizationHandler) ListOrganizationSharedKnowledgeBases(c *gin.Contex
 		if item.SourceFromAgent != nil {
 			extras["source_from_agent"] = item.SourceFromAgent
 		}
-		rows = append(rows, sharedKBRow(&item.SharedKnowledgeBaseInfo, extras))
+		rows = append(rows, sharedKBRow(ctx, &item.SharedKnowledgeBaseInfo, extras))
 	}
 
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": rows, "total": len(rows)})

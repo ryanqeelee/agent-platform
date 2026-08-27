@@ -48,13 +48,22 @@ func TestFilterKnowledgeSearchScopesForAPIKey(t *testing.T) {
 	ctx := types.WithTenantAPIKeyScope(context.Background(), types.TenantAPIKeyScope{
 		KnowledgeBaseIDs: types.StringArray{"kb-1"},
 	})
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, uint64(1))
 	scopes := []types.KnowledgeSearchScope{
 		{TenantID: 1, KBID: "kb-1"},
 		{TenantID: 1, KBID: "kb-2"},
+		{TenantID: 2, KBID: "kb-1"},
 	}
 	got := filterKnowledgeSearchScopesForAPIKey(ctx, scopes)
 	if len(got) != 1 || got[0].KBID != "kb-1" {
 		t.Fatalf("filtered scopes = %#v, want only kb-1", got)
+	}
+
+	fullCtx := types.WithTenantAPIKeyScope(context.Background(), types.TenantAPIKeyScope{FullAccess: true})
+	fullCtx = context.WithValue(fullCtx, types.TenantIDContextKey, uint64(1))
+	got = filterKnowledgeSearchScopesForAPIKey(fullCtx, scopes)
+	if len(got) != 2 || got[0].TenantID != 1 || got[1].TenantID != 1 {
+		t.Fatalf("full-key scopes = %#v, want own-tenant scopes only", got)
 	}
 }
 

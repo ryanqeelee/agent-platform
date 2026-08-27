@@ -17,6 +17,7 @@ export interface TenantMember {
   status: TenantMemberStatus
   invited_by?: string | null
   joined_at: string
+  business_role_ids: string[]
 }
 
 export interface ListMembersResponse {

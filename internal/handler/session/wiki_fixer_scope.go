@@ -49,6 +49,9 @@ func resolveBuiltinWikiFixerTenantScope(
 	if currentTenantID == 0 || len(kbIDs) != 1 || kbLookup == nil || kbShare == nil {
 		return agent, 0
 	}
+	if !callerTenantRole.HasPermission(types.TenantRoleAdmin) {
+		return agent, 0
+	}
 
 	kbID := kbIDs[0]
 	kb, err := kbLookup.GetKnowledgeBaseByIDOnly(ctx, kbID)

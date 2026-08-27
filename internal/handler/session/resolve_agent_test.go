@@ -50,7 +50,7 @@ func (s *resolveAgentShareStub) ListSharedAgentsInOrganizations(context.Context,
 func (s *resolveAgentShareStub) SetSharedAgentDisabledByMe(context.Context, uint64, string, uint64, bool) error {
 	panic("not implemented")
 }
-func (s *resolveAgentShareStub) TenantCanAccessKBViaSomeSharedAgent(context.Context, uint64, types.TenantRole, *types.KnowledgeBase) (bool, error) {
+func (s *resolveAgentShareStub) FindSharedAgentForKnowledgeBase(context.Context, uint64, types.TenantRole, *types.KnowledgeBase) (*types.CustomAgent, error) {
 	panic("not implemented")
 }
 func (s *resolveAgentShareStub) GetShare(context.Context, string) (*types.AgentShare, error) {
@@ -140,6 +140,39 @@ func TestResolveAgent_UsesSharedAgentWhenSourceSelectorMatches(t *testing.T) {
 	require.Equal(t, sharedAgent, agent)
 	require.Equal(t, uint64(84), effectiveTenantID)
 	require.True(t, sharedReadOnly)
+}
+
+func TestResolveAgent_APIKeyCannotUseSharedAgent(t *testing.T) {
+	c, ctx := newResolveAgentTestContext(7)
+	ctx = types.WithTenantAPIKeyScope(ctx, types.TenantAPIKeyScope{FullAccess: true})
+	c.Request = c.Request.WithContext(ctx)
+	h := &Handler{
+		agentShareService: &resolveAgentShareStub{agent: &types.CustomAgent{
+			ID: "shared", TenantID: 84, Name: "Shared",
+		}},
+		customAgentService: &resolveOwnAgentStub{},
+	}
+
+	agent, effectiveTenantID, sharedReadOnly := h.resolveAgent(ctx, c, "shared", 84)
+
+	require.Nil(t, agent)
+	require.Zero(t, effectiveTenantID)
+	require.False(t, sharedReadOnly)
+}
+
+func TestAttachSharedAgentExecutionProvenanceKeepsCallerBeforeTenantRewrite(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	ctx = context.WithValue(ctx, types.UserIDContextKey, "user-1")
+	ctx = attachSharedAgentExecutionProvenance(
+		ctx, true, 84, &types.CustomAgent{ID: "shared", TenantID: 84},
+	)
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, uint64(84))
+
+	caller, source, agentID, ok := types.AuthorizedSharedAgentExecutionFromContext(ctx)
+	require.True(t, ok)
+	require.Equal(t, uint64(7), caller)
+	require.Equal(t, uint64(84), source)
+	require.Equal(t, "shared", agentID)
 }
 
 func TestResolveAgent_FallsBackToLocalAgentWithoutSourceSelector(t *testing.T) {

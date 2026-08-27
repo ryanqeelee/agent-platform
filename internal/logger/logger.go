@@ -538,6 +538,7 @@ func CloneContext(ctx context.Context) context.Context {
 			newCtx = context.WithValue(newCtx, k, v)
 		}
 	}
+	newCtx = types.CopyPrivateAuthorizationContext(newCtx, ctx)
 
 	// Preserve the active OpenTelemetry span across the rebuild. The Langfuse
 	// *Trace handle above carries the trace id, but span PARENTING flows through

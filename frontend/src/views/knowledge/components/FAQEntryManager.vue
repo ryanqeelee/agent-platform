@@ -261,7 +261,7 @@
                         {{ entry.standard_question }}
                       </div>
                       <div class="faq-card-actions">
-                        <t-popup v-if="canManage" v-model="entry.showMore" overlayClassName="card-more-popup"
+                        <t-popup v-if="canEdit" v-model="entry.showMore" overlayClassName="card-more-popup"
                           trigger="click" destroy-on-close placement="bottom-right"
                           @visible-change="(visible: boolean) => (entry.showMore = visible)">
                           <div class="card-more-btn" @click.stop>
@@ -927,56 +927,31 @@ const uiStore = useUIStore()
 const authStore = useAuthStore()
 const orgStore = useOrganizationStore()
 
-// Permission control: check if current user owns this KB or has edit/manage permission.
-//
-// isOwner used to compare kbInfo.tenant_id against the user's effective tenant id,
-// which silently treated "any KB visible to me in my current tenant" as "I created
-// it" — Viewer / Contributor in their home tenant ended up showing every FAQ
-// CRUD entry on every KB and 403'ing when they clicked. Mirror the rule we settled
-// on in KnowledgeBase.vue: explicit creator_id match, with role / org-share fallbacks
-// inside canEdit / canManage. Legacy KBs with empty creator_id stay tenant-owned
-// (Admin+ may manage).
-const isOwner = computed(() => {
-  if (!kbInfo.value) return false
-  const creatorId = (kbInfo.value as any).creator_id || ''
-  const userId = authStore.user?.id || ''
-  if (!creatorId) return false
-  return creatorId === userId
-})
-
 // Current KB's shared record (when accessed via organization share)
 const currentSharedKb = computed(() =>
   orgStore.sharedKnowledgeBases.find((s) => s.knowledge_base?.id === props.kbId) ?? null,
 )
 
 // Accessed via organization share: presence in the sharedKnowledgeBases list
-// means we reached this KB through a shared space, so the user's local tenant
-// role is irrelevant — only the share grant counts. tenant_id comparison
-// alone is unreliable (a user can be a member of both source and receiving
-// tenants); share-list presence is the authoritative signal.
+// means we reached this KB through a shared space. Share permission remains
+// necessary, and the active local role must still meet the backend's write
+// floor; a creator field never substitutes for either authority.
 const isViaShare = computed(() => !!currentSharedKb.value)
 
-// Can edit: when accessed via an organization share, ONLY the share grant
-// counts — even if the current user happens to be the original creator of
-// the KB. The backend's RBAC middleware authorizes based on the active
-// tenant, not on creator_id, so a creator viewing their own KB from a
-// different tenant context will be 403'd on write. Otherwise: KB creator
-// (any role) or tenant Admin+ in the home tenant.
+// Own-tenant content can be maintained by an active Contributor+. Shared
+// writes keep the existing share-edit predicate and additionally require
+// Admin+, matching the backend's cross-tenant write floor (Contributor and
+// Viewer never gain a new cross-tenant write path here).
 const canEdit = computed(() => {
-  if (isViaShare.value) return orgStore.canEditKB(props.kbId, false)
-  if (isOwner.value) return true
-  if (authStore.hasRole('admin')) return true
-  return orgStore.canEditKB(props.kbId, false)
+  if (isViaShare.value) return authStore.hasRole('admin') && orgStore.canEditKB(props.kbId, false)
+  return authStore.hasRole('contributor')
 })
 
-// Can manage (delete, settings, share): same isViaShare-first rule. For
-// shared KBs only an 'admin' share grant qualifies — editor/viewer (and
-// even being the creator viewed via share) never grant delete/settings.
+// KB settings and share management are Admin+ lifecycle actions. Shared
+// management also requires the existing share-management predicate.
 const canManage = computed(() => {
-  if (isViaShare.value) return orgStore.canManageKB(props.kbId, false)
-  if (isOwner.value) return true
-  if (authStore.hasRole('admin')) return true
-  return orgStore.canManageKB(props.kbId, false)
+  if (isViaShare.value) return authStore.hasRole('admin') && orgStore.canManageKB(props.kbId, false)
+  return authStore.hasRole('admin')
 })
 
 const faqExportOptions = computed(() => [
@@ -1339,6 +1314,7 @@ const clearTagFilter = () => {
 }
 
 const openTagManageDrawer = () => {
+  if (!canEdit.value) return
   tagFilterPanelVisible.value = false
   tagManageDrawerVisible.value = true
 }
@@ -1413,7 +1389,7 @@ const loadTags = async (reset = false) => {
 }
 
 const handleEntryTagChange = async (entryId: number, value?: string) => {
-  if (!props.kbId) return
+  if (!props.kbId || !canEdit.value) return
   const targetEntry = entries.value.find((item) => item.id === entryId)
   const previousTagId = targetEntry ? targetEntry.tag_id : undefined
   const normalizedValue = value ? Number(value) : null
@@ -1443,6 +1419,7 @@ const handleNavigateToCurrentKB = () => {
 }
 
 const handleOpenKBSettings = () => {
+  if (!canManage.value) return
   if (!props.kbId) {
     MessagePlugin.warning(t('knowledgeEditor.messages.missingId'))
     return
@@ -1486,14 +1463,14 @@ const handleFaqMenuAction = (event: Event) => {
       handleBatchStatusChange(false)
     }
   } else if (detail.action === 'batchDelete') {
-    if (canManage.value && selectedRowKeys.value.length > 0) {
+    if (canEdit.value && selectedRowKeys.value.length > 0) {
       handleBatchDelete()
     }
   }
 }
 
 const handleEntryStatusChange = async (entry: FAQEntry, value: boolean) => {
-  if (!props.kbId) {
+  if (!props.kbId || !canEdit.value) {
     return
   }
   const entryIndex = entries.value.findIndex(e => e.id === entry.id)
@@ -1522,7 +1499,7 @@ const handleEntryStatusChange = async (entry: FAQEntry, value: boolean) => {
 }
 
 const handleEntryRecommendedChange = async (entry: FAQEntry, value: boolean) => {
-  if (entryRecommendedLoading[entry.id]) {
+  if (!canEdit.value || entryRecommendedLoading[entry.id]) {
     return
   }
   const entryIndex = entries.value.findIndex(e => e.id === entry.id)
@@ -1684,6 +1661,7 @@ const resetEditorForm = () => {
 }
 
 const openEditor = (entry?: FAQEntry) => {
+  if (!canEdit.value) return
   if (entry) {
     editorMode.value = 'edit'
     currentEntryId.value = entry.id
@@ -1755,7 +1733,7 @@ const removeNegative = (index: number) => {
 }
 
 const handleSubmitEntry = async () => {
-  if (!editorFormRef.value) return
+  if (!editorFormRef.value || !canEdit.value) return
   const result = await editorFormRef.value.validate?.()
   if (result !== true) return
 
@@ -1785,7 +1763,7 @@ const handleSubmitEntry = async () => {
 }
 
 const handleBatchDelete = async () => {
-  if (!selectedRowKeys.value.length) return
+  if (!canEdit.value || !selectedRowKeys.value.length) return
   try {
     await deleteFAQEntries(props.kbId, selectedRowKeys.value)
     MessagePlugin.success(t('knowledgeEditor.faqImport.deleteSuccess'))
@@ -1801,13 +1779,13 @@ const batchTagDialogVisible = ref(false)
 const batchTagValue = ref<string>('')
 
 const openBatchTagDialog = () => {
-  if (!selectedRowKeys.value.length) return
+  if (!canEdit.value || !selectedRowKeys.value.length) return
   batchTagValue.value = ''
   batchTagDialogVisible.value = true
 }
 
 const handleBatchTag = async () => {
-  if (!selectedRowKeys.value.length || !props.kbId) return
+  if (!canEdit.value || !selectedRowKeys.value.length || !props.kbId) return
   try {
     const updates: Record<number, number | null> = {}
     selectedRowKeys.value.forEach(id => {
@@ -1825,7 +1803,7 @@ const handleBatchTag = async () => {
 }
 
 const handleBatchStatusChange = async (isEnabled: boolean) => {
-  if (!selectedRowKeys.value.length || !props.kbId) return
+  if (!canEdit.value || !selectedRowKeys.value.length || !props.kbId) return
   try {
     const by_id: Record<number, { is_enabled: boolean }> = {}
     selectedRowKeys.value.forEach(id => {
@@ -1841,7 +1819,7 @@ const handleBatchStatusChange = async (isEnabled: boolean) => {
 }
 
 const handleBatchRecommendedChange = async (isRecommended: boolean) => {
-  if (!selectedRowKeys.value.length || !props.kbId) return
+  if (!canEdit.value || !selectedRowKeys.value.length || !props.kbId) return
   try {
     const by_id: Record<number, { is_recommended: boolean }> = {}
     selectedRowKeys.value.forEach(id => {
@@ -1857,11 +1835,13 @@ const handleBatchRecommendedChange = async (isRecommended: boolean) => {
 }
 
 const handleMenuEdit = (entry: FAQEntry) => {
+  if (!canEdit.value) return
   entry.showMore = false
   openEditor(entry)
 }
 
 const handleMenuDelete = async (entry: FAQEntry) => {
+  if (!canEdit.value) return
   entry.showMore = false
   try {
     await deleteFAQEntries(props.kbId, [entry.id])
@@ -1873,6 +1853,7 @@ const handleMenuDelete = async (entry: FAQEntry) => {
 }
 
 const openImportDialog = () => {
+  if (!canEdit.value) return
   // 如果正在导入，不允许打开导入对话框
   if (importState.taskStatus?.status === 'running') {
     MessagePlugin.warning(t('faqManager.import.importInProgress'))
@@ -2367,6 +2348,7 @@ const formatImportTime = (timeStr?: string) => {
 }
 
 const handleImport = async () => {
+  if (!canEdit.value) return
   if (!importState.file || !importState.preview.length) {
     MessagePlugin.warning(t('knowledgeEditor.faqImport.selectFile'))
     return

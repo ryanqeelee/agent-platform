@@ -9,19 +9,14 @@ export type SettingsRoleKey = 'viewer' | 'contributor' | 'admin' | 'owner'
  */
 export const SETTINGS_SECTION_MIN_ROLE: Record<string, SettingsRoleKey> = {
   general: 'viewer',
-  ollama: 'admin',
-  weknoracloud: 'admin',
-  models: 'contributor',
   websearch: 'admin',
   chathistory: 'admin',
-  vectorstore: 'admin',
   parser: 'admin',
-  storage: 'admin',
-  mcp: 'admin',
   system: 'viewer',
   userprofile: 'viewer',
   tenant: 'viewer',
   members: 'viewer',
+  businessRoles: 'admin',
 }
 
 /**
@@ -31,7 +26,7 @@ export const SETTINGS_SECTION_MIN_ROLE: Record<string, SettingsRoleKey> = {
  */
 export const EMPLOYEE_SURFACE_MIN_ROLE = {
   knowledgeBases: 'contributor',
-  agents: 'contributor',
+  agents: 'admin',
   organizations: 'admin',
 } as const satisfies Record<string, SettingsRoleKey>
 
@@ -50,10 +45,18 @@ export const employeeSurfaceMinRoleForPath = (path: string): SettingsRoleKey | u
  */
 export const SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE = {
   members: 'admin',
-  models: 'admin',
 } as const satisfies Record<string, SettingsRoleKey>
 
 export const SYSTEM_ADMIN_SETTINGS_SECTIONS = new Set([
+  'models',
+  'chathistory',
+  'websearch',
+  'parser',
+	'mcp',
+  'ollama',
+  'weknoracloud',
+  'vectorstore',
+  'storage',
   'system-global',
   'runtime-queues',
   'platform-api-keys',

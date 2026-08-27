@@ -229,7 +229,6 @@ func TestKnowledgeBaseManagementRoutesDeclareManageKBsCapability(t *testing.T) {
 	}{
 		{http.MethodPut, "/api/v1/knowledge-bases/:id"},
 		{http.MethodDelete, "/api/v1/knowledge-bases/:id"},
-		{http.MethodPost, "/api/v1/initialization/initialize/:kbId"},
 		{http.MethodPut, "/api/v1/initialization/config/:kbId"},
 	}
 
@@ -338,7 +337,6 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 	RegisterModelRoutes(v1, &handler.ModelHandler{}, &handler.ModelCredentialsHandler{}, g)
 	RegisterEvaluationRoutes(v1, &handler.EvaluationHandler{}, g)
 	RegisterSystemRoutes(v1, &handler.SystemHandler{}, g)
-	RegisterMCPServiceRoutes(v1, &handler.MCPServiceHandler{}, &handler.MCPCredentialsHandler{}, &handler.MCPOAuthHandler{}, g)
 	RegisterWebSearchProviderRoutes(v1, &handler.WebSearchProviderHandler{}, &handler.WebSearchProviderCredentialsHandler{}, g)
 	RegisterVectorStoreRoutes(v1, &handler.VectorStoreHandler{}, g)
 	RegisterStorageBackendRoutes(v1, &handler.StorageBackendHandler{}, g)
@@ -353,17 +351,12 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 		cap    types.APIKeyCapability
 	}{
 		{http.MethodGet, "/api/v1/tenants", types.APIKeyCapabilityManageTenantSettings},
-		{http.MethodGet, "/api/v1/models", types.APIKeyCapabilityManageModels},
 		{http.MethodPost, "/api/v1/evaluation", types.APIKeyCapabilityRunEvaluations},
 		{http.MethodGet, "/api/v1/system/info", types.APIKeyCapabilityManageVectorStores},
-		{http.MethodGet, "/api/v1/mcp-services", types.APIKeyCapabilityManageMCPServices},
 		{http.MethodGet, "/api/v1/web-search-providers", types.APIKeyCapabilityManageWebSearch},
-		{http.MethodGet, "/api/v1/vector-stores", types.APIKeyCapabilityManageVectorStores},
-		{http.MethodGet, "/api/v1/storage-backends", types.APIKeyCapabilityManageStorageBackends},
 		{http.MethodGet, "/api/v1/embed-channels", types.APIKeyCapabilityManageChannels},
 		{http.MethodGet, "/api/v1/im-channels", types.APIKeyCapabilityManageChannels},
 		{http.MethodGet, "/api/v1/datasource", types.APIKeyCapabilityManageDataSources},
-		{http.MethodGet, "/api/v1/models/weknoracloud/status", types.APIKeyCapabilityManageModels},
 	}
 
 	for _, tc := range cases {
@@ -376,6 +369,40 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 				t.Fatalf("policy capabilities = %#v, want %s", policy.Capabilities, tc.cap)
 			}
 		})
+	}
+}
+
+func TestPlatformInfrastructureRoutesRejectWorkspaceAPIKeys(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	g := &rbacGuards{}
+	v1 := gin.New().Group("/api/v1")
+	RegisterModelRoutes(v1, &handler.ModelHandler{}, &handler.ModelCredentialsHandler{}, g)
+	RegisterInitializationRoutes(v1, &handler.InitializationHandler{}, g)
+	RegisterMCPServiceRoutes(v1, &handler.MCPServiceHandler{}, &handler.MCPCredentialsHandler{}, &handler.MCPOAuthHandler{}, g)
+	RegisterVectorStoreRoutes(v1, &handler.VectorStoreHandler{}, g)
+	RegisterStorageBackendRoutes(v1, &handler.StorageBackendHandler{}, g)
+	RegisterWeKnoraCloudRoutes(v1, &handler.WeKnoraCloudHandler{}, g)
+
+	for _, tc := range []struct {
+		method string
+		path   string
+		cap    types.APIKeyCapability
+	}{
+		{http.MethodGet, "/api/v1/models", types.APIKeyCapabilityManageModels},
+		{http.MethodPost, "/api/v1/initialization/initialize/:kbId", types.APIKeyCapabilityManageModels},
+		{http.MethodGet, "/api/v1/initialization/ollama/models", types.APIKeyCapabilityManageModels},
+		{http.MethodGet, "/api/v1/mcp-services", types.APIKeyCapabilityManageMCPServices},
+		{http.MethodGet, "/api/v1/vector-stores", types.APIKeyCapabilityManageVectorStores},
+		{http.MethodGet, "/api/v1/storage-backends", types.APIKeyCapabilityManageStorageBackends},
+		{http.MethodGet, "/api/v1/models/weknoracloud/status", types.APIKeyCapabilityManageModels},
+	} {
+		policy := mustLookupAPIKeyPolicy(t, g, tc.method, tc.path)
+		if !policy.PlatformOnly {
+			t.Fatalf("%s must reject workspace API keys", tc.path)
+		}
+		if !policyHasCapability(policy, tc.cap) {
+			t.Fatalf("%s capabilities = %#v, want %s", tc.path, policy.Capabilities, tc.cap)
+		}
 	}
 }
 
@@ -440,8 +467,6 @@ func TestOrganizationRoutesDeclareManageSpacesCapability(t *testing.T) {
 		{http.MethodPost, "/api/v1/organizations/:id/invite-code"},
 		{http.MethodGet, "/api/v1/organizations/:id/members"},
 		{http.MethodPut, "/api/v1/organizations/:id/members/:tenant_id"},
-		{http.MethodGet, "/api/v1/shared-knowledge-bases"},
-		{http.MethodGet, "/api/v1/shared-agents"},
 		{http.MethodPost, "/api/v1/shared-agents/disabled"},
 	}
 
@@ -457,8 +482,7 @@ func TestOrganizationRoutesDeclareManageSpacesCapability(t *testing.T) {
 		})
 	}
 
-	// KB/agent share management is open to full-access keys (tenant-wide
-	// authority) but never via a capability.
+	// KB share management remains open to full-access keys but never via a capability.
 	shareRoutes := []struct {
 		method string
 		path   string
@@ -467,9 +491,6 @@ func TestOrganizationRoutesDeclareManageSpacesCapability(t *testing.T) {
 		{http.MethodGet, "/api/v1/knowledge-bases/:id/shares"},
 		{http.MethodPut, "/api/v1/knowledge-bases/:id/shares/:share_id"},
 		{http.MethodDelete, "/api/v1/knowledge-bases/:id/shares/:share_id"},
-		{http.MethodPost, "/api/v1/agents/:id/shares"},
-		{http.MethodGet, "/api/v1/agents/:id/shares"},
-		{http.MethodDelete, "/api/v1/agents/:id/shares/:share_id"},
 	}
 	for _, tc := range shareRoutes {
 		t.Run("share "+tc.method+" "+tc.path, func(t *testing.T) {
@@ -481,6 +502,21 @@ func TestOrganizationRoutesDeclareManageSpacesCapability(t *testing.T) {
 				t.Fatalf("share route must not be granted by any capability: %#v", policy.Capabilities)
 			}
 		})
+	}
+
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/v1/shared-knowledge-bases"},
+		{http.MethodGet, "/api/v1/shared-agents"},
+		{http.MethodPost, "/api/v1/agents/:id/shares"},
+		{http.MethodGet, "/api/v1/agents/:id/shares"},
+		{http.MethodDelete, "/api/v1/agents/:id/shares/:share_id"},
+	} {
+		if _, ok := g.apiKeyAuthorizer.Lookup(tc.method, tc.path); ok {
+			t.Fatalf("%s %s must remain JWT-only", tc.method, tc.path)
+		}
 	}
 }
 

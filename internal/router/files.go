@@ -25,7 +25,7 @@ import (
 //   - /files                              tenant-scoped raw storage proxy
 //   - /api/v1/knowledge-bases/:id/files   KB-scoped proxy (shared-KB images)
 //   - /api/v1/files/presigned             HMAC-signed anonymous access (IM)
-//   - /api/v1/files/presigned-preview     Admin-only URL diagnostics
+//   - /api/v1/files/presigned-preview     SystemAdmin-only URL diagnostics
 //   - /r/:token                           short-lived capability URLs
 //
 // The handlers differ in how they authenticate and which tenant owns the
@@ -82,33 +82,66 @@ func requireFilePathQuery(c *gin.Context) (string, bool) {
 	return filePath, true
 }
 
-// resolveCatalogResource maps a logical resource path onto its physical path
-// when the catalog knows it, enforcing that the resource belongs to
-// ownerTenantID. isResource reports whether the path resolved to a registered
-// resource (whose tenant is then authoritative). On !ok the response has been
-// written.
+// resolveCatalogResource maps a registered resource path onto its physical
+// path and verifies ownership. The catalog is the sole file authority: raw or
+// unknown storage paths are not a second access path.
 func resolveCatalogResource(
 	c *gin.Context,
 	catalog interfaces.ResourceCatalog,
 	filePath string,
 	ownerTenantID uint64,
-) (resolved string, isResource, ok bool) {
+) (resolved string, resource *types.StoredResource, ok bool) {
 	if catalog == nil {
-		return filePath, false, true
-	}
-	resolvedPath, resource, err := catalog.ResolvePath(c.Request.Context(), filePath)
-	if err != nil {
 		c.Status(http.StatusNotFound)
-		return "", false, false
+		return "", nil, false
 	}
-	if resource == nil {
-		return filePath, false, true
+	resolvedPath, resource, err := catalog.ResolveTenantPath(c.Request.Context(), ownerTenantID, filePath)
+	if err != nil || resource == nil {
+		c.Status(http.StatusNotFound)
+		return "", nil, false
 	}
 	if resource.TenantID != ownerTenantID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: resource not accessible"})
-		return "", false, false
+		return "", nil, false
 	}
-	return resolvedPath, true, true
+	return resolvedPath, resource, true
+}
+
+// authorizeKnowledgeBoundResource keeps /files usable for images in ordinary
+// employee-assistant answers without turning it into a knowledge bypass. A
+// bound resource is readable only when one of its owning documents still
+// resolves through the caller's live KnowledgeBaseService access boundary.
+func authorizeKnowledgeBoundResource(
+	ctx context.Context,
+	catalog interfaces.ResourceCatalog,
+	resource *types.StoredResource,
+	knowledgeService middleware.KnowledgeLookup,
+	kbService middleware.KBLookup,
+) bool {
+	if catalog == nil || resource == nil {
+		return false
+	}
+	bindings, err := catalog.ListKnowledgeBindings(ctx, types.BuildResourcePath(resource.Handle))
+	if err != nil {
+		return false
+	}
+	if len(bindings) == 0 {
+		return true
+	}
+	if knowledgeService == nil || kbService == nil {
+		return false
+	}
+	for _, binding := range bindings {
+		knowledge, lookupErr := knowledgeService.GetKnowledgeByIDOnly(ctx, binding.OwnerID)
+		if lookupErr != nil || knowledge == nil || knowledge.TenantID != resource.TenantID {
+			continue
+		}
+		kb, accessErr := kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
+		if accessErr == nil && kb != nil && kb.TenantID == resource.TenantID {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveFileService picks the file service for (tenant, backendID, provider)
@@ -191,13 +224,14 @@ func streamStoredFile(c *gin.Context, reader io.ReadCloser, contentType string, 
 // the request context (set by whichever auth middleware precedes it), so the
 // same handler backs both the authenticated /files route and the embed route
 // (where EmbedAuth injects the channel's tenant). Tenant ownership of the
-// requested path is enforced via ValidateStoragePathTenant either way.
+// requested path must resolve through the resource catalog.
 func newFileServeHandler(
 	globalFileService interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
-	resourceCatalogs ...interfaces.ResourceCatalog,
+	resourceCatalog interfaces.ResourceCatalog,
+	knowledgeService middleware.KnowledgeLookup,
+	kbService middleware.KBLookup,
 ) gin.HandlerFunc {
-	resourceCatalog := firstResourceCatalog(resourceCatalogs)
 	absDir := localStorageAbsDir()
 	if info, err := os.Stat(absDir); err != nil || !info.IsDir() {
 		if err := os.MkdirAll(absDir, 0o755); err != nil {
@@ -216,22 +250,15 @@ func newFileServeHandler(
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: workspace context missing"})
 			return
 		}
-		filePath, resourceResolved, ok := resolveCatalogResource(c, resourceCatalog, filePath, tenant.ID)
+		filePath, resource, ok := resolveCatalogResource(c, resourceCatalog, filePath, tenant.ID)
 		if !ok {
 			return
 		}
-
-		// A registered resource's tenant is authoritative. Physical provider
-		// paths remain an internal locator and are not required to encode access
-		// control metadata (some cloud layouts contain other numeric segments).
-		if !resourceResolved {
-			if err := secutils.ValidateStoragePathTenant(filePath, tenant.ID); err != nil {
-				logger.Warnf(c.Request.Context(),
-					"[Router] /files denied cross-tenant or invalid path: tenant_id=%d file_path=%q err=%v",
-					tenant.ID, filePath, err)
-				c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: file path not accessible"})
-				return
-			}
+		if !authorizeKnowledgeBoundResource(
+			c.Request.Context(), resourceCatalog, resource, knowledgeService, kbService,
+		) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: resource not accessible"})
+			return
 		}
 
 		backendID, provider := parseStorageTarget(filePath)
@@ -255,14 +282,6 @@ func newFileServeHandler(
 	}
 }
 
-func serveFiles(r getRouteRegistrar, globalFileService interfaces.FileService, resolvers ...interfaces.StorageBackendResolver) {
-	var storageResolver interfaces.StorageBackendResolver
-	if len(resolvers) > 0 {
-		storageResolver = resolvers[0]
-	}
-	serveFilesWithResources(r, globalFileService, storageResolver, nil)
-}
-
 // serveFilesWithResources registers the tenant-scoped storage proxy.
 // It is registered after auth middleware, so tenant context comes from
 // authentication.
@@ -274,18 +293,20 @@ func serveFilesWithResources(
 	globalFileService interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
 	resourceCatalog interfaces.ResourceCatalog,
+	knowledgeService middleware.KnowledgeLookup,
+	kbService middleware.KBLookup,
 ) {
 	logger.Infof(context.Background(), "[Router] Serving files from /files")
 	// /files sits outside the /api/v1 APIKeyGate, so it carries its own
 	// API-key guard. A KB-restricted key is denied (a raw storage path cannot
 	// be bounded to its allow-list); full-access keys and tenant-wide retrieve
-	// keys pass, since the handler still enforces same-tenant paths
-	// (ValidateStoragePathTenant). Embed routes use their own
+	// keys pass, since the handler still requires a tenant-owned catalog
+	// resource. Embed routes use their own
 	// /embed/.../files handler.
 	r.GET(
 		"/files",
 		middleware.AllowFileServeAPIKey(),
-		newFileServeHandler(globalFileService, storageResolver, resourceCatalog),
+		newFileServeHandler(globalFileService, storageResolver, resourceCatalog, knowledgeService, kbService),
 	)
 }
 
@@ -297,6 +318,8 @@ func serveResourceGrants(
 	tenantService interfaces.TenantService,
 	globalFileService interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
+	knowledgeService middleware.KnowledgeLookup,
+	kbService middleware.KBLookup,
 ) {
 	if resourceCatalog == nil || tenantService == nil {
 		return
@@ -305,6 +328,19 @@ func serveResourceGrants(
 		ctx := c.Request.Context()
 		resource, err := resourceCatalog.ResolveAccessGrant(ctx, c.Param("token"))
 		if err != nil || resource == nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		bindings, bindingErr := resourceCatalog.ListKnowledgeBindings(ctx, types.BuildResourcePath(resource.Handle))
+		if bindingErr != nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		// A short resource token carries no current human actor, so it cannot
+		// safely express revocation for enterprise knowledge. Keep anonymous
+		// grants for non-knowledge assets only; authenticated KB/file routes
+		// perform the live authorization and binding proof instead.
+		if len(bindings) > 0 {
 			c.Status(http.StatusNotFound)
 			return
 		}
@@ -368,7 +404,7 @@ func serveKBScopedFiles(
 	tenantService interfaces.TenantService,
 	globalFileService interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
-	resourceCatalogs ...interfaces.ResourceCatalog,
+	resourceCatalog interfaces.ResourceCatalog,
 ) {
 	logger.Infof(context.Background(), "[Router] Serving KB-scoped files from /knowledge-bases/:id/files")
 	// API-key access mirrors /files: KB-restricted keys are denied (an
@@ -388,7 +424,8 @@ func serveKBScopedFiles(
 			tenantService,
 			globalFileService,
 			storageResolver,
-			firstResourceCatalog(resourceCatalogs),
+			resourceCatalog,
+			g.knowledgeService,
 		),
 	)
 }
@@ -399,33 +436,14 @@ func serveKBScopedFiles(
 // tenant's storage config is loaded via TenantService so the file is fetched
 // from the backend that actually holds it — the caller's own storage config is
 // irrelevant here.
-func newKBScopedFileServeHandler(
-	tenantService interfaces.TenantService,
-	globalFileService interfaces.FileService,
-	resolvers ...interfaces.StorageBackendResolver,
-) gin.HandlerFunc {
-	var storageResolver interfaces.StorageBackendResolver
-	if len(resolvers) > 0 {
-		storageResolver = resolvers[0]
-	}
-	return newKBScopedFileServeHandlerWithResources(tenantService, globalFileService, storageResolver, nil)
-}
-
-func firstResourceCatalog(catalogs []interfaces.ResourceCatalog) interfaces.ResourceCatalog {
-	if len(catalogs) == 0 {
-		return nil
-	}
-	return catalogs[0]
-}
-
 func newKBScopedFileServeHandlerWithResources(
 	tenantService interfaces.TenantService,
 	globalFileService interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
 	resourceCatalog interfaces.ResourceCatalog,
+	knowledgeService middleware.KnowledgeLookup,
 ) gin.HandlerFunc {
 	absDir := localStorageAbsDir()
-
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
 
@@ -443,11 +461,31 @@ func newKBScopedFileServeHandlerWithResources(
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: workspace context missing"})
 			return
 		}
-		filePath, _, ok = resolveCatalogResource(c, resourceCatalog, filePath, ownerTenantID)
+		filePath, resource, ok := resolveCatalogResource(c, resourceCatalog, filePath, ownerTenantID)
 		if !ok {
 			return
 		}
-
+		bindings, bindingErr := resourceCatalog.ListKnowledgeBindings(ctx, types.BuildResourcePath(resource.Handle))
+		if bindingErr != nil || len(bindings) == 0 {
+			c.Status(http.StatusForbidden)
+			return
+		}
+		if knowledgeService == nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		bound := false
+		for _, binding := range bindings {
+			knowledge, knowledgeErr := knowledgeService.GetKnowledgeByIDOnly(ctx, binding.OwnerID)
+			if knowledgeErr == nil && knowledge != nil && knowledge.TenantID == ownerTenantID && knowledge.KnowledgeBaseID == c.Param("id") {
+				bound = true
+				break
+			}
+		}
+		if !bound {
+			c.Status(http.StatusForbidden)
+			return
+		}
 		if err := secutils.ValidateKBScopedStoragePath(filePath, ownerTenantID); err != nil {
 			logger.Warnf(ctx, "[Router] /knowledge-bases/:id/files denied path not allowed for KB proxy: owner_tenant_id=%d file_path=%q err=%v",
 				ownerTenantID, filePath, err)
@@ -589,7 +627,7 @@ func presignedFileHandler(tenantService interfaces.TenantService, absDir string,
 	}
 }
 
-// servePresignedPreview registers an Admin-only diagnostic endpoint that
+// servePresignedPreview registers a SystemAdmin-only diagnostic endpoint that
 // returns the presigned HTTP URL that *would be* generated for a given
 // storage path by the calling tenant's current storage config — exactly the
 // URL an IM channel would embed in a reply. Operators can paste the result
@@ -601,13 +639,12 @@ func presignedFileHandler(tenantService interfaces.TenantService, absDir string,
 func servePresignedPreview(r *gin.Engine, cfg *config.Config, storageResolver interfaces.StorageBackendResolver) {
 	absDir := localStorageAbsDir()
 
-	// This route is registered on the engine root, NOT the /api/v1 group,
-	// so the APIKeyGate never runs for it. RequireRole short-circuits
-	// API-key principals (deferring to that absent gate), which would let
-	// any valid key past the Admin check. Deny API keys explicitly first.
+	// This route is registered on the engine root, NOT the /api/v1 group, so
+	// there is no capability gate for platform keys. Keep it human-only and
+	// require the platform role explicitly.
 	r.GET("/api/v1/files/presigned-preview",
 		middleware.DenyAPIKeyPrincipal(),
-		middleware.RequireRole(types.TenantRoleAdmin, cfg),
+		middleware.RequireSystemAdmin(cfg),
 		func(c *gin.Context) {
 			ctx := c.Request.Context()
 			filePath, ok := requireFilePathQuery(c)

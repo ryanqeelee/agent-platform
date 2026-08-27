@@ -63,7 +63,7 @@ func (s *sessionService) AgentQA(
 	req.CustomAgent.EnsureDefaults()
 
 	// Build AgentConfig from custom agent and tenant info
-	agentConfig, err := s.buildAgentConfig(ctx, req, tenantInfo, agentTenantID)
+	agentConfig, sharedScope, err := s.buildAgentConfig(ctx, req, tenantInfo, agentTenantID)
 	if err != nil {
 		return err
 	}
@@ -74,7 +74,7 @@ func (s *sessionService) AgentQA(
 	}
 
 	// Resolve model ID using shared helper (AgentQA requires a model, so error if not found)
-	effectiveModelID, err := s.resolveChatModelID(ctx, req, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs)
+	effectiveModelID, err := s.resolveChatModelID(ctx, req, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs, sharedScope)
 	if err != nil {
 		return err
 	}
@@ -94,25 +94,22 @@ func (s *sessionService) AgentQA(
 	// must not force users to configure an otherwise-unused rerank model.
 	var rerankModel rerank.Reranker
 	if agentRequiresRerankModel(req.CustomAgent) {
-		// Rerank model is resolved purely from the agent config now.
-		// We used to fall back to ConversationConfig.RerankModelID at
-		// the tenant level, but that path encouraged "leave rerank
-		// blank on the agent and inherit silently" which made debugging
-		// retrieval quality a guessing game across tenant settings vs
-		// agent settings. Forcing the agent to declare its own rerank
-		// model puts the configuration where the user actually edits
-		// the agent. If a Wiki-only agent doesn't need reranking,
-		// agentRequiresRerankModel() below already lets it pass.
 		rerankModelID := req.CustomAgent.Config.RerankModelID
-		if rerankModelID == "" {
-			logger.Warnf(ctx, "No rerank model configured for custom agent %s, but knowledge_search tool is enabled", req.CustomAgent.ID)
-			return errors.New("rerank model is not configured: please set rerank_model_id on the agent")
+		if rerankModelID != "" {
+			rerankModel, err = s.modelService.GetRerankModel(ctx, rerankModelID)
 		}
-
-		rerankModel, err = s.modelService.GetRerankModel(ctx, rerankModelID)
-		if err != nil {
-			logger.Warnf(ctx, "Failed to get rerank model: %v", err)
-			return fmt.Errorf("failed to get rerank model: %w", err)
+		if rerankModelID == "" || err != nil {
+			models, listErr := s.modelService.ListModels(ctx)
+			if listErr != nil {
+				return fmt.Errorf("failed to resolve platform rerank model: %w", listErr)
+			}
+			rerankModelID = activePlatformModelID(models, types.ModelTypeRerank)
+			if rerankModelID != "" {
+				rerankModel, err = s.modelService.GetRerankModel(ctx, rerankModelID)
+			}
+		}
+		if rerankModelID == "" || err != nil {
+			return errors.New("platform rerank model is unavailable")
 		}
 	} else {
 		logger.Infof(ctx, "knowledge_search is unavailable for the effective agent scope, skipping rerank model initialization")
@@ -215,7 +212,7 @@ func (s *sessionService) buildAgentConfig(
 	req *types.QARequest,
 	tenantInfo *types.Tenant,
 	agentTenantID uint64,
-) (*types.AgentConfig, error) {
+) (*types.AgentConfig, *sharedAgentSearchScope, error) {
 	customAgent := req.CustomAgent
 	agentConfig := &types.AgentConfig{
 		MaxIterations:               customAgent.Config.MaxIterations,
@@ -244,10 +241,15 @@ func (s *sessionService) buildAgentConfig(
 	// Configure skills based on CustomAgentConfig
 	s.configureSkillsFromAgent(ctx, agentConfig, customAgent)
 
-	// Resolve knowledge bases using shared helper
-	kbIDs, knowledgeIDs, err := s.resolveKnowledgeBases(ctx, req)
+	sharedScope, err := s.buildSharedAgentSearchScope(ctx, req)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+
+	// Resolve knowledge bases using shared helper
+	kbIDs, knowledgeIDs, err := s.resolveKnowledgeBases(ctx, req, sharedScope)
+	if err != nil {
+		return nil, nil, err
 	}
 	agentConfig.KnowledgeBases = kbIDs
 	agentConfig.KnowledgeIDs = knowledgeIDs
@@ -304,9 +306,9 @@ func (s *sessionService) buildAgentConfig(
 	}
 
 	// Build search targets using agent's tenant (handler has validated access for shared agent)
-	searchTargets, err := s.buildSearchTargets(ctx, agentTenantID, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs, req.TagScopes)
+	searchTargets, err := s.buildSearchTargets(ctx, agentTenantID, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs, req.TagScopes, sharedScope)
 	if err != nil {
-		return nil, fmt.Errorf("build search targets: %w", err)
+		return nil, nil, fmt.Errorf("build search targets: %w", err)
 	}
 	agentConfig.SearchTargets = searchTargets
 	// Document tags are stored in knowledge_tag_relations, so document-KB tag
@@ -327,7 +329,7 @@ func (s *sessionService) buildAgentConfig(
 		agentConfig.MaxContextTokens = types.DefaultMaxContextTokens
 	}
 
-	return agentConfig, nil
+	return agentConfig, sharedScope, nil
 }
 
 func mergeResolvedTagKnowledgeIDs(

@@ -17,7 +17,7 @@
         <!-- 与其它 settings 列表同形：左侧 engine 徽章 + 标题 + env pill + 副标题 + 测试动作。
              env 来源是只读的 (engine_type / connection_config 由 .env 写入），所以没有更多菜单；
              user 来源沿用三点菜单的编辑 / 删除入口；测试结果作为卡片底部的彩色条出现。 -->
-        <div v-if="stores.length === 0 && !authStore.hasRole('admin')" class="empty-stores">
+        <div v-if="stores.length === 0 && !authStore.isSystemAdmin" class="empty-stores">
           <t-empty :description="t('vectorStoreSettings.emptyDesc')" />
         </div>
         <div v-else class="store-grid">
@@ -63,7 +63,7 @@
                     env 来源（.env 写入）也不需要 dropdown — 没有可执行的动作。
                   -->
                   <div
-                    v-if="authStore.hasRole('admin') && storeActionsFor(store).length > 0"
+                    v-if="authStore.isSystemAdmin && storeActionsFor(store).length > 0"
                     class="store-card__actions"
                     @click.stop
                   >
@@ -91,7 +91,7 @@
             </div>
           </div>
           <button
-            v-if="authStore.hasRole('admin')"
+            v-if="authStore.isSystemAdmin"
             type="button"
             class="store-card store-card--add"
             @click="openAddDialog"
@@ -617,7 +617,7 @@ const openAddDialog = () => {
 
 // env 来源由 .env 注入，与列表菜单一致：不可点击编辑
 const isStoreCardClickable = (store: VectorStoreEntity) =>
-  authStore.hasRole('admin') && store.source !== 'env'
+  authStore.isSystemAdmin && store.source !== 'env'
 
 const onStoreCardClick = (event: Event, store: VectorStoreEntity) => {
   if (!isStoreCardClickable(store)) return

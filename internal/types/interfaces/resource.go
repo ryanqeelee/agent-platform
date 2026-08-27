@@ -22,6 +22,7 @@ type ResourceRepository interface {
 	GetByID(ctx context.Context, id string) (*types.StoredResource, error)
 	GetByHandle(ctx context.Context, handle string) (*types.StoredResource, error)
 	GetByTenantLocation(ctx context.Context, tenantID uint64, locationHash string) (*types.StoredResource, error)
+	ListBindings(ctx context.Context, resourceID string, ownerType string) ([]*types.ResourceBinding, error)
 	MarkDeleted(ctx context.Context, id string) error
 	CreateBinding(ctx context.Context, binding *types.ResourceBinding) error
 	CreateGrant(ctx context.Context, grant *types.ResourceAccessGrant) error
@@ -45,6 +46,8 @@ type ResourceCatalog interface {
 	Register(ctx context.Context, tenantID uint64, physicalPath string, meta ResourceRegistration) (string, error)
 	Resolve(ctx context.Context, reference string) (*types.StoredResource, error)
 	ResolvePath(ctx context.Context, value string) (string, *types.StoredResource, error)
+	ResolveTenantPath(ctx context.Context, tenantID uint64, value string) (string, *types.StoredResource, error)
+	ListKnowledgeBindings(ctx context.Context, reference string) ([]*types.ResourceBinding, error)
 	Bind(ctx context.Context, reference, ownerType, ownerID, relation string) error
 	MarkDeleted(ctx context.Context, reference string) error
 	CreateAccessGrant(ctx context.Context, reference string, ttl time.Duration) (string, error)

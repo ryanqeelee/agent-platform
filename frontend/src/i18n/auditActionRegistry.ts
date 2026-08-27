@@ -29,6 +29,10 @@ export const TENANT_MEMBER_AUDIT_ACTIONS = [
   'rbac.invitation_declined',
   'rbac.invitation_revoked',
   'rbac.invitation_expired',
+  'knowledge_role.created',
+  'knowledge_role.updated',
+  'knowledge_role.member_assigned',
+  'knowledge_access.updated',
 ] as const
 
 /** Platform control-plane audit events (system settings → audit tab). */

@@ -337,9 +337,8 @@ CREATE INDEX IF NOT EXISTS idx_auth_tokens_token_type ON auth_tokens(token_type)
 CREATE INDEX IF NOT EXISTS idx_auth_tokens_expires_at ON auth_tokens(expires_at);
 
 -- tenant_members carries the per-(user, tenant) TenantRole used by the
--- tenant-level RBAC introduced in #1303. SQLite does not support partial
--- indexes the same way Postgres does, so we use a plain unique index on
--- (user_id, tenant_id) — soft-deleted rows are filtered by the GORM scope.
+-- tenant-level RBAC introduced in #1303. Active memberships must be unique,
+-- while a soft-deleted membership can be rejoined as a new row.
 CREATE TABLE IF NOT EXISTS tenant_members (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id VARCHAR(36) NOT NULL,
@@ -353,7 +352,7 @@ CREATE TABLE IF NOT EXISTS tenant_members (
     deleted_at DATETIME
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_members_user_tenant_unique
-    ON tenant_members(user_id, tenant_id);
+    ON tenant_members(user_id, tenant_id) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_tenant_members_tenant_role
     ON tenant_members(tenant_id, role);
 CREATE INDEX IF NOT EXISTS idx_tenant_members_user
@@ -1104,3 +1103,47 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_wiki_page_revisions_page_version
 
 CREATE INDEX IF NOT EXISTS idx_wiki_page_revisions_kb_slug
     ON wiki_page_revisions (knowledge_base_id, slug);
+
+CREATE TABLE IF NOT EXISTS business_roles (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name VARCHAR(128) NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_business_roles_tenant_id
+    ON business_roles (tenant_id, id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_members_tenant_id_for_business_roles
+    ON tenant_members (tenant_id, id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_business_roles_tenant_name_active
+    ON business_roles (tenant_id, name) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_business_roles_tenant_enabled
+    ON business_roles (tenant_id, enabled) WHERE deleted_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS business_role_members (
+    tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    role_id VARCHAR(36) NOT NULL,
+    tenant_member_id INTEGER NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (tenant_id, role_id, tenant_member_id),
+    FOREIGN KEY (tenant_id, role_id) REFERENCES business_roles(tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, tenant_member_id) REFERENCES tenant_members(tenant_id, id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_business_role_members_tenant_user
+    ON business_role_members (tenant_id, tenant_member_id, role_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_bases_tenant_id_for_access_grants
+    ON knowledge_bases (tenant_id, id);
+CREATE TABLE IF NOT EXISTS knowledge_base_role_grants (
+    tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    role_id VARCHAR(36) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (tenant_id, knowledge_base_id, role_id),
+    FOREIGN KEY (tenant_id, role_id) REFERENCES business_roles(tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, knowledge_base_id) REFERENCES knowledge_bases(tenant_id, id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_kb_role_grants_tenant_role
+    ON knowledge_base_role_grants (tenant_id, role_id, knowledge_base_id);

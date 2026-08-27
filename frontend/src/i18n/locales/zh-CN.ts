@@ -127,6 +127,7 @@ export default {
     empty: '尚未邀请任何成员。点击右上角邀请伙伴加入。',
     emptySearch: '没有匹配 "{q}" 的成员。',
     searchPlaceholder: '按姓名或邮箱搜索',
+    businessRoles: { title: '业务岗位', none: '未分配', saved: '业务岗位已保存', saveFailed: '保存业务岗位失败' },
     audit: {
       tabLabel: '审计日志',
       description: '记录当前空间的成员变更与访问拒绝事件，按时间倒序展示。一分钟内的重复拒绝会自动去重。',
@@ -159,7 +160,8 @@ export default {
         'rbac.invitation_accepted': '接受邀请',
         'rbac.invitation_declined': '拒绝邀请',
         'rbac.invitation_revoked': '撤销邀请',
-        'rbac.invitation_expired': '邀请过期'
+        'rbac.invitation_expired': '邀请过期',
+        'knowledge_role.created': '创建业务岗位', 'knowledge_role.updated': '更新业务岗位', 'knowledge_role.member_assigned': '分配成员业务岗位', 'knowledge_access.updated': '更新知识访问范围'
       },
       columns: {
         time: '时间',
@@ -240,6 +242,13 @@ export default {
       createOwnKB: '创建并编辑自己的知识库和智能体',
       readAll: '查看空间内容'
     }
+  },
+  businessRoles: {
+    title: '业务岗位', description: '业务岗位只决定员工可使用哪些知识，不改变系统角色。', create: '新增岗位', rename: '重命名岗位', nameRequired: '请输入岗位名称', createFailed: '新增岗位失败', saveFailed: '保存岗位失败',
+    columns: { name: '岗位名称', enabled: '启用', actions: '操作' }
+  },
+  knowledgeAccess: {
+    title: '知识访问范围', description: '不选岗位时，企业内所有员工都可使用该知识；选定岗位后，仅这些岗位中的员工可使用。', all: '企业全员', roles: '指定业务岗位', noRoles: '暂无可用业务岗位，请由管理员先创建岗位', disabled: '已停用', loadFailed: '无法读取知识访问范围', roleRequired: '请至少选择一个业务岗位', saved: '知识访问范围已保存', saveFailed: '保存知识访问范围失败'
   },
   userProfile: {
     title: '用户信息',

@@ -40,6 +40,7 @@ type RouterParams struct {
 	EvaluationService            interfaces.EvaluationService
 	KBShareService               interfaces.KBShareService
 	AgentShareService            interfaces.AgentShareService
+	KnowledgeGovernanceService   interfaces.KnowledgeGovernanceService
 	KBHandler                    *handler.KnowledgeBaseHandler
 	KnowledgeHandler             *handler.KnowledgeHandler
 	TenantHandler                *handler.TenantHandler
@@ -47,6 +48,7 @@ type RouterParams struct {
 	TenantAPIKeyService          interfaces.TenantAPIKeyService
 	TenantMemberService          interfaces.TenantMemberService
 	TenantMemberHandler          *handler.TenantMemberHandler
+	KnowledgeGovernanceHandler   *handler.KnowledgeGovernanceHandler
 	TenantInvitationHandler      *handler.TenantInvitationHandler
 	AuditLogHandler              *handler.AuditLogHandler
 	AuditLogService              interfaces.AuditLogService
@@ -170,18 +172,21 @@ func NewRouter(params RouterParams) *gin.Engine {
 
 	// Short-lived capability URLs for IM and other clients that cannot attach
 	// WeKnora authentication headers.
-	serveResourceGrants(r, params.ResourceCatalog, params.TenantService, params.FileService, params.StorageBackendResolver)
+	serveResourceGrants(r, params.ResourceCatalog, params.TenantService, params.FileService, params.StorageBackendResolver, params.KnowledgeService, params.KBService)
 
 	// 认证中间件
 	r.Use(middleware.Auth(params.TenantService, params.UserService, params.TenantMemberService, params.TenantAPIKeyService, params.Config))
 
 	// 文件服务：统一代理本地/MinIO/COS/TOS存储后端（需要认证）
-	serveFilesWithResources(r, params.FileService, params.StorageBackendResolver, params.ResourceCatalog)
+	serveFilesWithResources(
+		r, params.FileService, params.StorageBackendResolver, params.ResourceCatalog,
+		params.KnowledgeService, params.KBService,
+	)
 
 	// Presigned file access: no auth required, signature-verified.
 	servePresignedFiles(r, params.TenantService, params.StorageBackendResolver)
 
-	// Diagnostic preview of presigned URLs (Admin only, behind auth middleware).
+	// Diagnostic preview of presigned URLs (SystemAdmin only, behind auth middleware).
 	servePresignedPreview(r, params.Config, params.StorageBackendResolver)
 
 	// Langfuse observability — only active when LANGFUSE_* env vars are set.
@@ -205,16 +210,12 @@ func NewRouter(params RouterParams) *gin.Engine {
 		// preserving today's behaviour during the rollout window.
 		rbacGuards := newRBACGuards(
 			params.Config,
-			params.KBHandler,
-			params.CustomAgentHandler,
-			params.KnowledgeHandler,
-			params.ChunkHandler,
-			params.WikiPageHandler,
 			params.KBService,
 			params.KnowledgeService,
 			params.ChunkService,
 			params.KBShareService,
 			params.AgentShareService,
+			params.KnowledgeGovernanceService,
 		)
 
 		// API-key gate: single authority for X-API-Key principals. Runs
@@ -226,6 +227,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 
 		RegisterAuthRoutes(v1, params.AuthHandler, rbacGuards)
 		RegisterTenantRoutes(v1, params.TenantHandler, params.TenantMemberHandler, params.TenantInvitationHandler, params.AuditLogHandler, rbacGuards)
+		RegisterKnowledgeGovernanceRoutes(v1, params.KnowledgeGovernanceHandler, rbacGuards)
 		RegisterMyInvitationRoutes(v1, params.TenantInvitationHandler)
 		RegisterKnowledgeBaseRoutes(v1, params.KBHandler, rbacGuards)
 		RegisterKnowledgeBaseActivityRoutes(v1, params.AuditLogHandler, rbacGuards)

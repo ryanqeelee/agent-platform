@@ -13,13 +13,9 @@ var errTenantAPIKeyScopeForbidden = stderrors.New("workspace API key scope forbi
 
 // APIKeyRoutePolicy declares how an X-API-Key caller may use a single route.
 //
-// Design: API-key authorization is a SEPARATE authority from the JWT
-// role/ownership guards. Ownership ("creator OR Admin+") is a human concept
-// and never applies to a machine principal; instead every API-key-accessible
-// route declares one policy here, and the APIKeyGate is the single place that
-// enforces it. Routes that declare no policy are denied for API keys by
-// default (fail-closed), which removes the old "remember to add APIKeyDeny"
-// footgun.
+// API-key authorization is separate from JWT role guards. Every
+// API-key-accessible route declares one policy, and APIKeyGate enforces it.
+// Undeclared routes deny API keys by default.
 type APIKeyRoutePolicy struct {
 	// PlatformOnly rejects workspace-bound keys even when they are full-access.
 	// It is used for control-plane routes under /system/admin and cross-workspace
@@ -155,8 +151,8 @@ func (a *APIKeyRouteAuthorizer) authorize(scope types.TenantAPIKeyScope, method,
 // DenyAPIKeyPrincipal returns a middleware that rejects any X-API-Key
 // principal outright. Use it on routes registered directly on the engine
 // (outside the /api/v1 group) where the APIKeyRouteAuthorizer.Middleware
-// gate does NOT run — the JWT role guards (RequireRole / RequireSystemAdmin
-// / RequireOwnershipOrRole) short-circuit API-key principals on the
+// gate does NOT run — the JWT role guards (RequireRole / RequireSystemAdmin)
+// short-circuit API-key principals on the
 // assumption the gate already authorized them, so an ungated route would
 // otherwise let any valid key through. JWT sessions pass straight through.
 func DenyAPIKeyPrincipal() gin.HandlerFunc {

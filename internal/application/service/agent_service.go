@@ -101,6 +101,9 @@ type agentService struct {
 	webSearchStateService interfaces.WebSearchStateService
 	wikiPageService       interfaces.WikiPageService
 	tenantService         interfaces.TenantService
+	tenantMemberService   interfaces.TenantMemberService
+	kbShareService        interfaces.KBShareService
+	agentShareService     interfaces.AgentShareService
 	storageResolver       interfaces.StorageBackendResolver
 	toolApprovalGate      approval.MCPApproval
 }
@@ -122,6 +125,9 @@ func NewAgentService(
 	webSearchStateService interfaces.WebSearchStateService,
 	wikiPageService interfaces.WikiPageService,
 	tenantService interfaces.TenantService,
+	tenantMemberService interfaces.TenantMemberService,
+	kbShareService interfaces.KBShareService,
+	agentShareService interfaces.AgentShareService,
 	storageResolver interfaces.StorageBackendResolver,
 	toolApprovalGate approval.MCPApproval,
 ) interfaces.AgentService {
@@ -141,6 +147,9 @@ func NewAgentService(
 		webSearchStateService: webSearchStateService,
 		wikiPageService:       wikiPageService,
 		tenantService:         tenantService,
+		tenantMemberService:   tenantMemberService,
+		kbShareService:        kbShareService,
+		agentShareService:     agentShareService,
 		storageResolver:       storageResolver,
 		toolApprovalGate:      toolApprovalGate,
 	}
@@ -441,6 +450,12 @@ func (s *agentService) registerTools(
 	if config.SharedAgentReadOnly {
 		allowedTools = filterSharedAgentWriteTools(allowedTools)
 	}
+	// Wiki mutations are content maintenance, never a Viewer capability. The
+	// turn's current tenant role is the sole registration authority; creator
+	// history is deliberately irrelevant.
+	if !hasRegisteredKnowledgeWriteAuthority(ctx) {
+		allowedTools = filterWikiWriteTools(allowedTools)
+	}
 
 	// ---- Capability detection from SearchTargets ----
 	var hasVectorKB bool
@@ -671,6 +686,12 @@ func (s *agentService) registerTools(
 		}
 
 		if toolToRegister != nil {
+			if isKnowledgeScopedTool(toolName) {
+				toolToRegister = tools.NewLiveKnowledgeAccessTool(
+					toolToRegister, config.SearchTargets, s.knowledgeBaseService,
+					s.tenantMemberService, isWikiWriteTool(toolName),
+				)
+			}
 			if toolToRegister.Name() != toolName {
 				logger.Warnf(ctx, "Tool name mismatch: expected %s, got %s", toolName, toolToRegister.Name())
 			}
@@ -682,21 +703,60 @@ func (s *agentService) registerTools(
 	return nil
 }
 
+func isKnowledgeScopedTool(name string) bool {
+	switch name {
+	case tools.ToolKnowledgeSearch, tools.ToolGrepChunks, tools.ToolListKnowledgeChunks,
+		tools.ToolQueryKnowledgeGraph, tools.ToolGetDocumentInfo, tools.ToolDatabaseQuery,
+		tools.ToolDataAnalysis, tools.ToolDataSchema,
+		tools.ToolWikiReadPage, tools.ToolWikiSearch, tools.ToolWikiReadSourceDoc,
+		tools.ToolWikiFlagIssue, tools.ToolWikiWritePage, tools.ToolWikiReplaceText,
+		tools.ToolWikiRenamePage, tools.ToolWikiDeletePage, tools.ToolWikiReadIssue,
+		tools.ToolWikiUpdateIssue:
+		return true
+	default:
+		return false
+	}
+}
+
+func filterWikiWriteTools(allowed []string) []string {
+	filtered := make([]string, 0, len(allowed))
+	for _, name := range allowed {
+		if !isWikiWriteTool(name) {
+			filtered = append(filtered, name)
+		}
+	}
+	return filtered
+}
+
+func hasRegisteredKnowledgeWriteAuthority(ctx context.Context) bool {
+	if scope, isAPIKey := types.TenantAPIKeyScopeFromContext(ctx); isAPIKey {
+		return scope.FullAccess ||
+			scope.HasCapability(types.APIKeyCapabilityManageKnowledgeBases) ||
+			scope.HasCapability(types.APIKeyCapabilityIngest)
+	}
+	return types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleContributor)
+}
+
+// isWikiWriteTool is the single policy classifier for Agent tools that mutate
+// wiki/issue content. Registration uses it to hide writes from stale
+// read-only contexts; the live decorator uses it again at execution time.
+func isWikiWriteTool(name string) bool {
+	switch name {
+	case tools.ToolWikiFlagIssue, tools.ToolWikiWritePage, tools.ToolWikiReplaceText,
+		tools.ToolWikiRenamePage, tools.ToolWikiDeletePage, tools.ToolWikiUpdateIssue:
+		return true
+	default:
+		return false
+	}
+}
+
 // filterSharedAgentWriteTools enforces the read-only contract of AgentShare.
 // These tools write source-workspace Wiki state and otherwise bypass the HTTP
 // KB permission middleware because they execute inside the agent engine.
 func filterSharedAgentWriteTools(allowed []string) []string {
-	sourceWorkspaceWrites := map[string]bool{
-		tools.ToolWikiFlagIssue:   true,
-		tools.ToolWikiUpdateIssue: true,
-		tools.ToolWikiWritePage:   true,
-		tools.ToolWikiReplaceText: true,
-		tools.ToolWikiRenamePage:  true,
-		tools.ToolWikiDeletePage:  true,
-	}
 	filtered := make([]string, 0, len(allowed))
 	for _, name := range allowed {
-		if !sourceWorkspaceWrites[name] {
+		if !isWikiWriteTool(name) {
 			filtered = append(filtered, name)
 		}
 	}

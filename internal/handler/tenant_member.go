@@ -32,8 +32,9 @@ import (
 // is guaranteed to either match the active tenant or carry a
 // cross-tenant superuser bypass.
 type TenantMemberHandler struct {
-	memberService interfaces.TenantMemberService
-	userService   interfaces.UserService
+	memberService     interfaces.TenantMemberService
+	userService       interfaces.UserService
+	governanceService interfaces.KnowledgeGovernanceService
 }
 
 // NewTenantMemberHandler wires the dependencies. PR 1 already provides
@@ -44,10 +45,12 @@ type TenantMemberHandler struct {
 func NewTenantMemberHandler(
 	memberService interfaces.TenantMemberService,
 	userService interfaces.UserService,
+	governanceService interfaces.KnowledgeGovernanceService,
 ) *TenantMemberHandler {
 	return &TenantMemberHandler{
-		memberService: memberService,
-		userService:   userService,
+		memberService:     memberService,
+		userService:       userService,
+		governanceService: governanceService,
 	}
 }
 
@@ -150,6 +153,15 @@ func (h *TenantMemberHandler) ListMembers(c *gin.Context) {
 			row.Email = u.Email
 			row.Username = u.Username
 			row.Avatar = u.Avatar
+		}
+		if types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin) {
+			roleIDs, roleErr := h.governanceService.ListMemberBusinessRoleIDs(ctx, tenantID, m.UserID)
+			if roleErr != nil {
+				logger.Errorf(ctx, "ListMemberBusinessRoleIDs failed: tenant=%d err=%v", tenantID, roleErr)
+				c.Error(apperrors.NewServiceUnavailableError("cannot load business role assignments"))
+				return
+			}
+			row.BusinessRoleIDs = roleIDs
 		}
 		resp = append(resp, row)
 	}

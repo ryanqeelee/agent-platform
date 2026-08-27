@@ -89,7 +89,11 @@ func (s *stubModelService) GetModelByID(_ context.Context, id string) (*types.Mo
 }
 
 func (s *stubModelService) ListModels(context.Context) ([]*types.Model, error) {
-	return nil, nil
+	models := make([]*types.Model, 0, len(s.modelsByID))
+	for _, model := range s.modelsByID {
+		models = append(models, model)
+	}
+	return models, nil
 }
 
 func (s *stubModelService) UpdateModel(context.Context, *types.Model) error {

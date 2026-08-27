@@ -204,7 +204,7 @@ const {
 })
 
 const drawerVisible = ref(false)
-const canConfigureRetrieval = computed(() => authStore.hasRole('admin'))
+const canConfigureRetrieval = computed(() => authStore.isSystemAdmin)
 const inputRef = ref<HTMLInputElement | null>(null)
 const scrollRef = ref<HTMLElement | null>(null)
 

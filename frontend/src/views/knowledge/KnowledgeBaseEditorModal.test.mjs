@@ -30,3 +30,13 @@ test('shows a post-create hint after the first successful save', () => {
   assert.match(source, /settings-footer-note/)
   assert.match(source, /knowledgeEditor\.postCreateHint\.followUpDesc/)
 })
+
+test('share and activity authority is current Admin in the KB tenant, never creator identity', () => {
+  assert.match(
+    source,
+    /const canShareKB = computed\(\(\) => \{\s*if \(editorMode\.value !== 'edit' \|\| !activeKbId\.value\) return false\s*if \(Number\(kbTenantId\.value \|\| 0\) !== Number\(authStore\.currentTenantId \|\| 0\)\) return false\s*return authStore\.hasRole\('admin'\)\s*\}\)/s
+  )
+  assert.match(source, /const canViewActivity = computed\(\(\) => \{\s*return canShareKB\.value\s*\}\)/s)
+  assert.doesNotMatch(source, /kbCreatorId\.value === userId/)
+  assert.doesNotMatch(source, /isKbOwner\.value \|\| authStore\.hasRole\('admin'\)/)
+})

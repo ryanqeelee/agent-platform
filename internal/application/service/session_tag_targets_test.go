@@ -30,6 +30,13 @@ func (s *tagTargetKnowledgeBaseService) GetKnowledgeBasesByIDsOnly(
 	return out, nil
 }
 
+func (s *tagTargetKnowledgeBaseService) GetKnowledgeBaseByID(_ context.Context, id string) (*types.KnowledgeBase, error) {
+	if kb := s.kbs[id]; kb != nil {
+		return kb, nil
+	}
+	return nil, fmt.Errorf("knowledge base %s not found", id)
+}
+
 type tagTargetKnowledgeService struct {
 	interfaces.KnowledgeService
 	knowledges []*types.Knowledge
@@ -131,7 +138,7 @@ func TestBuildAgentConfig_TagOnlyScopePreservesRetrievalTarget(t *testing.T) {
 		},
 	}
 
-	agentConfig, err := svc.buildAgentConfig(
+	agentConfig, _, err := svc.buildAgentConfig(
 		tagTargetContext(),
 		req,
 		&types.Tenant{ID: 100},
@@ -160,6 +167,7 @@ func TestBuildSearchTargets_DocumentTagScopeResolvesKnowledgeIDs(t *testing.T) {
 		[]string{"doc-kb"},
 		nil,
 		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -181,6 +189,7 @@ func TestBuildSearchTargets_ExplicitKnowledgeScopeDisablesRecallThresholds(t *te
 		nil,
 		[]string{"doc-1"},
 		nil,
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -199,6 +208,7 @@ func TestBuildSearchTargets_DocumentTagScopeIntersectsExplicitKnowledgeIDs(t *te
 		[]string{"doc-kb"},
 		[]string{"doc-2", "doc-3"},
 		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -218,6 +228,7 @@ func TestBuildSearchTargets_FAQTagScopeKeepsIndexTagFilter(t *testing.T) {
 		[]string{"faq-kb"},
 		nil,
 		[]types.TagScope{{KnowledgeBaseID: "faq-kb", TagIDs: []string{"tag-a", "tag-b"}}},
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -238,6 +249,7 @@ func TestBuildSearchTargets_FullKBWithTagScopeSkipsFullKBTarget(t *testing.T) {
 		[]string{"doc-kb"},
 		nil,
 		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -246,7 +258,7 @@ func TestBuildSearchTargets_FullKBWithTagScopeSkipsFullKBTarget(t *testing.T) {
 	assert.NotEqual(t, types.SearchTargetTypeKnowledgeBase, targets[0].Type)
 }
 
-func TestBuildSearchTargets_DocumentTagScopeWithMissingKBMetadata(t *testing.T) {
+func TestBuildSearchTargets_RejectsTagScopeWithMissingKBMetadata(t *testing.T) {
 	svc := &sessionService{
 		knowledgeBaseService: &tagTargetKnowledgeBaseService{kbs: map[string]*types.KnowledgeBase{}},
 		knowledgeService: &tagTargetKnowledgeService{
@@ -267,13 +279,11 @@ func TestBuildSearchTargets_DocumentTagScopeWithMissingKBMetadata(t *testing.T) 
 		[]string{"doc-kb"},
 		nil,
 		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+		nil,
 	)
 
-	require.NoError(t, err)
-	require.Len(t, targets, 1)
-	assert.Equal(t, types.SearchTargetTypeKnowledge, targets[0].Type)
-	assert.ElementsMatch(t, []string{"doc-1", "doc-3"}, targets[0].KnowledgeIDs)
-	assert.True(t, targets[0].DisableRecallThresholds)
+	require.Error(t, err)
+	require.Nil(t, targets)
 }
 
 func TestMergeResolvedTagKnowledgeIDs_OnlyIncludesTagScopedTargets(t *testing.T) {
@@ -323,6 +333,7 @@ func TestBuildSearchTargets_DocumentTagScopeResolutionError(t *testing.T) {
 		[]string{"doc-kb"},
 		nil,
 		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+		nil,
 	)
 
 	require.Error(t, err)

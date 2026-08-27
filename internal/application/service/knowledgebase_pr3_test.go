@@ -175,6 +175,66 @@ func TestCreateKnowledgeBase_DefaultStorageProviderFromTenant(t *testing.T) {
 	assert.Equal(t, "cos", kbExplicit.GetStorageProvider())
 }
 
+func TestCreateKnowledgeBase_WorkspacePrincipalUsesPlatformModelDefaults(t *testing.T) {
+	repo := newFakeKBRepo()
+	svc := newPR3KBService(repo, &fakeRegistry{registered: map[string]struct{}{}}, &fakeOwnership{})
+	svc.modelService = &stubModelService{modelsByID: map[string]*types.Model{
+		"chat-default":  {ID: "chat-default", Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusActive, IsDefault: true},
+		"embed-default": {ID: "embed-default", Type: types.ModelTypeEmbedding, Status: types.ModelStatusActive, IsDefault: true},
+	}}
+	ctx := context.WithValue(ctxWithTenant(1), types.UserIDContextKey, "user-1")
+	storeID := validKBStoreUUID
+	kb, err := svc.CreateKnowledgeBase(ctx, &types.KnowledgeBase{
+		Name:             "kb",
+		SummaryModelID:   "client-chat",
+		EmbeddingModelID: "client-embed",
+		VectorStoreID:    &storeID,
+		VLMConfig:        types.VLMConfig{Enabled: true, ModelID: "client-vlm"},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "chat-default", kb.SummaryModelID)
+	assert.Equal(t, "embed-default", kb.EmbeddingModelID)
+	assert.Nil(t, kb.VectorStoreID)
+	assert.False(t, kb.VLMConfig.Enabled)
+}
+
+type knowledgeAccessGovernanceStub struct {
+	interfaces.KnowledgeGovernanceService
+	allowed bool
+	calls   int
+}
+
+func (s *knowledgeAccessGovernanceStub) CanAccessKnowledgeBase(context.Context, uint64, string, types.TenantRole, string) (bool, error) {
+	s.calls++
+	return s.allowed, nil
+}
+
+func TestAuthorizeOwnKnowledgeBaseRequiresExactSharedProvenance(t *testing.T) {
+	governance := &knowledgeAccessGovernanceStub{allowed: false}
+	svc := &knowledgeBaseService{governance: governance}
+	kb := &types.KnowledgeBase{ID: "kb-source", TenantID: 2}
+
+	sharedCtx := types.WithAuthorizedSharedKnowledgeBase(ctxWithTenant(1), 1, 2, "kb-source", types.OrgRoleViewer)
+	sharedCtx = context.WithValue(sharedCtx, types.TenantIDContextKey, uint64(2))
+	require.NoError(t, svc.authorizeOwnKnowledgeBase(sharedCtx, kb), "route-authorized exact shared KB must not fabricate source membership")
+	require.Zero(t, governance.calls)
+
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+	}{
+		{"direct source context", ctxWithTenant(2)},
+		{"wrong KB marker", types.WithAuthorizedSharedKnowledgeBase(ctxWithTenant(1), 1, 2, "kb-other", types.OrgRoleViewer)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.WithValue(tc.ctx, types.TenantIDContextKey, uint64(2))
+			err := svc.authorizeOwnKnowledgeBase(ctx, kb)
+			require.Error(t, err, "source access without exact route provenance must use ordinary governance")
+		})
+	}
+}
+
 func TestCreateKnowledgeBase_DefaultStorageProviderRespectsAllowList(t *testing.T) {
 	t.Setenv(storageallowlist.AllowListEnv, "minio")
 	repo := newFakeKBRepo()

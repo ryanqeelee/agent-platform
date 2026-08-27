@@ -5662,6 +5662,13 @@ export default {
     confirmRemovePrompt: 'Remove this credential? This cannot be undone.',
     confirmRemove: 'Confirm remove'
   },
+  businessRoles: {
+    title: 'Business roles', description: 'Business roles only control which knowledge employees can use; they do not change system roles.', create: 'Add role', rename: 'Rename role', nameRequired: 'Enter a role name', createFailed: 'Failed to add role', saveFailed: 'Failed to save role',
+    columns: { name: 'Role name', enabled: 'Enabled', actions: 'Actions' }
+  },
+  knowledgeAccess: {
+    title: 'Knowledge access', description: 'Without selected roles, all employees in this workspace can use this knowledge. With roles selected, only members of those roles can use it.', all: 'All employees', roles: 'Selected business roles', noRoles: 'No enabled business roles. Ask an administrator to create one first.', disabled: 'Disabled', loadFailed: 'Unable to load knowledge access', roleRequired: 'Select at least one business role', saved: 'Knowledge access saved', saveFailed: 'Failed to save knowledge access'
+  },
   userProfile: {
     title: 'User Profile',
     description: 'View your account info (user ID, username, email, registration time).'
@@ -5675,6 +5682,7 @@ export default {
     empty: 'No members yet. Invite a teammate to get started.',
     emptySearch: 'No members match "{q}".',
     searchPlaceholder: 'Search by name or email',
+    businessRoles: { title: 'Business roles', none: 'Unassigned', saved: 'Business roles saved', saveFailed: 'Failed to save business roles' },
     permissions: {
       title: 'Role permissions',
       desc: 'What each role can do inside this workspace. Server-enforced; UI controls reflect the rules but are not the source of truth.',
@@ -5774,7 +5782,8 @@ export default {
         'rbac.invitation_accepted': 'Invitation accepted',
         'rbac.invitation_declined': 'Invitation declined',
         'rbac.invitation_revoked': 'Invitation revoked',
-        'rbac.invitation_expired': 'Invitation expired'
+        'rbac.invitation_expired': 'Invitation expired',
+        'knowledge_role.created': 'Business role created', 'knowledge_role.updated': 'Business role updated', 'knowledge_role.member_assigned': 'Member business roles updated', 'knowledge_access.updated': 'Knowledge access updated'
       },
       outcome: {
         success: 'Success',

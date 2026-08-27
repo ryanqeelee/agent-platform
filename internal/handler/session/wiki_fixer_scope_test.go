@@ -41,7 +41,7 @@ func (s *wikiFixerKBShareStub) CheckTenantKBPermission(
 	return s.permission, s.isShared, s.err
 }
 
-func TestResolveBuiltinWikiFixerTenantScope_SharedEditorUsesSourceTenant(t *testing.T) {
+func TestResolveBuiltinWikiFixerTenantScope_AdminEditorUsesSourceTenant(t *testing.T) {
 	agent := &types.CustomAgent{ID: types.BuiltinWikiFixerID, TenantID: 10, Name: "Wiki Fixer"}
 	kbLookup := &wikiFixerKBLookupStub{
 		kb: &types.KnowledgeBase{ID: "kb-shared", TenantID: 20, Name: "Shared KB"},
@@ -55,7 +55,7 @@ func TestResolveBuiltinWikiFixerTenantScope_SharedEditorUsesSourceTenant(t *test
 		context.Background(),
 		agent,
 		10,
-		types.TenantRoleContributor,
+		types.TenantRoleAdmin,
 		[]string{"kb-shared"},
 		kbLookup,
 		kbShare,
@@ -68,10 +68,10 @@ func TestResolveBuiltinWikiFixerTenantScope_SharedEditorUsesSourceTenant(t *test
 	require.Equal(t, "kb-shared", kbLookup.calledWith)
 	require.Equal(t, "kb-shared", kbShare.checkedKBID)
 	require.Equal(t, uint64(10), kbShare.checkedTenantID)
-	require.Equal(t, types.TenantRoleContributor, kbShare.checkedTenantRole)
+	require.Equal(t, types.TenantRoleAdmin, kbShare.checkedTenantRole)
 }
 
-func TestResolveBuiltinWikiFixerTenantScope_SharedViewerDoesNotSwitchTenant(t *testing.T) {
+func TestResolveBuiltinWikiFixerTenantScope_AdminViewerDoesNotSwitchTenant(t *testing.T) {
 	agent := &types.CustomAgent{ID: types.BuiltinWikiFixerID, TenantID: 10}
 	kbLookup := &wikiFixerKBLookupStub{
 		kb: &types.KnowledgeBase{ID: "kb-shared", TenantID: 20},
@@ -85,7 +85,7 @@ func TestResolveBuiltinWikiFixerTenantScope_SharedViewerDoesNotSwitchTenant(t *t
 		context.Background(),
 		agent,
 		10,
-		types.TenantRoleContributor,
+		types.TenantRoleAdmin,
 		[]string{"kb-shared"},
 		kbLookup,
 		kbShare,
@@ -94,6 +94,18 @@ func TestResolveBuiltinWikiFixerTenantScope_SharedViewerDoesNotSwitchTenant(t *t
 	require.Same(t, agent, gotAgent)
 	require.Zero(t, effectiveTenantID)
 	require.Equal(t, uint64(10), gotAgent.TenantID)
+}
+
+func TestResolveBuiltinWikiFixerTenantScope_ContributorEditorDoesNotSwitchTenant(t *testing.T) {
+	agent := &types.CustomAgent{ID: types.BuiltinWikiFixerID, TenantID: 10}
+	gotAgent, effectiveTenantID := resolveBuiltinWikiFixerTenantScope(
+		context.Background(), agent, 10, types.TenantRoleContributor, []string{"kb-shared"},
+		&wikiFixerKBLookupStub{kb: &types.KnowledgeBase{ID: "kb-shared", TenantID: 20}},
+		&wikiFixerKBShareStub{permission: types.OrgRoleEditor, isShared: true},
+	)
+
+	require.Same(t, agent, gotAgent)
+	require.Zero(t, effectiveTenantID)
 }
 
 func TestResolveBuiltinWikiFixerTenantScope_IgnoresNonWikiFixerAgents(t *testing.T) {

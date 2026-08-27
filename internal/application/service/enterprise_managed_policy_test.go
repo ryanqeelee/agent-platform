@@ -38,13 +38,13 @@ func TestEnterpriseManagedMemberAndInvitationPolicy(t *testing.T) {
 }
 
 func TestEnterpriseManagedSharingAdapters(t *testing.T) {
-	kb := NewKBShareService(nil, nil, nil, nil, nil, nil)
+	kb := NewKBShareService()
 	if ok, err := kb.HasTenantKBPermission(context.Background(), "kb", 1, types.TenantRoleViewer, types.OrgRoleViewer); err != nil || ok {
 		t.Fatalf("KB access must be denied, ok=%v err=%v", ok, err)
 	}
-	agent := NewAgentShareService(nil, nil, nil, nil, nil, nil)
-	if ok, err := agent.TenantCanAccessKBViaSomeSharedAgent(context.Background(), 1, types.TenantRoleViewer, &types.KnowledgeBase{}); err != nil || ok {
-		t.Fatalf("agent share access must be denied, ok=%v err=%v", ok, err)
+	agent := NewAgentShareService()
+	if got, err := agent.FindSharedAgentForKnowledgeBase(context.Background(), 1, types.TenantRoleViewer, &types.KnowledgeBase{}); err != nil || got != nil {
+		t.Fatalf("agent share access must be denied, got=%v err=%v", got, err)
 	}
 	if _, err := kb.ShareKnowledgeBase(context.Background(), "kb", "org", "u", 1, types.OrgRoleViewer); !errors.Is(err, policy.ErrSharingUnavailable) {
 		t.Fatalf("new KB share: %v", err)

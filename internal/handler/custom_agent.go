@@ -119,7 +119,7 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 		secutils.SanitizeForLog(createdAgent.ID), secutils.SanitizeForLog(createdAgent.Name))
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
-		"data":    createdAgent,
+		"data":    service.AgentView(ctx, createdAgent),
 	})
 }
 
@@ -166,7 +166,7 @@ func (h *CustomAgentHandler) GetAgent(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    agent,
+		"data":    service.AgentView(ctx, agent),
 	})
 }
 
@@ -247,9 +247,13 @@ func (h *CustomAgentHandler) ListAgents(c *gin.Context) {
 	// 分支单独渲染。
 	enrichAgentCreatorNames(ctx, h.userService, agents)
 
+	views := make([]*types.CustomAgent, 0, len(agents))
+	for _, agent := range agents {
+		views = append(views, service.AgentView(ctx, agent))
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success":                true,
-		"data":                   agents,
+		"data":                   views,
 		"disabled_own_agent_ids": disabledOwnIDs,
 	})
 }
@@ -369,7 +373,7 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 	logger.Infof(ctx, "Custom agent updated successfully, ID: %s", secutils.SanitizeForLog(id))
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    updatedAgent,
+		"data":    service.AgentView(ctx, updatedAgent),
 	})
 }
 
@@ -504,7 +508,7 @@ func (h *CustomAgentHandler) CopyAgent(c *gin.Context) {
 		secutils.SanitizeForLog(id), secutils.SanitizeForLog(copiedAgent.ID))
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
-		"data":    copiedAgent,
+		"data":    service.AgentView(ctx, copiedAgent),
 	})
 }
 
@@ -547,6 +551,17 @@ func (h *CustomAgentHandler) GetPlaceholders(c *gin.Context) {
 func (h *CustomAgentHandler) GetAgentTypePresets(c *gin.Context) {
 	ctx := c.Request.Context()
 	presets := types.ListAgentTypePresetsWithContext(ctx)
+	if !types.IsSystemAdminFromContext(ctx) {
+		for i := range presets {
+			if presets[i].Config == nil {
+				continue
+			}
+			presets[i].Config = &types.AgentTypePresetConfig{
+				SupportedFileTypes: presets[i].Config.SupportedFileTypes,
+				KBSelectionMode:    presets[i].Config.KBSelectionMode,
+			}
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    presets,

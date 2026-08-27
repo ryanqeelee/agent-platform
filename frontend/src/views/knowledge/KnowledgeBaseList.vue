@@ -8,7 +8,7 @@
         <div class="header-title" style="--wails-draggable: drag">
           <div class="title-row" style="--wails-draggable: drag">
             <h2 style="--wails-draggable: drag">{{ $t('knowledgeBase.title') }}</h2>
-            <t-tooltip v-if="authStore.hasRole('contributor')" :content="$t('knowledgeList.create')" placement="bottom">
+            <t-tooltip v-if="authStore.hasRole('admin')" :content="$t('knowledgeList.create')" placement="bottom">
               <t-button variant="text" theme="default" size="small" class="header-action-btn"
                 data-guide="kb-list-create" style="--wails-draggable: no-drag" @click="handleCreateKnowledgeBase">
                 <template #icon><t-icon name="folder-add" size="16px" /></template>
@@ -635,7 +635,7 @@
           <img class="empty-img" src="@/assets/img/upload.svg" alt="">
           <span class="empty-txt">{{ $t('knowledgeList.empty.title') }}</span>
           <span class="empty-desc">{{ $t('knowledgeList.empty.description') }}</span>
-          <t-button v-if="authStore.hasRole('contributor')" class="kb-create-btn empty-state-btn"
+          <t-button v-if="authStore.hasRole('admin')" class="kb-create-btn empty-state-btn"
             data-guide="kb-list-create" @click="handleCreateKnowledgeBase">
             <template #icon><t-icon name="folder-add" /></template>
             {{ $t('knowledgeList.create') }}
@@ -663,7 +663,7 @@
           <img class="empty-img" src="@/assets/img/upload.svg" alt="">
           <span class="empty-txt">{{ $t('knowledgeList.empty.title') }}</span>
           <span class="empty-desc">{{ $t('knowledgeList.empty.description') }}</span>
-          <t-button v-if="authStore.hasRole('contributor')" class="kb-create-btn empty-state-btn"
+          <t-button v-if="authStore.hasRole('admin')" class="kb-create-btn empty-state-btn"
             data-guide="kb-list-create" @click="handleCreateKnowledgeBase">
             <template #icon><t-icon name="folder-add" /></template>
             {{ $t('knowledgeList.create') }}
@@ -861,9 +861,8 @@ interface KB {
   processing_count?: number;
   share_count?: number;
   is_pinned?: boolean;
-  // creator_id is the owner-id matched against authStore.user.id when
-  // gating the per-card more-menu (Settings / Delete). Empty for legacy
-  // KBs created before PR 5; those fall back to the role gate.
+  // creator_id is display/filter metadata only. Lifecycle authority is
+  // current Admin+ in the KB's own tenant, not its historical creator.
   creator_id?: string;
   // creator_name 由后端 list 接口回填，仅用于卡片右下角来源徽章的 tooltip。
   creator_name?: string;
@@ -1186,7 +1185,7 @@ const filteredKnowledgeBases = computed(() => {
 
 const showKbListEmpty = computed(() => {
   if (loading.value) return false
-  if (!authStore.hasRole('contributor')) return false
+  if (!authStore.hasRole('admin')) return false
   if (spaceSelection.value === 'all' && filteredKnowledgeBases.value.length === 0) return true
   if (spaceSelection.value === 'mine' && kbs.value.length === 0) return true
   return false
@@ -1331,34 +1330,29 @@ const onVisibleChange = (visible: boolean) => {
 }
 
 const handleSettings = (kb: KB) => {
+  if (!canManageKBCard(kb)) return
   // 手动关闭弹窗
   kb.showMore = false
   goSettings(kb.id)
 }
 
-// canManageKBCard mirrors KnowledgeBase.vue's `canManage`, gating the
-// destructive items of the per-card menu — Settings, Delete — so a
-// Viewer cannot click into them for a KB they don't own. The server
-// still rejects the call (PR 5 guards every such mutation with
-// OwnedKBOrAdmin) but the UI shouldn't surface buttons the user has
-// no authority to use.
+// KB lifecycle is owned by Admin+ in the active tenant. Creator identity is
+// presentation/filter metadata only; it never grants a management bypass.
 //
 // The pin item is intentionally NOT gated by this predicate any more:
 // pin state is per (user, kb) as of migration 000050 and the backend
 // route only requires KB read access, so anyone who can see the card
 // should be able to pin it for themselves.
 //
-// Legacy KBs created before PR 5 have an empty creator_id; treat
-// those as tenant-owned (Admin+ may manage) so existing KBs aren't
-// suddenly unmanageable for everyone.
+// Cross-tenant cards are explicitly marked isMine=false (or carry a share
+// permission), so Admin in the receiving tenant never sees lifecycle actions
+// for a source-tenant KB.
 function canManageKBCard(kb: KB): boolean {
-  const userId = authStore.user?.id || ''
-  if (kb.creator_id && userId && kb.creator_id === userId) return true
-  return authStore.hasRole('admin')
+  return authStore.hasRole('admin') && (kb as any).isMine !== false && (kb as any).permission == null
 }
 
 function canDuplicateKBCard(kb: any): boolean {
-  return authStore.hasRole('contributor') && kb.isMine !== false
+  return authStore.hasRole('admin') && kb.isMine !== false && kb.permission == null
 }
 
 // isMyKb 仅用于卡片右下角徽章在「我创建」与「同空间其他成员创建」之间切换。
@@ -1392,13 +1386,15 @@ function showKbOriginBadge(kb: { creator_id?: string; creator_name?: string }): 
 
 // 通过 ID 处理设置（用于全部 Tab 下的知识库）
 const handleSettingsById = (id: string) => {
+  const kb = kbs.value.find(k => k.id === id)
+  if (!kb || !canManageKBCard(kb)) return
   goSettings(id)
 }
 
 // 通过 ID 处理删除（用于全部 Tab 下的知识库）
 const handleDeleteById = (id: string) => {
   const kb = kbs.value.find(k => k.id === id)
-  if (kb) {
+  if (kb && canManageKBCard(kb)) {
     deletingKb.value = kb
     deleteVisible.value = true
   }
@@ -1434,11 +1430,14 @@ const handleTogglePinById = async (id: string) => {
 }
 
 const handleDuplicate = async (kb: KB) => {
+  if (!canDuplicateKBCard(kb)) return
   kb.showMore = false
   await duplicateKB(kb.id)
 }
 
 const handleDuplicateById = async (id: string) => {
+  const kb = kbs.value.find(k => k.id === id)
+  if (!kb || !canDuplicateKBCard(kb)) return
   await duplicateKB(id)
 }
 
@@ -1666,7 +1665,7 @@ const handleCardClick = (kb: KB) => {
   // Track this open in the per-user "recent" list before navigating —
   // matches the user mental model "this is what I last worked on".
   pins.touchRecent('kb', kb.id)
-  if (isInitialized(kb)) {
+  if (isInitialized(kb) || !canManageKBCard(kb)) {
     goDetail(kb.id)
   } else {
     goSettings(kb.id)
@@ -1693,6 +1692,7 @@ const goSettings = (id: string) => {
 
 // 创建知识库
 const handleCreateKnowledgeBase = () => {
+  if (!authStore.hasRole('admin')) return
   markContextualGuideDone('kbList')
   // 无模型时仍打开创建向导，并定位到模型配置页；用户可在向导内添加模型，无需先跳转系统设置
   const initialSection =

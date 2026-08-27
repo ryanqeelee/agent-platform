@@ -1,11 +1,25 @@
 package session
 
 import (
+	"context"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 )
+
+func TestAppendTagScopeKnowledgeBaseIDsClosesRestrictedAPIKeyGap(t *testing.T) {
+	ctx := types.WithTenantAPIKeyScope(context.Background(), types.TenantAPIKeyScope{
+		KnowledgeBaseIDs: types.StringArray{"kb-a"},
+	})
+	targets := appendTagScopeKnowledgeBaseIDs(
+		[]string{"kb-a"},
+		[]types.TagScope{{KnowledgeBaseID: "kb-b", TagIDs: []string{"tag-b"}}},
+	)
+	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, targets, nil); err == nil {
+		t.Fatal("key restricted to KB A must not tag-scope KB B")
+	}
+}
 
 func TestTagScopesFromMentionedItems(t *testing.T) {
 	scopes := tagScopesFromMentionedItems([]MentionedItemRequest{

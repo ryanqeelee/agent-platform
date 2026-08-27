@@ -131,6 +131,17 @@ func (h *WebSearchProviderHandler) ListProviders(c *gin.Context) {
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
+	scope, apiKeyPrincipal := types.TenantAPIKeyScopeFromContext(ctx)
+	if !types.IsSystemAdminFromContext(ctx) && (!apiKeyPrincipal || !scope.IsPlatform()) {
+		for _, provider := range providers {
+			if provider != nil && provider.IsDefault {
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": []gin.H{{"is_default": true}}})
+				return
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": []gin.H{}})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

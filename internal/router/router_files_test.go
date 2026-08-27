@@ -24,7 +24,21 @@ type stubFileService struct {
 }
 
 type stubResourceCatalog struct {
-	resource *types.StoredResource
+	resource   *types.StoredResource
+	bindings   []*types.ResourceBinding
+	bindingErr error
+}
+
+type stubKnowledgeByID struct{ knowledge *types.Knowledge }
+
+func (s *stubKnowledgeByID) GetKnowledgeByIDOnly(context.Context, string) (*types.Knowledge, error) {
+	return s.knowledge, nil
+}
+
+type stubKnowledgeBaseByID struct{ kb *types.KnowledgeBase }
+
+func (s *stubKnowledgeBaseByID) GetKnowledgeBaseByID(context.Context, string) (*types.KnowledgeBase, error) {
+	return s.kb, nil
 }
 
 func (s *stubResourceCatalog) Register(
@@ -45,6 +59,14 @@ func (s *stubResourceCatalog) ResolvePath(_ context.Context, value string) (stri
 		return s.resource.PhysicalPath, s.resource, nil
 	}
 	return value, nil, nil
+}
+
+func (s *stubResourceCatalog) ResolveTenantPath(_ context.Context, _ uint64, value string) (string, *types.StoredResource, error) {
+	return s.ResolvePath(context.Background(), value)
+}
+
+func (s *stubResourceCatalog) ListKnowledgeBindings(context.Context, string) ([]*types.ResourceBinding, error) {
+	return s.bindings, s.bindingErr
 }
 
 func (s *stubResourceCatalog) Bind(context.Context, string, string, string, string) error {
@@ -100,15 +122,16 @@ func TestServeFilesFallsBackToGlobalFileService(t *testing.T) {
 
 	engine := gin.New()
 	var requestedPath string
-	serveFiles(engine, &stubFileService{
+	filePath := "local://42/docs/example.txt"
+	resourceRef := types.BuildResourcePath("AbCdEfGhIjKlMnOpQrStUv")
+	serveFilesWithResources(engine, &stubFileService{
 		getFile: func(ctx context.Context, filePath string) (io.ReadCloser, error) {
 			requestedPath = filePath
 			return io.NopCloser(strings.NewReader("fallback-body")), nil
 		},
-	})
+	}, nil, &stubResourceCatalog{resource: &types.StoredResource{TenantID: 42, PhysicalPath: filePath}}, nil, nil)
 
-	filePath := "local://42/docs/example.txt"
-	req := httptest.NewRequest(http.MethodGet, "/files?file_path="+url.QueryEscape(filePath), nil)
+	req := httptest.NewRequest(http.MethodGet, "/files?file_path="+url.QueryEscape(resourceRef), nil)
 	req = req.WithContext(context.WithValue(req.Context(), types.TenantInfoContextKey, &types.Tenant{ID: 42}))
 
 	recorder := httptest.NewRecorder()
@@ -136,7 +159,7 @@ func TestServeFilesResolvesShortResourceReference(t *testing.T) {
 	serveFilesWithResources(engine, &stubFileService{getFile: func(_ context.Context, path string) (io.ReadCloser, error) {
 		requestedPath = path
 		return io.NopCloser(strings.NewReader("image")), nil
-	}}, nil, &stubResourceCatalog{resource: &types.StoredResource{TenantID: 42, PhysicalPath: physical}})
+	}}, nil, &stubResourceCatalog{resource: &types.StoredResource{TenantID: 42, PhysicalPath: physical}}, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/files?file_path="+url.QueryEscape(ref), nil)
 	req = req.WithContext(context.WithValue(req.Context(), types.TenantInfoContextKey, &types.Tenant{ID: 42}))
@@ -151,6 +174,44 @@ func TestServeFilesResolvesShortResourceReference(t *testing.T) {
 	}
 }
 
+func TestServeFilesRejectsUnregisteredPath(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("STORAGE_TYPE", "local")
+	const filePath = "local://42/docs/legacy.txt"
+	engine := gin.New()
+	serveFilesWithResources(engine, &stubFileService{getFile: func(_ context.Context, path string) (io.ReadCloser, error) {
+		t.Fatalf("unregistered path reached file service: %q", path)
+		return nil, nil
+	}}, nil, &stubResourceCatalog{}, nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/files?file_path="+url.QueryEscape(filePath), nil)
+	req = req.WithContext(context.WithValue(req.Context(), types.TenantInfoContextKey, &types.Tenant{ID: 42}))
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+	if got, want := w.Code, http.StatusNotFound; got != want {
+		t.Fatalf("status = %d, want %d body=%s", got, want, w.Body.String())
+	}
+}
+
+func TestServeFilesServesKnowledgeBoundResourceAfterLiveAccessCheck(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	serveFilesWithResources(engine, &stubFileService{getFile: func(context.Context, string) (io.ReadCloser, error) {
+		return io.NopCloser(strings.NewReader("image")), nil
+	}}, nil, &stubResourceCatalog{
+		resource: &types.StoredResource{Handle: "AbCdEfGhIjKlMnOpQrStUv", TenantID: 42, PhysicalPath: "local://42/exports/a.png"},
+		bindings: []*types.ResourceBinding{{OwnerType: "knowledge", OwnerID: "knowledge-1"}},
+	}, &stubKnowledgeByID{knowledge: &types.Knowledge{
+		ID: "knowledge-1", TenantID: 42, KnowledgeBaseID: "kb-1",
+	}}, &stubKnowledgeBaseByID{kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 42}})
+	req := httptest.NewRequest(http.MethodGet, "/files?file_path="+url.QueryEscape(types.BuildResourcePath("AbCdEfGhIjKlMnOpQrStUv")), nil)
+	req = req.WithContext(context.WithValue(req.Context(), types.TenantInfoContextKey, &types.Tenant{ID: 42}))
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+	if got, want := w.Code, http.StatusOK; got != want {
+		t.Fatalf("status = %d, want %d body=%s", got, want, w.Body.String())
+	}
+}
+
 func TestServeFilesRejectsCrossTenantResourceReference(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	const ref = "resource://AbCdEfGhIjKlMnOpQrStUv"
@@ -158,13 +219,33 @@ func TestServeFilesRejectsCrossTenantResourceReference(t *testing.T) {
 	serveFilesWithResources(engine, &stubFileService{getFile: func(context.Context, string) (io.ReadCloser, error) {
 		t.Fatal("GetFile should not be called")
 		return nil, nil
-	}}, nil, &stubResourceCatalog{resource: &types.StoredResource{TenantID: 7, PhysicalPath: "local://7/exports/a.png"}})
+	}}, nil, &stubResourceCatalog{resource: &types.StoredResource{TenantID: 7, PhysicalPath: "local://7/exports/a.png"}}, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/files?file_path="+url.QueryEscape(ref), nil)
 	req = req.WithContext(context.WithValue(req.Context(), types.TenantInfoContextKey, &types.Tenant{ID: 42}))
 	recorder := httptest.NewRecorder()
 	engine.ServeHTTP(recorder, req)
 
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusForbidden)
+	}
+}
+
+func TestServeFilesFailsClosedWhenKnowledgeBindingLookupFails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const ref = "resource://AbCdEfGhIjKlMnOpQrStUv"
+	engine := gin.New()
+	serveFilesWithResources(engine, &stubFileService{getFile: func(context.Context, string) (io.ReadCloser, error) {
+		t.Fatal("GetFile should not be called when binding lookup fails")
+		return nil, nil
+	}}, nil, &stubResourceCatalog{
+		resource:   &types.StoredResource{TenantID: 42, Handle: "AbCdEfGhIjKlMnOpQrStUv", PhysicalPath: "local://42/exports/a.png"},
+		bindingErr: context.DeadlineExceeded,
+	}, nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/files?file_path="+url.QueryEscape(ref), nil)
+	req = req.WithContext(context.WithValue(req.Context(), types.TenantInfoContextKey, &types.Tenant{ID: 42}))
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, req)
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusForbidden)
 	}
@@ -193,6 +274,8 @@ func TestResourceGrantServesShortPublicURL(t *testing.T) {
 			return io.NopCloser(strings.NewReader("image")), nil
 		}},
 		nil,
+		nil,
+		nil,
 	)
 
 	req := httptest.NewRequest(http.MethodGet, "/r/GrantTokenAbCdEfGhIjKlM", nil)
@@ -206,71 +289,44 @@ func TestResourceGrantServesShortPublicURL(t *testing.T) {
 	}
 }
 
+func TestResourceGrantRejectsKnowledgeBoundResource(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	serveResourceGrants(engine, &stubResourceCatalog{
+		resource: &types.StoredResource{ID: "resource-1", Handle: "AbCdEfGhIjKlMnOpQrStUv", TenantID: 42, PhysicalPath: "local://42/exports/a.png"},
+		bindings: []*types.ResourceBinding{{OwnerType: "knowledge", OwnerID: "old-knowledge"}},
+	}, &stubTenantService{}, &stubFileService{getFile: func(context.Context, string) (io.ReadCloser, error) {
+		t.Fatal("knowledge-bound grant must not reach storage")
+		return nil, nil
+	}}, nil, nil, nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/r/GrantTokenAbCdEfGhIjKlM", nil))
+	if got, want := w.Code, http.StatusNotFound; got != want {
+		t.Fatalf("status = %d, want %d", got, want)
+	}
+}
+
 func TestServeFilesDoesNotFallbackWhenProviderDoesNotMatchGlobalStorage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("STORAGE_TYPE", "minio")
 
 	engine := gin.New()
-	serveFiles(engine, &stubFileService{
+	filePath := "local://42/docs/example.txt"
+	resourceRef := types.BuildResourcePath("AbCdEfGhIjKlMnOpQrStUv")
+	serveFilesWithResources(engine, &stubFileService{
 		getFile: func(ctx context.Context, filePath string) (io.ReadCloser, error) {
 			t.Fatalf("GetFile should not be called for mismatched provider, got %q", filePath)
 			return nil, nil
 		},
-	})
+	}, nil, &stubResourceCatalog{resource: &types.StoredResource{TenantID: 42, PhysicalPath: filePath}}, nil, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/files?file_path="+url.QueryEscape("local://42/docs/example.txt"), nil)
+	req := httptest.NewRequest(http.MethodGet, "/files?file_path="+url.QueryEscape(resourceRef), nil)
 	req = req.WithContext(context.WithValue(req.Context(), types.TenantInfoContextKey, &types.Tenant{ID: 42}))
 
 	recorder := httptest.NewRecorder()
 	engine.ServeHTTP(recorder, req)
 
 	if got, want := recorder.Code, http.StatusBadRequest; got != want {
-		t.Fatalf("status = %d, want %d", got, want)
-	}
-}
-
-func TestServeFilesRejectsCrossTenantPath(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	t.Setenv("STORAGE_TYPE", "local")
-
-	engine := gin.New()
-	serveFiles(engine, &stubFileService{
-		getFile: func(ctx context.Context, filePath string) (io.ReadCloser, error) {
-			t.Fatalf("GetFile should not be called for cross-tenant path, got %q", filePath)
-			return nil, nil
-		},
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/files?file_path="+url.QueryEscape("local://7/knowledge/secret.pdf"), nil)
-	req = req.WithContext(context.WithValue(req.Context(), types.TenantInfoContextKey, &types.Tenant{ID: 42}))
-
-	recorder := httptest.NewRecorder()
-	engine.ServeHTTP(recorder, req)
-
-	if got, want := recorder.Code, http.StatusForbidden; got != want {
-		t.Fatalf("status = %d, want %d", got, want)
-	}
-}
-
-func TestServeFilesRejectsPathWithoutTenantSegment(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	t.Setenv("STORAGE_TYPE", "local")
-
-	engine := gin.New()
-	serveFiles(engine, &stubFileService{
-		getFile: func(ctx context.Context, filePath string) (io.ReadCloser, error) {
-			t.Fatalf("GetFile should not be called without tenant segment, got %q", filePath)
-			return nil, nil
-		},
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/files?file_path="+url.QueryEscape("local://docs/example.txt"), nil)
-	req = req.WithContext(context.WithValue(req.Context(), types.TenantInfoContextKey, &types.Tenant{ID: 42}))
-
-	recorder := httptest.NewRecorder()
-	engine.ServeHTTP(recorder, req)
-
-	if got, want := recorder.Code, http.StatusForbidden; got != want {
 		t.Fatalf("status = %d, want %d", got, want)
 	}
 }
@@ -284,6 +340,7 @@ func TestServeFilesAPIKeyScopeMatrix(t *testing.T) {
 	t.Setenv("STORAGE_TYPE", "local")
 
 	const filePath = "local://42/docs/example.txt"
+	resourceRef := types.BuildResourcePath("AbCdEfGhIjKlMnOpQrStUv")
 
 	cases := []struct {
 		name     string
@@ -322,13 +379,13 @@ func TestServeFilesAPIKeyScopeMatrix(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			engine := gin.New()
-			serveFiles(engine, &stubFileService{
+			serveFilesWithResources(engine, &stubFileService{
 				getFile: func(_ context.Context, _ string) (io.ReadCloser, error) {
 					return io.NopCloser(strings.NewReader("body")), nil
 				},
-			})
+			}, nil, &stubResourceCatalog{resource: &types.StoredResource{TenantID: 42, PhysicalPath: filePath}}, nil, nil)
 
-			req := httptest.NewRequest(http.MethodGet, "/files?file_path="+url.QueryEscape(filePath), nil)
+			req := httptest.NewRequest(http.MethodGet, "/files?file_path="+url.QueryEscape(resourceRef), nil)
 			ctx := context.WithValue(req.Context(), types.TenantInfoContextKey, &types.Tenant{ID: 42})
 			ctx = types.WithTenantAPIKeyScope(ctx, tc.scope)
 			req = req.WithContext(ctx)
@@ -343,130 +400,38 @@ func TestServeFilesAPIKeyScopeMatrix(t *testing.T) {
 	}
 }
 
-// newKBScopedFilesTestEngine wires newKBScopedFileServeHandler behind a
-// middleware that injects effectiveTenantID into the request context, mirroring
-// what RequireKBAccess does after resolving an org-shared KB to its source
-// tenant. This lets the handler be exercised without the full RBAC stack.
-func newKBScopedFilesTestEngine(
-	effectiveTenantID uint64,
-	tenantSvc interfaces.TenantService,
-	global interfaces.FileService,
-) *gin.Engine {
+func TestKBScopedFilesRejectsUnregisteredPath(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("STORAGE_TYPE", "local")
+	const ownerTenantID = uint64(10008)
+	const filePath = "local://10008/exports/legacy.jpg"
 	engine := gin.New()
-	engine.GET("/knowledge-bases/:id/files",
-		func(c *gin.Context) {
-			ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, effectiveTenantID)
-			c.Request = c.Request.WithContext(ctx)
-			c.Next()
-		},
-		newKBScopedFileServeHandler(tenantSvc, global),
-	)
-	return engine
-}
-
-// A tenant whose owner-tenant (10008) storage objects are requested by a
-// borrowing tenant via a shared KB: the effective tenant in context is the
-// owner, so the path validates and the file is served.
-func TestKBScopedFilesServesOwnerTenantPath(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	t.Setenv("STORAGE_TYPE", "local")
-
-	const ownerTenantID = uint64(10008)
-	var requestedPath string
-	engine := newKBScopedFilesTestEngine(
-		ownerTenantID,
-		&stubTenantService{get: func(_ context.Context, id uint64) (*types.Tenant, error) {
-			return &types.Tenant{ID: id}, nil
-		}},
-		&stubFileService{getFile: func(_ context.Context, filePath string) (io.ReadCloser, error) {
-			requestedPath = filePath
-			return io.NopCloser(strings.NewReader("shared-body")), nil
-		}},
-	)
-
-	filePath := "local://10008/exports/img.jpg"
-	req := httptest.NewRequest(http.MethodGet, "/knowledge-bases/kb-1/files?file_path="+url.QueryEscape(filePath), nil)
-	recorder := httptest.NewRecorder()
-	engine.ServeHTTP(recorder, req)
-
-	if got, want := recorder.Code, http.StatusOK; got != want {
-		t.Fatalf("status = %d, want %d body=%s", got, want, recorder.Body.String())
-	}
-	if requestedPath != filePath {
-		t.Fatalf("requested path = %q, want %q", requestedPath, filePath)
-	}
-	if body := recorder.Body.String(); body != "shared-body" {
-		t.Fatalf("body = %q, want %q", body, "shared-body")
-	}
-}
-
-// The path must belong to the effective (owner) tenant. A path pointing at a
-// different tenant than the resolved KB owner is still rejected, so the guard
-// cannot be used to reach arbitrary tenants' files.
-func TestKBScopedFilesRejectsPathNotOwnedByKBTenant(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	t.Setenv("STORAGE_TYPE", "local")
-
-	const ownerTenantID = uint64(10008)
-	engine := newKBScopedFilesTestEngine(
-		ownerTenantID,
-		&stubTenantService{get: func(_ context.Context, id uint64) (*types.Tenant, error) {
-			t.Fatalf("GetTenantByID should not be called for mismatched path, got %d", id)
+	engine.GET("/knowledge-bases/:id/files", func(c *gin.Context) {
+		ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, ownerTenantID)
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	}, newKBScopedFileServeHandlerWithResources(
+		&stubTenantService{get: func(_ context.Context, id uint64) (*types.Tenant, error) { return &types.Tenant{ID: id}, nil }},
+		&stubFileService{getFile: func(_ context.Context, path string) (io.ReadCloser, error) {
+			t.Fatalf("unregistered path reached file service: %q", path)
 			return nil, nil
 		}},
-		&stubFileService{getFile: func(_ context.Context, filePath string) (io.ReadCloser, error) {
-			t.Fatalf("GetFile should not be called for mismatched path, got %q", filePath)
-			return nil, nil
-		}},
-	)
-
-	req := httptest.NewRequest(http.MethodGet,
-		"/knowledge-bases/kb-1/files?file_path="+url.QueryEscape("local://9999/exports/other.jpg"), nil)
-	recorder := httptest.NewRecorder()
-	engine.ServeHTTP(recorder, req)
-
-	if got, want := recorder.Code, http.StatusForbidden; got != want {
-		t.Fatalf("status = %d, want %d", got, want)
-	}
-}
-
-// KB-scoped proxy is for embedded exports/ images only; raw knowledge uploads
-// must use /knowledge/:id/download even when the tenant matches.
-func TestKBScopedFilesRejectsNonExportsPath(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	t.Setenv("STORAGE_TYPE", "local")
-
-	const ownerTenantID = uint64(10008)
-	engine := newKBScopedFilesTestEngine(
-		ownerTenantID,
-		&stubTenantService{get: func(_ context.Context, id uint64) (*types.Tenant, error) {
-			t.Fatalf("GetTenantByID should not be called for non-exports path, got %d", id)
-			return nil, nil
-		}},
-		&stubFileService{getFile: func(_ context.Context, filePath string) (io.ReadCloser, error) {
-			t.Fatalf("GetFile should not be called for non-exports path, got %q", filePath)
-			return nil, nil
-		}},
-	)
-
-	req := httptest.NewRequest(http.MethodGet,
-		"/knowledge-bases/kb-1/files?file_path="+url.QueryEscape("local://10008/knowledge-id/123.pdf"), nil)
-	recorder := httptest.NewRecorder()
-	engine.ServeHTTP(recorder, req)
-
-	if got, want := recorder.Code, http.StatusForbidden; got != want {
-		t.Fatalf("status = %d, want %d", got, want)
+		nil, &stubResourceCatalog{}, nil,
+	))
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/knowledge-bases/kb-1/files?file_path="+url.QueryEscape(filePath), nil))
+	if got, want := w.Code, http.StatusNotFound; got != want {
+		t.Fatalf("status = %d, want %d body=%s", got, want, w.Body.String())
 	}
 }
 
 func TestKBScopedFilesRequiresFilePath(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	engine := newKBScopedFilesTestEngine(
-		10008,
-		&stubTenantService{},
-		&stubFileService{},
-	)
+	engine := gin.New()
+	engine.GET("/knowledge-bases/:id/files", newKBScopedFileServeHandlerWithResources(
+		&stubTenantService{}, &stubFileService{}, nil, &stubResourceCatalog{}, nil,
+	))
 
 	req := httptest.NewRequest(http.MethodGet, "/knowledge-bases/kb-1/files", nil)
 	recorder := httptest.NewRecorder()
@@ -477,19 +442,83 @@ func TestKBScopedFilesRequiresFilePath(t *testing.T) {
 	}
 }
 
+// Registered resources are only reachable through the KB that owns the
+// bound knowledge. A stale resource handle therefore cannot be replayed via a
+// different KB, nor can an unbound catalog entry acquire access merely by
+// being addressed through this proxy.
+func TestKBScopedFilesRejectsUnboundOrCrossKnowledgeBaseResource(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("STORAGE_TYPE", "local")
+
+	const ownerTenantID = uint64(10008)
+	const handle = "abcdefghijklmnopqrstuv"
+	resource := &types.StoredResource{
+		Handle:       handle,
+		TenantID:     ownerTenantID,
+		PhysicalPath: "local://10008/exports/img.jpg",
+	}
+
+	for _, tc := range []struct {
+		name      string
+		bindings  []*types.ResourceBinding
+		knowledge *types.Knowledge
+	}{
+		{
+			name: "unbound resource",
+		},
+		{
+			name:     "bound to another knowledge base",
+			bindings: []*types.ResourceBinding{{OwnerType: "knowledge", OwnerID: "knowledge-1"}},
+			knowledge: &types.Knowledge{
+				ID:              "knowledge-1",
+				TenantID:        ownerTenantID,
+				KnowledgeBaseID: "kb-other",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			catalog := &stubResourceCatalog{resource: resource, bindings: tc.bindings}
+			engine := gin.New()
+			engine.GET("/knowledge-bases/:id/files", func(c *gin.Context) {
+				ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, ownerTenantID)
+				c.Request = c.Request.WithContext(ctx)
+				c.Next()
+			}, newKBScopedFileServeHandlerWithResources(
+				&stubTenantService{},
+				&stubFileService{getFile: func(_ context.Context, path string) (io.ReadCloser, error) {
+					t.Fatalf("GetFile must not be called for %s: %q", tc.name, path)
+					return nil, nil
+				}},
+				nil,
+				catalog,
+				&downloadKnowledgeLookup{knowledge: tc.knowledge},
+			))
+
+			req := httptest.NewRequest(http.MethodGet,
+				"/knowledge-bases/kb-expected/files?file_path="+url.QueryEscape(types.BuildResourcePath(handle)), nil)
+			w := httptest.NewRecorder()
+			engine.ServeHTTP(w, req)
+			if got, want := w.Code, http.StatusForbidden; got != want {
+				t.Fatalf("status = %d, want %d body=%s", got, want, w.Body.String())
+			}
+		})
+	}
+}
+
 func TestServeFilesForcesActiveContentDownload(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("STORAGE_TYPE", "local")
 
 	engine := gin.New()
-	serveFiles(engine, &stubFileService{
+	filePath := "local://42/docs/payload.svg"
+	resourceRef := types.BuildResourcePath("AbCdEfGhIjKlMnOpQrStUv")
+	serveFilesWithResources(engine, &stubFileService{
 		getFile: func(_ context.Context, _ string) (io.ReadCloser, error) {
 			return io.NopCloser(strings.NewReader(`<svg onload="alert(1)"></svg>`)), nil
 		},
-	})
+	}, nil, &stubResourceCatalog{resource: &types.StoredResource{TenantID: 42, PhysicalPath: filePath}}, nil, nil)
 
-	filePath := "local://42/docs/payload.svg"
-	req := httptest.NewRequest(http.MethodGet, "/files?file_path="+url.QueryEscape(filePath), nil)
+	req := httptest.NewRequest(http.MethodGet, "/files?file_path="+url.QueryEscape(resourceRef), nil)
 	req = req.WithContext(context.WithValue(req.Context(), types.TenantInfoContextKey, &types.Tenant{ID: 42}))
 
 	recorder := httptest.NewRecorder()

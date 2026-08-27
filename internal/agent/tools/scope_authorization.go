@@ -2,12 +2,151 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
+
+// LiveKnowledgeAccessTool keeps a turn's server-selected target set from
+// becoming a durable authorization cache. It is intentionally a narrow
+// decorator: a target revoked after engine construction rejects the entire
+// tool call rather than letting any direct SQL/wiki tool inspect stale scope.
+type LiveKnowledgeAccessTool struct {
+	delegate               types.Tool
+	targets                types.SearchTargets
+	kbService              interfaces.KnowledgeBaseService
+	memberships            interfaces.TenantMemberService
+	requiresKnowledgeWrite bool
+}
+
+func NewLiveKnowledgeAccessTool(
+	delegate types.Tool,
+	targets types.SearchTargets,
+	kbService interfaces.KnowledgeBaseService,
+	memberships interfaces.TenantMemberService,
+	requiresKnowledgeWrite bool,
+) types.Tool {
+	return &LiveKnowledgeAccessTool{
+		delegate: delegate, targets: targets, kbService: kbService,
+		memberships: memberships, requiresKnowledgeWrite: requiresKnowledgeWrite,
+	}
+}
+
+func (t *LiveKnowledgeAccessTool) Name() string                { return t.delegate.Name() }
+func (t *LiveKnowledgeAccessTool) Description() string         { return t.delegate.Description() }
+func (t *LiveKnowledgeAccessTool) Parameters() json.RawMessage { return t.delegate.Parameters() }
+func (t *LiveKnowledgeAccessTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	if err := AuthorizeLiveKnowledgeTargets(ctx, t.targets, t.kbService); err != nil {
+		return &types.ToolResult{Success: false, Error: "knowledge access is no longer available"}, nil
+	}
+	if t.requiresKnowledgeWrite && !t.hasLiveKnowledgeWriteAuthority(ctx) {
+		return &types.ToolResult{Success: false, Error: "knowledge write access is no longer available"}, nil
+	}
+	return t.delegate.Execute(ctx, args)
+}
+
+// AuthorizeLiveKnowledgeTargets rechecks same-tenant Business Role governance
+// at the actual knowledge-read boundary. Cross-tenant targets must carry the
+// exact server-issued provenance from the route that already authorized them;
+// this layer deliberately does not implement a second share interpreter.
+func AuthorizeLiveKnowledgeTargets(
+	ctx context.Context,
+	targets types.SearchTargets,
+	kbService interfaces.KnowledgeBaseService,
+) error {
+	if kbService == nil {
+		return fmt.Errorf("knowledge access cannot be verified")
+	}
+	checked := false
+	for _, target := range targets {
+		if target == nil || target.KnowledgeBaseID == "" {
+			continue
+		}
+		checked = true
+		if !liveKnowledgeTargetAllowed(ctx, target, kbService) {
+			return fmt.Errorf("knowledge access is no longer available")
+		}
+	}
+	if !checked {
+		return fmt.Errorf("knowledge access is no longer available")
+	}
+	return nil
+}
+
+// liveKnowledgeTargetAllowed accepts foreign content only through exact
+// server-owned provenance. Same-tenant content is always checked through the
+// governed KB read so disabling a Business Role takes effect immediately.
+func liveKnowledgeTargetAllowed(
+	ctx context.Context,
+	target *types.SearchTarget,
+	kbService interfaces.KnowledgeBaseService,
+) bool {
+	if target == nil || target.KnowledgeBaseID == "" || kbService == nil {
+		return false
+	}
+	_, directSourceTenantID, directKnowledgeBaseID, _, hasDirectShareProvenance :=
+		types.AuthorizedSharedKnowledgeBaseFromContext(ctx)
+	if hasDirectShareProvenance {
+		return target.TenantID == directSourceTenantID &&
+			target.KnowledgeBaseID == directKnowledgeBaseID
+	}
+	_, provenanceSourceTenantID, _, hasSharedAgentProvenance :=
+		types.AuthorizedSharedAgentExecutionFromContext(ctx)
+	if hasSharedAgentProvenance {
+		return target.TenantID == provenanceSourceTenantID
+	}
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok || tenantID == 0 || (target.TenantID != 0 && target.TenantID != tenantID) {
+		return false
+	}
+	kb, err := kbService.GetKnowledgeBaseByID(ctx, target.KnowledgeBaseID)
+	return err == nil && kb != nil && kb.TenantID == tenantID
+}
+
+func liveCurrentTenantRole(
+	ctx context.Context, tenantID uint64, memberships interfaces.TenantMemberService,
+) (types.TenantRole, bool) {
+	if memberships == nil {
+		return "", false
+	}
+	userID, ok := types.UserIDFromContext(ctx)
+	if !ok || userID == "" || types.IsSyntheticUserID(userID) {
+		return "", false
+	}
+	membership, err := memberships.GetMembership(ctx, userID, tenantID)
+	if err != nil || membership == nil || membership.DeletedAt.Valid ||
+		membership.UserID != userID || membership.TenantID != tenantID ||
+		membership.Status != types.TenantMemberStatusActive {
+		return "", false
+	}
+	return membership.Role, true
+}
+
+func (t *LiveKnowledgeAccessTool) hasLiveKnowledgeWriteAuthority(ctx context.Context) bool {
+	if scope, isAPIKey := types.TenantAPIKeyScopeFromContext(ctx); isAPIKey {
+		return scope.FullAccess ||
+			scope.HasCapability(types.APIKeyCapabilityManageKnowledgeBases) ||
+			scope.HasCapability(types.APIKeyCapabilityIngest)
+	}
+	if _, _, _, sharedAgent := types.AuthorizedSharedAgentExecutionFromContext(ctx); sharedAgent {
+		return false
+	}
+	if _, _, _, permission, directShare := types.AuthorizedSharedKnowledgeBaseFromContext(ctx); directShare {
+		return permission.HasPermission(types.OrgRoleEditor)
+	}
+	callerTenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok || callerTenantID == 0 {
+		return false
+	}
+	role, ok := liveCurrentTenantRole(ctx, callerTenantID, t.memberships)
+	if !ok {
+		return false
+	}
+	return role.HasPermission(types.TenantRoleContributor)
+}
 
 func effectiveSearchTargetTagIDs(target *types.SearchTarget) []string {
 	if target == nil {
@@ -75,6 +214,22 @@ func authorizeKnowledgeInSearchTargets(
 			err = fmt.Errorf("empty result")
 		}
 		return nil, fmt.Errorf("document %s not found: %w", knowledgeID, err)
+	}
+	// A same-tenant Agent turn must consult the live knowledge service, not
+	// only the target snapshot captured when the turn began. That service is
+	// backed by KnowledgeAccess and therefore observes a role being disabled
+	// while an Agent session is still open. Foreign shared KBs keep their
+	// pre-existing organization-share boundary.
+	_, sharedSourceTenantID, _, sharedAgent := types.AuthorizedSharedAgentExecutionFromContext(ctx)
+	if tenantID, ok := types.TenantIDFromContext(ctx); ok && tenantID == knowledge.TenantID &&
+		(!sharedAgent || knowledge.TenantID != sharedSourceTenantID) {
+		knowledge, err = knowledgeService.GetKnowledgeByID(ctx, knowledgeID)
+		if err != nil || knowledge == nil {
+			if err == nil {
+				err = fmt.Errorf("empty result")
+			}
+			return nil, fmt.Errorf("document %s is not accessible: %w", knowledgeID, err)
+		}
 	}
 	if !searchTargets.ContainsKB(knowledge.KnowledgeBaseID) {
 		return nil, fmt.Errorf("knowledge base %s is not within the current Agent scope", knowledge.KnowledgeBaseID)

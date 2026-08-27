@@ -173,16 +173,20 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
   }
 
   /** 智能体编辑器打开时预取的依赖（不含 IM channels / 单 KB shares） */
-  async function prefetchAgentEditorDeps(force = false): Promise<void> {
-    await Promise.all([
-      ensureMcpServices(force),
-      ensureSkills(force),
+  async function prefetchAgentEditorDeps(force = false, includePlatform = false): Promise<void> {
+    const dependencies = [
       ensureAgentTypePresets(force),
       ensurePromptTemplates(force),
-      ensureStorageEngine(force),
       ensurePlaceholders(force),
-      ensureTenantRetrievalConfig(force),
-    ])
+    ]
+    if (includePlatform) {
+      dependencies.push(
+        ensureMcpServices(force),
+        ensureSkills(force),
+        ensureTenantRetrievalConfig(force),
+      )
+    }
+    await Promise.all(dependencies)
   }
 
   function invalidate(...keys: EditorResourceKey[]) {

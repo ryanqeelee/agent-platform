@@ -209,20 +209,18 @@ func RegisterAuthRoutes(r *gin.RouterGroup, handler *handler.AuthHandler, g *rba
 
 // RegisterSystemRoutes registers system information routes
 //
-// Reads (GetSystemInfo / ListParserEngines / GetStorageEngineStatus)
-// are gated to Viewer+ — any tenant member can see "is the parser
-// reachable". The /*-check / /reconnect endpoints actively probe
-// remote services with tenant credentials and could trigger network
-// fanout, so they're Admin+.
+// SystemInfo has an enterprise-safe projection for ordinary members.
+// Parser and storage diagnostics are platform infrastructure and remain
+// visible only to SystemAdmin.
 func RegisterSystemRoutes(r *gin.RouterGroup, handler *handler.SystemHandler, g *rbacGuards) {
 	systemRoutes := g.apiKeyGroup(r.Group("/system"), apiKeyManageVectorStores(apiKeyFullAccess()))
 	{
 		systemRoutes.GET("/info", g.Viewer(), handler.GetSystemInfo)
-		systemRoutes.GET("/parser-engines", g.Viewer(), handler.ListParserEngines)
-		systemRoutes.POST("/parser-engines/check", g.Admin(), handler.CheckParserEngines)
-		systemRoutes.POST("/docreader/reconnect", g.Admin(), handler.ReconnectDocReader)
-		systemRoutes.GET("/storage-engine-status", g.Viewer(), handler.GetStorageEngineStatus)
-		systemRoutes.POST("/storage-engine-check", g.Admin(), handler.CheckStorageEngine)
+		systemRoutes.GET("/parser-engines", g.SystemAdmin(), handler.ListParserEngines)
+		systemRoutes.POST("/parser-engines/check", g.SystemAdmin(), handler.CheckParserEngines)
+		systemRoutes.POST("/docreader/reconnect", g.SystemAdmin(), handler.ReconnectDocReader)
+		systemRoutes.GET("/storage-engine-status", g.SystemAdmin(), handler.GetStorageEngineStatus)
+		systemRoutes.POST("/storage-engine-check", g.SystemAdmin(), handler.CheckStorageEngine)
 	}
 }
 

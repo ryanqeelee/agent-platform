@@ -13,14 +13,6 @@ type ResourceKey = 'knowledgeBases' | 'agents' | 'models' | 'webSearchProviders'
 
 export type ListCreatorFilter = 'all' | 'mine' | 'others'
 
-function isKbModelReady(kb: any): boolean {
-  if (!kb.summary_model_id || kb.summary_model_id === '') return false
-  const strategy = kb.indexing_strategy
-  const needsEmbedding = !strategy || strategy.vector_enabled || strategy.keyword_enabled
-  if (needsEmbedding && (!kb.embedding_model_id || kb.embedding_model_id === '')) return false
-  return true
-}
-
 export const useChatResourcesStore = defineStore('chatResources', () => {
   const rawKnowledgeBases = ref<any[]>([])
   const agents = ref<CustomAgent[]>([])
@@ -44,7 +36,7 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
   const kbDetailCache = new Map<string, { at: number; data: any }>()
   const kbDetailInflight = new Map<string, Promise<any | null>>()
 
-  const validKnowledgeBases = computed(() => rawKnowledgeBases.value.filter(isKbModelReady))
+  const validKnowledgeBases = computed(() => rawKnowledgeBases.value)
   const chatModels = computed(() => allModels.value.filter((m) => m.type === 'KnowledgeQA'))
 
   function isFresh(key: ResourceKey): boolean {

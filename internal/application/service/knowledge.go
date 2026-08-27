@@ -81,6 +81,7 @@ type knowledgeService struct {
 	// which has a no-op fallback. See knowledge_span_tracker.go.
 	spanTracker SpanTracker
 	audit       interfaces.AuditLogService
+	governance  interfaces.KnowledgeGovernanceService
 }
 
 const (
@@ -118,6 +119,7 @@ func NewKnowledgeService(
 	taskPendingRepo interfaces.TaskPendingOpsRepository,
 	spanTracker SpanTracker,
 	audit interfaces.AuditLogService,
+	governance interfaces.KnowledgeGovernanceService,
 ) (interfaces.KnowledgeService, error) {
 	return &knowledgeService{
 		config:          config,
@@ -147,6 +149,7 @@ func NewKnowledgeService(
 		taskPendingRepo: taskPendingRepo,
 		spanTracker:     spanTracker,
 		audit:           audit,
+		governance:      governance,
 	}, nil
 }
 
@@ -477,6 +480,20 @@ func (s *knowledgeService) GetKnowledgeByID(ctx context.Context, id string) (*ty
 		})
 		return nil, err
 	}
+	// RequireKBAccess rewrites a successful cross-tenant request to the
+	// source tenant only after recording exact KB provenance. A direct source
+	// context, or a marker for another KB, is never equivalent to membership
+	// and must still pass ordinary governance.
+	if s.governance != nil && !types.HasAuthorizedSharedKnowledgeBase(ctx, tenantID, knowledge.KnowledgeBaseID) {
+		userID, _ := types.UserIDFromContext(ctx)
+		allowed, accessErr := s.governance.CanAccessKnowledgeBase(ctx, tenantID, userID, types.TenantRoleFromContext(ctx), knowledge.KnowledgeBaseID)
+		if accessErr != nil {
+			return nil, accessErr
+		}
+		if !allowed {
+			return nil, werrors.NewNotFoundError("knowledge not found")
+		}
+	}
 
 	// Load tags for this knowledge
 	tagMap, err := s.repo.GetKnowledgeTags(ctx, []string{knowledge.ID})
@@ -493,37 +510,6 @@ func (s *knowledgeService) GetKnowledgeByID(ctx context.Context, id string) (*ty
 // GetKnowledgeByIDOnly retrieves knowledge by ID without tenant filter (for permission resolution).
 func (s *knowledgeService) GetKnowledgeByIDOnly(ctx context.Context, id string) (*types.Knowledge, error) {
 	return s.repo.GetKnowledgeByIDOnly(ctx, id)
-}
-
-// GetOwningKBCreatorID walks knowledge_id -> kb_id -> KB.CreatorID for
-// the per-KB ownership lookups in handler/rbac_lookups.go (PR 5, #1303).
-// Both fetches are tenant-scoped (GetKnowledgeByID reads tenant from
-// ctx; GetKnowledgeBaseByID is then constrained to the same tenant by
-// the KB service), so a cross-tenant id surfaces as the underlying
-// "not found" error and the caller maps it to ErrResourceNotFound. The
-// KB row itself is not returned so callers can't accidentally widen
-// their scope past "needed the creator id".
-func (s *knowledgeService) GetOwningKBCreatorID(ctx context.Context, knowledgeID string) (string, error) {
-	// Resolve via the repository directly: ownership only needs the
-	// knowledge -> kb_id link, so we deliberately skip the service-level
-	// GetKnowledgeByID (which also eagerly loads tags) to keep this lookup
-	// minimal and tenant-scoped.
-	tenantID, ok := ctx.Value(types.TenantIDContextKey).(uint64)
-	if !ok {
-		return "", werrors.NewUnauthorizedError("Workspace ID not found in context")
-	}
-	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
-	if err != nil {
-		return "", err
-	}
-	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
-	if err != nil {
-		return "", err
-	}
-	if kb == nil {
-		return "", repository.ErrKnowledgeBaseNotFound
-	}
-	return kb.CreatorID, nil
 }
 
 // ListKnowledgeByKnowledgeBaseID returns all knowledge entries in a knowledge base
@@ -751,7 +737,40 @@ func (s *knowledgeService) GetKnowledgeBatch(ctx context.Context,
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	return s.repo.GetKnowledgeBatch(ctx, tenantID, ids)
+	rows, err := s.repo.GetKnowledgeBatch(ctx, tenantID, ids)
+	if err != nil {
+		return nil, err
+	}
+	return s.filterKnowledgeBatch(ctx, tenantID, rows)
+}
+
+func (s *knowledgeService) filterKnowledgeBatch(ctx context.Context, tenantID uint64, rows []*types.Knowledge) ([]*types.Knowledge, error) {
+	if s.governance == nil {
+		return rows, nil
+	}
+	currentTenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok || currentTenantID != tenantID {
+		return rows, nil
+	}
+	userID, _ := types.UserIDFromContext(ctx)
+	out := make([]*types.Knowledge, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		if types.HasAuthorizedSharedKnowledgeBase(ctx, tenantID, row.KnowledgeBaseID) {
+			out = append(out, row)
+			continue
+		}
+		allowed, err := s.governance.CanAccessKnowledgeBase(ctx, tenantID, userID, types.TenantRoleFromContext(ctx), row.KnowledgeBaseID)
+		if err != nil {
+			return nil, err
+		}
+		if allowed {
+			out = append(out, row)
+		}
+	}
+	return out, nil
 }
 
 // GetKnowledgeBatchWithSharedAccess retrieves knowledge by IDs, including items from shared KBs the user has access to.
@@ -763,6 +782,10 @@ func (s *knowledgeService) GetKnowledgeBatchWithSharedAccess(ctx context.Context
 		return nil, nil
 	}
 	ownList, err := s.repo.GetKnowledgeBatch(ctx, tenantID, ids)
+	if err != nil {
+		return nil, err
+	}
+	ownList, err = s.filterKnowledgeBatch(ctx, tenantID, ownList)
 	if err != nil {
 		return nil, err
 	}
@@ -1034,7 +1057,8 @@ func (s *knowledgeService) SearchKnowledge(ctx context.Context, keyword string, 
 	// Shared knowledge bases (document type only). Plan 3 of #1303 keys
 	// the share lookup on (tenantID, callerTenantRole); userID is no
 	// longer load-bearing for org-share access.
-	if userIDVal := ctx.Value(types.UserIDContextKey); userIDVal != nil {
+	_, isAPIKey := types.TenantAPIKeyScopeFromContext(ctx)
+	if userIDVal := ctx.Value(types.UserIDContextKey); !isAPIKey && userIDVal != nil {
 		if userID, ok := userIDVal.(string); ok && userID != "" {
 			callerTenantRole := types.TenantRoleFromContext(ctx)
 			sharedList, err := s.kbShareService.ListSharedKnowledgeBases(ctx, tenantID, callerTenantRole)

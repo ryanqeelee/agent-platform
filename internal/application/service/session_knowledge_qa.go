@@ -44,14 +44,19 @@ func (s *sessionService) KnowledgeQA(
 	})
 	ctx = setupCtx
 
+	sharedScope, err := s.buildSharedAgentSearchScope(ctx, req)
+	if err != nil {
+		return err
+	}
+
 	// Resolve knowledge bases using shared helper
-	knowledgeBaseIDs, knowledgeIDs, err := s.resolveKnowledgeBases(ctx, req)
+	knowledgeBaseIDs, knowledgeIDs, err := s.resolveKnowledgeBases(ctx, req, sharedScope)
 	if err != nil {
 		return err
 	}
 
 	// Resolve chat model ID using shared helper
-	chatModelID, err := s.resolveChatModelID(ctx, req, knowledgeBaseIDs, knowledgeIDs)
+	chatModelID, err := s.resolveChatModelID(ctx, req, knowledgeBaseIDs, knowledgeIDs, sharedScope)
 	if err != nil {
 		return err
 	}
@@ -87,7 +92,7 @@ func (s *sessionService) KnowledgeQA(
 	retrievalTenantID := s.resolveRetrievalTenantID(ctx, req)
 
 	// Build unified search targets (computed once, used throughout pipeline)
-	searchTargets, err := s.buildSearchTargets(ctx, retrievalTenantID, knowledgeBaseIDs, knowledgeIDs, req.TagScopes)
+	searchTargets, err := s.buildSearchTargets(ctx, retrievalTenantID, knowledgeBaseIDs, knowledgeIDs, req.TagScopes, sharedScope)
 	if err != nil {
 		return fmt.Errorf("build search targets: %w", err)
 	}
@@ -236,11 +241,24 @@ func (s *sessionService) selectChatModelID(
 	session *types.Session,
 	knowledgeBaseIDs []string,
 	knowledgeIDs []string,
+	sharedScope *sharedAgentSearchScope,
 ) (string, error) {
 	// If no knowledge base IDs but have knowledge IDs, derive KB IDs from knowledge IDs (include shared KB files)
 	if len(knowledgeBaseIDs) == 0 && len(knowledgeIDs) > 0 {
 		tenantID := types.MustTenantIDFromContext(ctx)
-		knowledgeList, err := s.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, knowledgeIDs)
+		var knowledgeList []*types.Knowledge
+		var err error
+		_, apiKeyPrincipal := types.TenantAPIKeyScopeFromContext(ctx)
+		switch {
+		case sharedScope != nil:
+			knowledgeList, err = s.knowledgeService.GetKnowledgeBatch(
+				sharedScope.callerContext(ctx), sharedScope.sourceTenantID, knowledgeIDs,
+			)
+		case apiKeyPrincipal:
+			knowledgeList, err = s.knowledgeService.GetKnowledgeBatch(ctx, tenantID, knowledgeIDs)
+		default:
+			knowledgeList, err = s.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, knowledgeIDs)
+		}
 		if err != nil {
 			logger.Warnf(ctx, "Failed to get knowledge batch for model selection: %v", err)
 		} else {
@@ -336,15 +354,10 @@ func (s *sessionService) resolveKnowledgeBasesFromAgent(
 		// trust the client here: a stale session payload or API caller could
 		// still ask us to retrieve against an incompatible KB and we'd rather
 		// just drop it (and log) than feed it to tools that would no-op.
-		capFilter := tools.DeriveKBFilterForAgent(customAgent.Config.AgentMode, customAgent.Config.AllowedTools)
 		accept := func(kb *types.KnowledgeBase) bool {
-			if kb == nil {
-				return false
-			}
-			if capFilter.IsEmpty() {
-				return true
-			}
-			return tools.KBSatisfiesAgentRequirements(kb.Capabilities(), customAgent.Config.AgentMode, customAgent.Config.AllowedTools)
+			return kb != nil && tools.KBSatisfiesAgentRequirements(
+				kb.Capabilities(), customAgent.Config.AgentMode, customAgent.Config.AllowedTools,
+			)
 		}
 
 		// Get own knowledge bases (uses ctx TenantID = agent's tenant)
@@ -432,7 +445,11 @@ func (s *sessionService) buildSearchTargets(
 	knowledgeBaseIDs []string,
 	knowledgeIDs []string,
 	tagScopes []types.TagScope,
+	sharedScope *sharedAgentSearchScope,
 ) (types.SearchTargets, error) {
+	if sharedScope != nil && tenantID != sharedScope.sourceTenantID {
+		return nil, fmt.Errorf("shared-Agent retrieval tenant does not match proven source")
+	}
 	var targets types.SearchTargets
 	tagIDsByKB := mergeTagScopesByKB(tagScopes)
 
@@ -463,16 +480,51 @@ func (s *sessionService) buildSearchTargets(
 		}
 	}
 	userID, _ := types.UserIDFromContext(ctx)
+	_, apiKeyPrincipal := types.TenantAPIKeyScopeFromContext(ctx)
+	// Explicit KB and tag scopes are authority requests, not discovery hints:
+	// reject an inaccessible or missing ID before it can become a search target.
+	for _, kbID := range kbIDsToFetch {
+		kb := kbByID[kbID]
+		if kb == nil {
+			return nil, fmt.Errorf("knowledge base %s is not accessible", kbID)
+		}
+		if sharedScope != nil {
+			if !sharedScope.allowsKnowledgeBase(kbID) || kb.TenantID != sharedScope.sourceTenantID {
+				return nil, fmt.Errorf("knowledge base %s is not accessible", kbID)
+			}
+			continue
+		}
+		if kb.TenantID == tenantID {
+			if _, err := s.knowledgeBaseService.GetKnowledgeBaseByID(ctx, kbID); err != nil {
+				return nil, fmt.Errorf("knowledge base %s is not accessible", kbID)
+			}
+			continue
+		}
+		if apiKeyPrincipal {
+			return nil, fmt.Errorf("knowledge base %s is not accessible", kbID)
+		}
+		if s.kbShareService == nil {
+			return nil, fmt.Errorf("knowledge base %s is not accessible", kbID)
+		}
+		hasAccess, err := s.kbShareService.HasTenantKBPermission(ctx, kbID, tenantID, callerTenantRole, types.OrgRoleViewer)
+		if err != nil || !hasAccess {
+			return nil, fmt.Errorf("knowledge base %s is not accessible", kbID)
+		}
+	}
 	resolveKBTenant := func(kbID string) uint64 {
 		if kbTenantMap[kbID] != 0 {
 			return kbTenantMap[kbID]
 		}
 		kb := kbByID[kbID]
+		if sharedScope != nil {
+			kbTenantMap[kbID] = sharedScope.sourceTenantID
+			return kbTenantMap[kbID]
+		}
 		if kb == nil {
 			kbTenantMap[kbID] = tenantID
 		} else if kb.TenantID == tenantID {
 			kbTenantMap[kbID] = tenantID
-		} else if s.kbShareService != nil && userID != "" {
+		} else if s.kbShareService != nil && userID != "" && !apiKeyPrincipal {
 			hasAccess, _ := s.kbShareService.HasTenantKBPermission(ctx, kbID, tenantID, callerTenantRole, types.OrgRoleViewer)
 			if hasAccess {
 				kbTenantMap[kbID] = kb.TenantID
@@ -504,10 +556,73 @@ func (s *sessionService) buildSearchTargets(
 
 	// Process individual knowledge IDs (include shared KB files the user has access to)
 	if len(knowledgeIDs) > 0 {
-		knowledgeList, err := s.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, knowledgeIDs)
+		var knowledgeList []*types.Knowledge
+		var err error
+		switch {
+		case sharedScope != nil:
+			knowledgeList, err = s.knowledgeService.GetKnowledgeBatch(
+				sharedScope.callerContext(ctx), sharedScope.sourceTenantID, knowledgeIDs,
+			)
+		case apiKeyPrincipal:
+			knowledgeList, err = s.knowledgeService.GetKnowledgeBatch(ctx, tenantID, knowledgeIDs)
+		default:
+			knowledgeList, err = s.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, knowledgeIDs)
+		}
 		if err != nil {
 			logger.Warnf(ctx, "Failed to get knowledge batch for search targets: %v", err)
-			return targets, nil // Return what we have, don't fail
+			if sharedScope != nil || apiKeyPrincipal {
+				return nil, fmt.Errorf("get knowledge batch for search targets: %w", err)
+			}
+			return targets, nil // Preserve ordinary best-effort shared-access behavior.
+		}
+
+		returned := make(map[string]struct{}, len(knowledgeList))
+		for _, k := range knowledgeList {
+			if k != nil {
+				returned[k.ID] = struct{}{}
+			}
+		}
+		for _, knowledgeID := range uniqueNonEmptyStrings(knowledgeIDs) {
+			if _, ok := returned[knowledgeID]; !ok {
+				return nil, fmt.Errorf("knowledge %s is not accessible", knowledgeID)
+			}
+		}
+
+		if sharedScope != nil || apiKeyPrincipal {
+			ownerKBIDs := make([]string, 0, len(knowledgeList))
+			for _, knowledge := range knowledgeList {
+				if knowledge == nil || knowledge.KnowledgeBaseID == "" {
+					return nil, fmt.Errorf("knowledge target is not accessible")
+				}
+				if sharedScope != nil {
+					if knowledge.TenantID != sharedScope.sourceTenantID ||
+						!sharedScope.allowsKnowledgeBase(knowledge.KnowledgeBaseID) {
+						return nil, fmt.Errorf("knowledge %s is not accessible", knowledge.ID)
+					}
+				} else if knowledge.TenantID != tenantID {
+					return nil, fmt.Errorf("knowledge %s is not accessible", knowledge.ID)
+				}
+				ownerKBIDs = append(ownerKBIDs, knowledge.KnowledgeBaseID)
+			}
+			ownerKBIDs = uniqueNonEmptyStrings(ownerKBIDs)
+			ownerKBs, ownerErr := s.knowledgeBaseService.GetKnowledgeBasesByIDsOnly(ctx, ownerKBIDs)
+			if ownerErr != nil {
+				return nil, fmt.Errorf("validate knowledge base ownership: %w", ownerErr)
+			}
+			owners := make(map[string]*types.KnowledgeBase, len(ownerKBs))
+			for _, kb := range ownerKBs {
+				if kb != nil {
+					owners[kb.ID] = kb
+					kbByID[kb.ID] = kb
+				}
+			}
+			for _, kbID := range ownerKBIDs {
+				kb := owners[kbID]
+				if kb == nil || (sharedScope != nil && kb.TenantID != sharedScope.sourceTenantID) ||
+					(sharedScope == nil && kb.TenantID != tenantID) {
+					return nil, fmt.Errorf("knowledge base %s is not accessible", kbID)
+				}
+			}
 		}
 
 		// Group knowledge IDs by their KB, excluding those already covered by full KB search
@@ -559,7 +674,11 @@ func (s *sessionService) buildSearchTargets(
 			logger.Warnf(ctx, "Knowledge base metadata missing for tag scope, kb_id=%s, using document tag resolution", kbID)
 		}
 		if useDocumentTagResolution {
-			tagKnowledgeIDs, err := s.knowledgeService.ListKnowledgeIDsByTagIDs(ctx, kbTenant, kbID, tagIDs)
+			tagCtx := ctx
+			if sharedScope != nil {
+				tagCtx = sharedScope.callerContext(ctx)
+			}
+			tagKnowledgeIDs, err := s.knowledgeService.ListKnowledgeIDsByTagIDs(tagCtx, kbTenant, kbID, tagIDs)
 			if err != nil {
 				return nil, fmt.Errorf("resolve knowledge IDs for tag scope kb_id=%s: %w", kbID, err)
 			}
@@ -676,6 +795,9 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 	var understandStart time.Time
 	for _, eventType := range eventList {
 		stageStart := time.Now()
+		if err := s.authorizeLiveKnowledgeStage(ctx, eventType, chatManage.SearchTargets); err != nil {
+			return err
+		}
 		// Wrap each pipeline stage in a Langfuse span so the trace timeline
 		// shows the gaps between LLM/embedding/rerank generations (the work
 		// that happens between them — vector DB search, merge, filter, prompt
@@ -794,6 +916,44 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 	return nil
 }
 
+func (s *sessionService) authorizeLiveKnowledgeStage(
+	ctx context.Context, eventType types.EventType, targets types.SearchTargets,
+) error {
+	if !knowledgePipelineStageRequiresLiveAuthorization(eventType) || !hasDurableKnowledgeTarget(targets) {
+		return nil
+	}
+	if err := tools.AuthorizeLiveKnowledgeTargets(
+		ctx,
+		targets,
+		s.knowledgeBaseService,
+	); err != nil {
+		return fmt.Errorf("knowledge access validation before %s: %w", eventType, err)
+	}
+	return nil
+}
+
+func knowledgePipelineStageRequiresLiveAuthorization(eventType types.EventType) bool {
+	switch eventType {
+	case types.CHUNK_SEARCH,
+		types.CHUNK_SEARCH_PARALLEL,
+		types.ENTITY_SEARCH,
+		types.DATA_ANALYSIS,
+		types.CHAT_COMPLETION_STREAM:
+		return true
+	default:
+		return false
+	}
+}
+
+func hasDurableKnowledgeTarget(targets types.SearchTargets) bool {
+	for _, target := range targets {
+		if target != nil && target.KnowledgeBaseID != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // SearchKnowledge performs knowledge base search without LLM summarization
 // knowledgeBaseIDs: list of knowledge base IDs to search (supports multi-KB)
 // knowledgeIDs: list of specific knowledge (file) IDs to search
@@ -812,7 +972,7 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	}
 
 	// Build unified search targets (computed once, used throughout pipeline)
-	searchTargets, err := s.buildSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs, tagScopes)
+	searchTargets, err := s.buildSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs, tagScopes, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build search targets: %w", err)
 	}
@@ -884,6 +1044,9 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 
 	for _, event := range searchEvents {
 		logger.Infof(ctx, "Starting to trigger search event: %v", event)
+		if err := s.authorizeLiveKnowledgeStage(ctx, event, chatManage.SearchTargets); err != nil {
+			return nil, err
+		}
 		stageCtx, stageSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
 			Name: "pipeline." + string(event),
 			Metadata: map[string]interface{}{

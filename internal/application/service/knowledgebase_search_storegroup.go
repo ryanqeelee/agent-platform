@@ -208,6 +208,9 @@ func (s *knowledgeBaseService) authorizeKBAccess(
 
 	for _, kb := range kbs {
 		if kb.TenantID == requestTenantID {
+			if err := s.authorizeOwnKnowledgeBase(ctx, kb); err != nil {
+				return err
+			}
 			continue
 		}
 		hasPermission, permErr := s.kbShareService.HasTenantKBPermission(

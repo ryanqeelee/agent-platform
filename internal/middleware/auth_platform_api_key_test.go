@@ -19,6 +19,9 @@ func TestPlatformTenantOptionalAPIs(t *testing.T) {
 		{http.MethodGet, "/api/v1/tenants/all", true},
 		{http.MethodGet, "/api/v1/tenants/search", true},
 		{http.MethodPost, "/api/v1/tenants", true},
+		{http.MethodPut, "/api/v1/system/enterprise-activations/activation-1", true},
+		{http.MethodPut, "/api/v1/system/enterprise-activations", false},
+		{http.MethodPut, "/api/v1/system/enterprise-activations/activation-1/extra", false},
 		{http.MethodGet, "/api/v1/knowledge-bases", false},
 		{http.MethodGet, "/api/v1/tenants", false},
 	}

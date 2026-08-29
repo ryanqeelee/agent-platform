@@ -7,8 +7,34 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// EnterpriseActivationCommand is the internal command consumed by the
+// ProductBaseTenantOwnerActivationV1 adapter. The caller-supplied digest is
+// an opaque idempotency receipt; persisted tenant identity and owner fields
+// are compared independently on replay.
+type EnterpriseActivationCommand struct {
+	ActivationID      string
+	RequestSHA256     string
+	TenantName        string
+	TenantDescription string
+	FirstOwnerUserID  string
+	DesiredState      types.EnterpriseActivationState
+}
+
+// EnterpriseActivationResult is the stable internal projection returned by
+// the repository/service. HTTP serialization stays private to the handler.
+type EnterpriseActivationResult struct {
+	ActivationID      string
+	TenantID          uint64
+	OwnerMembershipID uint64
+	RequestSHA256     string
+	State             types.EnterpriseActivationState
+}
+
 // TenantService defines the tenant service interface
 type TenantService interface {
+	// ApplyEnterpriseActivation creates or advances one Ringxun-owned tenant
+	// activation receipt without changing the general tenant creation flow.
+	ApplyEnterpriseActivation(ctx context.Context, command EnterpriseActivationCommand) (*EnterpriseActivationResult, error)
 	// CreateTenant creates a tenant
 	CreateTenant(ctx context.Context, tenant *types.Tenant) (*types.Tenant, error)
 	// GetTenantByID gets a tenant by ID
@@ -42,6 +68,9 @@ type TenantService interface {
 
 // TenantRepository defines the tenant repository interface
 type TenantRepository interface {
+	// ApplyEnterpriseActivation atomically owns the activation receipt, binds
+	// the existing first Owner, and advances the tenant/member state pair.
+	ApplyEnterpriseActivation(ctx context.Context, command EnterpriseActivationCommand) (*EnterpriseActivationResult, error)
 	// CreateTenant creates a tenant
 	CreateTenant(ctx context.Context, tenant *types.Tenant) error
 	// GetTenantByID gets a tenant by ID
@@ -54,6 +83,9 @@ type TenantRepository interface {
 	SearchTenants(ctx context.Context, keyword string, tenantID uint64, page, pageSize int) ([]*types.Tenant, int64, error)
 	// UpdateTenant updates a tenant
 	UpdateTenant(ctx context.Context, tenant *types.Tenant) error
+	// SetDefaultStorageBackend updates only the activation-critical default
+	// backend reference, avoiding stale full-row writes during lifecycle races.
+	SetDefaultStorageBackend(ctx context.Context, tenantID uint64, backendID string) error
 	// DeleteTenant deletes a tenant
 	DeleteTenant(ctx context.Context, id uint64) error
 	// AdjustStorageUsed adjusts the storage used for a tenant

@@ -10,6 +10,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,6 +18,10 @@ import (
 
 type stubTenantService struct {
 	tenant *types.Tenant
+}
+
+func (s *stubTenantService) ApplyEnterpriseActivation(context.Context, interfaces.EnterpriseActivationCommand) (*interfaces.EnterpriseActivationResult, error) {
+	return nil, nil
 }
 
 func (s *stubTenantService) UpdateTenant(_ context.Context, tenant *types.Tenant) (*types.Tenant, error) {

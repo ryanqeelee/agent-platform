@@ -13,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
 )
 
@@ -86,6 +87,10 @@ func (f *flowEmbedSvc) EmbedDisplayTitle(context.Context, *types.EmbedChannel) s
 
 type flowTenantSvc struct {
 	tenant *types.Tenant
+}
+
+func (f *flowTenantSvc) ApplyEnterpriseActivation(context.Context, interfaces.EnterpriseActivationCommand) (*interfaces.EnterpriseActivationResult, error) {
+	return nil, nil
 }
 
 func (f *flowTenantSvc) GetTenantByID(context.Context, uint64) (*types.Tenant, error) {

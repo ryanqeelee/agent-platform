@@ -29,6 +29,10 @@ type stubTenantService struct {
 
 var _ interfaces.TenantService = (*stubTenantService)(nil)
 
+func (s *stubTenantService) ApplyEnterpriseActivation(context.Context, interfaces.EnterpriseActivationCommand) (*interfaces.EnterpriseActivationResult, error) {
+	panic("unexpected")
+}
+
 func (s *stubTenantService) GetTenantByID(ctx context.Context, id uint64) (*types.Tenant, error) {
 	if s.get == nil {
 		return nil, os.ErrNotExist

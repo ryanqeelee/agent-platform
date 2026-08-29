@@ -8,10 +8,21 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
+
+type authTenantService struct {
+	interfaces.TenantService
+	status string
+}
+
+func (s *authTenantService) GetTenantByID(_ context.Context, id uint64) (*types.Tenant, error) {
+	return &types.Tenant{ID: id, Status: s.status}, nil
+}
 
 func init() {
 	_ = os.Setenv("JWT_SECRET", "test-jwt-secret-for-user-auth-token-tests")
@@ -96,7 +107,8 @@ func newAuthTestUserService(tokenRepo *stubAuthTokenRepo) *userService {
 				"user-1": {ID: "user-1", TenantID: 1, IsActive: true},
 			},
 		},
-		tokenRepo: tokenRepo,
+		tokenRepo:     tokenRepo,
+		tenantService: &authTenantService{status: types.TenantStatusActive},
 	}
 }
 
@@ -249,6 +261,73 @@ func TestTokenIssuanceRejectsSuspendedMembershipAcrossEntryPoints(t *testing.T) 
 			t.Fatalf("suspended AutoSetup issuance = (%q, %q, %v), want rejection", access, refresh, err)
 		}
 	})
+}
+
+func TestActivationTenantStatusGatesLoginRefreshAndJWTValidation(t *testing.T) {
+	for _, status := range []string{
+		types.TenantStatusProvisioning,
+		types.TenantStatusActivationAbandoned,
+		types.TenantStatusActive,
+	} {
+		t.Run(status, func(t *testing.T) {
+			tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}
+			svc := newAuthTestUserService(tokenRepo)
+			svc.tenantService = &authTenantService{status: status}
+			user := svc.userRepo.(*stubUserRepoForAuth).users["user-1"]
+			user.Email = "owner@example.invalid"
+			hash, err := bcrypt.GenerateFromPassword([]byte("CorrectHorse9"), bcrypt.MinCost)
+			require.NoError(t, err)
+			user.PasswordHash = string(hash)
+			members, repo := newServiceWithRepo()
+			repo.rows = []*types.TenantMember{{
+				UserID: user.ID, TenantID: user.TenantID, Role: types.TenantRoleOwner,
+				Status: types.TenantMemberStatusActive,
+			}}
+			svc.memberService = members
+
+			login, err := svc.Login(context.Background(), &types.LoginRequest{
+				Email: user.Email, Password: "CorrectHorse9",
+			})
+			require.NoError(t, err)
+			if status == types.TenantStatusActive {
+				require.True(t, login.Success)
+				require.NotEmpty(t, login.Token)
+			} else {
+				require.False(t, login.Success)
+				require.Empty(t, login.Token)
+			}
+
+			refreshJWT := signTestJWT(jwt.MapClaims{
+				"user_id": user.ID, "type": "refresh", "exp": time.Now().Add(time.Hour).Unix(),
+			})
+			tokenRepo.tokens[refreshJWT] = &types.AuthToken{
+				UserID: user.ID, Token: refreshJWT, TokenType: "refresh_token",
+			}
+			access, rotated, refreshErr := svc.RefreshToken(context.Background(), refreshJWT)
+			if status == types.TenantStatusActive {
+				require.NoError(t, refreshErr)
+				require.NotEmpty(t, access)
+				require.NotEmpty(t, rotated)
+			} else {
+				require.ErrorIs(t, refreshErr, ErrTenantNotActive)
+				require.Empty(t, access)
+				require.Empty(t, rotated)
+			}
+
+			accessJWT := signTestJWT(jwt.MapClaims{
+				"user_id": user.ID, "tenant_id": user.TenantID, "type": "access", "exp": time.Now().Add(time.Hour).Unix(),
+			})
+			tokenRepo.tokens[accessJWT] = &types.AuthToken{
+				UserID: user.ID, Token: accessJWT, TokenType: "access_token",
+			}
+			_, _, validateErr := svc.ValidateToken(context.Background(), accessJWT)
+			if status == types.TenantStatusActive {
+				require.NoError(t, validateErr)
+			} else {
+				require.ErrorIs(t, validateErr, ErrTenantNotActive)
+			}
+		})
+	}
 }
 
 func TestLogoutRevokesAllUserTokens(t *testing.T) {

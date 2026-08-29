@@ -16,10 +16,15 @@ CREATE TABLE tenants (
     storage_quota BIGINT NOT NULL DEFAULT 10737418240,
     storage_used BIGINT NOT NULL DEFAULT 0,
     agent_config JSON DEFAULT NULL COMMENT 'Tenant-level agent configuration in JSON format',
+    ringxun_activation_id VARCHAR(128) NULL,
+    ringxun_activation_request_sha256 VARCHAR(64) NULL,
+    ringxun_initial_owner_user_id VARCHAR(36) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 AUTO_INCREMENT=10000;
+
+CREATE UNIQUE INDEX idx_tenants_ringxun_activation_id_unique ON tenants(ringxun_activation_id);
 
 CREATE TABLE models (
     id VARCHAR(64) PRIMARY KEY,

@@ -18,7 +18,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func newKnowledgeGovernancePostgresDatabase(t *testing.T) *gorm.DB {
+func newIsolatedPostgresTestDatabase(t *testing.T, schemaPrefix string) *gorm.DB {
 	t.Helper()
 	dsn := os.Getenv("WEKNORA_TEST_POSTGRES_DSN")
 	if dsn == "" {
@@ -26,7 +26,7 @@ func newKnowledgeGovernancePostgresDatabase(t *testing.T) *gorm.DB {
 	}
 	admin, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
-	schema := "weknora_knowledge_governance_" + strings.ReplaceAll(uuid.NewString()[:8], "-", "")
+	schema := schemaPrefix + strings.ReplaceAll(uuid.NewString()[:8], "-", "")
 	require.NoError(t, admin.Exec("CREATE SCHEMA "+schema).Error)
 	t.Cleanup(func() { _ = admin.Exec("DROP SCHEMA " + schema + " CASCADE").Error })
 
@@ -41,6 +41,12 @@ func newKnowledgeGovernancePostgresDatabase(t *testing.T) *gorm.DB {
 	}
 	db, err := gorm.Open(postgres.Open(scopedDSN), &gorm.Config{})
 	require.NoError(t, err)
+	return db
+}
+
+func newKnowledgeGovernancePostgresDatabase(t *testing.T) *gorm.DB {
+	t.Helper()
+	db := newIsolatedPostgresTestDatabase(t, "weknora_knowledge_governance_")
 	for _, statement := range []string{
 		`CREATE TABLE tenants (id bigint PRIMARY KEY)`,
 		`CREATE TABLE knowledge_bases (id varchar(36) PRIMARY KEY, tenant_id bigint NOT NULL, deleted_at timestamptz)`,

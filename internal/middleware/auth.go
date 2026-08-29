@@ -237,6 +237,15 @@ func authenticateJWTUser(
 			return false
 		}
 	}
+	if tenant.Status != types.TenantStatusActive {
+		logger.Warnf(ctx, "[auth] inactive tenant rejected: tenant=%d status=%s user=%s", targetTenantID, tenant.Status, user.ID)
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "Forbidden: workspace is not active",
+			"code":  "TENANT_INACTIVE",
+		})
+		c.Abort()
+		return false
+	}
 
 	// 解析当前空间内的角色 (issue #1303)
 	role, ok := resolveTenantRole(ctx, memberService, user, targetTenantID, crossTenantSwitch, cfg)
@@ -405,6 +414,11 @@ func authenticateAPIKeyRequest(
 
 func isPlatformTenantOptionalAPI(path, method string) bool {
 	path = strings.TrimSuffix(strings.TrimSpace(path), "/")
+	const activationPrefix = "/api/v1/system/enterprise-activations/"
+	if method == http.MethodPut && strings.HasPrefix(path, activationPrefix) &&
+		!strings.Contains(strings.TrimPrefix(path, activationPrefix), "/") {
+		return true
+	}
 	// 精确匹配 admin 控制面前缀（"/api/v1/system/admin" 本身或其子路径）。
 	// 裸 HasPrefix 会误放行诸如 "/api/v1/system/admin-foo" 的同前缀路径。
 	if path == "/api/v1/system/admin" || strings.HasPrefix(path, "/api/v1/system/admin/") {

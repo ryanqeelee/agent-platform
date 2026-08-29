@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -88,6 +89,76 @@ func NewTenantHandler(
 type createTenantRequest struct {
 	Name        string `json:"name" binding:"required,min=1,max=128"`
 	Description string `json:"description" binding:"max=512"`
+}
+
+type enterpriseActivationTenantRequest struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+type productBaseTenantOwnerActivationRequestV1 struct {
+	Schema           string                            `json:"schema"`
+	RequestSHA256    string                            `json:"requestSha256"`
+	Tenant           enterpriseActivationTenantRequest `json:"tenant"`
+	FirstOwnerUserID string                            `json:"firstOwnerUserId"`
+	DesiredState     types.EnterpriseActivationState   `json:"desiredState"`
+}
+
+type productBaseTenantOwnerActivationResponseV1 struct {
+	Schema            string                          `json:"schema"`
+	ActivationID      string                          `json:"activationId"`
+	TenantID          uint64                          `json:"tenantId"`
+	OwnerMembershipID uint64                          `json:"ownerMembershipId"`
+	RequestSHA256     string                          `json:"requestSha256"`
+	State             types.EnterpriseActivationState `json:"state"`
+}
+
+// PutEnterpriseActivation is the sole Ringxun-to-Product-Base tenant
+// lifecycle adapter. Route authorization restricts it to platform API keys
+// carrying system_tenants_manage; this handler only validates the frozen body
+// and projects the service result.
+func (h *TenantHandler) PutEnterpriseActivation(c *gin.Context) {
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	var request productBaseTenantOwnerActivationRequestV1
+	if err := decoder.Decode(&request); err != nil {
+		c.Error(errors.NewValidationError("Invalid enterprise activation request").WithDetails(err.Error()))
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		c.Error(errors.NewValidationError("Invalid enterprise activation request"))
+		return
+	}
+	if request.Schema != "ProductBaseTenantOwnerActivationV1" {
+		c.Error(errors.NewValidationError("schema must be ProductBaseTenantOwnerActivationV1"))
+		return
+	}
+
+	result, err := h.service.ApplyEnterpriseActivation(c.Request.Context(), interfaces.EnterpriseActivationCommand{
+		ActivationID:      c.Param("activation_id"),
+		RequestSHA256:     request.RequestSHA256,
+		TenantName:        request.Tenant.Name,
+		TenantDescription: request.Tenant.Description,
+		FirstOwnerUserID:  request.FirstOwnerUserID,
+		DesiredState:      request.DesiredState,
+	})
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		c.Error(errors.NewInternalServerError("Failed to apply enterprise activation").WithDetails(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, productBaseTenantOwnerActivationResponseV1{
+		Schema:            "ProductBaseTenantOwnerActivationV1",
+		ActivationID:      result.ActivationID,
+		TenantID:          result.TenantID,
+		OwnerMembershipID: result.OwnerMembershipID,
+		RequestSHA256:     result.RequestSHA256,
+		State:             result.State,
+	})
 }
 
 // updateTenantRequest is the JSON body for PUT /tenants/:id. Only the

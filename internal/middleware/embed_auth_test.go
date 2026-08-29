@@ -137,6 +137,10 @@ type fakeTenantService struct {
 	tenant *types.Tenant
 }
 
+func (f *fakeTenantService) ApplyEnterpriseActivation(context.Context, interfaces.EnterpriseActivationCommand) (*interfaces.EnterpriseActivationResult, error) {
+	return nil, nil
+}
+
 func (f *fakeTenantService) GetTenantByID(ctx context.Context, id uint64) (*types.Tenant, error) {
 	return f.tenant, nil
 }

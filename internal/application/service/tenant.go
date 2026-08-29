@@ -3,13 +3,18 @@ package service
 import (
 	"context"
 	"errors"
+	"regexp"
+	"strings"
 	"time"
 
+	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
+
+var enterpriseActivationSHA256 = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // ListTenantsParams defines parameters for listing tenants with filtering and pagination
 type ListTenantsParams struct {
@@ -28,6 +33,59 @@ type tenantService struct {
 // NewTenantService creates a new tenant service instance
 func NewTenantService(repo interfaces.TenantRepository, storageRepo interfaces.StorageBackendRepository) interfaces.TenantService {
 	return &tenantService{repo: repo, storageRepo: storageRepo}
+}
+
+// ApplyEnterpriseActivation validates the narrow platform command and lets the
+// repository own all cross-row concurrency and state-transition invariants.
+func (s *tenantService) ApplyEnterpriseActivation(
+	ctx context.Context,
+	command interfaces.EnterpriseActivationCommand,
+) (*interfaces.EnterpriseActivationResult, error) {
+	if command.ActivationID == "" || command.ActivationID != strings.TrimSpace(command.ActivationID) || len(command.ActivationID) > 128 {
+		return nil, werrors.NewBadRequestError("activation_id is invalid")
+	}
+	if !enterpriseActivationSHA256.MatchString(command.RequestSHA256) {
+		return nil, werrors.NewBadRequestError("requestSha256 must be 64 lowercase hexadecimal characters")
+	}
+	if command.TenantName == "" || strings.TrimSpace(command.TenantName) == "" || len(command.TenantName) > 128 {
+		return nil, werrors.NewBadRequestError("tenant.name is invalid")
+	}
+	if len(command.TenantDescription) > 512 {
+		return nil, werrors.NewBadRequestError("tenant.description is too long")
+	}
+	if command.FirstOwnerUserID == "" || command.FirstOwnerUserID != strings.TrimSpace(command.FirstOwnerUserID) || len(command.FirstOwnerUserID) > 36 {
+		return nil, werrors.NewBadRequestError("firstOwnerUserId is invalid")
+	}
+	switch command.DesiredState {
+	case types.EnterpriseActivationStatePrepared,
+		types.EnterpriseActivationStateActive,
+		types.EnterpriseActivationStateAbandoned:
+	default:
+		return nil, werrors.NewBadRequestError("desiredState is invalid")
+	}
+
+	result, err := s.repo.ApplyEnterpriseActivation(ctx, command)
+	if errors.Is(err, apprepo.ErrEnterpriseActivationStorageRequired) {
+		if result == nil {
+			return nil, errors.New("activation storage precondition returned no tenant")
+		}
+		if ensureErr := s.ensureActivationDefaultStorageBackend(ctx, result.TenantID); ensureErr != nil {
+			return nil, ensureErr
+		}
+		result, err = s.repo.ApplyEnterpriseActivation(ctx, command)
+	}
+	if errors.Is(err, apprepo.ErrEnterpriseActivationConflict) {
+		return nil, werrors.NewConflictError("enterprise activation conflicts with the durable receipt").WithDetails(err.Error())
+	}
+	if err != nil {
+		return nil, err
+	}
+	if result.State == types.EnterpriseActivationStatePrepared {
+		if err := s.ensureActivationDefaultStorageBackend(ctx, result.TenantID); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
 }
 
 // CreateTenant creates a new tenant
@@ -76,6 +134,16 @@ func (s *tenantService) createDefaultStorageBackend(ctx context.Context, tenant 
 	if s.storageRepo == nil || tenant == nil {
 		return nil
 	}
+	if tenant.DefaultStorageBackendID != nil && strings.TrimSpace(*tenant.DefaultStorageBackendID) != "" {
+		backend, err := s.storageRepo.GetByID(ctx, tenant.ID, *tenant.DefaultStorageBackendID)
+		if err != nil {
+			return err
+		}
+		if backend == nil {
+			return errors.New("default storage backend does not exist")
+		}
+		return nil
+	}
 	provider := ""
 	if tenant.StorageEngineConfig != nil {
 		provider = tenant.StorageEngineConfig.DefaultProvider
@@ -88,15 +156,45 @@ func (s *tenantService) createDefaultStorageBackend(ctx context.Context, tenant 
 		return errors.New("no supported default storage backend is configured")
 	}
 	backend.LegacyAlias = true
-	if err := s.storageRepo.Create(ctx, backend); err != nil {
+	created := false
+	existing, err := s.storageRepo.FindLegacyAlias(ctx, tenant.ID, backend.Provider)
+	if err != nil {
 		return err
 	}
+	if existing != nil {
+		backend = existing
+	} else if err := s.storageRepo.Create(ctx, backend); err != nil {
+		// An identical replay may have won the unique legacy-alias insert.
+		existing, lookupErr := s.storageRepo.FindLegacyAlias(ctx, tenant.ID, backend.Provider)
+		if lookupErr != nil {
+			return lookupErr
+		}
+		if existing == nil {
+			return err
+		}
+		backend = existing
+	} else {
+		created = true
+	}
 	tenant.DefaultStorageBackendID = &backend.ID
-	if err := s.repo.UpdateTenant(ctx, tenant); err != nil {
-		_ = s.storageRepo.Delete(ctx, tenant.ID, backend.ID)
+	if err := s.repo.SetDefaultStorageBackend(ctx, tenant.ID, backend.ID); err != nil {
+		if created {
+			_ = s.storageRepo.Delete(ctx, tenant.ID, backend.ID)
+		}
 		return err
 	}
 	return nil
+}
+
+func (s *tenantService) ensureActivationDefaultStorageBackend(ctx context.Context, tenantID uint64) error {
+	if s.storageRepo == nil {
+		return errors.New("activation requires a storage backend repository")
+	}
+	tenant, err := s.repo.GetTenantByID(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	return s.createDefaultStorageBackend(ctx, tenant)
 }
 
 // GetTenantByID retrieves a tenant by their ID

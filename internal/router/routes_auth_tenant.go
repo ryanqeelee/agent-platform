@@ -48,6 +48,11 @@ func RegisterTenantRoutes(
 	auditLogHandler *handler.AuditLogHandler,
 	g *rbacGuards,
 ) {
+	// Narrow Ringxun activation adapter. It is tenant-header optional because
+	// the prepared tenant does not exist when the first command arrives.
+	g.apiKeyRoute(r, http.MethodPut, "/system/enterprise-activations/:activation_id",
+		apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage), handler.PutEnterpriseActivation)
+
 	// Cross-tenant superuser endpoints — promoted from handler if-blocks
 	// to middleware.RequireCrossTenantAccess at the route layer.
 	g.apiKeyRoute(r, http.MethodGet, "/tenants/all",

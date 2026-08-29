@@ -82,6 +82,23 @@ func GetDefaultRetrieverEngines() []RetrieverEngineParams {
 	return result
 }
 
+const (
+	TenantStatusProvisioning        = "provisioning"
+	TenantStatusActive              = "active"
+	TenantStatusActivationAbandoned = "activation_abandoned"
+)
+
+// EnterpriseActivationState is the Product Base projection of the narrow
+// Ringxun-driven tenant activation lifecycle. It is not persisted directly;
+// Tenant.Status remains the durable authority inside Product Base.
+type EnterpriseActivationState string
+
+const (
+	EnterpriseActivationStatePrepared  EnterpriseActivationState = "prepared"
+	EnterpriseActivationStateActive    EnterpriseActivationState = "active"
+	EnterpriseActivationStateAbandoned EnterpriseActivationState = "abandoned"
+)
+
 // Tenant represents the tenant
 type Tenant struct {
 	// ID
@@ -92,6 +109,11 @@ type Tenant struct {
 	Description string `yaml:"description"         json:"description"`
 	// Status
 	Status string `yaml:"status"              json:"status"              gorm:"default:'active'"`
+	// Ringxun activation receipt. These fields are private persistence state
+	// for the platform adapter and must never leak through general tenant APIs.
+	RingxunActivationID            *string `yaml:"-" json:"-" gorm:"column:ringxun_activation_id;type:varchar(128);uniqueIndex:idx_tenants_ringxun_activation_id_unique"`
+	RingxunActivationRequestSHA256 *string `yaml:"-" json:"-" gorm:"column:ringxun_activation_request_sha256;type:varchar(64)"`
+	RingxunInitialOwnerUserID      *string `yaml:"-" json:"-" gorm:"column:ringxun_initial_owner_user_id;type:varchar(36)"`
 	// Retriever engines
 	RetrieverEngines RetrieverEngines `yaml:"retriever_engines"   json:"retriever_engines"   gorm:"type:json"`
 	// Business

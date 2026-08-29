@@ -68,3 +68,52 @@ func TestRunMigrations_SQLiteDiscoversLegacyOwnerInvitationRevocation(t *testing
 		t.Fatal("sqlite incremental owner index accepted a second active owner")
 	}
 }
+
+func TestRunMigrations_SQLiteEnterpriseActivationReceiptUpDown(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("locate test file")
+	}
+	root := filepath.Clean(filepath.Join(filepath.Dir(file), "../.."))
+	t.Chdir(root)
+	path := filepath.Join(t.TempDir(), "activation.db")
+
+	if err := RunMigrationsWithOptions("sqlite3://"+path, MigrationOptions{SQLiteDBPath: path}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver, err := sqlite3migrate.WithInstance(db, &sqlite3migrate.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := migrate.NewWithDatabaseInstance("file://migrations/sqlite", "sqlite3", driver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+
+	assertReceiptUnique := func() {
+		t.Helper()
+		if _, err := db.Exec(`INSERT INTO tenants(name, business, ringxun_activation_id) VALUES ('first', '', 'receipt-1')`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(`INSERT INTO tenants(name, business, ringxun_activation_id) VALUES ('second', '', 'receipt-1')`); err == nil {
+			t.Fatal("activation receipt unique index accepted a duplicate")
+		}
+	}
+	assertReceiptUnique()
+
+	if err := m.Steps(-1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`SELECT ringxun_activation_id FROM tenants LIMIT 1`); err == nil {
+		t.Fatal("activation receipt down migration left its columns behind")
+	}
+	if err := m.Steps(1); err != nil {
+		t.Fatal(err)
+	}
+	assertReceiptUnique()
+}

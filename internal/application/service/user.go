@@ -42,6 +42,10 @@ var (
 	// Login, refresh, OIDC and Lite AutoSetup must all reject the same durable
 	// suspension state before any new access or refresh token is persisted.
 	ErrMembershipSuspended = errors.New("workspace membership is suspended")
+
+	// ErrTenantNotActive is returned by every token-validation/issuance seam
+	// while an enterprise activation is still prepared or was abandoned.
+	ErrTenantNotActive = errors.New("workspace is not active")
 )
 
 // ValidatePasswordPolicy keeps administrative password resets aligned with
@@ -826,6 +830,9 @@ func (s *userService) generateTokensForTenant(
 	if err := s.requireAuthenticatableMembership(ctx, user); err != nil {
 		return "", "", err
 	}
+	if err := s.requireActiveTenant(ctx, activeTenantID); err != nil {
+		return "", "", err
+	}
 	// Generate access token (expires in 24 hours)
 	accessClaims := jwt.MapClaims{
 		"user_id":   user.ID,
@@ -901,6 +908,23 @@ func (s *userService) requireAuthenticatableMembership(ctx context.Context, user
 	}
 	if member != nil && member.Status == types.TenantMemberStatusSuspended {
 		return ErrMembershipSuspended
+	}
+	return nil
+}
+
+func (s *userService) requireActiveTenant(ctx context.Context, tenantID uint64) error {
+	if tenantID == 0 {
+		return nil
+	}
+	if s.tenantService == nil {
+		return ErrTenantNotActive
+	}
+	tenant, err := s.tenantService.GetTenantByID(ctx, tenantID)
+	if err != nil || tenant == nil {
+		return fmt.Errorf("%w: load workspace", ErrTenantNotActive)
+	}
+	if tenant.Status != types.TenantStatusActive {
+		return ErrTenantNotActive
 	}
 	return nil
 }
@@ -1030,6 +1054,9 @@ func (s *userService) ValidateToken(ctx context.Context, tokenString string) (*t
 	// falls back to the user's home tenant so old tokens (and tokens issued
 	// by code paths that don't yet set the claim) keep working.
 	activeTenantID := tenantIDFromClaims(claims, user.TenantID)
+	if err := s.requireActiveTenant(ctx, activeTenantID); err != nil {
+		return nil, 0, err
+	}
 
 	return user, activeTenantID, nil
 }

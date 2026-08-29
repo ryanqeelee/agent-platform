@@ -117,6 +117,9 @@ func RegisterTenantRoutes(
 				g.apiKeyRoute(tenantByID, http.MethodPost, "/members", apiKeyManageMembers(apiKeyFullAccess()), g.Admin(), memberHandler.AddMember)
 				g.apiKeyRoute(tenantByID, http.MethodPut, "/members/:user_id", apiKeyManageMembers(apiKeyFullAccess()), g.Admin(), memberHandler.UpdateMemberRole)
 				g.apiKeyRoute(tenantByID, http.MethodPut, "/members/:user_id/status", apiKeyManageMembers(apiKeyFullAccess()), g.Admin(), memberHandler.UpdateMemberStatus)
+				// Human Owner/Admin and enabled cross-tenant platform operators only;
+				// workspace API keys do not grant employee analysis access.
+				tenantByID.PUT("/members/:user_id/operating-analysis-access", g.Admin(), memberHandler.UpdateOperatingAnalysisAccess)
 				g.apiKeyRoute(tenantByID, http.MethodDelete, "/members/:user_id", apiKeyManageMembers(apiKeyFullAccess()), g.Admin(), memberHandler.RemoveMember)
 				tenantByID.POST("/members/:user_id/transfer-ownership", g.Owner(), memberHandler.TransferOwnership)
 				tenantByID.POST("/leave", g.Viewer(), memberHandler.LeaveTenant)

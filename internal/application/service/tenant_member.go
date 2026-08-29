@@ -486,6 +486,34 @@ func (s *tenantMemberService) UpdateStatus(
 	return nil
 }
 
+func (s *tenantMemberService) UpdateOperatingAnalysisAccess(
+	ctx context.Context,
+	userID string,
+	tenantID uint64,
+	enabled bool,
+) error {
+	changed, err := s.repo.UpdateOperatingAnalysisAccess(
+		ctx, managedActor(ctx), userID, tenantID, enabled,
+	)
+	if err != nil {
+		return mapMemberMutationError(err)
+	}
+	if !changed {
+		return nil
+	}
+	details, _ := json.Marshal(map[string]bool{
+		"old_enabled": !enabled,
+		"new_enabled": enabled,
+	})
+	s.emitAudit(ctx, &types.AuditLog{
+		TenantID: tenantID, ActorUserID: auditActor(ctx), ActorRole: auditActorRole(ctx),
+		Action:     types.AuditActionOperatingAnalysisAccessChanged,
+		TargetType: "tenant_member", TargetUserID: userID,
+		Outcome: types.AuditOutcomeSuccess, Details: types.JSON(details),
+	})
+	return nil
+}
+
 func (s *tenantMemberService) TransferOwnership(ctx context.Context, targetUserID string, tenantID uint64) error {
 	actorID := auditActor(ctx)
 	if actorID == "" || actorID == targetUserID || actorRole(ctx) != types.TenantRoleOwner {

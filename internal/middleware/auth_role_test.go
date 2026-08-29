@@ -142,6 +142,11 @@ func (f *fakeMemberService) UpdateStatus(
 ) error {
 	return nil
 }
+func (f *fakeMemberService) UpdateOperatingAnalysisAccess(
+	ctx context.Context, userID string, tenantID uint64, enabled bool,
+) error {
+	return nil
+}
 
 func (f *fakeMemberService) TransferOwnership(ctx context.Context, targetUserID string, tenantID uint64) error {
 	return nil

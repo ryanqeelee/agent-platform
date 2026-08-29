@@ -128,6 +128,7 @@ export default {
     emptySearch: '"{q}"와 일치하는 멤버가 없습니다.',
     searchPlaceholder: '이름 또는 이메일로 검색',
     businessRoles: { title: '업무 역할', none: '할당되지 않음', saved: '업무 역할을 저장했습니다', saveFailed: '업무 역할을 저장하지 못했습니다' },
+    operatingAnalysis: { granted: '경영 분석 권한을 부여했습니다', revoked: '경영 분석 권한을 취소했습니다' },
     audit: {
       tabLabel: '감사 로그',
       description: '이 워크스페이스의 멤버 변경 및 접근 거부 이벤트를 최신순으로 기록합니다. 1분 이내의 반복 거부는 자동으로 중복 제거됩니다.',
@@ -153,6 +154,7 @@ export default {
         'rbac.member_removed': '멤버 제거',
         'rbac.member_role_changed': '역할 변경',
         'rbac.member_status_changed': '멤버 상태 변경',
+        'rbac.operating_analysis_access_changed': '경영 분석 권한 변경',
         'rbac.ownership_transferred': '소유권 이전',
         'rbac.member_left': '멤버 탈퇴',
         'rbac.access_denied': '접근 거부',
@@ -229,6 +231,7 @@ export default {
       member: '이름 · 이메일',
       role: '역할',
       status: '상태',
+      operatingAnalysis: '경영 분석',
       joinedAt: '가입일',
       operations: '작업'
     },
@@ -5892,6 +5895,8 @@ export default {
   menu: {
     knowledgeBase: '지식베이스',
     operatingAnalysis: '경영 분석',
+    operatingAnalysisContactAdmin: '경영 분석 권한은 기업 관리자에게 문의하세요',
+    operatingAnalysisUnavailable: '경영 분석 서비스를 일시적으로 사용할 수 없습니다',
     agents: '에이전트',
     organizations: '공유 공간',
     newChat: '새 대화',

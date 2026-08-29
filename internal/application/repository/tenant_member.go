@@ -321,6 +321,50 @@ func (r *tenantMemberRepository) UpdateStatus(ctx context.Context, actor types.M
 	})
 }
 
+// UpdateOperatingAnalysisAccess uses its own authority matrix because the
+// permission is orthogonal to role lifecycle: Owner/Admin may change any
+// member, including themselves and each other.
+func (r *tenantMemberRepository) UpdateOperatingAnalysisAccess(
+	ctx context.Context,
+	actor types.MemberActorAuthority,
+	userID string,
+	tenantID uint64,
+	enabled bool,
+) (bool, error) {
+	changed := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		role, err := lockTenantAuthority(ctx, tx, actor, tenantID)
+		if err != nil {
+			return err
+		}
+		if !actor.ServicePrincipal && role != types.TenantRoleOwner && role != types.TenantRoleAdmin {
+			return ErrMemberActionForbidden
+		}
+		var target types.TenantMember
+		if err := tx.WithContext(ctx).Clauses(forUpdateClause()).
+			Where("user_id = ? AND tenant_id = ?", userID, tenantID).Take(&target).Error; err != nil {
+			return err
+		}
+		if err := lockBoundEnterpriseUser(ctx, tx, target.UserID, tenantID); err != nil {
+			return err
+		}
+		if target.OperatingAnalysisAccess == enabled {
+			return nil
+		}
+		res := tx.WithContext(ctx).Model(&types.TenantMember{}).Where("id = ?", target.ID).
+			Updates(map[string]any{"operating_analysis_access": enabled, "updated_at": time.Now()})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		changed = true
+		return nil
+	})
+	return changed, err
+}
+
 // SoftDelete marks the membership row as deleted after the same tenant lock
 // and current actor/target validation used by role and status changes.
 func (r *tenantMemberRepository) SoftDelete(ctx context.Context, actor types.MemberActorAuthority, userID string, tenantID uint64) error {

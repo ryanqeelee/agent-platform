@@ -241,6 +241,34 @@ func (r *fakeTenantMemberRepo) UpdateStatus(ctx context.Context, actor types.Mem
 	return gormErrRecordNotFound
 }
 
+func (r *fakeTenantMemberRepo) UpdateOperatingAnalysisAccess(
+	ctx context.Context,
+	actor types.MemberActorAuthority,
+	userID string,
+	tenantID uint64,
+	enabled bool,
+) (bool, error) {
+	if err := r.validateActor(actor, tenantID); err != nil {
+		return false, err
+	}
+	if !actor.ServicePrincipal {
+		role := actorRoleFor(r, actor.UserID, tenantID)
+		if role != types.TenantRoleOwner && role != types.TenantRoleAdmin {
+			return false, apprepo.ErrMemberActionForbidden
+		}
+	}
+	for _, member := range r.rows {
+		if member.UserID == userID && member.TenantID == tenantID && !member.DeletedAt.Valid {
+			if member.OperatingAnalysisAccess == enabled {
+				return false, nil
+			}
+			member.OperatingAnalysisAccess = enabled
+			return true, nil
+		}
+	}
+	return false, gormErrRecordNotFound
+}
+
 func (r *fakeTenantMemberRepo) SoftDelete(ctx context.Context, actor types.MemberActorAuthority, userID string, tenantID uint64) error {
 	if r.failSoftDelete != nil {
 		return r.failSoftDelete
@@ -408,6 +436,43 @@ func newServiceWithRepo() (interfaces.TenantMemberService, *fakeTenantMemberRepo
 	// hooks are nil-safe (see emitAudit), so passing nil keeps existing
 	// coverage intact without forcing a stub.
 	return NewTenantMemberService(r, nil), r
+}
+
+type operatingAnalysisAuditCapture struct {
+	interfaces.AuditLogService
+	entries []*types.AuditLog
+}
+
+func (c *operatingAnalysisAuditCapture) Log(_ context.Context, entry *types.AuditLog) error {
+	c.entries = append(c.entries, entry)
+	return nil
+}
+
+func TestTenantMemberService_OperatingAnalysisAccessUsesIndependentAdminMatrix(t *testing.T) {
+	repo := newFakeRepo()
+	repo.rows = []*types.TenantMember{
+		{UserID: "owner", TenantID: 1, Role: types.TenantRoleOwner, Status: types.TenantMemberStatusActive},
+		{UserID: "admin", TenantID: 1, Role: types.TenantRoleAdmin, Status: types.TenantMemberStatusActive},
+		{UserID: "employee", TenantID: 1, Role: types.TenantRoleViewer, Status: types.TenantMemberStatusActive},
+	}
+	audit := &operatingAnalysisAuditCapture{}
+	svc := NewTenantMemberService(repo, audit)
+
+	if err := svc.UpdateOperatingAnalysisAccess(memberActorCtx("owner", types.TenantRoleOwner), "owner", 1, true); err != nil {
+		t.Fatalf("owner self grant: %v", err)
+	}
+	if err := svc.UpdateOperatingAnalysisAccess(memberActorCtx("owner", types.TenantRoleOwner), "owner", 1, true); err != nil {
+		t.Fatalf("idempotent replay: %v", err)
+	}
+	if err := svc.UpdateOperatingAnalysisAccess(memberActorCtx("admin", types.TenantRoleAdmin), "owner", 1, false); err != nil {
+		t.Fatalf("admin revoke owner: %v", err)
+	}
+	if err := svc.UpdateOperatingAnalysisAccess(memberActorCtx("employee", types.TenantRoleViewer), "admin", 1, true); !errors.Is(err, ErrMemberActionForbidden) {
+		t.Fatalf("employee mutation = %v, want forbidden", err)
+	}
+	if len(audit.entries) != 2 || audit.entries[0].Action != types.AuditActionOperatingAnalysisAccessChanged {
+		t.Fatalf("audit entries = %+v, want two real changes", audit.entries)
+	}
 }
 
 func TestTenantMemberService_AddMember_RejectsInvalidRole(t *testing.T) {

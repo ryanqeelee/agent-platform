@@ -128,6 +128,7 @@ export default {
     emptySearch: '没有匹配 "{q}" 的成员。',
     searchPlaceholder: '按姓名或邮箱搜索',
     businessRoles: { title: '业务岗位', none: '未分配', saved: '业务岗位已保存', saveFailed: '保存业务岗位失败' },
+    operatingAnalysis: { granted: '已授予经营分析权限', revoked: '已撤销经营分析权限' },
     audit: {
       tabLabel: '审计日志',
       description: '记录当前空间的成员变更与访问拒绝事件，按时间倒序展示。一分钟内的重复拒绝会自动去重。',
@@ -153,6 +154,7 @@ export default {
         'rbac.member_removed': '移除成员',
         'rbac.member_role_changed': '角色变更',
         'rbac.member_status_changed': '成员状态变更',
+        'rbac.operating_analysis_access_changed': '经营分析权限变更',
         'rbac.ownership_transferred': '所有权转移',
         'rbac.member_left': '成员退出',
         'rbac.access_denied': '访问被拒',
@@ -229,6 +231,7 @@ export default {
       member: '姓名与邮箱',
       role: '角色',
       status: '状态',
+      operatingAnalysis: '经营分析',
       joinedAt: '加入时间',
       operations: '操作'
     },
@@ -5892,6 +5895,8 @@ export default {
   menu: {
     knowledgeBase: '知识库',
     operatingAnalysis: '经营分析',
+    operatingAnalysisContactAdmin: '请联系企业管理员开通经营分析权限',
+    operatingAnalysisUnavailable: '经营分析服务暂不可用',
     agents: '智能体',
     organizations: '共享空间',
     newChat: '新对话',

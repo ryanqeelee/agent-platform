@@ -51,6 +51,10 @@ type TenantMemberService interface {
 	// UpdateStatus suspends or restores a member while retaining their role.
 	UpdateStatus(ctx context.Context, userID string, tenantID uint64, status types.TenantMemberStatus) error
 
+	// UpdateOperatingAnalysisAccess grants or revokes the role-independent
+	// operating-analysis permission for one member.
+	UpdateOperatingAnalysisAccess(ctx context.Context, userID string, tenantID uint64, enabled bool) error
+
 	// TransferOwnership is the sole ordinary product path that changes Owner.
 	TransferOwnership(ctx context.Context, targetUserID string, tenantID uint64) error
 

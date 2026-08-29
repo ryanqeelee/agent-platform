@@ -74,6 +74,10 @@ type updateMemberStatusRequest struct {
 	Status types.TenantMemberStatus `json:"status" binding:"required"`
 }
 
+type updateOperatingAnalysisAccessRequest struct {
+	Enabled *bool `json:"enabled" binding:"required"`
+}
+
 // parseTenantIDFromPath reads :id from the gin route and validates it as
 // a tenant ID. Returning (0, false) means we already wrote the error to
 // the gin context and the caller should `return` immediately.
@@ -141,6 +145,8 @@ func (h *TenantMemberHandler) ListMembers(c *gin.Context) {
 	}
 
 	resp := make([]types.TenantMemberResponse, 0, len(members))
+	canViewOperatingAnalysisAccess := types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin) ||
+		types.HasCrossTenantAccessFromContext(ctx)
 	for _, m := range members {
 		row := types.TenantMemberResponse{
 			UserID:    m.UserID,
@@ -162,6 +168,10 @@ func (h *TenantMemberHandler) ListMembers(c *gin.Context) {
 				return
 			}
 			row.BusinessRoleIDs = roleIDs
+		}
+		if canViewOperatingAnalysisAccess {
+			enabled := m.OperatingAnalysisAccess
+			row.OperatingAnalysisAccess = &enabled
 		}
 		resp = append(resp, row)
 	}
@@ -286,9 +296,51 @@ func (h *TenantMemberHandler) AddMember(c *gin.Context) {
 		InvitedBy: member.InvitedBy,
 		JoinedAt:  member.JoinedAt,
 	}
+	enabled := member.OperatingAnalysisAccess
+	resp.OperatingAnalysisAccess = &enabled
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
 		"data":    resp,
+	})
+}
+
+// UpdateOperatingAnalysisAccess grants or revokes the explicit, role-
+// independent operating-analysis permission. Route and repository authority
+// both require Owner/Admin, while allowing self-service by those roles.
+func (h *TenantMemberHandler) UpdateOperatingAnalysisAccess(c *gin.Context) {
+	ctx := c.Request.Context()
+	tenantID, ok := parseTenantIDFromPath(c)
+	if !ok {
+		return
+	}
+	userID := strings.TrimSpace(c.Param("user_id"))
+	if userID == "" {
+		c.Error(apperrors.NewValidationError("user_id is required"))
+		return
+	}
+	var req updateOperatingAnalysisAccessRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewValidationError("invalid request body").WithDetails(err.Error()))
+		return
+	}
+	if err := h.memberService.UpdateOperatingAnalysisAccess(ctx, userID, tenantID, *req.Enabled); err != nil {
+		switch {
+		case errors.Is(err, service.ErrMembershipNotFound):
+			c.Error(apperrors.NewNotFoundError("membership not found"))
+		case errors.Is(err, service.ErrMemberActionForbidden):
+			c.Error(apperrors.NewForbiddenError(err.Error()))
+		default:
+			logger.Errorf(ctx, "UpdateOperatingAnalysisAccess failed: user=%s tenant=%d err=%v", userID, tenantID, err)
+			c.Error(apperrors.NewInternalServerError("failed to update operating analysis access").WithDetails(err.Error()))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"user_id":                   userID,
+			"operating_analysis_access": *req.Enabled,
+		},
 	})
 }
 

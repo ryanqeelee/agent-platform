@@ -62,11 +62,16 @@ type tenantPolicyTenantService struct {
 type tenantPolicyMemberService struct {
 	interfaces.TenantMemberService
 	ensureOwnerCalls int
+	member           *types.TenantMember
 }
 
 func (s *tenantPolicyMemberService) EnsureOwner(context.Context, string, uint64) (*types.TenantMember, error) {
 	s.ensureOwnerCalls++
 	return nil, errors.New("catalog manager must not become tenant owner")
+}
+
+func (s *tenantPolicyMemberService) GetMembership(context.Context, string, uint64) (*types.TenantMember, error) {
+	return s.member, nil
 }
 
 func (s *tenantPolicyTenantService) CreateTenant(_ context.Context, tenant *types.Tenant) (*types.Tenant, error) {
@@ -225,5 +230,33 @@ func TestAuthMeDoesNotAdvertiseTenantCreationToViewer(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), `"can_create_tenant":false`) {
 		t.Fatalf("viewer response advertised tenant creation: %s", w.Body.String())
+	}
+}
+
+func TestAuthMeProjectsOperatingAnalysisAccessFromPersistedMembership(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := &AuthHandler{
+		userService:   &tenantPolicyUserService{user: &types.User{ID: "viewer", TenantID: 7, IsActive: true}},
+		tenantService: &tenantPolicyTenantService{},
+		tenantMemberSvc: &tenantPolicyMemberService{member: &types.TenantMember{
+			UserID: "viewer", TenantID: 7, Status: types.TenantMemberStatusActive,
+			OperatingAnalysisAccess: true,
+		}},
+		configInfo:       &config.Config{Tenant: &config.TenantConfig{}},
+		systemSettingSvc: &tenantPolicySettingService{},
+	}
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, uint64(7))
+		ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleViewer)
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	})
+	r.GET("/auth/me", h.GetCurrentUser)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/auth/me", nil))
+
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"operating_analysis_access":{"schema":"OperatingAnalysisAccessV1","tenant_id":7,"membership_status":"active","enabled":true}`) {
+		t.Fatalf("unexpected strict access projection: status=%d body=%s", w.Code, w.Body.String())
 	}
 }

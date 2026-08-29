@@ -78,10 +78,14 @@
             </div>
             <div class="menu_box" :class="{ 'menu_box--sticky': item.children && !uiStore.sidebarCollapsed }"
                 v-for="(item, index) in topMenuItems" :key="index">
-                <t-tooltip :content="item.title" placement="right" :disabled="!uiStore.sidebarCollapsed">
+                <t-tooltip :content="item.disabled
+                    ? t(operatingAnalysisAvailability?.availability.nextAction === 'contact_admin'
+                        ? 'menu.operatingAnalysisContactAdmin'
+                        : 'menu.operatingAnalysisUnavailable')
+                    : item.title" placement="right" :disabled="!uiStore.sidebarCollapsed && !item.disabled">
                     <div @click="handleMenuClick(item.path)" @mouseenter="mouseenteMenu(item.path)"
                         @mouseleave="mouseleaveMenu(item.path)" :data-guide="`nav-${item.path}`"
-                        :class="['menu_item', item.childrenPath && item.childrenPath == currentpath ? 'menu_item_c_active' : isMenuItemActive(item.path) ? 'menu_item_active' : '']">
+                        :class="['menu_item', { 'menu_item--disabled': item.disabled }, item.childrenPath && item.childrenPath == currentpath ? 'menu_item_c_active' : isMenuItemActive(item.path) ? 'menu_item_active' : '']">
                         <div class="menu_item-box">
                             <div class="menu_icon">
                                 <img class="icon"
@@ -255,6 +259,7 @@ import UserMenu from '@/components/UserMenu.vue';
 import TenantSelector from '@/components/TenantSelector.vue';
 import { useI18n } from 'vue-i18n';
 import { getSystemInfo } from '@/api/system';
+import { getOperatingAnalysisAvailability, type OperatingAnalysisAvailabilityV1 } from '@/api/operatingAnalysis';
 
 const chatResources = useChatResourcesStore();
 // Platform logos reused from IMChannelsOverviewPanel — keeps the session list
@@ -335,10 +340,11 @@ const activeBucket = computed(() => sessionBuckets.value[activeSessionBucketKey.
 const hasAnySession = computed(() =>
     Object.values(sessionBuckets.value).some((bucket) => bucket.items.length > 0),
 );
-type MenuItem = { title: string; icon: string; path: string; childrenPath?: string; children?: any[] };
+type MenuItem = { title: string; icon: string; path: string; childrenPath?: string; children?: any[]; disabled?: boolean };
 const { menuArr, visibleMenuArr } = storeToRefs(usemenuStore);
 let activeSubmenu = ref<string>('');
 const isLiteEdition = ref(false);
+const operatingAnalysisAvailability = ref<OperatingAnalysisAvailabilityV1 | null>(null);
 
 // 批量管理状态
 const batchMode = ref(false)
@@ -434,10 +440,24 @@ const getIconActiveState = (itemPath: string) => {
 
 // 分离上下两部分菜单（使用 visibleMenuArr 以便 lite 模式过滤 logout）
 const topMenuItems = computed<MenuItem[]>(() => {
-    return (visibleMenuArr.value as unknown as MenuItem[]).filter((item: MenuItem) =>
-        item.path === 'knowledge-bases' || item.path === 'operating-analysis' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat'
-    );
+    return (visibleMenuArr.value as unknown as MenuItem[]).flatMap((item: MenuItem) => {
+        if (!(item.path === 'knowledge-bases' || item.path === 'operating-analysis' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat')) {
+            return [];
+        }
+        if (item.path !== 'operating-analysis') return [item];
+        const state = operatingAnalysisAvailability.value?.availability.state;
+        if (!state || state === 'hidden') return [];
+        return [{ ...item, disabled: state !== 'enabled' }];
+    });
 });
+
+const refreshOperatingAnalysisAvailability = async () => {
+    try {
+        operatingAnalysisAvailability.value = await getOperatingAnalysisAvailability();
+    } catch {
+        operatingAnalysisAvailability.value = null;
+    }
+};
 
 const bottomMenuItems = computed<MenuItem[]>(() => {
     return (visibleMenuArr.value as unknown as MenuItem[]).filter((item: MenuItem) => {
@@ -975,6 +995,7 @@ onMounted(async () => {
     }
 
     window.addEventListener(SESSION_MUTATION_EVENT, handleSessionMutation);
+    void refreshOperatingAnalysisAvailability();
 
     isLiteEdition.value = authStore.isLiteMode
     getSystemInfo().then(res => {
@@ -1063,6 +1084,13 @@ const getIcon = (path: string) => {
 }
 getIcon(typeof route.name === 'string' ? route.name as string : (route.name ? String(route.name) : ''))
 const handleMenuClick = async (path: string) => {
+    if (path === 'operating-analysis' && operatingAnalysisAvailability.value?.availability.state !== 'enabled') {
+        const nextAction = operatingAnalysisAvailability.value?.availability.nextAction;
+        MessagePlugin.info(t(nextAction === 'contact_admin'
+            ? 'menu.operatingAnalysisContactAdmin'
+            : 'menu.operatingAnalysisUnavailable'));
+        return;
+    }
     if (path === 'knowledge-bases') {
         // 知识库菜单项：如果在知识库内部，跳转到当前知识库文件页；否则跳转到知识库列表
         const kbId = await getCurrentKbId()
@@ -1444,6 +1472,11 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
             .menu_title {
                 color: var(--td-text-color-primary);
             }
+        }
+
+        &--disabled {
+            cursor: not-allowed;
+            opacity: 0.56;
         }
     }
 

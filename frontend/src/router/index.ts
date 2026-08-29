@@ -2,7 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteLocationNormalized } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { autoSetup, getCurrentUser, getEnterpriseSession, EnterpriseSessionRequestError, userInfoFromApi } from '@/api/auth'
-import { post } from '@/utils/request'
+import { exchangeOperatingAnalysis, getOperatingAnalysisAvailability } from '@/api/operatingAnalysis'
 import { employeeSurfaceMinRoleForPath, SETTINGS_SECTION_MIN_ROLE } from '@/config/settingsAccess'
 import { DEFAULT_EMPLOYEE_WORKSPACE_PATH, loginDestination, safeReturnTo } from './safeReturnTo'
 
@@ -156,9 +156,11 @@ const router = createRouter({
           meta: { requiresInit: true, requiresAuth: true },
           beforeEnter: async () => {
             try {
-              const response = await post<{ access_token?: string; expires_in?: number }>(
-                '/api/auth/weknora-exchange',
-              )
+              const availability = await getOperatingAnalysisAvailability()
+              if (availability.availability.state !== 'enabled' || !availability.availability.canExchange) {
+                return '/platform/creatChat'
+              }
+              const response = await exchangeOperatingAnalysis()
               if (!response.access_token || response.expires_in !== 900) {
                 return '/platform/creatChat'
               }

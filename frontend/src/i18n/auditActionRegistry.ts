@@ -21,6 +21,7 @@ export const TENANT_MEMBER_AUDIT_ACTIONS = [
   'rbac.member_removed',
   'rbac.member_role_changed',
   'rbac.member_status_changed',
+  'rbac.operating_analysis_access_changed',
   'rbac.ownership_transferred',
   'rbac.member_left',
   'rbac.access_denied',

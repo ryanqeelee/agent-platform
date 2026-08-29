@@ -128,6 +128,7 @@ export default {
     emptySearch: 'Нет участников по запросу "{q}".',
     searchPlaceholder: 'Поиск по имени или email',
     businessRoles: { title: 'Бизнес-роли', none: 'Не назначено', saved: 'Бизнес-роли сохранены', saveFailed: 'Не удалось сохранить бизнес-роли' },
+    operatingAnalysis: { granted: 'Доступ к операционному анализу предоставлен', revoked: 'Доступ к операционному анализу отозван' },
     audit: {
       tabLabel: 'Журнал аудита',
       description: 'Регистрирует все изменения участников и отказы в доступе в этом пространстве, в обратном хронологическом порядке. Повторные отказы в течение минуты дедуплицируются.',
@@ -153,6 +154,7 @@ export default {
         'rbac.member_removed': 'Удалён участник',
         'rbac.member_role_changed': 'Изменение роли',
         'rbac.member_status_changed': 'Статус участника изменён',
+        'rbac.operating_analysis_access_changed': 'Доступ к операционному анализу изменён',
         'rbac.ownership_transferred': 'Владение передано',
         'rbac.member_left': 'Участник вышел',
         'rbac.access_denied': 'Доступ запрещён',
@@ -229,6 +231,7 @@ export default {
       member: 'Имя и email',
       role: 'Роль',
       status: 'Статус',
+      operatingAnalysis: 'Операционный анализ',
       joinedAt: 'Дата вступления',
       operations: 'Действия'
     },
@@ -5892,6 +5895,8 @@ export default {
   menu: {
     knowledgeBase: 'База знаний',
     operatingAnalysis: 'Операционный анализ',
+    operatingAnalysisContactAdmin: 'Обратитесь к администратору предприятия за доступом к операционному анализу',
+    operatingAnalysisUnavailable: 'Операционный анализ временно недоступен',
     agents: 'Агенты',
     organizations: 'Общие пространства',
     newChat: 'Новый диалог',

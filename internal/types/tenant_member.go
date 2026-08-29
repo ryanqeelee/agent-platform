@@ -103,6 +103,9 @@ type TenantMember struct {
 	// Status controls whether this membership is honoured by the auth
 	// middleware; see TenantMemberStatus constants.
 	Status TenantMemberStatus `json:"status" gorm:"type:varchar(20);not null;default:'active'"`
+	// OperatingAnalysisAccess is the explicit, role-independent permission
+	// to use the governed operating-analysis workspace for this tenant.
+	OperatingAnalysisAccess bool `json:"operating_analysis_access" gorm:"not null;default:false"`
 	// InvitedBy records the user ID of the admin who created this row via
 	// an invitation flow. Nil for rows created by self-service registration.
 	InvitedBy *string `json:"invited_by,omitempty" gorm:"type:varchar(36)"`
@@ -127,19 +130,30 @@ type Membership struct {
 	Role       TenantRole `json:"role"`
 }
 
+// OperatingAnalysisAccessV1 is the strict Product Base assertion consumed by
+// Ringxun. It is built from the current persisted membership, never from the
+// login membership fallback used for UI compatibility.
+type OperatingAnalysisAccessV1 struct {
+	Schema           string             `json:"schema"`
+	TenantID         uint64             `json:"tenant_id"`
+	MembershipStatus TenantMemberStatus `json:"membership_status"`
+	Enabled          bool               `json:"enabled"`
+}
+
 // TenantMemberResponse is the API projection of a TenantMember row joined
 // with the human-facing user fields the management UI needs (email,
 // username, avatar). It is intentionally NOT the GORM model: returning
 // the model directly would leak DeletedAt/UpdatedAt and lock the DB
 // schema into the public API. Use this for `/tenants/:id/members` only.
 type TenantMemberResponse struct {
-	UserID          string             `json:"user_id"`
-	Email           string             `json:"email"`
-	Username        string             `json:"username"`
-	Avatar          string             `json:"avatar,omitempty"`
-	Role            TenantRole         `json:"role"`
-	Status          TenantMemberStatus `json:"status"`
-	InvitedBy       *string            `json:"invited_by,omitempty"`
-	JoinedAt        time.Time          `json:"joined_at"`
-	BusinessRoleIDs []string           `json:"business_role_ids"`
+	UserID                  string             `json:"user_id"`
+	Email                   string             `json:"email"`
+	Username                string             `json:"username"`
+	Avatar                  string             `json:"avatar,omitempty"`
+	Role                    TenantRole         `json:"role"`
+	Status                  TenantMemberStatus `json:"status"`
+	InvitedBy               *string            `json:"invited_by,omitempty"`
+	JoinedAt                time.Time          `json:"joined_at"`
+	BusinessRoleIDs         []string           `json:"business_role_ids"`
+	OperatingAnalysisAccess *bool              `json:"operating_analysis_access,omitempty"`
 }

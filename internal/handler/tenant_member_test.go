@@ -26,11 +26,12 @@ import (
 // gotten here" assertions.
 type stubMemberService struct {
 	interfaces.TenantMemberService
-	add             func(ctx context.Context, userID string, tenantID uint64, role types.TenantRole, invitedBy *string) (*types.TenantMember, error)
-	listTenant      func(ctx context.Context, tenantID uint64) ([]*types.TenantMember, error)
-	listMembersPage func(ctx context.Context, tenantID uint64, query string, page, pageSize int) ([]*types.TenantMember, int64, error)
-	updateRole      func(ctx context.Context, userID string, tenantID uint64, newRole types.TenantRole) error
-	remove          func(ctx context.Context, userID string, tenantID uint64) error
+	add                           func(ctx context.Context, userID string, tenantID uint64, role types.TenantRole, invitedBy *string) (*types.TenantMember, error)
+	listTenant                    func(ctx context.Context, tenantID uint64) ([]*types.TenantMember, error)
+	listMembersPage               func(ctx context.Context, tenantID uint64, query string, page, pageSize int) ([]*types.TenantMember, int64, error)
+	updateRole                    func(ctx context.Context, userID string, tenantID uint64, newRole types.TenantRole) error
+	updateOperatingAnalysisAccess func(ctx context.Context, userID string, tenantID uint64, enabled bool) error
+	remove                        func(ctx context.Context, userID string, tenantID uint64) error
 }
 
 type stubMemberGovernanceService struct {
@@ -90,6 +91,10 @@ func (s *stubMemberService) ListByTenant(ctx context.Context, tenantID uint64) (
 
 func (s *stubMemberService) UpdateRole(ctx context.Context, userID string, tenantID uint64, newRole types.TenantRole) error {
 	return s.updateRole(ctx, userID, tenantID, newRole)
+}
+
+func (s *stubMemberService) UpdateOperatingAnalysisAccess(ctx context.Context, userID string, tenantID uint64, enabled bool) error {
+	return s.updateOperatingAnalysisAccess(ctx, userID, tenantID, enabled)
 }
 
 func (s *stubMemberService) RemoveMember(ctx context.Context, userID string, tenantID uint64) error {
@@ -168,6 +173,7 @@ func memberTestRouterWithCfg(h *TenantMemberHandler, cfg *config.Config) *gin.En
 	tenantByID.GET("/members", h.ListMembers)
 	tenantByID.POST("/members", h.AddMember)
 	tenantByID.PUT("/members/:user_id", h.UpdateMemberRole)
+	tenantByID.PUT("/members/:user_id/operating-analysis-access", h.UpdateOperatingAnalysisAccess)
 	tenantByID.DELETE("/members/:user_id", h.RemoveMember)
 	tenantByID.POST("/leave", h.LeaveTenant)
 	return r

@@ -2,6 +2,8 @@ export default {
   menu: {
     knowledgeBase: 'Knowledge Base',
     operatingAnalysis: 'Operating Analysis',
+    operatingAnalysisContactAdmin: 'Contact an enterprise administrator for operating analysis access',
+    operatingAnalysisUnavailable: 'Operating analysis is temporarily unavailable',
     agents: 'Agents',
     organizations: 'Shared Spaces',
     newChat: 'New Chat',
@@ -5683,6 +5685,7 @@ export default {
     emptySearch: 'No members match "{q}".',
     searchPlaceholder: 'Search by name or email',
     businessRoles: { title: 'Business roles', none: 'Unassigned', saved: 'Business roles saved', saveFailed: 'Failed to save business roles' },
+    operatingAnalysis: { granted: 'Operating analysis access granted', revoked: 'Operating analysis access revoked' },
     permissions: {
       title: 'Role permissions',
       desc: 'What each role can do inside this workspace. Server-enforced; UI controls reflect the rules but are not the source of truth.',
@@ -5697,6 +5700,7 @@ export default {
       member: 'Name & email',
       role: 'Role',
       status: 'Status',
+      operatingAnalysis: 'Operating analysis',
       joinedAt: 'Joined',
       operations: 'Actions'
     },
@@ -5775,6 +5779,7 @@ export default {
         'rbac.member_removed': 'Member removed',
         'rbac.member_role_changed': 'Role changed',
         'rbac.member_status_changed': 'Member status changed',
+        'rbac.operating_analysis_access_changed': 'Operating analysis access changed',
         'rbac.ownership_transferred': 'Ownership transferred',
         'rbac.member_left': 'Member left',
         'rbac.access_denied': 'Access denied',

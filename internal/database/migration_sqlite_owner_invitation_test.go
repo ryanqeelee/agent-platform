@@ -67,6 +67,13 @@ func TestRunMigrations_SQLiteDiscoversLegacyOwnerInvitationRevocation(t *testing
 	if _, err := db.Exec(`INSERT INTO tenant_members(user_id, tenant_id, role, status) VALUES ('owner-a', 1, 'owner', 'active'), ('owner-b', 1, 'owner', 'active')`); err == nil {
 		t.Fatal("sqlite incremental owner index accepted a second active owner")
 	}
+	if _, err := db.Exec(`INSERT INTO tenant_members(user_id, tenant_id, role, status) VALUES ('employee-a', 1, 'viewer', 'active')`); err != nil {
+		t.Fatal(err)
+	}
+	var operatingAnalysisAccess bool
+	if err := db.QueryRow(`SELECT operating_analysis_access FROM tenant_members WHERE user_id = 'employee-a'`).Scan(&operatingAnalysisAccess); err != nil || operatingAnalysisAccess {
+		t.Fatalf("operating analysis default = %v, err=%v", operatingAnalysisAccess, err)
+	}
 }
 
 func TestRunMigrations_SQLiteEnterpriseActivationReceiptUpDown(t *testing.T) {
@@ -106,13 +113,13 @@ func TestRunMigrations_SQLiteEnterpriseActivationReceiptUpDown(t *testing.T) {
 	}
 	assertReceiptUnique()
 
-	if err := m.Steps(-1); err != nil {
+	if err := m.Migrate(5); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`SELECT ringxun_activation_id FROM tenants LIMIT 1`); err == nil {
 		t.Fatal("activation receipt down migration left its columns behind")
 	}
-	if err := m.Steps(1); err != nil {
+	if err := m.Migrate(7); err != nil {
 		t.Fatal(err)
 	}
 	assertReceiptUnique()

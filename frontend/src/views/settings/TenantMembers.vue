@@ -352,6 +352,10 @@
                 </t-select>
                 <span v-else>{{ memberBusinessRoleNames(row).join('、') || $t('tenantMember.businessRoles.none') }}</span>
               </template>
+              <template #operatingAnalysis="{ row }">
+                <t-switch :model-value="row.operating_analysis_access === true"
+                  @change="(enabled: boolean) => saveOperatingAnalysisAccess(row, enabled)" />
+              </template>
               <template #joined_at="{ row }">{{ formatDate(row.joined_at) }}</template>
               <template #actions="{ row }">
                 <t-popconfirm
@@ -535,6 +539,7 @@ import {
   listMembers,
   updateMemberRole,
   updateMemberStatus,
+  updateMemberOperatingAnalysisAccess,
   transferOwnership,
   type TenantMember,
   type TenantRole,
@@ -680,6 +685,7 @@ const canViewAudit = computed(
     effectivePlatformOperator.value,
 )
 const canManageBusinessRoles = computed(() => currentRole.value === 'owner' || currentRole.value === 'admin' || effectivePlatformOperator.value)
+const canManageOperatingAnalysisAccess = computed(() => currentRole.value === 'owner' || currentRole.value === 'admin' || effectivePlatformOperator.value)
 const currentUserId = computed(() => authStore.user?.id ?? '')
 
 // Use the active tenant id from the auth store; the route only allows
@@ -756,6 +762,9 @@ const columns = computed(() => [
   { colKey: 'role', title: t('tenantMember.columns.role'), width: 128 },
   { colKey: 'status', title: t('tenantMember.columns.status'), width: 88 },
   { colKey: 'businessRoles', title: t('tenantMember.businessRoles.title'), minWidth: 180 },
+  ...(canManageOperatingAnalysisAccess.value
+    ? [{ colKey: 'operatingAnalysis', title: t('tenantMember.columns.operatingAnalysis'), width: 112 }]
+    : []),
   { colKey: 'joined_at', title: t('tenantMember.columns.joinedAt'), width: 154 },
   { colKey: 'actions', title: t('tenantMember.columns.operations'), width: 88, align: 'left' },
 ])
@@ -773,6 +782,23 @@ async function saveBusinessRoles(row: TenantMember, roleIDs: string[]) {
     MessagePlugin.success(t('tenantMember.businessRoles.saved'))
   } catch {
     MessagePlugin.error(t('tenantMember.businessRoles.saveFailed'))
+  }
+}
+
+async function saveOperatingAnalysisAccess(row: TenantMember, enabled: boolean) {
+  try {
+    const response = await updateMemberOperatingAnalysisAccess(
+      activeTenantId.value,
+      row.user_id,
+      enabled,
+    )
+    if (!response.success) throw new Error(response.message)
+    row.operating_analysis_access = enabled
+    MessagePlugin.success(t(enabled
+      ? 'tenantMember.operatingAnalysis.granted'
+      : 'tenantMember.operatingAnalysis.revoked'))
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('tenantMember.errors.generic'))
   }
 }
 
@@ -1111,6 +1137,7 @@ function auditActionTheme(
     case 'rbac.member_removed':
     case 'rbac.member_left':
     case 'rbac.member_role_changed':
+    case 'rbac.operating_analysis_access_changed':
       return 'warning'
     default:
       return 'default'

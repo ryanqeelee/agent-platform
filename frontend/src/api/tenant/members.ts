@@ -18,6 +18,7 @@ export interface TenantMember {
   invited_by?: string | null
   joined_at: string
   business_role_ids: string[]
+  operating_analysis_access?: boolean
 }
 
 export interface ListMembersResponse {
@@ -137,6 +138,18 @@ export async function updateMemberStatus(
   status: 'active' | 'suspended',
 ): Promise<SimpleResponse> {
   return (await put(`/api/v1/tenants/${tenantId}/members/${userId}/status`, { status })) as unknown as SimpleResponse
+}
+
+/** Grant or revoke the member's explicit operating-analysis permission. */
+export async function updateMemberOperatingAnalysisAccess(
+  tenantId: number,
+  userId: string,
+  enabled: boolean,
+): Promise<SimpleResponse> {
+  return (await put(
+    `/api/v1/tenants/${tenantId}/members/${userId}/operating-analysis-access`,
+    { enabled },
+  )) as unknown as SimpleResponse
 }
 
 /** Explicit Owner-only ownership transfer; ordinary role updates cannot mint Owner. */

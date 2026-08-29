@@ -48,6 +48,10 @@ type TenantMemberRepository interface {
 	// active and suspended without changing its role.
 	UpdateStatus(ctx context.Context, actor types.MemberActorAuthority, userID string, tenantID uint64, status types.TenantMemberStatus) error
 
+	// UpdateOperatingAnalysisAccess changes the explicit analysis permission.
+	// It returns false for an idempotent replay that made no change.
+	UpdateOperatingAnalysisAccess(ctx context.Context, actor types.MemberActorAuthority, userID string, tenantID uint64, enabled bool) (bool, error)
+
 	// SoftDelete marks the active membership as deleted. The user record
 	// itself is untouched.
 	SoftDelete(ctx context.Context, actor types.MemberActorAuthority, userID string, tenantID uint64) error

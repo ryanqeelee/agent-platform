@@ -79,7 +79,10 @@
                     <div v-if="session.role == 'user'">
                         <usermsg :content="session.content" :mentioned_items="session.mentioned_items"
                             :images="session.images" :attachments="session.attachments" :embeddedMode="embeddedMode"
-                            :session-id="session_id">
+                            :session-id="session_id" :message-id="session.id"
+                            :handoff-available="operatingAnalysisHandoffAvailable"
+                            :handoff-pending="handoffPendingMessageId === session.id"
+                            @handoff="handoffToOperatingAnalysis">
                         </usermsg>
                     </div>
                     <div v-if="session.role == 'assistant' && shouldRenderAssistantMessage(session)">
@@ -126,7 +129,7 @@
 <script setup>
 import { storeToRefs } from 'pinia';
 import { ref, onMounted, onBeforeMount, onUnmounted, nextTick, watch, reactive, computed } from 'vue';
-import { useRoute, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
+import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
 import InputField from '../../components/Input-field.vue';
 import botmsg from './components/botmsg.vue';
 import usermsg from './components/usermsg.vue';
@@ -159,6 +162,11 @@ import {
 } from '@/api/message-suggestion';
 import { provideChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
 import { provideChatAttachmentPreviewDrawer } from '@/composables/useChatAttachmentPreviewDrawer';
+import {
+    createOperatingAnalysisHandoff,
+    getOperatingAnalysisAvailability,
+    OPERATING_ANALYSIS_HANDOFF_REF_KEY,
+} from '@/api/operatingAnalysis';
 
 const referencesDrawer = provideChatReferencesDrawer();
 provideChatAttachmentPreviewDrawer();
@@ -213,8 +221,37 @@ const attachStreamDebugToMessage = (message) => {
     message.debugRequest = payload;
 };
 const route = useRoute();
+const router = useRouter();
 const session_id = ref(props.session_id || route.params.chatid);
 const currentSession = ref(null);
+const operatingAnalysisHandoffAvailable = ref(false);
+const handoffPendingMessageId = ref('');
+
+const loadOperatingAnalysisHandoffAvailability = async () => {
+    if (props.embeddedMode) return;
+    try {
+        const response = await getOperatingAnalysisAvailability();
+        operatingAnalysisHandoffAvailable.value = response.availability.state === 'enabled'
+            && response.availability.canExchange;
+    } catch {
+        operatingAnalysisHandoffAvailable.value = false;
+    }
+};
+
+const handoffToOperatingAnalysis = async (messageId) => {
+    if (!session_id.value || !messageId || handoffPendingMessageId.value) return;
+    handoffPendingMessageId.value = messageId;
+    try {
+        const handoff = await createOperatingAnalysisHandoff(session_id.value, messageId);
+        if (handoff.schema !== 'OperatingAnalysisHandoffV1' || !handoff.handoffRef) throw new Error('invalid handoff');
+        sessionStorage.setItem(OPERATING_ANALYSIS_HANDOFF_REF_KEY, handoff.handoffRef);
+        await router.push('/platform/operating-analysis');
+    } catch {
+        MessagePlugin.error(t('menu.operatingAnalysisUnavailable'));
+    } finally {
+        handoffPendingMessageId.value = '';
+    }
+};
 
 // 拉 session 详情，并按其 last_request_state 把输入栏状态恢复到当时的发起态。
 // 嵌入式（embeddedMode）由宿主页面注入 agent/KB，所以跳过整套恢复逻辑，
@@ -965,6 +1002,7 @@ onBeforeMount(async () => {
 
 onMounted(async () => {
     window.addEventListener(SESSION_MUTATION_EVENT, handleSessionMutation);
+    void loadOperatingAnalysisHandoffAvailability();
     messagesList.splice(0);
 
     // 初始化状态：加载历史消息时不应显示loading

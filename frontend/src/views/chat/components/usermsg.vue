@@ -43,6 +43,11 @@
         <div class="user_msg">
             {{ content }}
         </div>
+        <button v-if="handoffAvailable && messageId && content" type="button" class="analysis_handoff"
+            :disabled="handoffPending" :aria-label="t('menu.operatingAnalysis')" @click="emit('handoff', messageId)">
+            <span aria-hidden="true">↗</span>
+            {{ t('menu.operatingAnalysis') }}
+        </button>
         <picturePreview :reviewImg="reviewImg" :reviewUrl="reviewUrl" @closePreImg="closePreImg" />
     </div>
 </template>
@@ -55,6 +60,7 @@ import { useChatAttachmentPreviewDrawer } from '@/composables/useChatAttachmentP
 import { isPreviewableAttachment, resolveAttachmentFileType } from '@/utils/attachmentPreview';
 
 const { t } = useI18n();
+const emit = defineEmits(['handoff']);
 
 const mentionTagClass = (item) => {
     if (item.type === 'kb') return item.kb_type === 'faq' ? 'faq-tag' : 'kb-tag';
@@ -100,6 +106,18 @@ const props = defineProps({
     sessionId: {
         type: String,
         default: ''
+    },
+    messageId: {
+        type: String,
+        default: ''
+    },
+    handoffAvailable: {
+        type: Boolean,
+        default: false
+    },
+    handoffPending: {
+        type: Boolean,
+        default: false
     }
 });
 
@@ -231,6 +249,56 @@ const closePreImg = () => {
     overflow-wrap: anywhere;
     box-sizing: border-box;
     white-space: pre-wrap;
+}
+
+.analysis_handoff {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 28px;
+    padding: 3px 8px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--td-text-color-secondary);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    opacity: 0;
+    transform: translateY(-2px);
+    transition: color 0.16s ease, background-color 0.16s ease, opacity 0.16s ease, transform 0.16s ease;
+
+    &:hover,
+    &:focus-visible {
+        color: var(--td-brand-color);
+        background: var(--td-brand-color-light);
+        outline: none;
+    }
+
+    &:disabled {
+        cursor: wait;
+        opacity: 0.55;
+    }
+}
+
+.user_msg_container:hover .analysis_handoff,
+.analysis_handoff:focus-visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+@media (hover: none) {
+    .analysis_handoff {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .analysis_handoff {
+        transition: none;
+        transform: none;
+    }
 }
 
 .user_images {

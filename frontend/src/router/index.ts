@@ -2,7 +2,13 @@ import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteLocationNormalized } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { autoSetup, getCurrentUser, getEnterpriseSession, EnterpriseSessionRequestError, userInfoFromApi } from '@/api/auth'
-import { exchangeOperatingAnalysis, getOperatingAnalysisAvailability } from '@/api/operatingAnalysis'
+import {
+  consumeOperatingAnalysisHandoff,
+  exchangeOperatingAnalysis,
+  getOperatingAnalysisAvailability,
+  OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY,
+  OPERATING_ANALYSIS_HANDOFF_REF_KEY,
+} from '@/api/operatingAnalysis'
 import { employeeSurfaceMinRoleForPath, SETTINGS_SECTION_MIN_ROLE } from '@/config/settingsAccess'
 import { DEFAULT_EMPLOYEE_WORKSPACE_PATH, loginDestination, safeReturnTo } from './safeReturnTo'
 
@@ -162,13 +168,31 @@ const router = createRouter({
           meta: { requiresInit: true, requiresAuth: true },
           beforeEnter: async () => {
             try {
-              const availability = await getOperatingAnalysisAvailability()
-              if (availability.availability.state !== 'enabled' || !availability.availability.canExchange) {
-                return '/platform/creatChat'
+              const handoffRef = sessionStorage.getItem(OPERATING_ANALYSIS_HANDOFF_REF_KEY)
+              let response
+              let handoffPrompt = null
+              if (handoffRef) {
+                sessionStorage.removeItem(OPERATING_ANALYSIS_HANDOFF_REF_KEY)
+                response = await consumeOperatingAnalysisHandoff(handoffRef)
+                if (response.handoff?.schema !== 'OperatingAnalysisHandoffV1' || !response.handoff.question) {
+                  return '/platform/creatChat'
+                }
+                handoffPrompt = response.handoff
+              } else {
+                const availability = await getOperatingAnalysisAvailability()
+                if (availability.availability.state !== 'enabled' || !availability.availability.canExchange) {
+                  return '/platform/creatChat'
+                }
+                response = await exchangeOperatingAnalysis()
               }
-              const response = await exchangeOperatingAnalysis()
               if (!response.access_token || response.expires_in !== 900) {
                 return '/platform/creatChat'
+              }
+              if (handoffPrompt) {
+                sessionStorage.setItem(
+                  OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY,
+                  JSON.stringify(handoffPrompt),
+                )
               }
               localStorage.setItem('retail_ai_app_auth_token', response.access_token)
               document.cookie = `retail_ai_app_auth_token=${response.access_token}; Path=/app; Max-Age=900; SameSite=Lax`

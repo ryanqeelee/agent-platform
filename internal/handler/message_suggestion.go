@@ -141,6 +141,8 @@ func (h *MessageSuggestionHandler) writeError(c *gin.Context, err error) {
 	// instead of falling through to a misleading 500.
 	case errors.Is(err, apperrors.ErrSessionNotFound):
 		c.Error(apperrors.NewNotFoundError("session not found"))
+	case errors.Is(err, interfaces.ErrConversationPlanMissing):
+		c.Error(apperrors.NewConflictError("该历史对话缺少 AI 能力方案，请新建对话"))
 	case strings.Contains(err.Error(), "completed assistant"):
 		c.Error(apperrors.NewBadRequestError(err.Error()))
 	case strings.Contains(err.Error(), "invalid suggestion event"),

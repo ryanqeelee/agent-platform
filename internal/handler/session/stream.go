@@ -65,7 +65,11 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 	}
 
 	// Verify that the session exists and belongs to this tenant
-	if _, err := h.sessionService.GetSession(ctx, sessionID); err != nil {
+	if _, err := h.sessionService.GetRunnableSession(ctx, sessionID); err != nil {
+		if stderrors.Is(err, interfaces.ErrConversationPlanMissing) {
+			c.Error(errors.NewConflictError("该历史对话缺少 AI 能力方案，请新建对话"))
+			return
+		}
 		if stderrors.Is(err, errors.ErrSessionNotFound) {
 			logger.Warnf(ctx, "Session not found, ID: %s", sessionID)
 			c.Error(errors.NewNotFoundError(err.Error()))

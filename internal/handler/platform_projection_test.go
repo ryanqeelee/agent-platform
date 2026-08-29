@@ -31,6 +31,45 @@ func TestGetSystemInfoHidesRuntimeDetailsFromWorkspace(t *testing.T) {
 	require.Equal(t, map[string]interface{}{"edition": Edition}, body.Data)
 }
 
+type capabilityProjectionResolver struct {
+	interfaces.AICapabilityPlanResolver
+}
+
+func (capabilityProjectionResolver) Resolve(context.Context, uint64) (*types.AICapabilityPlanResolution, error) {
+	return &types.AICapabilityPlanResolution{
+		ContractVersion: "AICapabilityPlanV1",
+		PlanVersionID:   "hidden-plan",
+		Source:          "platform_default",
+		Enterprise: types.EnterpriseAICapabilityProjection{
+			ServiceLevel: "standard",
+			Status:       "active",
+			Health:       types.EnterpriseAIHealth{Status: "unknown"},
+		},
+	}, nil
+}
+
+func TestEnterpriseAICapabilityProjectionHidesPlanIdentity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Set(types.TenantIDContextKey.String(), uint64(7))
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/tenants/7/ai-capability-plan", nil)
+
+	NewAICapabilityPlanHandler(capabilityProjectionResolver{}).GetEnterpriseProjection(c)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.JSONEq(t, `{
+		"success":true,
+		"data":{
+			"service_level":"standard",
+			"status":"active",
+			"usage":null,
+			"quota":null,
+			"health":{"status":"unknown"}
+		}
+	}`, recorder.Body.String())
+}
+
 type workspaceWebSearchRepo struct {
 	interfaces.WebSearchProviderRepository
 }

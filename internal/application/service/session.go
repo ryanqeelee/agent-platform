@@ -109,22 +109,23 @@ func generateEventID(suffix string) string {
 // (see service.LoadAgentHistory and chat_pipeline history loading) — there is no
 // separate cross-turn cache layer.
 type sessionService struct {
-	cfg                   *config.Config                         // Application configuration
-	sessionRepo           interfaces.SessionRepository           // Repository for session data
-	messageRepo           interfaces.MessageRepository           // Repository for message data
-	knowledgeBaseService  interfaces.KnowledgeBaseService        // Service for knowledge base operations
-	modelService          interfaces.ModelService                // Service for model operations
-	tenantService         interfaces.TenantService               // Service for tenant operations
-	eventManager          *chatpipeline.EventManager             // Event manager for chat pipeline
-	agentService          interfaces.AgentService                // Service for agent operations
-	knowledgeService      interfaces.KnowledgeService            // Service for knowledge operations
-	chunkService          interfaces.ChunkService                // Service for chunk operations
-	webSearchStateRepo    interfaces.WebSearchStateService       // Service for web search state
-	webSearchProviderRepo interfaces.WebSearchProviderRepository // Repository for web search provider entities
-	kbShareService        interfaces.KBShareService              // Service for KB sharing operations
-	agentShareService     interfaces.AgentShareService           // Service for shared-Agent live authorization
-	tenantMemberService   interfaces.TenantMemberService         // Service for current tenant membership
-	suggestionRepo        interfaces.MessageSuggestionRepository
+	cfg                    *config.Config                         // Application configuration
+	sessionRepo            interfaces.SessionRepository           // Repository for session data
+	messageRepo            interfaces.MessageRepository           // Repository for message data
+	knowledgeBaseService   interfaces.KnowledgeBaseService        // Service for knowledge base operations
+	modelService           interfaces.ModelService                // Service for model operations
+	tenantService          interfaces.TenantService               // Service for tenant operations
+	eventManager           *chatpipeline.EventManager             // Event manager for chat pipeline
+	agentService           interfaces.AgentService                // Service for agent operations
+	knowledgeService       interfaces.KnowledgeService            // Service for knowledge operations
+	chunkService           interfaces.ChunkService                // Service for chunk operations
+	webSearchStateRepo     interfaces.WebSearchStateService       // Service for web search state
+	webSearchProviderRepo  interfaces.WebSearchProviderRepository // Repository for web search provider entities
+	kbShareService         interfaces.KBShareService              // Service for KB sharing operations
+	agentShareService      interfaces.AgentShareService           // Service for shared-Agent live authorization
+	tenantMemberService    interfaces.TenantMemberService         // Service for current tenant membership
+	suggestionRepo         interfaces.MessageSuggestionRepository
+	capabilityPlanResolver interfaces.AICapabilityPlanResolver
 }
 
 // NewSessionService creates a new session service instance with all required dependencies
@@ -144,24 +145,26 @@ func NewSessionService(cfg *config.Config,
 	agentShareService interfaces.AgentShareService,
 	tenantMemberService interfaces.TenantMemberService,
 	suggestionRepo interfaces.MessageSuggestionRepository,
+	capabilityPlanResolver interfaces.AICapabilityPlanResolver,
 ) interfaces.SessionService {
 	return &sessionService{
-		cfg:                   cfg,
-		sessionRepo:           sessionRepo,
-		messageRepo:           messageRepo,
-		knowledgeBaseService:  knowledgeBaseService,
-		knowledgeService:      knowledgeService,
-		chunkService:          chunkService,
-		modelService:          modelService,
-		tenantService:         tenantService,
-		eventManager:          eventManager,
-		agentService:          agentService,
-		webSearchStateRepo:    webSearchStateRepo,
-		webSearchProviderRepo: webSearchProviderRepo,
-		kbShareService:        kbShareService,
-		agentShareService:     agentShareService,
-		tenantMemberService:   tenantMemberService,
-		suggestionRepo:        suggestionRepo,
+		cfg:                    cfg,
+		sessionRepo:            sessionRepo,
+		messageRepo:            messageRepo,
+		knowledgeBaseService:   knowledgeBaseService,
+		knowledgeService:       knowledgeService,
+		chunkService:           chunkService,
+		modelService:           modelService,
+		tenantService:          tenantService,
+		eventManager:           eventManager,
+		agentService:           agentService,
+		webSearchStateRepo:     webSearchStateRepo,
+		webSearchProviderRepo:  webSearchProviderRepo,
+		kbShareService:         kbShareService,
+		agentShareService:      agentShareService,
+		tenantMemberService:    tenantMemberService,
+		suggestionRepo:         suggestionRepo,
+		capabilityPlanResolver: capabilityPlanResolver,
 	}
 }
 
@@ -176,6 +179,11 @@ func (s *sessionService) CreateSession(ctx context.Context, session *types.Sessi
 	}
 
 	logger.Infof(ctx, "Creating session, tenant ID: %d", session.TenantID)
+	resolution, err := s.capabilityPlanResolver.Resolve(ctx, session.TenantID)
+	if err != nil || resolution == nil || strings.TrimSpace(resolution.PlanVersionID) == "" {
+		return nil, interfaces.ErrAICapabilityUnavailable
+	}
+	session.AICapabilityPlanVersionID = resolution.PlanVersionID
 
 	// Create session in repository
 	createdSession, err := s.sessionRepo.Create(ctx, session)
@@ -238,6 +246,17 @@ func (s *sessionService) GetOwnedSession(ctx context.Context, id string) (*types
 	tenantID := types.MustTenantIDFromContext(ctx)
 	userID := sessionUserIDFromContext(ctx)
 	return s.sessionRepo.Get(ctx, tenantID, userID, id)
+}
+
+func (s *sessionService) GetRunnableSession(ctx context.Context, id string) (*types.Session, error) {
+	session, err := s.GetOwnedSession(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(session.AICapabilityPlanVersionID) == "" {
+		return nil, interfaces.ErrConversationPlanMissing
+	}
+	return session, nil
 }
 
 // GetSessionByID loads a session by tenant and id without user scoping.

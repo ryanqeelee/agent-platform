@@ -85,6 +85,7 @@ type RouterParams struct {
 	DataSourceHandler            *handler.DataSourceHandler
 	DataSourceCredentialsHandler *handler.DataSourceCredentialsHandler
 	WeKnoraCloudHandler          *handler.WeKnoraCloudHandler
+	AICapabilityPlanHandler      *handler.AICapabilityPlanHandler
 	WikiPageHandler              *handler.WikiPageHandler
 }
 
@@ -227,6 +228,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 
 		RegisterAuthRoutes(v1, params.AuthHandler, rbacGuards)
 		RegisterTenantRoutes(v1, params.TenantHandler, params.TenantMemberHandler, params.TenantInvitationHandler, params.AuditLogHandler, rbacGuards)
+		RegisterCapabilityPlanRoutes(v1, params.AICapabilityPlanHandler, rbacGuards)
 		RegisterKnowledgeGovernanceRoutes(v1, params.KnowledgeGovernanceHandler, rbacGuards)
 		RegisterMyInvitationRoutes(v1, params.TenantInvitationHandler)
 		RegisterKnowledgeBaseRoutes(v1, params.KBHandler, rbacGuards)

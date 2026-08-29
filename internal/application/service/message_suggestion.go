@@ -49,6 +49,7 @@ type messageSuggestionService struct {
 	messageService     interfaces.MessageService
 	modelService       interfaces.ModelService
 	customAgentService interfaces.CustomAgentService
+	sessionService     interfaces.SessionService
 }
 
 func NewMessageSuggestionService(
@@ -56,12 +57,14 @@ func NewMessageSuggestionService(
 	messageService interfaces.MessageService,
 	modelService interfaces.ModelService,
 	customAgentService interfaces.CustomAgentService,
+	sessionService interfaces.SessionService,
 ) interfaces.MessageSuggestionService {
 	return &messageSuggestionService{
 		repo:               repo,
 		messageService:     messageService,
 		modelService:       modelService,
 		customAgentService: customAgentService,
+		sessionService:     sessionService,
 	}
 }
 
@@ -71,6 +74,9 @@ func (s *messageSuggestionService) EnsureFollowUps(
 	assistantMessageID string,
 	regenerate bool,
 ) (*types.MessageSuggestionSet, error) {
+	if _, err := s.sessionService.GetRunnableSession(ctx, sessionID); err != nil {
+		return nil, err
+	}
 	message, err := s.messageService.GetMessage(ctx, sessionID, assistantMessageID)
 	if err != nil {
 		return nil, err

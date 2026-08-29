@@ -24,8 +24,8 @@ type stubSessionService struct {
 	interfaces.SessionService
 }
 
-func (s *stubSessionService) GetSession(_ context.Context, id string) (*types.Session, error) {
-	return &types.Session{ID: id, TenantID: 1}, nil
+func (s *stubSessionService) GetRunnableSession(_ context.Context, id string) (*types.Session, error) {
+	return &types.Session{ID: id, TenantID: 1, AICapabilityPlanVersionID: "plan-test"}, nil
 }
 
 type stubMessageServiceForStream struct {

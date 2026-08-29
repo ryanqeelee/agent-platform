@@ -133,6 +133,10 @@ func (h *Handler) CreateSession(c *gin.Context) {
 	createdSession, err := h.sessionService.CreateSession(ctx, createdSession)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
+		if stderrors.Is(err, interfaces.ErrAICapabilityUnavailable) {
+			c.Error(errors.NewServiceUnavailableError("AI 能力暂不可用，请稍后新建对话"))
+			return
+		}
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}

@@ -1,6 +1,7 @@
 package session
 
 import (
+	stderrors "errors"
 	"fmt"
 	"io"
 	"mime"
@@ -11,6 +12,7 @@ import (
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
 )
@@ -22,7 +24,11 @@ func (h *Handler) UploadTemporaryDocument(c *gin.Context) {
 	sessionID := c.Param("session_id")
 	// Uploading attaches content to the session, so use the strict owner scope:
 	// a tenant admin may read an API-key session but must not add attachments.
-	if _, err := h.sessionService.GetOwnedSession(ctx, sessionID); err != nil {
+	if _, err := h.sessionService.GetRunnableSession(ctx, sessionID); err != nil {
+		if stderrors.Is(err, interfaces.ErrConversationPlanMissing) {
+			c.Error(apperrors.NewConflictError("该历史对话缺少 AI 能力方案，请新建对话"))
+			return
+		}
 		c.Error(apperrors.NewNotFoundError("Session not found"))
 		return
 	}

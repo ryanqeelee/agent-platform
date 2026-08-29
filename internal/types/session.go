@@ -89,6 +89,9 @@ type Session struct {
 	IsPinned bool `json:"is_pinned" gorm:"default:false"`
 	// PinnedAt records when the session was pinned; nil when not pinned.
 	PinnedAt *time.Time `json:"pinned_at,omitempty"`
+	// AICapabilityPlanVersionID is the immutable platform plan fixed when the
+	// conversation is created. It is internal execution lineage, never API data.
+	AICapabilityPlanVersionID string `json:"-" gorm:"column:ai_capability_plan_version_id;type:varchar(128)"`
 
 	// LastRequestState records the input-bar state used the last time this
 	// session sent a question (Agent, knowledge scope, web search, MCPs).

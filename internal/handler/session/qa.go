@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/storageurl"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -147,9 +149,12 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	// owner scope: a tenant admin may read an API-key session but must not be
 	// able to post messages to it (which would otherwise fail later at message
 	// creation with a 500 instead of a clean not-found).
-	session, err := h.sessionService.GetOwnedSession(ctx, sessionID)
+	session, err := h.sessionService.GetRunnableSession(ctx, sessionID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get session, session ID: %s, error: %v", sessionID, err)
+		if stderrors.Is(err, interfaces.ErrConversationPlanMissing) {
+			return nil, nil, errors.NewConflictError("该历史对话缺少 AI 能力方案，请新建对话")
+		}
 		return nil, nil, errors.NewNotFoundError("Session not found")
 	}
 

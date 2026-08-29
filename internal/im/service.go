@@ -1625,8 +1625,15 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 	}
 
 	// 4. Get the WeKnora session
-	session, err := s.sessionService.GetSession(sessionCtx, channelSession.SessionID)
+	session, err := s.sessionService.GetRunnableSession(sessionCtx, channelSession.SessionID)
 	if err != nil {
+		if errors.Is(err, interfaces.ErrConversationPlanMissing) {
+			_ = adapter.SendReply(ctx, msg, &ReplyMessage{
+				Content: "该历史对话已失效，请新建对话后重试。",
+				IsFinal: true,
+			})
+			return nil
+		}
 		// The underlying session may have been deleted from the UI while the
 		// ChannelSession mapping still exists (GORM soft-delete does not trigger
 		// SQL ON DELETE CASCADE). Recover by soft-deleting the stale mapping and
@@ -1642,7 +1649,7 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 			if err != nil {
 				return fmt.Errorf("resolve session (retry): %w", err)
 			}
-			session, err = s.sessionService.GetSession(sessionCtx, channelSession.SessionID)
+			session, err = s.sessionService.GetRunnableSession(sessionCtx, channelSession.SessionID)
 			if err != nil {
 				return fmt.Errorf("get session (retry): %w", err)
 			}

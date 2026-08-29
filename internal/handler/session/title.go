@@ -6,6 +6,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
 )
 
@@ -46,8 +47,12 @@ func (h *Handler) GenerateTitle(c *gin.Context) {
 	// Get session from database. Title generation writes the session row, so use
 	// the strict owner scope: a tenant admin may read an API-key session but must
 	// not be able to (re)generate its title.
-	session, err := h.sessionService.GetOwnedSession(ctx, sessionID)
+	session, err := h.sessionService.GetRunnableSession(ctx, sessionID)
 	if err != nil {
+		if stderrors.Is(err, interfaces.ErrConversationPlanMissing) {
+			c.Error(errors.NewConflictError("该历史对话缺少 AI 能力方案，请新建对话"))
+			return
+		}
 		if stderrors.Is(err, errors.ErrSessionNotFound) {
 			logger.Warnf(ctx, "Session not found, ID: %s", sessionID)
 			c.Error(errors.NewNotFoundError(err.Error()))

@@ -19,6 +19,8 @@ type SessionService interface {
 	// (no Admin+ API-key fallback). Write/mutation endpoints must use this so a
 	// tenant admin cannot alter API-key sessions they can only read.
 	GetOwnedSession(ctx context.Context, id string) (*types.Session, error)
+	// GetRunnableSession rejects historical conversations that have no fixed AI capability plan.
+	GetRunnableSession(ctx context.Context, id string) (*types.Session, error)
 	// GetSessionByID loads a session by tenant and id without user scoping.
 	GetSessionByID(ctx context.Context, tenantID uint64, id string) (*types.Session, error)
 	// SetSessionOwnerID assigns sessions.user_id for the given session row.

@@ -422,6 +422,13 @@ func (h *EmbedChannelHandler) CreateEmbedSession(c *gin.Context) {
 	created, err := h.sessionService.CreateSession(ctx, createdSession)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
+		if errors.Is(err, interfaces.ErrAICapabilityUnavailable) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"error":   "ai_capability_unavailable",
+				"message": "AI 能力暂不可用，请稍后新建对话",
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create session"})
 		return
 	}

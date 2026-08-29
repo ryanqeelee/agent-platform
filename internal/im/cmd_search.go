@@ -2,6 +2,7 @@ package im
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -43,6 +44,12 @@ func (c *SearchCommand) Execute(ctx context.Context, cmdCtx *CommandContext, arg
 	}
 
 	query := strings.Join(args, " ")
+	if _, err := c.sessionService.GetRunnableSession(ctx, cmdCtx.Session.SessionID); err != nil {
+		if errors.Is(err, interfaces.ErrConversationPlanMissing) {
+			return &CommandResult{Content: "该历史对话已失效，请新建对话后重试。"}, nil
+		}
+		return nil, fmt.Errorf("get session: %w", err)
+	}
 
 	// Resolve which KBs to search, mirroring the logic in the QA pipeline's
 	// resolveKnowledgeBasesFromAgent so that /search covers the same scope.

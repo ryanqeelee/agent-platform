@@ -2,10 +2,10 @@
     <div class="aside_box" :class="{ 'aside_box--collapsed': uiStore.sidebarCollapsed }">
         <!-- 展开时：Logo + 搜索/折叠按钮同行 -->
         <div class="logo_row" v-if="!uiStore.sidebarCollapsed">
-            <div class="logo_box" @click="router.push('/platform/creatChat')" style="cursor: pointer;">
+            <button class="logo_box" type="button" @click="router.push('/home')" aria-label="环枢·零售智能体首页">
                 <img class="logo" src="@/assets/img/product-brand.svg" alt="环枢">
                 <sup v-if="isLiteEdition" class="lite-badge">Lite</sup>
-            </div>
+            </button>
             <div class="logo_actions">
                 <t-tooltip placement="bottom">
                     <template #content>
@@ -1298,7 +1298,17 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         align-items: center;
         flex: 1;
         min-width: 0;
+        padding: 0;
         overflow: hidden;
+        border: 0;
+        background: transparent;
+        cursor: pointer;
+
+        &:focus-visible {
+            outline: 2px solid var(--td-brand-color);
+            outline-offset: 2px;
+            border-radius: 6px;
+        }
 
         .logo {
             width: 168px;

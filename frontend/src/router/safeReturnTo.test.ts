@@ -34,5 +34,5 @@ test('postLoginDestination restores a verified OIDC enterprise deep link', () =>
 
 test('postLoginDestination falls back after an invalid OIDC return target', () => {
   assert.equal(postLoginDestination(router, 'https://evil.example', true), DEFAULT_EMPLOYEE_WORKSPACE_PATH)
-  assert.equal(DEFAULT_EMPLOYEE_WORKSPACE_PATH, '/platform/creatChat')
+  assert.equal(DEFAULT_EMPLOYEE_WORKSPACE_PATH, '/home')
 })

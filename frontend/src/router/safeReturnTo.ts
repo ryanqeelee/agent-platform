@@ -1,6 +1,6 @@
 import type { Router } from 'vue-router'
 
-export const DEFAULT_EMPLOYEE_WORKSPACE_PATH = '/platform/creatChat'
+export const DEFAULT_EMPLOYEE_WORKSPACE_PATH = '/home'
 
 /**
  * Accept only a route the current SPA can resolve inside the employee product.

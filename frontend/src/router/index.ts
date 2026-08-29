@@ -196,7 +196,7 @@ const router = createRouter({
               }
               localStorage.setItem('retail_ai_app_auth_token', response.access_token)
               document.cookie = `retail_ai_app_auth_token=${response.access_token}; Path=/app; Max-Age=900; SameSite=Lax`
-              window.location.assign('/app/')
+              window.location.assign(handoffPrompt ? '/app/?data_workspace=data' : '/app/')
               return false
             } catch {
               return '/platform/creatChat'

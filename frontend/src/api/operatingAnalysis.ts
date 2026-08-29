@@ -18,8 +18,22 @@ export interface OperatingAnalysisExchangeV1 {
   expires_in: number
 }
 
+export interface OperatingAnalysisRevocationHistoryV1 {
+  schema: 'OperatingAnalysisRevocationHistoryV1'
+  availability: OperatingAnalysisAvailabilityV1['availability']
+  recentWork?: {
+    sessionId: string
+    title: string
+    updatedAt: string
+  }
+}
+
 export async function getOperatingAnalysisAvailability(): Promise<OperatingAnalysisAvailabilityV1> {
   return (await get('/api/auth/operating-analysis-availability')) as unknown as OperatingAnalysisAvailabilityV1
+}
+
+export async function getOperatingAnalysisHistory(): Promise<OperatingAnalysisRevocationHistoryV1> {
+  return (await get('/api/auth/operating-analysis-history')) as unknown as OperatingAnalysisRevocationHistoryV1
 }
 
 export async function exchangeOperatingAnalysis(): Promise<OperatingAnalysisExchangeV1> {

@@ -51,6 +51,7 @@ type RouterParams struct {
 	KnowledgeGovernanceHandler   *handler.KnowledgeGovernanceHandler
 	TenantInvitationHandler      *handler.TenantInvitationHandler
 	AuditLogHandler              *handler.AuditLogHandler
+	EnterpriseAdminHandler       *handler.EnterpriseAdministrationHandler
 	AuditLogService              interfaces.AuditLogService
 	ChunkHandler                 *handler.ChunkHandler
 	SessionHandler               *session.Handler
@@ -231,6 +232,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterCapabilityPlanRoutes(v1, params.AICapabilityPlanHandler, rbacGuards)
 		RegisterKnowledgeGovernanceRoutes(v1, params.KnowledgeGovernanceHandler, rbacGuards)
 		RegisterMyInvitationRoutes(v1, params.TenantInvitationHandler)
+		RegisterEnterpriseAdministrationRoutes(v1, params.EnterpriseAdminHandler, rbacGuards)
 		RegisterKnowledgeBaseRoutes(v1, params.KBHandler, rbacGuards)
 		RegisterKnowledgeBaseActivityRoutes(v1, params.AuditLogHandler, rbacGuards)
 		// KB-scoped image proxy: lets tenants render images embedded in

@@ -130,12 +130,11 @@ const router = createRouter({
           meta: { requiresInit: true, requiresAuth: true }
         },
         {
-          // Canonical enterprise-administration entry. The real record (rather
-          // than a static redirect) makes every navigation re-check the server
-          // projection before reusing the existing Settings members UI.
+          // Canonical enterprise-administration entry. The session projection
+          // remains the surface gate; the page resolves its read-only queue.
           path: 'enterprise',
           name: 'enterpriseAdministration',
-          component: { render: () => null },
+          component: () => import('../views/enterprise/EnterpriseAdministrationHome.vue'),
           meta: { requiresInit: true, requiresAuth: true },
           beforeEnter: async (to) => {
             try {
@@ -143,10 +142,7 @@ const router = createRouter({
               if (!projection.surfaces.enterpriseAdministration) {
                 return DEFAULT_EMPLOYEE_WORKSPACE_PATH
               }
-              return {
-                path: '/platform/settings',
-                query: { section: to.query.section === 'tenant' ? 'tenant' : 'members' },
-              }
+              return true
             } catch (error) {
               if (error instanceof EnterpriseSessionRequestError && error.status === 401) {
                 return loginDestination(router, to.fullPath)

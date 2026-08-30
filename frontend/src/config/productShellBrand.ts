@@ -187,3 +187,130 @@ const homeCopyByLocale: Record<string, RetailAgentHomeCopy> = {
 export function getRetailAgentHomeCopy(locale: string): RetailAgentHomeCopy {
   return homeCopyByLocale[locale] || homeCopyByLocale['zh-CN']
 }
+
+export type EnterpriseAdministrationCopy = {
+  eyebrow: string
+  title: string
+  description: string
+  serviceLevel: string
+  serviceStatus: string
+  members: string
+  storage: string
+  security: string
+  healthy: string
+  attention: string
+  unavailable: string
+  unknown: string
+  queueTitle: string
+  queueDescription: string
+  queueEmpty: string
+  serviceHealthTitle: string
+  serviceHealthDescription: string
+  serviceHealthAction: string
+  retry: string
+  loadFailed: string
+  itemCopy: Record<string, { title: string; description: string; action: string }>
+}
+
+const enterpriseAdministrationCopyByLocale: Record<string, EnterpriseAdministrationCopy> = {
+  'zh-CN': {
+    eyebrow: '企业管理',
+    title: '今天需要关注的企业事项',
+    description: '集中查看成员、知识与服务状态；具体模型和基础设施由平台统一管理。',
+    serviceLevel: '服务级别',
+    serviceStatus: '服务状态',
+    members: '活跃成员',
+    storage: '知识存储',
+    security: '安全动态',
+    healthy: '运行正常',
+    attention: '需要关注',
+    unavailable: '暂不可用',
+    unknown: '待确认',
+    queueTitle: '待处理事项',
+    queueDescription: '按影响程度排列，只展示当前角色可以处理的事项。',
+    queueEmpty: '当前没有需要处理的事项',
+    serviceHealthTitle: '平台服务支持',
+    serviceHealthDescription: '企业侧仅展示可用状态。服务能力、模型与基础设施由环枢平台统一维护。',
+    serviceHealthAction: '联系平台方',
+    retry: '重新加载',
+    loadFailed: '企业管理信息暂时无法加载',
+    itemCopy: {
+      license_or_capability_attention: { title: '服务能力需要处理', description: '当前企业服务配置需要平台方检查。', action: '查看服务状态' },
+      edge_node_offline: { title: '边缘节点连接离线', description: '部分企业侧边缘节点当前未连接平台。', action: '查看服务状态' },
+      operating_analysis_access_gap: { title: '经营分析授权待完善', description: '部分活跃成员尚未获得经营分析权限。', action: '管理成员' },
+      pending_invitations: { title: '成员邀请待接受', description: '已发送的成员邀请尚未完成。', action: '管理成员' },
+      knowledge_processing_failed: { title: '知识内容处理失败', description: '部分知识内容需要重新处理。', action: '查看知识库' },
+      recent_high_risk_operations: { title: '近期重要权限变更', description: '最近 7 天发生了需要复核的重要操作。', action: '查看审计记录' },
+    },
+  },
+  'en-US': {
+    eyebrow: 'Enterprise administration',
+    title: 'What needs attention today',
+    description: 'Review members, knowledge, and service status in one place. Models and infrastructure are managed by the platform.',
+    serviceLevel: 'Service level',
+    serviceStatus: 'Service status',
+    members: 'Active members',
+    storage: 'Knowledge storage',
+    security: 'Security activity',
+    healthy: 'Healthy',
+    attention: 'Needs attention',
+    unavailable: 'Unavailable',
+    unknown: 'To be confirmed',
+    queueTitle: 'Action queue',
+    queueDescription: 'Sorted by impact and limited to items your role can handle.',
+    queueEmpty: 'Nothing needs attention right now',
+    serviceHealthTitle: 'Platform support',
+    serviceHealthDescription: 'Enterprise users see availability only. The HuanShu platform manages service capabilities, models, and infrastructure.',
+    serviceHealthAction: 'Contact platform support',
+    retry: 'Try again',
+    loadFailed: 'Enterprise administration is temporarily unavailable',
+    itemCopy: {
+      license_or_capability_attention: { title: 'Service capability needs attention', description: 'The platform needs to review this enterprise service configuration.', action: 'View service status' },
+      edge_node_offline: { title: 'Edge node offline', description: 'One or more enterprise edge nodes are not connected to the platform.', action: 'View service status' },
+      operating_analysis_access_gap: { title: 'Operating analysis access incomplete', description: 'Some active members do not yet have operating analysis access.', action: 'Manage members' },
+      pending_invitations: { title: 'Member invitations pending', description: 'Sent invitations have not yet been accepted.', action: 'Manage members' },
+      knowledge_processing_failed: { title: 'Knowledge processing failed', description: 'Some knowledge content needs to be processed again.', action: 'Open knowledge bases' },
+      recent_high_risk_operations: { title: 'Recent important permission changes', description: 'Important operations from the last 7 days should be reviewed.', action: 'View audit log' },
+    },
+  },
+  'ru-RU': {
+    eyebrow: 'Управление предприятием',
+    title: 'Что требует внимания сегодня',
+    description: 'Участники, знания и состояние сервиса в одном месте. Модели и инфраструктуру обслуживает платформа.',
+    serviceLevel: 'Уровень сервиса', serviceStatus: 'Состояние сервиса', members: 'Активные участники', storage: 'Хранилище знаний', security: 'События безопасности',
+    healthy: 'Работает нормально', attention: 'Требует внимания', unavailable: 'Недоступно', unknown: 'Нужно уточнить',
+    queueTitle: 'Задачи', queueDescription: 'Сортировка по влиянию; показаны только доступные вашей роли задачи.', queueEmpty: 'Сейчас нет задач, требующих внимания',
+    serviceHealthTitle: 'Поддержка платформы', serviceHealthDescription: 'Предприятие видит только доступность. Возможности, модели и инфраструктуру обслуживает платформа HuanShu.', serviceHealthAction: 'Связаться с платформой',
+    retry: 'Повторить', loadFailed: 'Управление предприятием временно недоступно',
+    itemCopy: {
+      license_or_capability_attention: { title: 'Требуется проверка сервиса', description: 'Платформе нужно проверить конфигурацию сервиса предприятия.', action: 'Состояние сервиса' },
+      edge_node_offline: { title: 'Пограничный узел не в сети', description: 'Один или несколько пограничных узлов не подключены к платформе.', action: 'Состояние сервиса' },
+      operating_analysis_access_gap: { title: 'Не всем выдан доступ к анализу', description: 'У части активных участников нет доступа к операционному анализу.', action: 'Управлять участниками' },
+      pending_invitations: { title: 'Ожидающие приглашения', description: 'Отправленные приглашения еще не приняты.', action: 'Управлять участниками' },
+      knowledge_processing_failed: { title: 'Ошибка обработки знаний', description: 'Некоторые материалы нужно обработать повторно.', action: 'Открыть базы знаний' },
+      recent_high_risk_operations: { title: 'Важные изменения прав', description: 'Следует проверить важные операции за последние 7 дней.', action: 'Открыть аудит' },
+    },
+  },
+  'ko-KR': {
+    eyebrow: '기업 관리',
+    title: '오늘 확인할 기업 운영 항목',
+    description: '구성원, 지식, 서비스 상태를 한곳에서 확인합니다. 모델과 인프라는 플랫폼에서 통합 관리합니다.',
+    serviceLevel: '서비스 수준', serviceStatus: '서비스 상태', members: '활성 구성원', storage: '지식 저장공간', security: '보안 활동',
+    healthy: '정상 운영', attention: '확인 필요', unavailable: '사용 불가', unknown: '확인 대기',
+    queueTitle: '처리할 항목', queueDescription: '영향도 순으로 현재 역할이 처리할 수 있는 항목만 표시합니다.', queueEmpty: '현재 처리할 항목이 없습니다',
+    serviceHealthTitle: '플랫폼 지원', serviceHealthDescription: '기업에는 가용 상태만 표시합니다. 서비스 기능, 모델, 인프라는 HuanShu 플랫폼에서 관리합니다.', serviceHealthAction: '플랫폼에 문의',
+    retry: '다시 불러오기', loadFailed: '기업 관리 정보를 일시적으로 불러올 수 없습니다',
+    itemCopy: {
+      license_or_capability_attention: { title: '서비스 기능 확인 필요', description: '플랫폼에서 기업 서비스 구성을 확인해야 합니다.', action: '서비스 상태 보기' },
+      edge_node_offline: { title: '에지 노드 오프라인', description: '일부 기업 에지 노드가 플랫폼에 연결되어 있지 않습니다.', action: '서비스 상태 보기' },
+      operating_analysis_access_gap: { title: '운영 분석 권한 미완료', description: '일부 활성 구성원에게 운영 분석 권한이 없습니다.', action: '구성원 관리' },
+      pending_invitations: { title: '구성원 초대 대기', description: '발송한 초대가 아직 수락되지 않았습니다.', action: '구성원 관리' },
+      knowledge_processing_failed: { title: '지식 처리 실패', description: '일부 지식 콘텐츠를 다시 처리해야 합니다.', action: '지식 베이스 보기' },
+      recent_high_risk_operations: { title: '최근 중요 권한 변경', description: '최근 7일의 중요 작업을 검토해야 합니다.', action: '감사 기록 보기' },
+    },
+  },
+}
+
+export function getEnterpriseAdministrationCopy(locale: string): EnterpriseAdministrationCopy {
+  return enterpriseAdministrationCopyByLocale[locale] || enterpriseAdministrationCopyByLocale['zh-CN']
+}

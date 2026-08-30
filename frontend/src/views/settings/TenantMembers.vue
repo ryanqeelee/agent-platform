@@ -531,6 +531,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { AUDIT_ACTION_I18N_ROOTS } from '@/i18n/auditActionRegistry'
@@ -567,6 +568,7 @@ import { listBusinessRoles, updateMemberBusinessRoles, type BusinessRole } from 
 
 const { t, tm, locale } = useI18n()
 const authStore = useAuthStore()
+const route = useRoute()
 
 /** 悬停层限制在视口内，内容由内部滚动 */
 const permissionsPopupInnerStyle = {
@@ -1312,6 +1314,14 @@ function openAuditDrawer() {
     loadAuditLog(true)
   }
 }
+
+watch(
+  () => route.query.audit,
+  (audit) => {
+    if (audit === '1' && canViewAudit.value) openAuditDrawer()
+  },
+  { immediate: true },
+)
 
 watch(
   auditDrawerVisible,

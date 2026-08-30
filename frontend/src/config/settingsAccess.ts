@@ -25,12 +25,14 @@ export const SETTINGS_SECTION_MIN_ROLE: Record<string, SettingsRoleKey> = {
  * not govern the APIs: server route guards are authoritative.
  */
 export const EMPLOYEE_SURFACE_MIN_ROLE = {
+  enterpriseAdministration: 'contributor',
   knowledgeBases: 'contributor',
   agents: 'admin',
   organizations: 'admin',
 } as const satisfies Record<string, SettingsRoleKey>
 
 export const employeeSurfaceMinRoleForPath = (path: string): SettingsRoleKey | undefined => {
+  if (path === '/platform/enterprise') return EMPLOYEE_SURFACE_MIN_ROLE.enterpriseAdministration
   if (path === '/platform/agents') return EMPLOYEE_SURFACE_MIN_ROLE.agents
   if (path === '/platform/organizations') return EMPLOYEE_SURFACE_MIN_ROLE.organizations
   if (path === '/platform/knowledge-bases') {

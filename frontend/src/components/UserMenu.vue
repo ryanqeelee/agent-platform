@@ -83,6 +83,10 @@
           <t-icon name="user-circle" class="menu-icon" />
           <span>{{ $t('settings.workspaceSettings') }}</span>
         </div>
+        <div v-if="canEnterEnterpriseAdministration" class="menu-item" @click="handleEnterpriseAdministration">
+          <t-icon name="dashboard" class="menu-icon" />
+          <span>{{ enterpriseAdministrationCopy.eyebrow }}</span>
+        </div>
         <!-- “管理”类快捷入口只对真正具备写权限的人展示。 -->
         <div v-if="canManageMembers" class="menu-item" @click="handleQuickNav('members')">
           <t-icon name="usergroup" class="menu-icon" />
@@ -193,8 +197,9 @@ import { useRoleLabel, useHomeTenant } from '@/composables/useRoleLabel'
 import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom'
 import { openNewUserGuide } from '@/config/contextualGuides'
 import { SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE } from '@/config/settingsAccess'
+import { getEnterpriseAdministrationCopy } from '@/config/productShellBrand'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 const router = useRouter()
 const uiStore = useUIStore()
@@ -230,6 +235,10 @@ const canManageMembers = computed(() =>
   authStore.effectiveCrossTenantAccess || authStore.hasRole(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.members),
 )
 const canManageModels = computed(() => authStore.isSystemAdmin)
+const canEnterEnterpriseAdministration = computed(() =>
+  !authStore.isLiteMode && authStore.hasRole('contributor'),
+)
+const enterpriseAdministrationCopy = computed(() => getEnterpriseAdministrationCopy(locale.value))
 
 const menuRef = ref<HTMLElement>()
 const tenantMenuItemRef = ref<HTMLElement>()
@@ -271,6 +280,11 @@ const handleSettings = () => {
   menuVisible.value = false
   uiStore.openSettings()
   router.push('/platform/settings')
+}
+
+const handleEnterpriseAdministration = () => {
+  menuVisible.value = false
+  router.push('/platform/enterprise')
 }
 
 // Open the platform administration group inside the standard Settings

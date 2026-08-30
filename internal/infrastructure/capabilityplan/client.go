@@ -1,6 +1,7 @@
 package capabilityplan
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -38,6 +39,10 @@ func NewPlatformRetrievalProcessingSettingsResolverFromEnv() interfaces.Platform
 }
 
 func NewAssistantScenarioCapabilityResolverFromEnv() interfaces.AssistantScenarioCapabilityResolver {
+	return newClientFromEnv()
+}
+
+func NewEnterpriseAdministrationQueueResolverFromEnv() interfaces.EnterpriseAdministrationQueueResolver {
 	return newClientFromEnv()
 }
 
@@ -152,7 +157,56 @@ func (c *Client) ResolveAssistantScenarioCapabilities(
 	}, nil
 }
 
+func (c *Client) ResolveEnterpriseAdministrationQueue(
+	ctx context.Context,
+	tenantID uint64,
+	facts types.EnterpriseAdministrationFacts,
+) (*types.EnterpriseAdministrationPlatformProjection, error) {
+	var projection types.EnterpriseAdministrationPlatformProjection
+	if err := c.post(ctx, tenantID, "enterprise-administration-queue", facts, &projection); err != nil ||
+		projection.ContractVersion != types.EnterpriseAdministrationQueueV1 ||
+		projection.Scope.Kind != "enterprise_assigned" ||
+		projection.Scope.ProductBaseTenantID != strconv.FormatUint(tenantID, 10) ||
+		strings.TrimSpace(projection.AsOf) == "" {
+		return nil, interfaces.ErrAICapabilityUnavailable
+	}
+	for _, item := range projection.Items {
+		if !validEnterpriseAdministrationItem(item) {
+			return nil, interfaces.ErrAICapabilityUnavailable
+		}
+	}
+	return &projection, nil
+}
+
+func validEnterpriseAdministrationItem(item types.EnterpriseAdministrationItem) bool {
+	validCode := item.Code == "license_or_capability_attention" ||
+		item.Code == "edge_node_offline" ||
+		item.Code == "operating_analysis_access_gap"
+	validPriority := item.Priority == "critical" || item.Priority == "high" || item.Priority == "medium"
+	validTarget := item.Target == "members" || item.Target == "service_health"
+	return validCode && validPriority && validTarget && item.Count > 0
+}
+
 func (c *Client) get(ctx context.Context, tenantID uint64, route string, target any) error {
+	return c.request(ctx, http.MethodGet, tenantID, route, nil, target)
+}
+
+func (c *Client) post(ctx context.Context, tenantID uint64, route string, body any, target any) error {
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return interfaces.ErrAICapabilityUnavailable
+	}
+	return c.request(ctx, http.MethodPost, tenantID, route, payload, target)
+}
+
+func (c *Client) request(
+	ctx context.Context,
+	method string,
+	tenantID uint64,
+	route string,
+	body []byte,
+	target any,
+) error {
 	if tenantID == 0 || c.baseURL == "" || c.token == "" {
 		return interfaces.ErrAICapabilityUnavailable
 	}
@@ -162,12 +216,15 @@ func (c *Client) get(ctx context.Context, tenantID uint64, route string, target 
 		url.PathEscape(strconv.FormatUint(tenantID, 10)),
 		route,
 	)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return interfaces.ErrAICapabilityUnavailable
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	res, err := c.http.Do(req)
 	if err != nil {
 		return interfaces.ErrAICapabilityUnavailable

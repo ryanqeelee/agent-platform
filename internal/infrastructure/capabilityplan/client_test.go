@@ -2,12 +2,14 @@ package capabilityplan
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -203,4 +205,59 @@ func TestRingxunAssistantScenarioCapabilitiesIntegration(t *testing.T) {
 	require.Equal(t, true, settings.Capabilities.ExternalSearch)
 	require.Equal(t, false, settings.Capabilities.MCP)
 	require.Equal(t, true, settings.Capabilities.Tools)
+}
+
+func TestRingxunEnterpriseAdministrationQueueIntegration(t *testing.T) {
+	baseURL := os.Getenv("RINGXUN_CAPABILITY_PLAN_INTEGRATION_BASE_URL")
+	if baseURL == "" {
+		t.Skip("requires the Ringxun capability-plan integration fixture")
+	}
+	client := &Client{
+		baseURL: baseURL,
+		token:   os.Getenv("RINGXUN_CAPABILITY_PLAN_INTEGRATION_SERVICE_TOKEN"),
+		http:    &http.Client{Timeout: time.Second},
+	}
+	projection, err := client.ResolveEnterpriseAdministrationQueue(
+		context.Background(),
+		7,
+		types.EnterpriseAdministrationFacts{
+			Role:                                "admin",
+			ActiveMemberCount:                   3,
+			OperatingAnalysisMissingAccessCount: 2,
+		},
+	)
+	require.NoError(t, err)
+	require.Equal(t, "enterprise_assigned", projection.Scope.Kind)
+	require.Equal(t, "7", projection.Scope.ProductBaseTenantID)
+	require.Equal(t, "integration", projection.Summary.ServiceLevel)
+	require.Equal(t, 20, *projection.Summary.MemberQuota)
+	require.Equal(t, "operating_analysis_access_gap", projection.Items[0].Code)
+}
+
+func TestClientResolvesEnterpriseAdministrationQueue(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/api/internal/product-base/tenants/7/enterprise-administration-queue", r.URL.Path)
+		require.Equal(t, "Bearer service-token", r.Header.Get("Authorization"))
+		var facts types.EnterpriseAdministrationFacts
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&facts))
+		require.Equal(t, 3, facts.ActiveMemberCount)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"contract_version":"EnterpriseAdministrationQueueV1",
+			"scope":{"kind":"enterprise_assigned","product_base_tenant_id":"7"},
+			"as_of":"2026-08-30T00:00:00Z",
+			"summary":{"service_level":"retail_agent_enterprise","status":"active","member_quota":20,"health":"healthy"},
+			"items":[{"code":"operating_analysis_access_gap","priority":"high","count":2,"target":"members"}]
+		}`))
+	}))
+	defer server.Close()
+
+	client := &Client{baseURL: server.URL, token: "service-token", http: &http.Client{Timeout: time.Second}}
+	projection, err := client.ResolveEnterpriseAdministrationQueue(context.Background(), 7, types.EnterpriseAdministrationFacts{
+		Role: "admin", ActiveMemberCount: 3, OperatingAnalysisMissingAccessCount: 2,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 20, *projection.Summary.MemberQuota)
+	require.Equal(t, "operating_analysis_access_gap", projection.Items[0].Code)
 }

@@ -18,3 +18,8 @@ type AICapabilityPlanResolution struct {
 	Source          string                           `json:"source"`
 	Enterprise      EnterpriseAICapabilityProjection `json:"enterprise"`
 }
+
+type KnowledgeProcessingPlanPin struct {
+	ContractVersion string `json:"contract_version"`
+	PlanVersionID   string `json:"plan_version_id"`
+}

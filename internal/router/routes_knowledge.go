@@ -186,8 +186,8 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 	kb := g.apiKeyGroup(kbgrp, apiKeyRetrieve(apiKeyFullAccess()))
 	kbManagement := kb.With(apiKeyManageKnowledgeBases(apiKeyFullAccess()))
 	{
-		// 创建知识库 — JWT Admin+；API key 需 manage_kbs 或 full-access。
-		kbManagement.POST("", g.Admin(), handler.CreateKnowledgeBase)
+		// 创建知识库 — JWT Knowledge Administrator+；API key 需 manage_kbs 或 full-access。
+		kbManagement.POST("", g.Contributor(), handler.CreateKnowledgeBase)
 		// 获取知识库列表 — Viewer+ for JWT callers; retrieve-capable API keys pass via the gate.
 		kb.GET("", g.Viewer(), handler.ListKnowledgeBases)
 		// 获取知识库详情 — Viewer+ 且对 KB 有 read 权限

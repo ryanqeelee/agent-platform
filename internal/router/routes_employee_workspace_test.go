@@ -129,3 +129,23 @@ func TestTenantCreatorAllowsTenantlessOnboarding(t *testing.T) {
 		t.Fatalf("tenantless onboarding status=%d called=%t, want status=%d called=true", w.Code, called, http.StatusCreated)
 	}
 }
+
+func TestKnowledgeAdministratorReachesKnowledgeBaseCreate(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	enforce := true
+	g := &rbacGuards{cfg: &config.Config{Tenant: &config.TenantConfig{EnableRBAC: &enforce}}}
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		ctx := context.WithValue(c.Request.Context(), types.TenantRoleContextKey, types.TenantRoleContributor)
+		ctx = context.WithValue(ctx, types.TenantIDContextKey, uint64(1))
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	})
+	RegisterKnowledgeBaseRoutes(r.Group("/api/v1"), &handler.KnowledgeBaseHandler{}, g)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/knowledge-bases", nil))
+	if w.Code == http.StatusForbidden {
+		t.Fatalf("knowledge administrator create route remained forbidden")
+	}
+}

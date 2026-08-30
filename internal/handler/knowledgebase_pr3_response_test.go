@@ -117,6 +117,17 @@ func TestCreateKB_GenericErrorStillFallsThroughTo500(t *testing.T) {
 	}
 }
 
+func TestCreateKB_PlanUnavailableReturnsServiceUnavailable(t *testing.T) {
+	svc := &stubKBCreateService{createErr: interfaces.ErrAICapabilityUnavailable}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/knowledge-bases",
+		strings.NewReader(`{"name":"kb"}`))
+	req.Header.Set("Content-Type", "application/json")
+	newCreateKBRouter(svc).ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
+
 type errSentinel string
 
 func (e errSentinel) Error() string { return string(e) }

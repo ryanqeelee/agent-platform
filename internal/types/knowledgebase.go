@@ -69,6 +69,9 @@ type KnowledgeBase struct {
 	Description string `yaml:"description"             json:"description"`
 	// Workspace ID
 	TenantID uint64 `yaml:"tenant_id"               json:"tenant_id"`
+	// AI capability plan version used to materialize this knowledge base's
+	// processing configuration. It is internal and immutable after creation.
+	AICapabilityPlanVersionID string `yaml:"-" json:"-" gorm:"column:ai_capability_plan_version_id;type:varchar(128);<-:create"`
 	// CreatorID records the user ID of whoever originally created the KB.
 	// Used by the workspace-level RBAC middleware to let Contributors edit
 	// their own KBs without granting them access to everyone else's.

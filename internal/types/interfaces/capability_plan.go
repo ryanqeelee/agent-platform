@@ -15,3 +15,7 @@ var (
 type AICapabilityPlanResolver interface {
 	Resolve(ctx context.Context, tenantID uint64) (*types.AICapabilityPlanResolution, error)
 }
+
+type KnowledgeProcessingPlanResolver interface {
+	ResolveKnowledgeProcessingPlan(ctx context.Context, tenantID uint64) (*types.KnowledgeProcessingPlanPin, error)
+}

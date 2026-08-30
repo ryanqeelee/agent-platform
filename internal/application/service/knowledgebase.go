@@ -49,6 +49,7 @@ type knowledgeBaseService struct {
 	dsScheduler     *datasource.Scheduler
 	audit           interfaces.AuditLogService
 	governance      interfaces.KnowledgeGovernanceService
+	planResolver    interfaces.KnowledgeProcessingPlanResolver
 }
 
 // NewKnowledgeBaseService creates a new knowledge base service
@@ -72,6 +73,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	dsScheduler *datasource.Scheduler,
 	audit interfaces.AuditLogService,
 	governance interfaces.KnowledgeGovernanceService,
+	planResolver interfaces.KnowledgeProcessingPlanResolver,
 ) interfaces.KnowledgeBaseService {
 	return &knowledgeBaseService{
 		repo:            repo,
@@ -94,6 +96,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 		dsScheduler:     dsScheduler,
 		audit:           audit,
 		governance:      governance,
+		planResolver:    planResolver,
 	}
 }
 
@@ -131,6 +134,13 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	kb.EnsureDefaults()
 	_, authenticatedPrincipal := types.UserIDFromContext(ctx)
 	if authenticatedPrincipal && !types.IsSystemAdminFromContext(ctx) {
+		if _, apiKeyPrincipal := types.TenantAPIKeyScopeFromContext(ctx); !apiKeyPrincipal {
+			pin, err := s.planResolver.ResolveKnowledgeProcessingPlan(ctx, kb.TenantID)
+			if err != nil || pin == nil || strings.TrimSpace(pin.PlanVersionID) == "" {
+				return nil, interfaces.ErrAICapabilityUnavailable
+			}
+			kb.AICapabilityPlanVersionID = pin.PlanVersionID
+		}
 		if err := s.applyPlatformModelDefaults(ctx, kb); err != nil {
 			return nil, err
 		}

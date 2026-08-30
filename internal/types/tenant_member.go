@@ -23,8 +23,8 @@ const (
 	// delete the tenant, change Owners, or configure platform infrastructure.
 	TenantRoleAdmin TenantRole = "admin"
 	// TenantRoleContributor is presented as Knowledge Administrator. It can
-	// maintain content and access grants on existing knowledge bases, but does
-	// not create KBs or Agents or gain member, license, device, analysis, model,
+	// create knowledge bases and maintain their content and access grants, but
+	// does not create Agents or gain member, license, device, analysis, model,
 	// vector-store, or storage administration.
 	TenantRoleContributor TenantRole = "contributor"
 	// TenantRoleViewer is presented as Employee and consumes only resources

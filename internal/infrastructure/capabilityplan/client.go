@@ -22,6 +22,14 @@ type Client struct {
 }
 
 func NewClientFromEnv() interfaces.AICapabilityPlanResolver {
+	return newClientFromEnv()
+}
+
+func NewKnowledgeProcessingPlanResolverFromEnv() interfaces.KnowledgeProcessingPlanResolver {
+	return newClientFromEnv()
+}
+
+func newClientFromEnv() *Client {
 	return &Client{
 		baseURL: strings.TrimRight(strings.TrimSpace(os.Getenv("RINGXUN_CAPABILITY_PLAN_BASE_URL")), "/"),
 		token:   strings.TrimSpace(os.Getenv("RINGXUN_CAPABILITY_PLAN_SERVICE_TOKEN")),
@@ -29,34 +37,27 @@ func NewClientFromEnv() interfaces.AICapabilityPlanResolver {
 	}
 }
 
+func (c *Client) ResolveKnowledgeProcessingPlan(
+	ctx context.Context,
+	tenantID uint64,
+) (*types.KnowledgeProcessingPlanPin, error) {
+	var pin types.KnowledgeProcessingPlanPin
+	if err := c.get(ctx, tenantID, "knowledge-processing-plan-pin", &pin); err != nil ||
+		pin.ContractVersion != "KnowledgeProcessingPlanPinV1" ||
+		strings.TrimSpace(pin.PlanVersionID) == "" ||
+		len(pin.PlanVersionID) > 128 ||
+		pin.PlanVersionID != strings.TrimSpace(pin.PlanVersionID) {
+		return nil, interfaces.ErrAICapabilityUnavailable
+	}
+	return &pin, nil
+}
+
 func (c *Client) Resolve(ctx context.Context, tenantID uint64) (*types.AICapabilityPlanResolution, error) {
-	if tenantID == 0 || c.baseURL == "" || c.token == "" {
-		return nil, interfaces.ErrAICapabilityUnavailable
-	}
-	endpoint := fmt.Sprintf(
-		"%s/api/internal/product-base/tenants/%s/ai-capability-plan",
-		c.baseURL,
-		url.PathEscape(strconv.FormatUint(tenantID, 10)),
-	)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, interfaces.ErrAICapabilityUnavailable
-	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Accept", "application/json")
-	res, err := c.http.Do(req)
-	if err != nil {
-		return nil, interfaces.ErrAICapabilityUnavailable
-	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		return nil, interfaces.ErrAICapabilityUnavailable
-	}
 	var resolution types.AICapabilityPlanResolution
-	decoder := json.NewDecoder(res.Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&resolution); err != nil ||
-		resolution.ContractVersion != "AICapabilityPlanV1" ||
+	if err := c.get(ctx, tenantID, "ai-capability-plan", &resolution); err != nil {
+		return nil, interfaces.ErrAICapabilityUnavailable
+	}
+	if resolution.ContractVersion != "AICapabilityPlanV1" ||
 		strings.TrimSpace(resolution.PlanVersionID) == "" ||
 		len(resolution.PlanVersionID) > 128 ||
 		resolution.PlanVersionID != strings.TrimSpace(resolution.PlanVersionID) ||
@@ -67,4 +68,36 @@ func (c *Client) Resolve(ctx context.Context, tenantID uint64) (*types.AICapabil
 		return nil, interfaces.ErrAICapabilityUnavailable
 	}
 	return &resolution, nil
+}
+
+func (c *Client) get(ctx context.Context, tenantID uint64, route string, target any) error {
+	if tenantID == 0 || c.baseURL == "" || c.token == "" {
+		return interfaces.ErrAICapabilityUnavailable
+	}
+	endpoint := fmt.Sprintf(
+		"%s/api/internal/product-base/tenants/%s/%s",
+		c.baseURL,
+		url.PathEscape(strconv.FormatUint(tenantID, 10)),
+		route,
+	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return interfaces.ErrAICapabilityUnavailable
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/json")
+	res, err := c.http.Do(req)
+	if err != nil {
+		return interfaces.ErrAICapabilityUnavailable
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return interfaces.ErrAICapabilityUnavailable
+	}
+	decoder := json.NewDecoder(res.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return interfaces.ErrAICapabilityUnavailable
+	}
+	return nil
 }

@@ -8,7 +8,7 @@
         <div class="header-title" style="--wails-draggable: drag">
           <div class="title-row" style="--wails-draggable: drag">
             <h2 style="--wails-draggable: drag">{{ $t('knowledgeBase.title') }}</h2>
-            <t-tooltip v-if="authStore.hasRole('admin')" :content="$t('knowledgeList.create')" placement="bottom">
+            <t-tooltip v-if="authStore.hasRole('contributor')" :content="$t('knowledgeList.create')" placement="bottom">
               <t-button variant="text" theme="default" size="small" class="header-action-btn"
                 data-guide="kb-list-create" style="--wails-draggable: no-drag" @click="handleCreateKnowledgeBase">
                 <template #icon><t-icon name="folder-add" size="16px" /></template>
@@ -635,7 +635,7 @@
           <img class="empty-img" src="@/assets/img/upload.svg" alt="">
           <span class="empty-txt">{{ $t('knowledgeList.empty.title') }}</span>
           <span class="empty-desc">{{ $t('knowledgeList.empty.description') }}</span>
-          <t-button v-if="authStore.hasRole('admin')" class="kb-create-btn empty-state-btn"
+          <t-button v-if="authStore.hasRole('contributor')" class="kb-create-btn empty-state-btn"
             data-guide="kb-list-create" @click="handleCreateKnowledgeBase">
             <template #icon><t-icon name="folder-add" /></template>
             {{ $t('knowledgeList.create') }}
@@ -663,7 +663,7 @@
           <img class="empty-img" src="@/assets/img/upload.svg" alt="">
           <span class="empty-txt">{{ $t('knowledgeList.empty.title') }}</span>
           <span class="empty-desc">{{ $t('knowledgeList.empty.description') }}</span>
-          <t-button v-if="authStore.hasRole('admin')" class="kb-create-btn empty-state-btn"
+          <t-button v-if="authStore.hasRole('contributor')" class="kb-create-btn empty-state-btn"
             data-guide="kb-list-create" @click="handleCreateKnowledgeBase">
             <template #icon><t-icon name="folder-add" /></template>
             {{ $t('knowledgeList.create') }}
@@ -799,7 +799,6 @@ import ResourceOriginBadge from '@/components/ResourceOriginBadge.vue'
 import { shouldShowResourceOriginBadge } from '@/utils/card-list-badge'
 import ContextualGuide from '@/components/ContextualGuide.vue'
 import { isContextualGuideDone, markContextualGuideDone } from '@/config/contextualGuides'
-import { useTenantModelReadiness } from '@/composables/useTenantModelReadiness'
 import { useI18n } from 'vue-i18n'
 import { useListUrlState } from '@/composables/useListUrlState'
 import { useResourcePins } from '@/composables/useResourcePins'
@@ -808,7 +807,6 @@ const router = useRouter()
 const route = useRoute()
 const uiStore = useUIStore()
 const authStore = useAuthStore()
-const { loaded: modelsReadyLoaded, isReadyForDocumentKb } = useTenantModelReadiness()
 const orgStore = useOrganizationStore()
 const chatResources = useChatResourcesStore()
 const { t } = useI18n()
@@ -1692,12 +1690,9 @@ const goSettings = (id: string) => {
 
 // 创建知识库
 const handleCreateKnowledgeBase = () => {
-  if (!authStore.hasRole('admin')) return
+  if (!authStore.hasRole('contributor')) return
   markContextualGuideDone('kbList')
-  // 无模型时仍打开创建向导，并定位到模型配置页；用户可在向导内添加模型，无需先跳转系统设置
-  const initialSection =
-    modelsReadyLoaded.value && !isReadyForDocumentKb.value ? 'models' : undefined
-  uiStore.openCreateKB('document', initialSection)
+  uiStore.openCreateKB('document')
 }
 
 // 知识库编辑器成功回调（创建或编辑成功）

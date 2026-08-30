@@ -1,0 +1,1 @@
+ALTER TABLE knowledge_bases DROP COLUMN ai_capability_plan_version_id;

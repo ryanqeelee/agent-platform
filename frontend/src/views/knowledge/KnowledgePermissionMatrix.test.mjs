@@ -8,9 +8,12 @@ const faqPath = new URL('./components/FAQEntryManager.vue', import.meta.url)
 const scopeDialogPath = new URL('./components/KnowledgeAccessScopeDialog.vue', import.meta.url)
 const editorModalPath = new URL('./KnowledgeBaseEditorModal.vue', import.meta.url)
 
-test('knowledge list lifecycle is Admin+ own-tenant and creation CTAs are Admin+', async () => {
+test('knowledge list lifecycle is Admin+ while creation is Knowledge Administrator+', async () => {
   const source = await readFile(listPath, 'utf8')
-  assert.match(source, /v-if="authStore\.hasRole\('admin'\)"/)
+  assert.match(source, /v-if="authStore\.hasRole\('contributor'\)"[^>]*@click="handleCreateKnowledgeBase"/s)
+  assert.match(source, /const handleCreateKnowledgeBase = \(\) => \{\s*if \(!authStore\.hasRole\('contributor'\)\) return/s)
+  assert.match(source, /uiStore\.openCreateKB\('document'\)/)
+  assert.doesNotMatch(source, /openCreateKB\('document', initialSection\)/)
   assert.match(source, /function canManageKBCard\(kb: KB\): boolean \{\s*return authStore\.hasRole\('admin'\) && \(kb as any\)\.isMine !== false && \(kb as any\)\.permission == null/s)
   assert.match(source, /function canDuplicateKBCard\(kb: any\): boolean \{\s*return authStore\.hasRole\('admin'\) && kb\.isMine !== false && kb\.permission == null/s)
   assert.match(source, /const handleSettings = \(kb: KB\) => \{\s*if \(!canManageKBCard\(kb\)\) return/s)

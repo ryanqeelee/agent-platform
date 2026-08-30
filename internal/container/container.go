@@ -132,6 +132,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Registering external service clients...")
 	must(container.Provide(initDocReaderClient))
 	must(container.Provide(capabilityplan.NewClientFromEnv))
+	must(container.Provide(capabilityplan.NewKnowledgeProcessingPlanResolverFromEnv))
 	must(container.Provide(docparser.NewImageResolver))
 	must(container.Provide(initOllamaService))
 	must(container.Provide(initNeo4jClient))

@@ -3,11 +3,13 @@ package service
 import (
 	"context"
 	stderrors "errors"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/infrastructure/capabilityplan"
 	"github.com/Tencent/WeKnora/internal/storageallowlist"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -144,6 +146,18 @@ func newPR3KBService(repo *fakeKBRepo, registry *fakeRegistry, ownership *fakeOw
 	}
 }
 
+type knowledgeProcessingPlanResolverStub struct {
+	pin *types.KnowledgeProcessingPlanPin
+	err error
+}
+
+func (s knowledgeProcessingPlanResolverStub) ResolveKnowledgeProcessingPlan(
+	context.Context,
+	uint64,
+) (*types.KnowledgeProcessingPlanPin, error) {
+	return s.pin, s.err
+}
+
 func ctxWithTenant(tenantID uint64) context.Context {
 	return context.WithValue(context.Background(), types.TenantIDContextKey, tenantID)
 }
@@ -182,6 +196,10 @@ func TestCreateKnowledgeBase_WorkspacePrincipalUsesPlatformModelDefaults(t *test
 		"chat-default":  {ID: "chat-default", Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusActive, IsDefault: true},
 		"embed-default": {ID: "embed-default", Type: types.ModelTypeEmbedding, Status: types.ModelStatusActive, IsDefault: true},
 	}}
+	svc.planResolver = knowledgeProcessingPlanResolverStub{pin: &types.KnowledgeProcessingPlanPin{
+		ContractVersion: "KnowledgeProcessingPlanPinV1",
+		PlanVersionID:   "plan-v1",
+	}}
 	ctx := context.WithValue(ctxWithTenant(1), types.UserIDContextKey, "user-1")
 	storeID := validKBStoreUUID
 	kb, err := svc.CreateKnowledgeBase(ctx, &types.KnowledgeBase{
@@ -197,6 +215,65 @@ func TestCreateKnowledgeBase_WorkspacePrincipalUsesPlatformModelDefaults(t *test
 	assert.Equal(t, "embed-default", kb.EmbeddingModelID)
 	assert.Nil(t, kb.VectorStoreID)
 	assert.False(t, kb.VLMConfig.Enabled)
+	assert.Equal(t, "plan-v1", kb.AICapabilityPlanVersionID)
+}
+
+func TestCreateKnowledgeBase_WorkspacePrincipalLeavesNoRowWhenPlanUnavailable(t *testing.T) {
+	repo := newFakeKBRepo()
+	svc := newPR3KBService(repo, &fakeRegistry{registered: map[string]struct{}{}}, &fakeOwnership{})
+	svc.planResolver = knowledgeProcessingPlanResolverStub{err: interfaces.ErrAICapabilityUnavailable}
+	ctx := context.WithValue(ctxWithTenant(1), types.UserIDContextKey, "user-1")
+
+	kb, err := svc.CreateKnowledgeBase(ctx, &types.KnowledgeBase{Name: "kb"})
+
+	require.Nil(t, kb)
+	require.ErrorIs(t, err, interfaces.ErrAICapabilityUnavailable)
+	require.Empty(t, repo.rows)
+}
+
+func TestCreateKnowledgeBase_APIKeyKeepsExistingCreationPath(t *testing.T) {
+	repo := newFakeKBRepo()
+	svc := newPR3KBService(repo, &fakeRegistry{registered: map[string]struct{}{}}, &fakeOwnership{})
+	svc.planResolver = knowledgeProcessingPlanResolverStub{err: interfaces.ErrAICapabilityUnavailable}
+	svc.modelService = &stubModelService{modelsByID: map[string]*types.Model{
+		"chat-default":  {ID: "chat-default", Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusActive, IsDefault: true},
+		"embed-default": {ID: "embed-default", Type: types.ModelTypeEmbedding, Status: types.ModelStatusActive, IsDefault: true},
+	}}
+	ctx := context.WithValue(ctxWithTenant(1), types.UserIDContextKey, "system-api-key")
+	ctx = types.WithTenantAPIKeyScope(ctx, types.TenantAPIKeyScope{KeyID: 1, FullAccess: true})
+
+	kb, err := svc.CreateKnowledgeBase(ctx, &types.KnowledgeBase{Name: "kb"})
+
+	require.NoError(t, err)
+	require.Empty(t, kb.AICapabilityPlanVersionID)
+	require.Len(t, repo.rows, 1)
+}
+
+func TestRingxunKnowledgeProcessingPlanIntegrationPinsKnowledgeBase(t *testing.T) {
+	baseURL := os.Getenv("RINGXUN_CAPABILITY_PLAN_INTEGRATION_BASE_URL")
+	if baseURL == "" {
+		t.Skip("requires the Ringxun capability-plan integration fixture")
+	}
+	t.Setenv("RINGXUN_CAPABILITY_PLAN_BASE_URL", baseURL)
+	t.Setenv(
+		"RINGXUN_CAPABILITY_PLAN_SERVICE_TOKEN",
+		os.Getenv("RINGXUN_CAPABILITY_PLAN_INTEGRATION_SERVICE_TOKEN"),
+	)
+
+	repo := newFakeKBRepo()
+	svc := newPR3KBService(repo, &fakeRegistry{registered: map[string]struct{}{}}, &fakeOwnership{})
+	svc.planResolver = capabilityplan.NewKnowledgeProcessingPlanResolverFromEnv()
+	svc.modelService = &stubModelService{modelsByID: map[string]*types.Model{
+		"chat-default":  {ID: "chat-default", Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusActive, IsDefault: true},
+		"embed-default": {ID: "embed-default", Type: types.ModelTypeEmbedding, Status: types.ModelStatusActive, IsDefault: true},
+	}}
+	ctx := context.WithValue(ctxWithTenant(7), types.UserIDContextKey, "integration-user")
+
+	kb, err := svc.CreateKnowledgeBase(ctx, &types.KnowledgeBase{Name: "integration"})
+
+	require.NoError(t, err)
+	require.Equal(t, os.Getenv("RINGXUN_CAPABILITY_PLAN_INTEGRATION_VERSION_ID"), kb.AICapabilityPlanVersionID)
+	require.Len(t, repo.rows, 1)
 }
 
 type knowledgeAccessGovernanceStub struct {

@@ -474,6 +474,10 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 	// Create knowledge base using the service
 	kb, err := h.service.CreateKnowledgeBase(ctx, &req)
 	if err != nil {
+		if stderrors.Is(err, interfaces.ErrAICapabilityUnavailable) {
+			c.Error(apperrors.NewServiceUnavailableError("知识能力暂不可用，请联系平台管理员"))
+			return
+		}
 		// Surface typed AppErrors (notably the 400-class codes
 		// ErrVectorStoreBindingInvalid and ErrVectorStoreUnavailable
 		// returned by validateVectorStoreBinding) instead of wrapping them

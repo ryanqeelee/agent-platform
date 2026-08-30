@@ -43,6 +43,7 @@ func TestPlatformInfrastructureRoutesRequireSystemAdmin(t *testing.T) {
 		{http.MethodGet, "/api/v1/models/providers"},
 		{http.MethodGet, "/api/v1/models/model-1"},
 		{http.MethodGet, "/api/v1/platform/model-runtime-settings"},
+		{http.MethodGet, "/api/v1/platform/retrieval-processing-settings"},
 		{http.MethodPost, "/api/v1/initialization/initialize/kb-1"},
 		{http.MethodGet, "/api/v1/initialization/ollama/models"},
 		{http.MethodGet, "/api/v1/mcp-services"},

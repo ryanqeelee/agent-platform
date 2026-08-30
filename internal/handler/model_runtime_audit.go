@@ -20,9 +20,13 @@ func modelRuntimeRevision(model *types.Model) string {
 	if model == nil {
 		return ""
 	}
-	revision := model.UpdatedAt
+	return platformConfigRevision(model.CreatedAt, model.UpdatedAt)
+}
+
+func platformConfigRevision(createdAt, updatedAt time.Time) string {
+	revision := updatedAt
 	if revision.IsZero() {
-		revision = model.CreatedAt
+		revision = createdAt
 	}
 	if revision.IsZero() {
 		return ""
@@ -30,7 +34,7 @@ func modelRuntimeRevision(model *types.Model) string {
 	return revision.UTC().Format(time.RFC3339Nano)
 }
 
-func emitModelRuntimeAudit(
+func emitPlatformConfigAudit(
 	ctx context.Context,
 	audit interfaces.AuditLogService,
 	action types.AuditAction,

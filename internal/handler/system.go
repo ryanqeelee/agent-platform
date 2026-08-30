@@ -487,8 +487,9 @@ func (h *SystemHandler) ReconnectDocReader(c *gin.Context) {
 	}
 
 	if err := h.documentReader.Reconnect(addr); err != nil {
-		logger.Errorf(c.Request.Context(), "Failed to reconnect docreader to %s: %v", addr, err)
-		c.JSON(200, gin.H{"code": 1, "msg": fmt.Sprintf("连接失败: %v", err)})
+		safeError := sanitizeStorageCheckError(err)
+		logger.Errorf(c.Request.Context(), "Failed to reconnect docreader: %s", safeError)
+		c.JSON(200, gin.H{"code": 1, "msg": "连接失败: " + safeError})
 		return
 	}
 
@@ -581,7 +582,7 @@ func (h *SystemHandler) fetchRemoteEngines(ctx context.Context, reader interface
 	}
 	engines, err := reader.ListEngines(ctx, overrides)
 	if err != nil {
-		logger.Warnf(ctx, "Failed to fetch remote engines from docreader: %v", err)
+		logger.Warnf(ctx, "Failed to fetch remote engines from docreader: %s", sanitizeStorageCheckError(err))
 		return nil
 	}
 	return engines

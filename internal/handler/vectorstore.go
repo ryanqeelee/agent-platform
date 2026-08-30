@@ -16,14 +16,16 @@ import (
 type VectorStoreHandler struct {
 	repo    interfaces.VectorStoreRepository
 	service interfaces.VectorStoreService
+	audit   interfaces.AuditLogService
 }
 
 // NewVectorStoreHandler creates a new handler
 func NewVectorStoreHandler(
 	repo interfaces.VectorStoreRepository,
 	service interfaces.VectorStoreService,
+	audit interfaces.AuditLogService,
 ) *VectorStoreHandler {
-	return &VectorStoreHandler{repo: repo, service: service}
+	return &VectorStoreHandler{repo: repo, service: service, audit: audit}
 }
 
 // --- request DTOs ---
@@ -120,6 +122,10 @@ func (h *VectorStoreHandler) CreateStore(c *gin.Context) {
 		c.Error(err)
 		return
 	}
+	emitPlatformConfigAudit(ctx, h.audit, types.AuditActionSystemRetrievalProcessingChanged,
+		"create", "vector_store", store.ID, "enterprise_assigned",
+		platformConfigRevision(store.CreatedAt, store.UpdatedAt),
+		[]string{"name", "engine_type", "connection_config", "index_config"})
 
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
@@ -284,6 +290,9 @@ func (h *VectorStoreHandler) UpdateStore(c *gin.Context) {
 		logger.Warnf(ctx, "Failed to re-fetch vector store %s after update: %v", id, err)
 	}
 	if result != nil {
+		emitPlatformConfigAudit(ctx, h.audit, types.AuditActionSystemRetrievalProcessingChanged,
+			"update", "vector_store", result.ID, "enterprise_assigned",
+			platformConfigRevision(result.CreatedAt, result.UpdatedAt), []string{"name"})
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"data":    types.NewVectorStoreResponse(result, "user", false),
@@ -324,7 +333,8 @@ func (h *VectorStoreHandler) DeleteStore(c *gin.Context) {
 	}
 
 	// Ownership check
-	if _, status, msg := h.getOwnedStore(ctx, tenantID, id); status != http.StatusOK {
+	store, status, msg := h.getOwnedStore(ctx, tenantID, id)
+	if status != http.StatusOK {
 		c.JSON(status, gin.H{"success": false, "error": msg})
 		return
 	}
@@ -334,6 +344,9 @@ func (h *VectorStoreHandler) DeleteStore(c *gin.Context) {
 		c.Error(err)
 		return
 	}
+	emitPlatformConfigAudit(ctx, h.audit, types.AuditActionSystemRetrievalProcessingChanged,
+		"delete", "vector_store", id, "enterprise_assigned",
+		platformConfigRevision(store.CreatedAt, store.UpdatedAt), nil)
 
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
@@ -384,8 +397,9 @@ func (h *VectorStoreHandler) TestStoreByID(c *gin.Context) {
 		}
 		version, err := h.service.TestConnection(ctx, envStore.EngineType, envStore.ConnectionConfig)
 		if err != nil {
-			logger.Warnf(ctx, "Vector store connection test failed: %v", err)
-			c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})
+			safeError := sanitizeStorageCheckError(err)
+			logger.Warnf(ctx, "Vector store connection test failed: %s", safeError)
+			c.JSON(http.StatusOK, gin.H{"success": false, "error": safeError})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"success": true, "version": version})
@@ -401,15 +415,22 @@ func (h *VectorStoreHandler) TestStoreByID(c *gin.Context) {
 
 	version, err := h.service.TestConnection(ctx, store.EngineType, store.ConnectionConfig)
 	if err != nil {
-		logger.Warnf(ctx, "Vector store connection test failed: %v", err)
-		c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})
+		safeError := sanitizeStorageCheckError(err)
+		logger.Warnf(ctx, "Vector store connection test failed: %s", safeError)
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": safeError})
 		return
 	}
 
 	// Update stored version if detected
 	if version != "" && version != store.ConnectionConfig.Version {
 		if updateErr := h.service.SaveDetectedVersion(ctx, store, version); updateErr != nil {
-			logger.Warnf(ctx, "Failed to update detected version for store %s: %v", store.ID, updateErr)
+			logger.Warnf(ctx, "Failed to update detected version for store %s: %s", store.ID, sanitizeStorageCheckError(updateErr))
+		} else if updatedStore, loadErr := h.repo.GetByID(ctx, tenantID, store.ID); loadErr != nil {
+			logger.Warnf(ctx, "Failed to load updated vector store %s: %s", store.ID, sanitizeStorageCheckError(loadErr))
+		} else if updatedStore != nil {
+			emitPlatformConfigAudit(ctx, h.audit, types.AuditActionSystemRetrievalProcessingChanged,
+				"detected_version_updated", "vector_store", updatedStore.ID, "enterprise_assigned",
+				platformConfigRevision(updatedStore.CreatedAt, updatedStore.UpdatedAt), []string{"connection_config.version"})
 		}
 	}
 
@@ -449,8 +470,9 @@ func (h *VectorStoreHandler) TestStoreRaw(c *gin.Context) {
 	// which probes trusted stored/env configs).
 	version, err := h.service.TestRawConnection(ctx, req.EngineType, req.ConnectionConfig)
 	if err != nil {
-		logger.Warnf(ctx, "Vector store connection test failed: %v", err)
-		c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})
+		safeError := sanitizeStorageCheckError(err)
+		logger.Warnf(ctx, "Vector store connection test failed: %s", safeError)
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": safeError})
 		return
 	}
 

@@ -23,3 +23,7 @@ type KnowledgeProcessingPlanResolver interface {
 type PlatformModelRuntimeSettingsResolver interface {
 	ResolvePlatformModelRuntimeSettings(ctx context.Context, tenantID uint64) (*types.PlatformModelRuntimeSettings, error)
 }
+
+type PlatformRetrievalProcessingSettingsResolver interface {
+	ResolvePlatformRetrievalProcessingSettings(ctx context.Context, tenantID uint64) (*types.PlatformRetrievalProcessingSettings, error)
+}

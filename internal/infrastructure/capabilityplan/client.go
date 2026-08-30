@@ -33,6 +33,10 @@ func NewPlatformModelRuntimeSettingsResolverFromEnv() interfaces.PlatformModelRu
 	return newClientFromEnv()
 }
 
+func NewPlatformRetrievalProcessingSettingsResolverFromEnv() interfaces.PlatformRetrievalProcessingSettingsResolver {
+	return newClientFromEnv()
+}
+
 func newClientFromEnv() *Client {
 	return &Client{
 		baseURL: strings.TrimRight(strings.TrimSpace(os.Getenv("RINGXUN_CAPABILITY_PLAN_BASE_URL")), "/"),
@@ -87,6 +91,25 @@ func (c *Client) ResolvePlatformModelRuntimeSettings(
 		strings.TrimSpace(settings.ActivePlan.VersionID) == "" ||
 		strings.TrimSpace(settings.RequestRuntimeRefs.EmployeeAssistantRequestRuntime) == "" ||
 		strings.TrimSpace(settings.RequestRuntimeRefs.OperatingAnalysisRequestRuntime) == "" {
+		return nil, interfaces.ErrAICapabilityUnavailable
+	}
+	return &settings, nil
+}
+
+func (c *Client) ResolvePlatformRetrievalProcessingSettings(
+	ctx context.Context,
+	tenantID uint64,
+) (*types.PlatformRetrievalProcessingSettings, error) {
+	var settings types.PlatformRetrievalProcessingSettings
+	if err := c.get(ctx, tenantID, "retrieval-processing-settings", &settings); err != nil ||
+		settings.ContractVersion != "PlatformRetrievalProcessingSettingsV1" ||
+		(settings.Scope.Kind != "platform_shared" && settings.Scope.Kind != "enterprise_assigned") ||
+		settings.Scope.ProductBaseTenantID != strconv.FormatUint(tenantID, 10) ||
+		settings.ActivePlan.ContractVersion != "AICapabilityPlanV1" ||
+		strings.TrimSpace(settings.ActivePlan.VersionID) == "" ||
+		strings.TrimSpace(settings.CapabilityRefs.Embedding) == "" ||
+		strings.TrimSpace(settings.CapabilityRefs.Reranking) == "" ||
+		strings.TrimSpace(settings.CapabilityRefs.Parsing) == "" {
 		return nil, interfaces.ErrAICapabilityUnavailable
 	}
 	return &settings, nil

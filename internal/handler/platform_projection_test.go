@@ -56,7 +56,7 @@ func TestEnterpriseAICapabilityProjectionHidesPlanIdentity(t *testing.T) {
 	c.Set(types.TenantIDContextKey.String(), uint64(7))
 	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/tenants/7/ai-capability-plan", nil)
 
-	NewAICapabilityPlanHandler(capabilityProjectionResolver{}, capabilityProjectionResolver{}).GetEnterpriseProjection(c)
+	NewAICapabilityPlanHandler(capabilityProjectionResolver{}, capabilityProjectionResolver{}, nil).GetEnterpriseProjection(c)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.JSONEq(t, `{
@@ -92,7 +92,7 @@ func TestPlatformModelRuntimeProjectionIsExact(t *testing.T) {
 	c.Set(types.TenantIDContextKey.String(), uint64(7))
 	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/platform/model-runtime-settings", nil)
 
-	NewAICapabilityPlanHandler(capabilityProjectionResolver{}, capabilityProjectionResolver{}).
+	NewAICapabilityPlanHandler(capabilityProjectionResolver{}, capabilityProjectionResolver{}, nil).
 		GetPlatformModelRuntimeSettings(c)
 
 	require.Equal(t, http.StatusOK, recorder.Code)

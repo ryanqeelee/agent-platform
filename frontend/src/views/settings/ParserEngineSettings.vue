@@ -7,6 +7,8 @@
       </p>
     </div>
 
+    <PlatformRuntimeContext v-if="authStore.isSystemAdmin" context="retrieval" />
+
     <div v-if="loading" class="loading-state">
       <t-loading size="small" />
       <span>{{ $t('settings.parser.loading') }}</span>
@@ -386,6 +388,7 @@ import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
 import { MessagePlugin } from 'tdesign-vue-next'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import PlatformRuntimeContext from './components/PlatformRuntimeContext.vue'
 import {
   getParserEngines,
   getParserEngineConfig,

@@ -1,47 +1,73 @@
 <template>
-  <div class="runtime-context" role="note" :aria-label="$t('modelSettings.runtimeContext.title')">
+  <div class="runtime-context" role="note" :aria-label="$t(titleKey)">
     <div class="runtime-context__heading">
       <span class="runtime-context__eyebrow">{{ $t('modelSettings.runtimeContext.eyebrow') }}</span>
-      <strong>{{ $t('modelSettings.runtimeContext.title') }}</strong>
+      <strong>{{ $t(titleKey) }}</strong>
     </div>
-    <div v-if="settings" class="runtime-context__grid">
+    <div v-if="available" class="runtime-context__grid">
       <div>
         <span>{{ $t('modelSettings.runtimeContext.scope') }}</span>
-        <strong>{{ $t(`modelSettings.runtimeContext.${settings.scope.kind}`) }}</strong>
+        <strong>{{ $t(`modelSettings.runtimeContext.${scopeKind}`) }}</strong>
       </div>
       <div>
         <span>{{ $t('modelSettings.runtimeContext.activePlan') }}</span>
-        <strong>{{ settings.active_plan.version_id }}</strong>
+        <strong>{{ planVersion }}</strong>
       </div>
-      <div>
-        <span>{{ $t('modelSettings.runtimeContext.employeeAssistant') }}</span>
-        <strong>{{ settings.request_runtime_refs.employee_assistant_request_runtime }}</strong>
-      </div>
-      <div>
-        <span>{{ $t('modelSettings.runtimeContext.operatingAnalysis') }}</span>
-        <strong>{{ settings.request_runtime_refs.operating_analysis_request_runtime }}</strong>
+      <div v-for="item in capabilityItems" :key="item.labelKey">
+        <span>{{ $t(item.labelKey) }}</span>
+        <strong>{{ item.value }}</strong>
       </div>
     </div>
     <p v-else class="runtime-context__unavailable">
-      {{ $t('modelSettings.runtimeContext.unavailable') }}
+      {{ $t(unavailableKey) }}
     </p>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import {
   getPlatformModelRuntimeSettings,
-  type PlatformModelRuntimeSettings,
 } from '@/api/model'
+import { getPlatformRetrievalProcessingSettings } from '@/api/retrieval'
 
-const settings = ref<PlatformModelRuntimeSettings | null>(null)
+const props = withDefaults(defineProps<{ context?: 'request' | 'retrieval' }>(), {
+  context: 'request',
+})
+const available = ref(false)
+const scopeKind = ref<'platform_shared' | 'enterprise_assigned'>('platform_shared')
+const planVersion = ref('')
+const capabilityItems = ref<Array<{ labelKey: string; value: string }>>([])
+const titleKey = computed(() => props.context === 'retrieval'
+  ? 'modelSettings.runtimeContext.retrievalTitle'
+  : 'modelSettings.runtimeContext.title')
+const unavailableKey = computed(() => props.context === 'retrieval'
+  ? 'modelSettings.runtimeContext.retrievalUnavailable'
+  : 'modelSettings.runtimeContext.unavailable')
 
 onMounted(async () => {
   try {
-    settings.value = await getPlatformModelRuntimeSettings()
+    if (props.context === 'retrieval') {
+      const settings = await getPlatformRetrievalProcessingSettings()
+      scopeKind.value = settings.scope.kind
+      planVersion.value = settings.active_plan.version_id
+      capabilityItems.value = [
+        { labelKey: 'modelSettings.runtimeContext.embedding', value: settings.capability_refs.embedding },
+        { labelKey: 'modelSettings.runtimeContext.reranking', value: settings.capability_refs.reranking },
+        { labelKey: 'modelSettings.runtimeContext.parsing', value: settings.capability_refs.parsing },
+      ]
+    } else {
+      const settings = await getPlatformModelRuntimeSettings()
+      scopeKind.value = settings.scope.kind
+      planVersion.value = settings.active_plan.version_id
+      capabilityItems.value = [
+        { labelKey: 'modelSettings.runtimeContext.employeeAssistant', value: settings.request_runtime_refs.employee_assistant_request_runtime },
+        { labelKey: 'modelSettings.runtimeContext.operatingAnalysis', value: settings.request_runtime_refs.operating_analysis_request_runtime },
+      ]
+    }
+    available.value = true
   } catch {
-    settings.value = null
+    available.value = false
   }
 })
 </script>

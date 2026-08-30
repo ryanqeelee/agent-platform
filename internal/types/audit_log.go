@@ -106,9 +106,10 @@ const (
 	// redacted server-side before logging when is_secret=true (P3+;
 	// for now no setting is marked secret). Audit rows always have
 	// tenant_id=0 because the change is system-scope, not workspace-scoped.
-	AuditActionSystemSettingChanged        AuditAction = "system.setting_changed"
-	AuditActionSystemModelRuntimeChanged   AuditAction = "system.model_runtime_changed"
-	AuditActionSystemOllamaDownloadStarted AuditAction = "system.ollama_download_started"
+	AuditActionSystemSettingChanged             AuditAction = "system.setting_changed"
+	AuditActionSystemModelRuntimeChanged        AuditAction = "system.model_runtime_changed"
+	AuditActionSystemOllamaDownloadStarted      AuditAction = "system.ollama_download_started"
+	AuditActionSystemRetrievalProcessingChanged AuditAction = "system.retrieval_processing_changed"
 
 	// AuditActionSystemAdminPromoted fires when a SystemAdmin grants
 	// system-administrator privileges to another user via

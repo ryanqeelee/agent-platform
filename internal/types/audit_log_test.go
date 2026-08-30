@@ -44,6 +44,7 @@ func TestAuditAction_DotNamespaceConvention(t *testing.T) {
 		AuditActionSystemSettingChanged,
 		AuditActionSystemModelRuntimeChanged,
 		AuditActionSystemOllamaDownloadStarted,
+		AuditActionSystemRetrievalProcessingChanged,
 		AuditActionSystemAdminPromoted,
 		AuditActionSystemAdminRevoked,
 		AuditActionSystemUserPasswordReset,
@@ -140,6 +141,7 @@ func TestAuditAction_NoCollisionsAcrossNamespaces(t *testing.T) {
 	register("AuditActionSystemSettingChanged", AuditActionSystemSettingChanged)
 	register("AuditActionSystemModelRuntimeChanged", AuditActionSystemModelRuntimeChanged)
 	register("AuditActionSystemOllamaDownloadStarted", AuditActionSystemOllamaDownloadStarted)
+	register("AuditActionSystemRetrievalProcessingChanged", AuditActionSystemRetrievalProcessingChanged)
 	register("AuditActionSystemAdminPromoted", AuditActionSystemAdminPromoted)
 	register("AuditActionSystemAdminRevoked", AuditActionSystemAdminRevoked)
 	register("AuditActionSystemUserPasswordReset", AuditActionSystemUserPasswordReset)
@@ -161,6 +163,7 @@ func TestAuditAction_SystemNamespacePrefix(t *testing.T) {
 		AuditActionSystemSettingChanged,
 		AuditActionSystemModelRuntimeChanged,
 		AuditActionSystemOllamaDownloadStarted,
+		AuditActionSystemRetrievalProcessingChanged,
 		AuditActionSystemAdminPromoted,
 		AuditActionSystemAdminRevoked,
 		AuditActionSystemUserPasswordReset,
@@ -190,6 +193,7 @@ func TestAuditAction_SystemWireValues(t *testing.T) {
 		{AuditActionSystemSettingChanged, "system.setting_changed"},
 		{AuditActionSystemModelRuntimeChanged, "system.model_runtime_changed"},
 		{AuditActionSystemOllamaDownloadStarted, "system.ollama_download_started"},
+		{AuditActionSystemRetrievalProcessingChanged, "system.retrieval_processing_changed"},
 		{AuditActionSystemAdminPromoted, "system.admin_promoted"},
 		{AuditActionSystemAdminRevoked, "system.admin_revoked"},
 		{AuditActionSystemUserPasswordReset, "system.user_password_reset"},

@@ -9,6 +9,8 @@
       </div>
     </div>
 
+    <PlatformRuntimeContext v-if="authStore.isSystemAdmin" context="retrieval" />
+
     <t-loading :loading="loading" size="small" class="backend-list-loading">
       <t-empty
         v-if="!loading && backends.length === 0 && !authStore.isSystemAdmin"
@@ -251,6 +253,7 @@ import { AddIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import PlatformRuntimeContext from './components/PlatformRuntimeContext.vue'
 import { providerLogo } from './providerLogos'
 import {
   createStorageBackend, deleteStorageBackend, listStorageBackends, listStorageBackendTypes,

@@ -27,4 +27,12 @@ func RegisterCapabilityPlanRoutes(
 		g.SystemAdmin(),
 		h.GetPlatformModelRuntimeSettings,
 	)
+	g.apiKeyRoute(
+		r,
+		http.MethodGet,
+		"/platform/retrieval-processing-settings",
+		apiKeyPlatform(types.APIKeyCapabilitySystemSettingsRead),
+		g.SystemAdmin(),
+		h.GetPlatformRetrievalProcessingSettings,
+	)
 }

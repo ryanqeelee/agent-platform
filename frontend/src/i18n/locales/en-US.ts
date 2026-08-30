@@ -3902,7 +3902,9 @@ export default {
       eyebrow: 'Platform runtime context', title: 'Active capability plan', scope: 'Configuration scope',
       platform_shared: 'Platform shared', enterprise_assigned: 'Enterprise assigned', activePlan: 'Active Plan version',
       employeeAssistant: 'Employee Assistant runtime reference', operatingAnalysis: 'Operating Analysis runtime reference',
-      unavailable: 'Capability-plan context is unavailable. Model settings remain platform-only.'
+      retrievalTitle: 'Retrieval and processing plan', embedding: 'Embedding capability reference', reranking: 'Reranking capability reference', parsing: 'Parsing capability reference',
+      unavailable: 'Capability-plan context is unavailable. Model settings remain platform-only.',
+      retrievalUnavailable: 'Capability-plan context is unavailable. Retrieval and processing settings remain platform-only.'
     },
     typeShort: {
       chat: 'Chat',

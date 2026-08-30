@@ -5,6 +5,8 @@
       <p class="section-description">{{ t('retrievalSettings.description') }}</p>
     </div>
 
+    <PlatformRuntimeContext v-if="authStore.isSystemAdmin" context="retrieval" />
+
     <div class="settings-group">
       <!-- Rerank Model -->
       <div class="setting-item">
@@ -113,6 +115,7 @@ import { reactive, computed, onMounted, nextTick } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import ModelSelector from '@/components/ModelSelector.vue'
+import PlatformRuntimeContext from './components/PlatformRuntimeContext.vue'
 import {
   getTenantRetrievalConfig,
   updateTenantRetrievalConfig,

@@ -92,7 +92,7 @@ func (h *ModelCredentialsHandler) Put(c *gin.Context) {
 	if req.AppSecret != nil {
 		fields = append(fields, "app_secret")
 	}
-	emitModelRuntimeAudit(ctx, h.audit, types.AuditActionSystemModelRuntimeChanged,
+	emitPlatformConfigAudit(ctx, h.audit, types.AuditActionSystemModelRuntimeChanged,
 		"credentials_updated", "model", id, modelRuntimeScope(updated), modelRuntimeRevision(updated), fields)
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": resp})
 }
@@ -127,7 +127,7 @@ func (h *ModelCredentialsHandler) DeleteField(c *gin.Context) {
 		return
 	}
 	model, _ := h.svc.GetModelByID(ctx, id)
-	emitModelRuntimeAudit(ctx, h.audit, types.AuditActionSystemModelRuntimeChanged,
+	emitPlatformConfigAudit(ctx, h.audit, types.AuditActionSystemModelRuntimeChanged,
 		"credential_cleared", "model", id, modelRuntimeScope(model), modelRuntimeRevision(model), []string{field})
 	c.Status(http.StatusNoContent)
 }

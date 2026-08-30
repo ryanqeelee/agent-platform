@@ -10,17 +10,20 @@ import (
 )
 
 type AICapabilityPlanHandler struct {
-	resolver             interfaces.AICapabilityPlanResolver
-	modelRuntimeResolver interfaces.PlatformModelRuntimeSettingsResolver
+	resolver                    interfaces.AICapabilityPlanResolver
+	modelRuntimeResolver        interfaces.PlatformModelRuntimeSettingsResolver
+	retrievalProcessingResolver interfaces.PlatformRetrievalProcessingSettingsResolver
 }
 
 func NewAICapabilityPlanHandler(
 	resolver interfaces.AICapabilityPlanResolver,
 	modelRuntimeResolver interfaces.PlatformModelRuntimeSettingsResolver,
+	retrievalProcessingResolver interfaces.PlatformRetrievalProcessingSettingsResolver,
 ) *AICapabilityPlanHandler {
 	return &AICapabilityPlanHandler{
-		resolver:             resolver,
-		modelRuntimeResolver: modelRuntimeResolver,
+		resolver:                    resolver,
+		modelRuntimeResolver:        modelRuntimeResolver,
+		retrievalProcessingResolver: retrievalProcessingResolver,
 	}
 }
 
@@ -31,6 +34,18 @@ func (h *AICapabilityPlanHandler) GetPlatformModelRuntimeSettings(c *gin.Context
 	)
 	if err != nil || settings == nil {
 		c.Error(errors.NewServiceUnavailableError("平台运行配置暂不可用"))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": settings})
+}
+
+func (h *AICapabilityPlanHandler) GetPlatformRetrievalProcessingSettings(c *gin.Context) {
+	settings, err := h.retrievalProcessingResolver.ResolvePlatformRetrievalProcessingSettings(
+		c.Request.Context(),
+		c.GetUint64(types.TenantIDContextKey.String()),
+	)
+	if err != nil || settings == nil {
+		c.Error(errors.NewServiceUnavailableError("平台检索与处理配置暂不可用"))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": settings})

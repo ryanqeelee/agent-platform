@@ -1165,7 +1165,7 @@ func (h *InitializationHandler) DownloadOllamaModel(c *gin.Context) {
 	}()
 
 	logger.Infof(ctx, "Created download task for model, task ID: %s", taskID)
-	emitModelRuntimeAudit(ctx, h.audit, types.AuditActionSystemOllamaDownloadStarted,
+	emitPlatformConfigAudit(ctx, h.audit, types.AuditActionSystemOllamaDownloadStarted,
 		"download_started", "ollama_model", req.ModelName, "platform_shared", task.StartTime.UTC().Format(time.RFC3339Nano), nil)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

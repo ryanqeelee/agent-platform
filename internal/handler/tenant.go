@@ -37,6 +37,7 @@ type TenantHandler struct {
 	// in-code default, so a SystemAdmin's UI override applies on the
 	// very next CreateTenant call.
 	systemSettingSvc interfaces.SystemSettingService
+	audit            interfaces.AuditLogService
 }
 
 // NewTenantHandler creates a new tenant handler instance with the provided service
@@ -64,6 +65,7 @@ func NewTenantHandler(
 	kbService interfaces.KnowledgeBaseService,
 	config *config.Config,
 	systemSettingSvc interfaces.SystemSettingService,
+	audit interfaces.AuditLogService,
 ) *TenantHandler {
 	return &TenantHandler{
 		service:          service,
@@ -73,6 +75,7 @@ func NewTenantHandler(
 		kbService:        kbService,
 		config:           config,
 		systemSettingSvc: systemSettingSvc,
+		audit:            audit,
 	}
 }
 
@@ -1508,6 +1511,9 @@ func (h *TenantHandler) updateTenantParserEngineConfigInternal(c *gin.Context) {
 		}
 		return
 	}
+	emitPlatformConfigAudit(ctx, h.audit, types.AuditActionSystemRetrievalProcessingChanged,
+		"update", "parser_config", strconv.FormatUint(updatedTenant.ID, 10), "enterprise_assigned",
+		platformConfigRevision(updatedTenant.CreatedAt, updatedTenant.UpdatedAt), []string{"parser_engine_config"})
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    types.ParserEngineConfigForResponse(updatedTenant.ParserEngineConfig, true),
@@ -1574,6 +1580,9 @@ func (h *TenantHandler) updateTenantStorageEngineConfigInternal(c *gin.Context) 
 		}
 		return
 	}
+	emitPlatformConfigAudit(ctx, h.audit, types.AuditActionSystemRetrievalProcessingChanged,
+		"update", "storage_backend", strconv.FormatUint(updatedTenant.ID, 10), "enterprise_assigned",
+		platformConfigRevision(updatedTenant.CreatedAt, updatedTenant.UpdatedAt), []string{"storage_engine_config"})
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    types.StorageEngineConfigForResponse(updatedTenant.StorageEngineConfig, true),
@@ -1788,6 +1797,9 @@ func (h *TenantHandler) updateTenantRetrievalConfigInternal(c *gin.Context) {
 		}
 		return
 	}
+	emitPlatformConfigAudit(ctx, h.audit, types.AuditActionSystemRetrievalProcessingChanged,
+		"update", "retrieval_binding", strconv.FormatUint(updatedTenant.ID, 10), "enterprise_assigned",
+		platformConfigRevision(updatedTenant.CreatedAt, updatedTenant.UpdatedAt), []string{"retrieval_config"})
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    updatedTenant.RetrievalConfig,

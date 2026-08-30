@@ -26,10 +26,15 @@ func storageTestErrorMessage(err error) string {
 type StorageBackendHandler struct {
 	repo    interfaces.StorageBackendRepository
 	service interfaces.StorageBackendService
+	audit   interfaces.AuditLogService
 }
 
-func NewStorageBackendHandler(repo interfaces.StorageBackendRepository, service interfaces.StorageBackendService) *StorageBackendHandler {
-	return &StorageBackendHandler{repo: repo, service: service}
+func NewStorageBackendHandler(
+	repo interfaces.StorageBackendRepository,
+	service interfaces.StorageBackendService,
+	audit interfaces.AuditLogService,
+) *StorageBackendHandler {
+	return &StorageBackendHandler{repo: repo, service: service, audit: audit}
 }
 
 type storageBackendRequest struct {
@@ -120,6 +125,9 @@ func (h *StorageBackendHandler) Create(c *gin.Context) {
 		c.Error(err)
 		return
 	}
+	emitPlatformConfigAudit(c.Request.Context(), h.audit, types.AuditActionSystemRetrievalProcessingChanged,
+		"create", "storage_backend", backend.ID, "enterprise_assigned",
+		platformConfigRevision(backend.CreatedAt, backend.UpdatedAt), []string{"name", "provider", "config", "status"})
 	c.JSON(http.StatusCreated, gin.H{"success": true, "data": types.NewStorageBackendResponse(backend)})
 }
 
@@ -154,6 +162,9 @@ func (h *StorageBackendHandler) Update(c *gin.Context) {
 		c.Error(err)
 		return
 	}
+	emitPlatformConfigAudit(c.Request.Context(), h.audit, types.AuditActionSystemRetrievalProcessingChanged,
+		"update", "storage_backend", updated.ID, "enterprise_assigned",
+		platformConfigRevision(updated.CreatedAt, updated.UpdatedAt), []string{"name", "config", "status"})
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": types.NewStorageBackendResponse(updated)})
 }
 
@@ -171,9 +182,21 @@ func (h *StorageBackendHandler) Update(c *gin.Context) {
 // @Security     ApiKeyAuth
 // @Router       /storage-backends/{id} [delete]
 func (h *StorageBackendHandler) Delete(c *gin.Context) {
-	if err := h.service.Delete(c.Request.Context(), storageTenantID(c), c.Param("id")); err != nil {
+	ctx := c.Request.Context()
+	tenantID, id := storageTenantID(c), c.Param("id")
+	backend, err := h.repo.GetByID(ctx, tenantID, id)
+	if err != nil {
 		c.Error(err)
 		return
+	}
+	if err := h.service.Delete(ctx, tenantID, id); err != nil {
+		c.Error(err)
+		return
+	}
+	if backend != nil {
+		emitPlatformConfigAudit(ctx, h.audit, types.AuditActionSystemRetrievalProcessingChanged,
+			"delete", "storage_backend", backend.ID, "enterprise_assigned",
+			platformConfigRevision(backend.CreatedAt, backend.UpdatedAt), nil)
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
@@ -192,9 +215,21 @@ func (h *StorageBackendHandler) Delete(c *gin.Context) {
 // @Security     ApiKeyAuth
 // @Router       /storage-backends/{id}/default [put]
 func (h *StorageBackendHandler) SetDefault(c *gin.Context) {
-	if err := h.service.SetDefault(c.Request.Context(), storageTenantID(c), c.Param("id")); err != nil {
+	ctx := c.Request.Context()
+	tenantID, id := storageTenantID(c), c.Param("id")
+	backend, err := h.repo.GetByID(ctx, tenantID, id)
+	if err != nil {
 		c.Error(err)
 		return
+	}
+	if err := h.service.SetDefault(ctx, tenantID, id); err != nil {
+		c.Error(err)
+		return
+	}
+	if backend != nil {
+		emitPlatformConfigAudit(ctx, h.audit, types.AuditActionSystemRetrievalProcessingChanged,
+			"set_default", "storage_backend", backend.ID, "enterprise_assigned",
+			platformConfigRevision(backend.CreatedAt, backend.UpdatedAt), []string{"default"})
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }

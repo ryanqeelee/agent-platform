@@ -5,6 +5,8 @@
       <p class="section-description">{{ t('vectorStoreSettings.description') }}</p>
     </div>
 
+    <PlatformRuntimeContext v-if="authStore.isSystemAdmin" context="retrieval" />
+
     <!-- Loading -->
     <div v-if="loading" class="loading-container">
       <t-loading size="small" />
@@ -367,6 +369,7 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import { providerLogo } from './providerLogos'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import PlatformRuntimeContext from './components/PlatformRuntimeContext.vue'
 
 const { t } = useI18n()
 const authStore = useAuthStore()

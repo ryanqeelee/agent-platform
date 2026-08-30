@@ -711,6 +711,10 @@ onMounted(() => {
     gap: 18px;
   }
 
+  .section-heading > p {
+    display: none;
+  }
+
   .work-section {
     margin-top: 38px;
   }

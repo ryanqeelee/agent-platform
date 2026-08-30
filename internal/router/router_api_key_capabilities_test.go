@@ -183,7 +183,7 @@ func TestAgentReadRoutesDeclareReadAgentsCapability(t *testing.T) {
 	}
 }
 
-func TestAgentWriteRoutesRequireManageAgentsCapability(t *testing.T) {
+func TestAgentScenarioAuthoringRoutesAreNotAvailableToAPIKeys(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	g := &rbacGuards{}
 	v1 := gin.New().Group("/api/v1")
@@ -194,6 +194,7 @@ func TestAgentWriteRoutesRequireManageAgentsCapability(t *testing.T) {
 		method string
 		path   string
 	}{
+		{http.MethodGet, "/api/v1/agents/capabilities"},
 		{http.MethodPost, "/api/v1/agents"},
 		{http.MethodPut, "/api/v1/agents/:id"},
 		{http.MethodDelete, "/api/v1/agents/:id"},
@@ -202,15 +203,8 @@ func TestAgentWriteRoutesRequireManageAgentsCapability(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
-			policy := mustLookupAPIKeyPolicy(t, g, tc.method, tc.path)
-			if !policy.RequireFullAccess {
-				t.Fatal("policy should require full access without a matching capability")
-			}
-			if !policyHasCapability(policy, types.APIKeyCapabilityManageAgents) {
-				t.Fatalf("policy capabilities = %#v, want manage_agents", policy.Capabilities)
-			}
-			if policyHasCapability(policy, types.APIKeyCapabilityReadAgents) {
-				t.Fatalf("agent write route must not be granted by read_agents: %#v", policy.Capabilities)
+			if _, ok := g.apiKeyAuthorizer.Lookup(tc.method, tc.path); ok {
+				t.Fatal("assistant scenario authoring must require a human enterprise administrator")
 			}
 		})
 	}

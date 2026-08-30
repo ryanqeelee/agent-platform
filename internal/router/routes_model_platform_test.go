@@ -46,7 +46,6 @@ func TestPlatformInfrastructureRoutesRequireSystemAdmin(t *testing.T) {
 		{http.MethodGet, "/api/v1/platform/retrieval-processing-settings"},
 		{http.MethodPost, "/api/v1/initialization/initialize/kb-1"},
 		{http.MethodGet, "/api/v1/initialization/ollama/models"},
-		{http.MethodGet, "/api/v1/mcp-services"},
 		{http.MethodGet, "/api/v1/vector-stores/types"},
 		{http.MethodGet, "/api/v1/storage-backends/types"},
 		{http.MethodGet, "/api/v1/models/weknoracloud/status"},
@@ -60,6 +59,12 @@ func TestPlatformInfrastructureRoutesRequireSystemAdmin(t *testing.T) {
 		if w.Code != http.StatusForbidden {
 			t.Fatalf("enterprise Owner %s %s status = %d, want %d", tc.method, tc.path, w.Code, http.StatusForbidden)
 		}
+	}
+
+	enterpriseCatalog := httptest.NewRecorder()
+	r.ServeHTTP(enterpriseCatalog, httptest.NewRequest(http.MethodGet, "/api/v1/mcp-services", nil))
+	if enterpriseCatalog.Code == http.StatusForbidden {
+		t.Fatal("enterprise Owner must reach the safe MCP service catalog")
 	}
 
 	allowed := httptest.NewRecorder()

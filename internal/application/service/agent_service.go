@@ -257,7 +257,7 @@ func (s *agentService) registerMCPTools(
 
 	mcpMode := config.MCPSelectionMode
 	if mcpMode == "" {
-		mcpMode = "all"
+		mcpMode = "none"
 	}
 	if mcpMode == "none" {
 		logger.Infof(ctx, "MCP services disabled by agent config (mode: none)")

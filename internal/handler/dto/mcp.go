@@ -45,6 +45,15 @@ type MCPServiceResponse struct {
 	Credentials map[string]CredentialFieldMetadata `json:"credentials,omitempty"`
 }
 
+// MCPServiceOptionResponse is the enterprise-safe catalog used when an
+// administrator selects services for an assistant scenario.
+type MCPServiceOptionResponse struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Enabled     bool   `json:"enabled"`
+}
+
 // MCPAuthConfigResponse intentionally has no APIKey or Token fields. Their
 // presence is signalled via MCPServiceResponse.Credentials. AuthType, Scopes
 // and AuthServerMetadataURL are non-secret OAuth configuration and are safe to
@@ -132,6 +141,19 @@ func NewMCPServiceResponses(ctx context.Context, svcs []*types.MCPService) []*MC
 	out := make([]*MCPServiceResponse, 0, len(svcs))
 	for _, s := range svcs {
 		out = append(out, NewMCPServiceResponse(ctx, s))
+	}
+	return out
+}
+
+func NewMCPServiceOptionResponses(svcs []*types.MCPService) []*MCPServiceOptionResponse {
+	out := make([]*MCPServiceOptionResponse, 0, len(svcs))
+	for _, svc := range svcs {
+		out = append(out, &MCPServiceOptionResponse{
+			ID:          svc.ID,
+			Name:        svc.Name,
+			Description: svc.Description,
+			Enabled:     svc.Enabled,
+		})
 	}
 	return out
 }

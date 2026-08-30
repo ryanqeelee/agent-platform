@@ -924,6 +924,8 @@ export default {
       },
       basicInfo: 'Basic Info',
       basicInfoDesc: 'Configure agent name, description, and run mode',
+      scenarioPolicyLimited: 'Some extension capabilities are not enabled for this workspace. Contact the platform administrator to enable them.',
+      scenarioPolicyUnavailable: 'Extension capabilities are temporarily unavailable. Try again later.',
       promptsConfig: 'Prompts',
       promptsConfigDesc: 'Configure system, context, intent, rewrite, and fallback prompts',
       modelConfig: 'Model Config',

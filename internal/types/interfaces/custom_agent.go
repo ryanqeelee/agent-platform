@@ -10,6 +10,8 @@ import (
 // CustomAgentService defines the custom agent service interface
 // Provides high-level operations for agent creation, querying, updating, and deletion
 type CustomAgentService interface {
+	GetAssistantScenarioCapabilities(ctx context.Context) (*types.AssistantScenarioCapabilitySettings, error)
+
 	// CreateAgent creates a new custom agent
 	// Parameters:
 	//   - ctx: Context information, carrying request tracking, user identity, etc.

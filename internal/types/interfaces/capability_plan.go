@@ -27,3 +27,7 @@ type PlatformModelRuntimeSettingsResolver interface {
 type PlatformRetrievalProcessingSettingsResolver interface {
 	ResolvePlatformRetrievalProcessingSettings(ctx context.Context, tenantID uint64) (*types.PlatformRetrievalProcessingSettings, error)
 }
+
+type AssistantScenarioCapabilityResolver interface {
+	ResolveAssistantScenarioCapabilities(ctx context.Context, tenantID uint64) (*types.AssistantScenarioCapabilitySettings, error)
+}

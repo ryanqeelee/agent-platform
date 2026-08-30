@@ -19,29 +19,29 @@ import (
 // Agent or data-analysis configuration authority. Reads remain Viewer+ so
 // employees can inspect and run the assistants made available to them.
 func RegisterCustomAgentRoutes(r *gin.RouterGroup, agentHandler *handler.CustomAgentHandler, g *rbacGuards) {
-	agents := g.apiKeyGroup(r.Group("/agents"), apiKeyFullAccess())
+	agents := r.Group("/agents")
+	agentsWithAPIKey := g.apiKeyGroup(agents, apiKeyFullAccess())
 	// agentsRead are the agent read endpoints. They stay full-access only for
 	// plain scoped keys (agent config can carry sensitive model/MCP bindings),
 	// but read_agents, chat, or manage_agents may read them.
-	agentsRead := agents.With(apiKeyReadAgents(apiKeyManageAgents(apiKeyChat(apiKeyFullAccess()))))
-	// agentsWrite are the agent authoring endpoints. Owner by default, but a
-	// key granted manage_agents may author agents without full Owner.
-	agentsWrite := agents.With(apiKeyManageAgents(apiKeyFullAccess()))
+	agentsRead := agentsWithAPIKey.With(apiKeyReadAgents(apiKeyManageAgents(apiKeyChat(apiKeyFullAccess()))))
 	{
+		// Enterprise scenario policy is human-admin only; API keys do not author scenarios.
+		agents.GET("/capabilities", g.Admin(), agentHandler.GetAssistantScenarioCapabilities)
 		// Get placeholder definitions (must be before /:id to avoid conflict) — Viewer+
 		agentsRead.GET("/placeholders", g.Viewer(), agentHandler.GetPlaceholders)
 		// List smart-reasoning agent type presets (rag-qa / wiki-qa / hybrid / custom) — Viewer+
 		agentsRead.GET("/type-presets", g.Viewer(), agentHandler.GetAgentTypePresets)
 		// Create custom agent — Admin+
-		agentsWrite.POST("", g.Admin(), agentHandler.CreateAgent)
+		agents.POST("", g.Admin(), agentHandler.CreateAgent)
 		// List all agents (including built-in) — Viewer+
 		agentsRead.GET("", g.Viewer(), agentHandler.ListAgents)
 		// Get agent by ID — Viewer+
 		agentsRead.GET("/:id", g.Viewer(), agentHandler.GetAgent)
 		// Update/delete/copy agent — Admin+
-		agentsWrite.PUT("/:id", g.Admin(), agentHandler.UpdateAgent)
-		agentsWrite.DELETE("/:id", g.Admin(), agentHandler.DeleteAgent)
-		agentsWrite.POST("/:id/copy", g.Admin(), agentHandler.CopyAgent)
+		agents.PUT("/:id", g.Admin(), agentHandler.UpdateAgent)
+		agents.DELETE("/:id", g.Admin(), agentHandler.DeleteAgent)
+		agents.POST("/:id/copy", g.Admin(), agentHandler.CopyAgent)
 	}
 	// Registered outside the group to avoid Gin route conflict with /agents/:id/shares in organization routes
 	g.apiKeyRoute(r, http.MethodGet, "/agents/:id/suggested-questions",

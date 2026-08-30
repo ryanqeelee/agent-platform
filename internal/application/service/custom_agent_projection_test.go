@@ -71,6 +71,26 @@ func TestAgentViewKeepsPlatformBindingsForSystemAdmin(t *testing.T) {
 	assert.Same(t, agent, AgentView(ctx, agent))
 }
 
+func TestAgentViewShowsOnlyScenarioControlsToEnterpriseAdmin(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantRoleContextKey, types.TenantRoleAdmin)
+	agent := &types.CustomAgent{Config: types.CustomAgentConfig{
+		ModelID:          "platform-model",
+		AllowedTools:     []string{"knowledge_search"},
+		MCPSelectionMode: "selected",
+		MCPServices:      []string{"mcp-1"},
+		WebSearchEnabled: true,
+		LLMCallTimeout:   90,
+	}}
+
+	view := AgentView(ctx, agent)
+	assert.Equal(t, []string{"knowledge_search"}, view.Config.AllowedTools)
+	assert.Equal(t, "selected", view.Config.MCPSelectionMode)
+	assert.Equal(t, []string{"mcp-1"}, view.Config.MCPServices)
+	assert.True(t, view.Config.WebSearchEnabled)
+	assert.Empty(t, view.Config.ModelID)
+	assert.Zero(t, view.Config.LLMCallTimeout)
+}
+
 func TestWorkspaceAgentUpdateChangesBusinessFieldsOnly(t *testing.T) {
 	current := types.CustomAgentConfig{
 		SystemPrompt: "old", ModelID: "platform-model", Temperature: 0.4,
@@ -86,5 +106,5 @@ func TestWorkspaceAgentUpdateChangesBusinessFieldsOnly(t *testing.T) {
 	assert.Equal(t, "new", next.SystemPrompt)
 	assert.Equal(t, "platform-model", next.ModelID)
 	assert.Equal(t, 0.4, next.Temperature)
-	assert.Equal(t, []string{"platform-tool"}, next.AllowedTools)
+	assert.Equal(t, []string{"workspace-tool"}, next.AllowedTools)
 }

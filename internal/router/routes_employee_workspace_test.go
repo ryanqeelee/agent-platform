@@ -39,6 +39,12 @@ func TestViewerCannotReachRegisteredEmployeeWorkspaceMutationRoutes(t *testing.T
 			},
 		},
 		{
+			name: "agent scenario capabilities", method: http.MethodGet, path: "/api/v1/agents/capabilities",
+			register: func(v1 *gin.RouterGroup, g *rbacGuards) {
+				RegisterCustomAgentRoutes(v1, &handler.CustomAgentHandler{}, g)
+			},
+		},
+		{
 			name: "agent update", method: http.MethodPut, path: "/api/v1/agents/agent-1",
 			register: func(v1 *gin.RouterGroup, g *rbacGuards) {
 				RegisterCustomAgentRoutes(v1, &handler.CustomAgentHandler{}, g)

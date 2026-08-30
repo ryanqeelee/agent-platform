@@ -17,10 +17,13 @@ import (
 
 // Custom agent related errors
 var (
-	ErrAgentNotFound       = errors.New("agent not found")
-	ErrCannotModifyBuiltin = errors.New("cannot modify built-in agent basic info")
-	ErrCannotDeleteBuiltin = errors.New("cannot delete built-in agent")
-	ErrAgentNameRequired   = errors.New("agent name is required")
+	ErrAgentNotFound                          = errors.New("agent not found")
+	ErrCannotModifyBuiltin                    = errors.New("cannot modify built-in agent basic info")
+	ErrCannotDeleteBuiltin                    = errors.New("cannot delete built-in agent")
+	ErrAgentNameRequired                      = errors.New("agent name is required")
+	ErrAssistantScenarioCapabilityDenied      = errors.New("该助理场景能力未由平台启用，请联系平台管理员")
+	ErrAssistantScenarioCapabilityUnavailable = errors.New("助理场景能力暂不可用，请稍后重试")
+	ErrAssistantScenarioConfigurationInvalid  = errors.New("助理场景包含已停用或不存在的服务，请重新选择后保存")
 )
 
 const (
@@ -45,6 +48,13 @@ func AgentView(ctx context.Context, agent *types.CustomAgent) *types.CustomAgent
 	view := *agent
 	view.Config = types.CustomAgentConfig{}
 	applyWorkspaceAgentConfig(&view.Config, agent.Config)
+	if types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin) {
+		applyEnterpriseScenarioConfig(&view.Config, agent.Config)
+		if view.Config.MCPSelectionMode == "all" {
+			view.Config.MCPSelectionMode = "none"
+			view.Config.MCPServices = nil
+		}
+	}
 	return &view
 }
 
@@ -72,15 +82,24 @@ func applyWorkspaceAgentConfig(dst *types.CustomAgentConfig, src types.CustomAge
 	}
 }
 
+func applyEnterpriseScenarioConfig(dst *types.CustomAgentConfig, src types.CustomAgentConfig) {
+	dst.AllowedTools = src.AllowedTools
+	dst.MCPSelectionMode = src.MCPSelectionMode
+	dst.MCPServices = src.MCPServices
+	dst.WebSearchEnabled = src.WebSearchEnabled
+}
+
 func preserveAgentPlatformBindings(next *types.CustomAgentConfig, current types.CustomAgentConfig) {
 	business := types.CustomAgentConfig{}
 	applyWorkspaceAgentConfig(&business, *next)
+	applyEnterpriseScenarioConfig(&business, *next)
 	*next = current
 	currentModelID := ""
 	if current.QuestionSuggestions != nil {
 		currentModelID = current.QuestionSuggestions.FollowUps.ModelID
 	}
 	applyWorkspaceAgentConfig(next, business)
+	applyEnterpriseScenarioConfig(next, business)
 	if next.QuestionSuggestions != nil && current.QuestionSuggestions != nil {
 		next.QuestionSuggestions.FollowUps.ModelID = currentModelID
 	}
@@ -88,13 +107,15 @@ func preserveAgentPlatformBindings(next *types.CustomAgentConfig, current types.
 
 // customAgentService implements the CustomAgentService interface
 type customAgentService struct {
-	repo           interfaces.CustomAgentRepository
-	chunkRepo      interfaces.ChunkRepository
-	kbService      interfaces.KnowledgeBaseService
-	kbShareService interfaces.KBShareService
-	wikiPageRepo   interfaces.WikiPageRepository
-	tagRepo        interfaces.KnowledgeTagRepository
-	knowledgeRepo  interfaces.KnowledgeRepository
+	repo                 interfaces.CustomAgentRepository
+	chunkRepo            interfaces.ChunkRepository
+	kbService            interfaces.KnowledgeBaseService
+	kbShareService       interfaces.KBShareService
+	wikiPageRepo         interfaces.WikiPageRepository
+	tagRepo              interfaces.KnowledgeTagRepository
+	knowledgeRepo        interfaces.KnowledgeRepository
+	scenarioCapabilities interfaces.AssistantScenarioCapabilityResolver
+	mcpServices          interfaces.MCPServiceService
 }
 
 // NewCustomAgentService creates a new custom agent service
@@ -106,16 +127,193 @@ func NewCustomAgentService(
 	wikiPageRepo interfaces.WikiPageRepository,
 	tagRepo interfaces.KnowledgeTagRepository,
 	knowledgeRepo interfaces.KnowledgeRepository,
+	scenarioCapabilities interfaces.AssistantScenarioCapabilityResolver,
+	mcpServices interfaces.MCPServiceService,
 ) interfaces.CustomAgentService {
 	return &customAgentService{
-		repo:           repo,
-		chunkRepo:      chunkRepo,
-		kbService:      kbService,
-		kbShareService: kbShareService,
-		wikiPageRepo:   wikiPageRepo,
-		tagRepo:        tagRepo,
-		knowledgeRepo:  knowledgeRepo,
+		repo:                 repo,
+		chunkRepo:            chunkRepo,
+		kbService:            kbService,
+		kbShareService:       kbShareService,
+		wikiPageRepo:         wikiPageRepo,
+		tagRepo:              tagRepo,
+		knowledgeRepo:        knowledgeRepo,
+		scenarioCapabilities: scenarioCapabilities,
+		mcpServices:          mcpServices,
 	}
+}
+
+type assistantScenarioMCPCatalog interface {
+	ListMCPServicesByIDs(context.Context, uint64, []string) ([]*types.MCPService, error)
+}
+
+func assistantScenarioCapabilityUse(
+	config types.CustomAgentConfig,
+	allowMCPAll bool,
+) (types.AssistantScenarioCapabilities, error) {
+	use := types.AssistantScenarioCapabilities{
+		ExternalSearch: config.WebSearchEnabled,
+		Tools:          config.AgentMode == types.AgentModeSmartReasoning,
+	}
+	switch config.MCPSelectionMode {
+	case "", "none":
+	case "selected":
+		use.MCP = len(config.MCPServices) > 0
+	case "all":
+		if !allowMCPAll {
+			return use, ErrAssistantScenarioCapabilityDenied
+		}
+		use.MCP = true
+	default:
+		return use, ErrAssistantScenarioCapabilityDenied
+	}
+	return use, nil
+}
+
+func validateAssistantScenarioCapabilities(
+	ctx context.Context,
+	resolver interfaces.AssistantScenarioCapabilityResolver,
+	tenantID uint64,
+	config types.CustomAgentConfig,
+	allowMCPAll bool,
+) error {
+	use, err := assistantScenarioCapabilityUse(config, allowMCPAll)
+	if err != nil {
+		return err
+	}
+	if !use.ExternalSearch && !use.MCP && !use.Tools {
+		return nil
+	}
+	if resolver == nil {
+		return ErrAssistantScenarioCapabilityUnavailable
+	}
+	settings, err := resolver.ResolveAssistantScenarioCapabilities(ctx, tenantID)
+	if err != nil || settings == nil {
+		return ErrAssistantScenarioCapabilityUnavailable
+	}
+	if use.ExternalSearch && !settings.Capabilities.ExternalSearch ||
+		use.MCP && !settings.Capabilities.MCP ||
+		use.Tools && !settings.Capabilities.Tools {
+		return ErrAssistantScenarioCapabilityDenied
+	}
+	return nil
+}
+
+func validateAssistantScenarioMCPSelection(
+	ctx context.Context,
+	catalog assistantScenarioMCPCatalog,
+	tenantID uint64,
+	config types.CustomAgentConfig,
+) error {
+	if config.MCPSelectionMode != "selected" || len(config.MCPServices) == 0 {
+		return nil
+	}
+	if catalog == nil {
+		return ErrAssistantScenarioCapabilityUnavailable
+	}
+	services, err := catalog.ListMCPServicesByIDs(ctx, tenantID, config.MCPServices)
+	if err != nil {
+		return ErrAssistantScenarioCapabilityUnavailable
+	}
+	enabled := make(map[string]struct{}, len(services))
+	for _, service := range services {
+		if service != nil && service.Enabled {
+			enabled[service.ID] = struct{}{}
+		}
+	}
+	for _, id := range config.MCPServices {
+		if _, ok := enabled[id]; !ok {
+			return ErrAssistantScenarioConfigurationInvalid
+		}
+	}
+	return nil
+}
+
+func validateAssistantScenarioExecution(
+	ctx context.Context,
+	resolver interfaces.AssistantScenarioCapabilityResolver,
+	mcpCatalog assistantScenarioMCPCatalog,
+	tenantID uint64,
+	agent *types.CustomAgent,
+	req *types.QARequest,
+) error {
+	if agent == nil {
+		if req.WebSearchEnabled || len(req.MCPServiceIDs) > 0 {
+			return ErrAssistantScenarioCapabilityDenied
+		}
+		return nil
+	}
+	if err := validateAssistantScenarioCapabilities(ctx, resolver, tenantID, agent.Config, true); err != nil {
+		return err
+	}
+	if req.SharedAgentReadOnly {
+		callerTenantID, sourceTenantID, agentID, ok := types.AuthorizedSharedAgentExecutionFromContext(ctx)
+		if !ok || sourceTenantID != tenantID || agentID != agent.ID {
+			return ErrAssistantScenarioCapabilityDenied
+		}
+		if err := validateAssistantScenarioCapabilities(ctx, resolver, callerTenantID, agent.Config, true); err != nil {
+			return err
+		}
+	}
+	if err := validateAssistantScenarioMCPSelection(ctx, mcpCatalog, tenantID, agent.Config); err != nil {
+		return err
+	}
+	if req.WebSearchEnabled && !agent.Config.WebSearchEnabled {
+		return ErrAssistantScenarioCapabilityDenied
+	}
+	if len(req.MCPServiceIDs) == 0 {
+		return nil
+	}
+	switch agent.Config.MCPSelectionMode {
+	case "all":
+		return nil
+	case "selected":
+		allowed := make(map[string]struct{}, len(agent.Config.MCPServices))
+		for _, id := range agent.Config.MCPServices {
+			allowed[id] = struct{}{}
+		}
+		for _, id := range req.MCPServiceIDs {
+			if _, ok := allowed[id]; !ok {
+				return ErrAssistantScenarioCapabilityDenied
+			}
+		}
+		return nil
+	default:
+		return ErrAssistantScenarioCapabilityDenied
+	}
+}
+
+func (s *customAgentService) GetAssistantScenarioCapabilities(
+	ctx context.Context,
+) (*types.AssistantScenarioCapabilitySettings, error) {
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok || s.scenarioCapabilities == nil {
+		return nil, ErrAssistantScenarioCapabilityUnavailable
+	}
+	settings, err := s.scenarioCapabilities.ResolveAssistantScenarioCapabilities(ctx, tenantID)
+	if err != nil || settings == nil {
+		return nil, ErrAssistantScenarioCapabilityUnavailable
+	}
+	return settings, nil
+}
+
+func (s *customAgentService) validateAssistantScenarioConfig(
+	ctx context.Context,
+	tenantID uint64,
+	config types.CustomAgentConfig,
+) error {
+	if !types.IsSystemAdminFromContext(ctx) {
+		if err := validateAssistantScenarioCapabilities(
+			ctx,
+			s.scenarioCapabilities,
+			tenantID,
+			config,
+			false,
+		); err != nil {
+			return err
+		}
+	}
+	return validateAssistantScenarioMCPSelection(ctx, s.mcpServices, tenantID, config)
 }
 
 // CreateAgent creates a new custom agent
@@ -158,11 +356,15 @@ func (s *customAgentService) CreateAgent(ctx context.Context, agent *types.Custo
 		business := agent.Config
 		agent.Config = types.CustomAgentConfig{}
 		applyWorkspaceAgentConfig(&agent.Config, business)
+		applyEnterpriseScenarioConfig(&agent.Config, business)
 	}
 
 	// Set defaults
 	agent.EnsureDefaults()
 	if err := agent.Config.QuestionSuggestions.Validate(); err != nil {
+		return nil, err
+	}
+	if err := s.validateAssistantScenarioConfig(ctx, tenantID, agent.Config); err != nil {
 		return nil, err
 	}
 
@@ -351,6 +553,9 @@ func (s *customAgentService) UpdateAgent(ctx context.Context, agent *types.Custo
 	if err := existingAgent.Config.QuestionSuggestions.Validate(); err != nil {
 		return nil, err
 	}
+	if err := s.validateAssistantScenarioConfig(ctx, tenantID, existingAgent.Config); err != nil {
+		return nil, err
+	}
 
 	logger.Infof(ctx, "Updating custom agent, ID: %s, name: %s", agent.ID, agent.Name)
 
@@ -390,6 +595,9 @@ func (s *customAgentService) updateBuiltinAgent(ctx context.Context, agent *type
 		if err := existingAgent.Config.QuestionSuggestions.Validate(); err != nil {
 			return nil, err
 		}
+		if err := s.validateAssistantScenarioConfig(ctx, tenantID, existingAgent.Config); err != nil {
+			return nil, err
+		}
 
 		logger.Infof(ctx, "Updating built-in agent config, ID: %s", agent.ID)
 
@@ -421,6 +629,9 @@ func (s *customAgentService) updateBuiltinAgent(ctx context.Context, agent *type
 	}
 	newAgent.EnsureDefaults()
 	if err := newAgent.Config.QuestionSuggestions.Validate(); err != nil {
+		return nil, err
+	}
+	if err := s.validateAssistantScenarioConfig(ctx, tenantID, newAgent.Config); err != nil {
 		return nil, err
 	}
 
@@ -523,6 +734,9 @@ func (s *customAgentService) CopyAgent(ctx context.Context, id string) (*types.C
 
 	// Ensure defaults
 	newAgent.EnsureDefaults()
+	if err := s.validateAssistantScenarioConfig(ctx, tenantID, newAgent.Config); err != nil {
+		return nil, err
+	}
 
 	logger.Infof(ctx, "Copying agent, source ID: %s, new ID: %s", id, newAgent.ID)
 

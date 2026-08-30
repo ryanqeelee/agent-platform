@@ -4951,6 +4951,8 @@ export default {
       },
       basicInfo: '기본정보',
       basicInfoDesc: '에이전트 이름, 설명 및 실행 모드 구성',
+      scenarioPolicyLimited: '이 작업 공간에서 일부 확장 기능이 활성화되지 않았습니다. 플랫폼 관리자에게 문의하세요.',
+      scenarioPolicyUnavailable: '확장 기능을 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도하세요.',
       promptsConfig: '프롬프트',
       promptsConfigDesc: '시스템/컨텍스트/의도/재작성/폴백 프롬프트 구성',
       modelConfig: '모델 구성',

@@ -34,3 +34,10 @@ test('shows a post-create hint after the first successful save', () => {
   assert.match(source, /settings-footer-note/)
   assert.match(source, /agent\.editor\.postCreateHint\.title/)
 })
+
+test('enterprise scenario controls follow the three platform capabilities', () => {
+  assert.match(source, /const canConfigureTools = computed\(\(\) => authStore\.isSystemAdmin \|\| scenarioCapabilities\.value\.tools\)/)
+  assert.match(source, /const canConfigureMCP = computed\(\(\) => authStore\.isSystemAdmin \|\| scenarioCapabilities\.value\.mcp\)/)
+  assert.match(source, /const canConfigureExternalSearch = computed\(\(\) => authStore\.isSystemAdmin \|\| scenarioCapabilities\.value\.external_search\)/)
+  assert.match(source, /v-if="authStore\.isSystemAdmin" value="all"/)
+})

@@ -90,6 +90,16 @@ func (s *sessionService) KnowledgeQA(
 
 	// Resolve retrieval tenant scope using shared helper
 	retrievalTenantID := s.resolveRetrievalTenantID(ctx, req)
+	if err := validateAssistantScenarioExecution(
+		ctx,
+		s.scenarioCapabilities,
+		s.mcpServices,
+		retrievalTenantID,
+		req.CustomAgent,
+		req,
+	); err != nil {
+		return err
+	}
 
 	// Build unified search targets (computed once, used throughout pipeline)
 	searchTargets, err := s.buildSearchTargets(ctx, retrievalTenantID, knowledgeBaseIDs, knowledgeIDs, req.TagScopes, sharedScope)

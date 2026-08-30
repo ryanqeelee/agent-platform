@@ -58,6 +58,33 @@ type UpdateAgentRequest struct {
 	Config      types.CustomAgentConfig `json:"config"`
 }
 
+func handleAssistantScenarioCapabilityError(c *gin.Context, err error) bool {
+	switch err {
+	case service.ErrAssistantScenarioCapabilityDenied:
+		c.Error(errors.NewForbiddenError(err.Error()))
+		return true
+	case service.ErrAssistantScenarioCapabilityUnavailable:
+		c.Error(errors.NewServiceUnavailableError(err.Error()))
+		return true
+	case service.ErrAssistantScenarioConfigurationInvalid:
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return true
+	default:
+		return false
+	}
+}
+
+func (h *CustomAgentHandler) GetAssistantScenarioCapabilities(c *gin.Context) {
+	settings, err := h.service.GetAssistantScenarioCapabilities(c.Request.Context())
+	if err != nil {
+		if !handleAssistantScenarioCapabilityError(c, err) {
+			c.Error(errors.NewInternalServerError("无法读取助理场景能力"))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": settings})
+}
+
 // CreateAgent godoc
 // @Summary      创建智能体
 // @Description  创建新的自定义智能体
@@ -68,7 +95,6 @@ type UpdateAgentRequest struct {
 // @Success      201      {object}  map[string]interface{}  "创建的智能体"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
-// @Security     ApiKeyAuth
 // @Router       /agents [post]
 func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -109,6 +135,9 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, nil)
 		if err == service.ErrAgentNameRequired {
 			c.Error(errors.NewBadRequestError(err.Error()))
+			return
+		}
+		if handleAssistantScenarioCapabilityError(c, err) {
 			return
 		}
 		c.Error(errors.NewInternalServerError(err.Error()))
@@ -307,7 +336,6 @@ func enrichAgentCreatorNames(ctx context.Context, userSvc interfaces.UserService
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Failure      403      {object}  errors.AppError         "无法修改内置智能体"
 // @Security     Bearer
-// @Security     ApiKeyAuth
 // @Router       /agents/{id} [put]
 func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -365,7 +393,9 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 		case service.ErrAgentNameRequired:
 			c.Error(errors.NewBadRequestError(err.Error()))
 		default:
-			c.Error(errors.NewInternalServerError(err.Error()))
+			if !handleAssistantScenarioCapabilityError(c, err) {
+				c.Error(errors.NewInternalServerError(err.Error()))
+			}
 		}
 		return
 	}
@@ -389,7 +419,6 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 // @Failure      403  {object}  errors.AppError         "无法删除内置智能体"
 // @Failure      404  {object}  errors.AppError         "智能体不存在"
 // @Security     Bearer
-// @Security     ApiKeyAuth
 // @Router       /agents/{id} [delete]
 func (h *CustomAgentHandler) DeleteAgent(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -455,7 +484,6 @@ func (h *CustomAgentHandler) DeleteAgent(c *gin.Context) {
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Failure      404  {object}  errors.AppError         "智能体不存在"
 // @Security     Bearer
-// @Security     ApiKeyAuth
 // @Router       /agents/{id}/copy [post]
 func (h *CustomAgentHandler) CopyAgent(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -480,7 +508,9 @@ func (h *CustomAgentHandler) CopyAgent(c *gin.Context) {
 		case service.ErrAgentNotFound:
 			c.Error(errors.NewNotFoundError("Agent not found"))
 		default:
-			c.Error(errors.NewInternalServerError(err.Error()))
+			if !handleAssistantScenarioCapabilityError(c, err) {
+				c.Error(errors.NewInternalServerError(err.Error()))
+			}
 		}
 		return
 	}

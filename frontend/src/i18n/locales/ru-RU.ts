@@ -4951,6 +4951,8 @@ export default {
       },
       basicInfo: 'Basic Info',
       basicInfoDesc: 'Настройка имени, описания и режима работы агента',
+      scenarioPolicyLimited: 'Некоторые дополнительные возможности не включены для этого пространства. Обратитесь к администратору платформы.',
+      scenarioPolicyUnavailable: 'Дополнительные возможности временно недоступны. Повторите попытку позже.',
       promptsConfig: 'Промпты',
       promptsConfigDesc: 'Настройка системных, контекстных, intent/rewrite/fallback промптов',
       modelConfig: 'Model Config',

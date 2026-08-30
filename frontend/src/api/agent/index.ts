@@ -144,6 +144,21 @@ export interface CustomAgent {
   updated_at?: string;
 }
 
+export interface AssistantScenarioCapabilities {
+  external_search: boolean;
+  mcp: boolean;
+  tools: boolean;
+}
+
+export interface AssistantScenarioCapabilitySettings {
+  contract_version: 'AssistantScenarioCapabilityV1';
+  scope: {
+    kind: 'platform_shared' | 'enterprise_assigned';
+    product_base_tenant_id: string;
+  };
+  capabilities: AssistantScenarioCapabilities;
+}
+
 // 创建智能体请求
 export interface CreateAgentRequest {
   name: string;
@@ -191,6 +206,10 @@ export function listAgents(params?: {
 // 获取智能体详情
 export function getAgentById(id: string) {
   return get<{ data: CustomAgent }>(`/api/v1/agents/${id}`);
+}
+
+export function getAssistantScenarioCapabilities() {
+  return get<{ data: AssistantScenarioCapabilitySettings }>('/api/v1/agents/capabilities');
 }
 
 // 创建智能体

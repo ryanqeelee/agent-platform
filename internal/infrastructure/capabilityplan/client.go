@@ -37,6 +37,10 @@ func NewPlatformRetrievalProcessingSettingsResolverFromEnv() interfaces.Platform
 	return newClientFromEnv()
 }
 
+func NewAssistantScenarioCapabilityResolverFromEnv() interfaces.AssistantScenarioCapabilityResolver {
+	return newClientFromEnv()
+}
+
 func newClientFromEnv() *Client {
 	return &Client{
 		baseURL: strings.TrimRight(strings.TrimSpace(os.Getenv("RINGXUN_CAPABILITY_PLAN_BASE_URL")), "/"),
@@ -113,6 +117,39 @@ func (c *Client) ResolvePlatformRetrievalProcessingSettings(
 		return nil, interfaces.ErrAICapabilityUnavailable
 	}
 	return &settings, nil
+}
+
+func (c *Client) ResolveAssistantScenarioCapabilities(
+	ctx context.Context,
+	tenantID uint64,
+) (*types.AssistantScenarioCapabilitySettings, error) {
+	var payload struct {
+		ContractVersion string                      `json:"contract_version"`
+		Scope           types.PlatformSettingsScope `json:"scope"`
+		Capabilities    struct {
+			ExternalSearch *bool `json:"external_search"`
+			MCP            *bool `json:"mcp"`
+			Tools          *bool `json:"tools"`
+		} `json:"capabilities"`
+	}
+	if err := c.get(ctx, tenantID, "assistant-scenario-capabilities", &payload); err != nil ||
+		payload.ContractVersion != "AssistantScenarioCapabilityV1" ||
+		(payload.Scope.Kind != "platform_shared" && payload.Scope.Kind != "enterprise_assigned") ||
+		payload.Scope.ProductBaseTenantID != strconv.FormatUint(tenantID, 10) ||
+		payload.Capabilities.ExternalSearch == nil ||
+		payload.Capabilities.MCP == nil ||
+		payload.Capabilities.Tools == nil {
+		return nil, interfaces.ErrAICapabilityUnavailable
+	}
+	return &types.AssistantScenarioCapabilitySettings{
+		ContractVersion: payload.ContractVersion,
+		Scope:           payload.Scope,
+		Capabilities: types.AssistantScenarioCapabilities{
+			ExternalSearch: *payload.Capabilities.ExternalSearch,
+			MCP:            *payload.Capabilities.MCP,
+			Tools:          *payload.Capabilities.Tools,
+		},
+	}, nil
 }
 
 func (c *Client) get(ctx context.Context, tenantID uint64, route string, target any) error {

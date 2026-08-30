@@ -51,6 +51,13 @@
                     <p class="section-description">{{ $t('agent.editor.basicInfoDesc') }}</p>
                   </div>
 
+                  <t-alert
+                    v-if="enterpriseScenarioAdmin && scenarioPolicyNotice"
+                    theme="warning"
+                    :message="scenarioPolicyNotice"
+                    class="scenario-policy-alert"
+                  />
+
                   <div class="settings-group">
                     <!-- 智能体 ID（用于 API 集成） -->
                     <div v-if="editorMode === 'edit' && editorAgent?.id" class="setting-row">
@@ -104,7 +111,7 @@
                           <t-radio-button value="quick-answer">
                             {{ $t('agent.type.normal') }}
                           </t-radio-button>
-                          <t-radio-button value="smart-reasoning">
+                          <t-radio-button value="smart-reasoning" :disabled="!canConfigureTools">
                             {{ $t('agent.type.agent') }}
                           </t-radio-button>
                         </t-radio-group>
@@ -1070,7 +1077,7 @@
                 </div>
 
                 <!-- 工具配置（仅 Agent 模式） -->
-                <div v-if="authStore.isSystemAdmin" v-show="currentSection === 'tools' && isAgentMode" class="section">
+                <div v-if="canConfigureTools" v-show="currentSection === 'tools' && isAgentMode" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agent.editor.toolsConfig') }}</h2>
                     <p class="section-description">{{ $t('agent.editor.toolsConfigDesc') }}</p>
@@ -1176,7 +1183,7 @@
                 </div>
 
                 <!-- MCP 服务配置（仅 Agent 模式） -->
-                <div v-if="authStore.isSystemAdmin" v-show="currentSection === 'mcp' && isAgentMode" class="section">
+                <div v-if="canConfigureMCP" v-show="currentSection === 'mcp' && isAgentMode" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agentEditor.mcp.label') }}</h2>
                     <p class="section-description">{{ $t('agentEditor.mcp.desc') }}</p>
@@ -1191,7 +1198,7 @@
                       </div>
                       <div class="setting-control">
                         <t-radio-group v-model="mcpSelectionMode">
-                          <t-radio-button value="all">{{ $t('agentEditor.selection.all') }}</t-radio-button>
+                          <t-radio-button v-if="authStore.isSystemAdmin" value="all">{{ $t('agentEditor.selection.all') }}</t-radio-button>
                           <t-radio-button value="selected">{{ $t('agentEditor.selection.selected') }}</t-radio-button>
                           <t-radio-button value="none">{{ $t('agentEditor.selection.disabled') }}</t-radio-button>
                         </t-radio-group>
@@ -1214,7 +1221,7 @@
                     </div>
 
                     <!-- 授权等待超时：对话中触发 OAuth 授权时的等待秒数 -->
-                    <div v-if="mcpSelectionMode !== 'none'" class="setting-row">
+                    <div v-if="authStore.isSystemAdmin && mcpSelectionMode !== 'none'" class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agentEditor.mcp.authWaitTimeout') }}</label>
                         <p class="desc">{{ $t('agentEditor.mcp.authWaitTimeoutDesc') }}</p>
@@ -1388,7 +1395,7 @@
                 </div>
 
                 <!-- 网络搜索配置 -->
-                <div v-if="authStore.isSystemAdmin" v-show="currentSection === 'websearch'" class="section">
+                <div v-if="canConfigureExternalSearch" v-show="currentSection === 'websearch'" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agent.editor.webSearchConfig') }}</h2>
                     <p class="section-description">{{ $t('agent.editor.webSearchConfigDesc') }}</p>
@@ -1426,7 +1433,7 @@
                     </div>
 
                     <!-- 网络搜索最大结果数 -->
-                    <div v-if="formData.config.web_search_enabled" class="setting-row">
+                    <div v-if="authStore.isSystemAdmin && formData.config.web_search_enabled" class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.webSearchMaxResults') }}</label>
                         <p class="desc">{{ $t('agentEditor.desc.webSearchMaxResults') }}</p>
@@ -1440,7 +1447,7 @@
                     </div>
 
                     <!-- 自动抓取页面内容 -->
-                    <div v-if="formData.config.web_search_enabled" class="setting-row">
+                    <div v-if="authStore.isSystemAdmin && formData.config.web_search_enabled" class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.webFetchEnabled') }}</label>
                         <p class="desc">{{ $t('agentEditor.desc.webFetchEnabled') }}</p>
@@ -1451,7 +1458,7 @@
                     </div>
 
                     <!-- 抓取页面数 -->
-                    <div v-if="formData.config.web_search_enabled && formData.config.web_fetch_enabled"
+                    <div v-if="authStore.isSystemAdmin && formData.config.web_search_enabled && formData.config.web_fetch_enabled"
                       class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.webFetchTopN') }}</label>
@@ -1651,8 +1658,10 @@ import { MessagePlugin } from 'tdesign-vue-next';
 import {
   createAgent,
   updateAgent,
+  getAssistantScenarioCapabilities,
   listIMChannels,
   type CustomAgent,
+  type AssistantScenarioCapabilities,
   type PlaceholderDefinition,
   type AgentTypePreset,
   type AgentType,
@@ -1698,6 +1707,26 @@ const chatResources = useChatResourcesStore();
 const editorResources = useEditorResourcesStore();
 
 const { t, locale: i18nLocale } = useI18n();
+
+const disabledScenarioCapabilities: AssistantScenarioCapabilities = {
+  external_search: false,
+  mcp: false,
+  tools: false,
+};
+const scenarioCapabilities = ref<AssistantScenarioCapabilities>({ ...disabledScenarioCapabilities });
+const scenarioPolicyLoadFailed = ref(false);
+const enterpriseScenarioAdmin = computed(() => !authStore.isSystemAdmin && authStore.hasRole('admin'));
+const canConfigureTools = computed(() => authStore.isSystemAdmin || scenarioCapabilities.value.tools);
+const canConfigureMCP = computed(() => authStore.isSystemAdmin || scenarioCapabilities.value.mcp);
+const canConfigureExternalSearch = computed(() => authStore.isSystemAdmin || scenarioCapabilities.value.external_search);
+const scenarioPolicyNotice = computed(() => {
+  if (scenarioPolicyLoadFailed.value) return t('agent.editor.scenarioPolicyUnavailable');
+  const capabilities = scenarioCapabilities.value;
+  if (!capabilities.external_search || !capabilities.mcp || !capabilities.tools) {
+    return t('agent.editor.scenarioPolicyLimited');
+  }
+  return '';
+});
 
 const props = defineProps<{
   visible: boolean;
@@ -2240,15 +2269,19 @@ const navItems = computed(() => {
     if (hasKnowledgeBase.value) {
       items.push({ key: 'retrieval', icon: 'search', label: t('agent.editor.retrievalStrategy') });
     }
-    items.push({ key: 'websearch', icon: 'internet', label: t('agent.editor.webSearchConfig') });
     items.push({ key: 'multimodal', icon: 'attach', label: t('agentEditor.imageUpload.navLabel') });
-    if (isAgentMode.value) {
-      items.push({ key: 'tools', icon: 'tools', label: t('agent.editor.toolsConfig') });
-      items.push({ key: 'mcp', icon: 'server', label: t('agentEditor.mcp.label') });
-    }
     if (isAgentMode.value && skillsAvailable.value) {
       items.push({ key: 'skills', icon: 'lightbulb', label: t('agent.editor.skillsConfig') });
     }
+  }
+  if (canConfigureExternalSearch.value) {
+    items.push({ key: 'websearch', icon: 'internet', label: t('agent.editor.webSearchConfig') });
+  }
+  if (isAgentMode.value && canConfigureTools.value) {
+    items.push({ key: 'tools', icon: 'tools', label: t('agent.editor.toolsConfig') });
+  }
+  if (isAgentMode.value && canConfigureMCP.value) {
+    items.push({ key: 'mcp', icon: 'server', label: t('agentEditor.mcp.label') });
   }
   // 发布（仅编辑模式）
   if (editorMode.value === 'edit' && editorAgent.value?.id && !editorAgent.value?.is_builtin && !authStore.isLiteMode && authStore.hasRole('admin')) {
@@ -2928,6 +2961,13 @@ watch(() => props.visible, async (val) => {
 
       // 补全可能缺失的字段
       agentData.config = { ...defaultFormData.config, ...agentData.config };
+      if (enterpriseScenarioAdmin.value && !canConfigureExternalSearch.value) {
+        agentData.config.web_search_enabled = false;
+      }
+      if (enterpriseScenarioAdmin.value && !canConfigureMCP.value) {
+        agentData.config.mcp_selection_mode = 'none';
+        agentData.config.mcp_services = [];
+      }
       if (agentData.config.thinking == null) {
         agentData.config.thinking = false;
       }
@@ -2985,6 +3025,9 @@ watch(() => props.visible, async (val) => {
     } else {
       // 创建新智能体，使用系统默认值
       const newFormData = JSON.parse(JSON.stringify(defaultFormData));
+      if (!canConfigureTools.value) {
+        newFormData.config.agent_mode = 'quick-answer';
+      }
       // 应用系统默认检索参数
       newFormData.config.embedding_top_k = defaultEmbeddingTopK.value;
       newFormData.config.keyword_threshold = defaultKeywordThreshold.value;
@@ -3340,10 +3383,23 @@ const applyPromptTemplateDefaults = (cfg: PromptTemplatesConfig | null) => {
 // 加载依赖数据（复用空间级缓存，避免重复请求）
 const loadDependencies = async () => {
   try {
+    scenarioCapabilities.value = { ...disabledScenarioCapabilities };
+    scenarioPolicyLoadFailed.value = false;
+    if (enterpriseScenarioAdmin.value) {
+      try {
+        const response = await getAssistantScenarioCapabilities();
+        scenarioCapabilities.value = response.data.capabilities;
+      } catch {
+        scenarioPolicyLoadFailed.value = true;
+      }
+    }
     const dependencies = [
       chatResources.ensureKnowledgeBases(),
 	  editorResources.prefetchAgentEditorDeps(false, authStore.isSystemAdmin),
     ];
+    if (enterpriseScenarioAdmin.value && canConfigureMCP.value) {
+      dependencies.push(editorResources.ensureMcpServices());
+    }
     if (authStore.isSystemAdmin) {
       dependencies.push(
         chatResources.ensureModels(),

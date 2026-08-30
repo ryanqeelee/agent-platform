@@ -83,9 +83,9 @@ func RegisterInitializationRoutes(r *gin.RouterGroup, handler *handler.Initializ
 
 // RegisterMCPServiceRoutes registers MCP service routes.
 //
-// MCP service configuration is platform infrastructure. Enterprise users may
-// complete their own OAuth flow for a platform-enabled service, but cannot
-// inspect endpoints, tools, resources, credentials, or approval policy.
+// MCP service configuration is platform infrastructure. Enterprise Admins may
+// list the safe service catalog and users may complete their own OAuth flow,
+// but neither can inspect endpoints, tools, resources, credentials, or policy.
 func RegisterMCPServiceRoutes(
 	r *gin.RouterGroup,
 	handler *handler.MCPServiceHandler,
@@ -105,7 +105,7 @@ func RegisterMCPServiceRoutes(
 	)
 	{
 		mcpServices.POST("", g.SystemAdmin(), handler.CreateMCPService)
-		mcpServices.GET("", g.SystemAdmin(), handler.ListMCPServices)
+		mcpServices.GET("", g.Admin(), handler.ListMCPServices)
 		mcpServices.GET("/:id", g.SystemAdmin(), handler.GetMCPService)
 		mcpServices.PUT("/:id", g.SystemAdmin(), handler.UpdateMCPService)
 		mcpServices.DELETE("/:id", g.SystemAdmin(), handler.DeleteMCPService)

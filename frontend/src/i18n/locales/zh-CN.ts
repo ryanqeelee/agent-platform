@@ -4951,6 +4951,8 @@ export default {
       },
       basicInfo: '基本信息',
       basicInfoDesc: '配置智能体的名称、描述与运行模式',
+      scenarioPolicyLimited: '当前空间的部分扩展能力尚未启用，如需使用请联系平台管理员。',
+      scenarioPolicyUnavailable: '扩展能力暂不可用，请稍后重试。',
       promptsConfig: '提示词',
       promptsConfigDesc: '配置系统提示词、上下文模板、意图/改写/兜底提示词',
       modelConfig: '模型配置',

@@ -113,7 +113,14 @@ func (h *MCPServiceHandler) ListMCPServices(c *gin.Context) {
 	services, err := h.mcpServiceService.ListMCPServices(ctx, tenantID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"tenant_id": tenantID})
-		c.Error(errors.NewInternalServerError("Failed to list MCP services: " + err.Error()))
+		c.Error(errors.NewInternalServerError("Failed to list MCP services"))
+		return
+	}
+	if !types.IsSystemAdminFromContext(ctx) {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data":    dto.NewMCPServiceOptionResponses(services),
+		})
 		return
 	}
 

@@ -54,3 +54,15 @@ type PlatformRetrievalProcessingSettings struct {
 		Parsing   string `json:"parsing"`
 	} `json:"capability_refs"`
 }
+
+type AssistantScenarioCapabilities struct {
+	ExternalSearch bool `json:"external_search"`
+	MCP            bool `json:"mcp"`
+	Tools          bool `json:"tools"`
+}
+
+type AssistantScenarioCapabilitySettings struct {
+	ContractVersion string                        `json:"contract_version"`
+	Scope           PlatformSettingsScope         `json:"scope"`
+	Capabilities    AssistantScenarioCapabilities `json:"capabilities"`
+}

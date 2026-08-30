@@ -115,6 +115,43 @@ func TestClientResolvesPlatformRetrievalProcessingSettings(t *testing.T) {
 	require.Equal(t, "embedding-v1", settings.CapabilityRefs.Embedding)
 }
 
+func TestClientResolvesStrictAssistantScenarioCapabilities(t *testing.T) {
+	response := `{
+		"contract_version":"AssistantScenarioCapabilityV1",
+		"scope":{"kind":"enterprise_assigned","product_base_tenant_id":"7"},
+		"capabilities":{"external_search":true,"mcp":false,"tools":true}
+	}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/internal/product-base/tenants/7/assistant-scenario-capabilities", r.URL.Path)
+		require.Equal(t, "Bearer service-token", r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(response))
+	}))
+	defer server.Close()
+
+	client := &Client{baseURL: server.URL, token: "service-token", http: &http.Client{Timeout: time.Second}}
+	settings, err := client.ResolveAssistantScenarioCapabilities(context.Background(), 7)
+	require.NoError(t, err)
+	require.True(t, settings.Capabilities.ExternalSearch)
+	require.False(t, settings.Capabilities.MCP)
+
+	response = `{
+		"contract_version":"AssistantScenarioCapabilityV1",
+		"scope":{"kind":"enterprise_assigned","product_base_tenant_id":"7"},
+		"capabilities":{"external_search":true,"mcp":false,"tools":true,"unknown":true}
+	}`
+	_, err = client.ResolveAssistantScenarioCapabilities(context.Background(), 7)
+	require.Error(t, err)
+
+	response = `{
+		"contract_version":"AssistantScenarioCapabilityV1",
+		"scope":{"kind":"enterprise_assigned","product_base_tenant_id":"7"},
+		"capabilities":{"external_search":true,"tools":true}
+	}`
+	_, err = client.ResolveAssistantScenarioCapabilities(context.Background(), 7)
+	require.Error(t, err)
+}
+
 func TestRingxunPlatformModelRuntimeSettingsIntegration(t *testing.T) {
 	baseURL := os.Getenv("RINGXUN_CAPABILITY_PLAN_INTEGRATION_BASE_URL")
 	if baseURL == "" {
@@ -147,4 +184,23 @@ func TestRingxunPlatformRetrievalProcessingSettingsIntegration(t *testing.T) {
 	require.Equal(t, "platform_shared", settings.Scope.Kind)
 	require.Equal(t, os.Getenv("RINGXUN_CAPABILITY_PLAN_INTEGRATION_VERSION_ID"), settings.ActivePlan.VersionID)
 	require.Equal(t, "embedding-integration", settings.CapabilityRefs.Embedding)
+}
+
+func TestRingxunAssistantScenarioCapabilitiesIntegration(t *testing.T) {
+	baseURL := os.Getenv("RINGXUN_CAPABILITY_PLAN_INTEGRATION_BASE_URL")
+	if baseURL == "" {
+		t.Skip("requires the Ringxun capability-plan integration fixture")
+	}
+	client := &Client{
+		baseURL: baseURL,
+		token:   os.Getenv("RINGXUN_CAPABILITY_PLAN_INTEGRATION_SERVICE_TOKEN"),
+		http:    &http.Client{Timeout: time.Second},
+	}
+	settings, err := client.ResolveAssistantScenarioCapabilities(context.Background(), 7)
+	require.NoError(t, err)
+	require.Equal(t, "platform_shared", settings.Scope.Kind)
+	require.Equal(t, "7", settings.Scope.ProductBaseTenantID)
+	require.Equal(t, true, settings.Capabilities.ExternalSearch)
+	require.Equal(t, false, settings.Capabilities.MCP)
+	require.Equal(t, true, settings.Capabilities.Tools)
 }

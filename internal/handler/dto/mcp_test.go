@@ -103,3 +103,18 @@ func TestMCPServiceResponse_NilSafe(t *testing.T) {
 	assert.Nil(t, NewMCPServiceResponse(adminContext(), nil))
 	assert.Equal(t, []*MCPServiceResponse{}, NewMCPServiceResponses(adminContext(), nil))
 }
+
+func TestMCPServiceOptionResponseContainsNoInfrastructureDetail(t *testing.T) {
+	url := "https://private.example.com"
+	body, err := json.Marshal(NewMCPServiceOptionResponses([]*types.MCPService{{
+		ID:            "svc-1",
+		TenantID:      7,
+		Name:          "经营数据",
+		Description:   "读取经营数据",
+		Enabled:       true,
+		TransportType: types.MCPTransportSSE,
+		URL:           &url,
+	}}))
+	assert.NoError(t, err)
+	assert.JSONEq(t, `[{"id":"svc-1","name":"经营数据","description":"读取经营数据","enabled":true}]`, string(body))
+}

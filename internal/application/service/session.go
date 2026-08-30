@@ -126,6 +126,8 @@ type sessionService struct {
 	tenantMemberService    interfaces.TenantMemberService         // Service for current tenant membership
 	suggestionRepo         interfaces.MessageSuggestionRepository
 	capabilityPlanResolver interfaces.AICapabilityPlanResolver
+	scenarioCapabilities   interfaces.AssistantScenarioCapabilityResolver
+	mcpServices            interfaces.MCPServiceService
 }
 
 // NewSessionService creates a new session service instance with all required dependencies
@@ -146,6 +148,8 @@ func NewSessionService(cfg *config.Config,
 	tenantMemberService interfaces.TenantMemberService,
 	suggestionRepo interfaces.MessageSuggestionRepository,
 	capabilityPlanResolver interfaces.AICapabilityPlanResolver,
+	scenarioCapabilities interfaces.AssistantScenarioCapabilityResolver,
+	mcpServices interfaces.MCPServiceService,
 ) interfaces.SessionService {
 	return &sessionService{
 		cfg:                    cfg,
@@ -165,6 +169,8 @@ func NewSessionService(cfg *config.Config,
 		tenantMemberService:    tenantMemberService,
 		suggestionRepo:         suggestionRepo,
 		capabilityPlanResolver: capabilityPlanResolver,
+		scenarioCapabilities:   scenarioCapabilities,
+		mcpServices:            mcpServices,
 	}
 }
 

@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -85,5 +86,60 @@ func TestSanitizeToolResultForClient_omitsOutput(t *testing.T) {
 	}
 	if meta["fetched_chunks"] != 1 {
 		t.Fatalf("summary metadata should remain, got %#v", meta["fetched_chunks"])
+	}
+}
+
+func TestFailedToolProjectionRemovesRawErrorsFromClientAndHistory(t *testing.T) {
+	const raw = "provider token=secret at http://internal.example stack trace"
+	result := &types.ToolResult{
+		Success: false,
+		Error:   raw,
+		Data: map[string]interface{}{
+			"display_type":          "web_fetch",
+			"error_code":            "FETCH_TIMEOUT",
+			"retryable":             true,
+			"summary_error_message": raw,
+			"results": []map[string]interface{}{{
+				"status":        "failed",
+				"error_code":    "FETCH_TIMEOUT",
+				"error_message": raw,
+			}},
+		},
+		Output: raw,
+	}
+
+	meta := SanitizeToolResultForClient("web_fetch", result)
+	if strings.Contains(strings.Join([]string{
+		StreamContentForToolResult("web_fetch", false, raw, result.Data),
+		CompactToolOutputForHistory("web_fetch", result),
+	}, " "), raw) {
+		t.Fatal("raw tool error reached the employee projection")
+	}
+	if _, ok := meta["summary_error_message"]; ok {
+		t.Fatal("raw web-fetch summary error reached client metadata")
+	}
+	if strings.Contains(fmt.Sprint(meta), raw) {
+		t.Fatal("nested raw web-fetch error reached client metadata")
+	}
+	if _, ok := meta["output"]; ok {
+		t.Fatal("failed tool output reached client metadata")
+	}
+	status, ok := meta["operationalStatus"].(types.RoleBoundedOperationalStatus)
+	if !ok || status.StatusCode != types.OperationalStatusExternalToolUnavailable {
+		t.Fatalf("missing stable operational status: %#v", meta["operationalStatus"])
+	}
+	if meta["error_code"] != "FETCH_TIMEOUT" || meta["retryable"] != true {
+		t.Fatalf("safe machine fields should remain: %#v", meta)
+	}
+
+	steps := SanitizeAgentStepsForStorage([]types.AgentStep{{
+		ToolCalls: []types.ToolCall{{Name: "web_fetch", Result: result}},
+	}})
+	stored := steps[0].ToolCalls[0].Result
+	if strings.Contains(fmt.Sprint(stored), raw) {
+		t.Fatal("raw tool error reached persisted history")
+	}
+	if stored.Output != "" {
+		t.Fatal("failed tool output should not be persisted")
 	}
 }

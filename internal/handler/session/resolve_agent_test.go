@@ -71,6 +71,10 @@ type resolveOwnAgentStub struct {
 	err   error
 }
 
+func (s *resolveOwnAgentStub) GetAssistantScenarioCapabilities(context.Context) (*types.AssistantScenarioCapabilitySettings, error) {
+	return nil, nil
+}
+
 func (s *resolveOwnAgentStub) GetAgentByID(context.Context, string) (*types.CustomAgent, error) {
 	return s.agent, s.err
 }

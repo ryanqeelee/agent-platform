@@ -115,12 +115,19 @@ func TestBuildSpanTree_LastFailureSurfaces(t *testing.T) {
 		{KnowledgeID: "kid", Attempt: 1, SpanID: "doc", ParentSpanID: "root", Name: types.StageDocReader, Kind: types.SpanKindStage, Status: types.SpanStatusFailed, ErrorCode: "DOCREADER_TIMEOUT", ErrorMessage: "slow", StartedAt: &now, FinishedAt: &finished},
 		{KnowledgeID: "kid", Attempt: 1, SpanID: "chunk", ParentSpanID: "root", Name: types.StageChunking, Kind: types.SpanKindStage, Status: types.SpanStatusCancelled, ErrorCode: "UPSTREAM_FAILED"},
 	}
-	_, _, lastFail := buildSpanTree("kid", 1, rows, types.ParseStatusFailed)
+	tree, _, lastFail := buildSpanTree("kid", 1, rows, types.ParseStatusFailed)
 	a := assert.New(t)
 	a.NotNil(lastFail)
 	a.Equal(types.StageDocReader, lastFail.Name,
 		"last_error must point at the actually-failed span, not the cascade-cancelled downstream")
 	a.Equal("DOCREADER_TIMEOUT", lastFail.ErrorCode)
+	projectKnowledgeSpanErrors(tree)
+	for _, child := range tree.Children {
+		if child.Name == types.StageDocReader {
+			a.Equal("Document processing did not complete.", child.ErrorMessage)
+			a.NotContains(child.ErrorMessage, "slow")
+		}
+	}
 }
 
 func TestKnowledgeSpansLastError_PrefersSpanFailure(t *testing.T) {
@@ -136,7 +143,7 @@ func TestKnowledgeSpansLastError_PrefersSpanFailure(t *testing.T) {
 	a := assert.New(t)
 	a.Equal(types.StageDocReader, got["name"])
 	a.Equal("DOCREADER_TIMEOUT", got["error_code"])
-	a.Equal("slow", got["error_message"])
+	a.Equal("Document processing did not complete.", got["error_message"])
 }
 
 func TestKnowledgeSpansLastError_RecoveryFallbackUsesKnowledgeMessage(t *testing.T) {
@@ -146,7 +153,7 @@ func TestKnowledgeSpansLastError_RecoveryFallbackUsesKnowledgeMessage(t *testing
 	a.NotNil(got)
 	a.Equal("knowledge_processing", got["name"])
 	a.Equal("UNKNOWN", got["error_code"])
-	a.Equal("wiki ingest timed out", got["error_message"])
+	a.Equal("Knowledge processing did not complete.", got["error_message"])
 	a.Equal(now, got["finished_at"])
 }
 

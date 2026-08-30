@@ -233,18 +233,24 @@ func (h *AgentStreamHandler) handleToolResult(ctx context.Context, evt event.Eve
 	content := agenttools.StreamContentForToolResult(data.ToolName, data.Success, data.Error, data.Data)
 	if !data.Success {
 		responseType = types.ResponseTypeError
-		if content == "" && data.Error != "" {
-			content = data.Error
-		}
+		logger.GetLogger(h.ctx).Warn("Tool execution failed", "tool", data.ToolName, "error", data.Error)
+	}
+	toolStatus := agenttools.ExternalToolOperationalStatus()
+	clientError := ""
+	if !data.Success {
+		clientError = toolStatus.SafeSummary
 	}
 
 	// Build metadata including tool result data for rich frontend rendering
 	metadata := map[string]interface{}{
 		"tool_name":    data.ToolName,
 		"success":      data.Success,
-		"error":        data.Error,
+		"error":        clientError,
 		"duration_ms":  durationMs,
 		"tool_call_id": data.ToolCallID,
+	}
+	if !data.Success {
+		metadata["operationalStatus"] = toolStatus
 	}
 
 	clientData := agenttools.SanitizeToolResultForClient(data.ToolName, &types.ToolResult{
@@ -539,18 +545,25 @@ func (h *AgentStreamHandler) handleError(ctx context.Context, evt event.Event) e
 	if !ok {
 		return nil
 	}
+	logger.GetLogger(h.ctx).Error("Agent execution failed", "stage", data.Stage, "error", data.Error)
 
+	status := types.ProjectOperationalStatus(
+		types.OperationalStatusModelRuntimeUnavailable,
+		types.OperationalStatusEmployee,
+		types.OperationalStatusFactsV1{},
+	)
 	// Build error metadata
 	metadata := map[string]interface{}{
-		"stage": data.Stage,
-		"error": data.Error,
+		"stage":             data.Stage,
+		"error":             status.SafeSummary,
+		"operationalStatus": status,
 	}
 
 	// Append error event to stream
 	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
 		ID:        evt.ID,
 		Type:      types.ResponseTypeError,
-		Content:   data.Error,
+		Content:   status.SafeSummary,
 		Done:      true,
 		Timestamp: time.Now(),
 		Data:      metadata,

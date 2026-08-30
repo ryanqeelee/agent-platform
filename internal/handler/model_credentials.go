@@ -75,7 +75,7 @@ func (h *ModelCredentialsHandler) Put(c *gin.Context) {
 			return
 		}
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"model_id": secutils.SanitizeForLog(id)})
-		c.Error(errors.NewInternalServerError("failed to update credentials: " + err.Error()))
+		c.Error(modelRuntimeInternalError(ctx, "model_credential_update_failed", "", id))
 		return
 	}
 
@@ -123,7 +123,7 @@ func (h *ModelCredentialsHandler) DeleteField(c *gin.Context) {
 			"model_id": secutils.SanitizeForLog(id),
 			"field":    field,
 		})
-		c.Error(errors.NewInternalServerError("failed to clear credential: " + err.Error()))
+		c.Error(modelRuntimeInternalError(ctx, "model_credential_clear_failed", "", id))
 		return
 	}
 	model, _ := h.svc.GetModelByID(ctx, id)

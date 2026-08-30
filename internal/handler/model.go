@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,6 +26,30 @@ import (
 type ModelHandler struct {
 	service interfaces.ModelService
 	audit   interfaces.AuditLogService
+}
+
+func modelRuntimeOperationalStatus(ctx context.Context, causeCode, providerName, modelName string) types.RoleBoundedOperationalStatus {
+	correlationRef, _ := types.RequestIDFromContext(ctx)
+	return types.ProjectOperationalStatus(
+		types.OperationalStatusModelRuntimeUnavailable,
+		types.OperationalStatusPlatform,
+		types.OperationalStatusFactsV1{
+			PlatformDiagnostics: &types.PlatformOperationalDiagnosticsV1{
+				CorrelationRef: correlationRef,
+				Domain:         "model_runtime",
+				CauseCode:      causeCode,
+				Provider:       providerName,
+				Model:          modelName,
+				Runtime:        "product_base_model",
+				Subsystem:      "model_configuration",
+			},
+		},
+	)
+}
+
+func modelRuntimeInternalError(ctx context.Context, causeCode, providerName, modelName string) *errors.AppError {
+	status := modelRuntimeOperationalStatus(ctx, causeCode, providerName, modelName)
+	return errors.NewInternalServerError(status.SafeSummary).WithDetails(status)
 }
 
 // NewModelHandler creates a new instance of ModelHandler
@@ -106,7 +131,7 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 
 	if err := h.service.CreateModel(ctx, model); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(modelRuntimeInternalError(ctx, "model_create_failed", model.Parameters.Provider, model.Name))
 		return
 	}
 
@@ -158,7 +183,7 @@ func (h *ModelHandler) GetModel(c *gin.Context) {
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(modelRuntimeInternalError(ctx, "model_read_failed", "", id))
 		return
 	}
 
@@ -196,7 +221,7 @@ func (h *ModelHandler) ListModels(c *gin.Context) {
 	models, err := h.service.ListModels(ctx)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(modelRuntimeInternalError(ctx, "model_list_failed", "", ""))
 		return
 	}
 
@@ -299,7 +324,13 @@ func writeModelDebugResult(c *gin.Context, started time.Time, request gin.H, res
 		"observations": observations,
 	}
 	if callErr != nil {
-		data["error"] = callErr.Error()
+		providerName, _ := request["provider"].(string)
+		modelName, _ := request["model_name"].(string)
+		status := modelRuntimeOperationalStatus(
+			c.Request.Context(), "model_debug_failed", providerName, modelName,
+		)
+		data["error"] = status.SafeSummary
+		data["operationalStatus"] = status
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
 }
@@ -362,7 +393,7 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 			c.Error(errors.NewNotFoundError("Model not found"))
 			return
 		}
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(modelRuntimeInternalError(ctx, "model_read_failed", "", id))
 		return
 	}
 
@@ -576,7 +607,7 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(modelRuntimeInternalError(ctx, "model_read_failed", "", id))
 		return
 	}
 
@@ -638,7 +669,7 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(modelRuntimeInternalError(ctx, "model_update_failed", model.Parameters.Provider, model.Name))
 		return
 	}
 
@@ -689,7 +720,13 @@ func (h *ModelHandler) DeleteModel(c *gin.Context) {
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		providerName := ""
+		modelName := id
+		if modelBeforeDelete != nil {
+			providerName = modelBeforeDelete.Parameters.Provider
+			modelName = modelBeforeDelete.Name
+		}
+		c.Error(modelRuntimeInternalError(ctx, "model_delete_failed", providerName, modelName))
 		return
 	}
 

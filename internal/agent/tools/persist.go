@@ -37,7 +37,25 @@ func SanitizeToolDataForPersist(data map[string]interface{}) map[string]interfac
 	for _, key := range persistStripFields[displayType] {
 		delete(out, key)
 	}
+	delete(out, "error")
+	delete(out, "error_message")
+	delete(out, "summary_error_message")
+	if results, ok := out["results"].([]map[string]interface{}); ok {
+		clean := make([]map[string]interface{}, len(results))
+		for i, result := range results {
+			clean[i] = SanitizeToolDataForPersist(result)
+		}
+		out["results"] = clean
+	}
 	return out
+}
+
+func ExternalToolOperationalStatus() types.RoleBoundedOperationalStatus {
+	return types.ProjectOperationalStatus(
+		types.OperationalStatusExternalToolUnavailable,
+		types.OperationalStatusEmployee,
+		types.OperationalStatusFactsV1{},
+	)
 }
 
 // SanitizeToolResultForClient builds stream / persistence metadata for the UI.
@@ -51,7 +69,10 @@ func SanitizeToolResultForClient(_ string, result *types.ToolResult) map[string]
 			meta[k] = v
 		}
 	}
-	if !ShouldOmitRawToolOutput("", result.Data) && result.Output != "" {
+	if !result.Success {
+		meta["operationalStatus"] = ExternalToolOperationalStatus()
+	}
+	if result.Success && !ShouldOmitRawToolOutput("", result.Data) && result.Output != "" {
 		meta["output"] = result.Output
 	}
 	return meta
@@ -60,7 +81,7 @@ func SanitizeToolResultForClient(_ string, result *types.ToolResult) map[string]
 // StreamContentForToolResult is the short SSE Content field for tool results.
 func StreamContentForToolResult(toolName string, success bool, errMsg string, data map[string]interface{}) string {
 	if !success {
-		return errMsg
+		return ExternalToolOperationalStatus().SafeSummary
 	}
 	if ShouldOmitRawToolOutput(toolName, data) {
 		return compactToolSummary(success, errMsg, data)
@@ -86,7 +107,12 @@ func SanitizeAgentStepsForStorage(steps []types.AgentStep) []types.AgentStep {
 				continue
 			}
 			result := *tc.Result
-			if ShouldOmitRawToolOutput(tc.Name, result.Data) {
+			if !result.Success {
+				result.Error = ExternalToolOperationalStatus().SafeSummary
+				result.Output = ""
+				result.Data = SanitizeToolDataForPersist(result.Data)
+			}
+			if result.Success && ShouldOmitRawToolOutput(tc.Name, result.Data) {
 				result.Output = compactToolSummary(result.Success, result.Error, result.Data)
 				result.Data = SanitizeToolDataForPersist(result.Data)
 			}
@@ -103,10 +129,7 @@ func CompactToolOutputForHistory(toolName string, result *types.ToolResult) stri
 		return ""
 	}
 	if !result.Success {
-		if result.Error != "" {
-			return "Error: " + result.Error
-		}
-		return "Error: tool call failed"
+		return "Error: " + ExternalToolOperationalStatus().SafeSummary
 	}
 	if result.Output != "" && !ShouldOmitRawToolOutput(toolName, result.Data) {
 		return result.Output
@@ -116,10 +139,7 @@ func CompactToolOutputForHistory(toolName string, result *types.ToolResult) stri
 
 func compactToolSummary(success bool, errMsg string, data map[string]interface{}) string {
 	if !success {
-		if errMsg != "" {
-			return "Error: " + errMsg
-		}
-		return "Error: tool call failed"
+		return "Error: " + ExternalToolOperationalStatus().SafeSummary
 	}
 	switch stringField(data, "display_type") {
 	case "knowledge_chunks_list":

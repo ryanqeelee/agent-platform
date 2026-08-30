@@ -666,15 +666,33 @@ func (h *KnowledgeHandler) GetKnowledgeSpans(c *gin.Context) {
 	// otherwise legacy completed documents would forever look like
 	// they're still waiting in the queue.
 	tree, currentStageName, lastErr := buildSpanTree(knowledge.ID, currentAttempt, rows, knowledge.ParseStatus)
+	projectKnowledgeSpanErrors(tree)
+	processingStage := currentStageName
+	if processingStage == "" {
+		processingStage = knowledge.ParseStatus
+	}
+	statusCode := types.OperationalStatusOK
+	if knowledge.ParseStatus == types.ParseStatusFailed || lastErr != nil {
+		statusCode = knowledgeOperationalStatusCode(processingStage, "")
+		if lastErr != nil {
+			statusCode = knowledgeOperationalStatusCode(lastErr.Name, lastErr.ErrorCode)
+		}
+	}
+	operationalStatus := types.ProjectOperationalStatus(
+		statusCode,
+		types.OperationalStatusEmployee,
+		types.OperationalStatusFactsV1{},
+	)
 
 	resp := gin.H{
-		"knowledge_id":    knowledge.ID,
-		"attempt":         currentAttempt,
-		"latest_attempt":  latestAttempt,
-		"parse_status":    knowledge.ParseStatus,
-		"current_attempt": currentAttempt,
-		"current_stage":   currentStageName,
-		"trace":           tree,
+		"knowledge_id":      knowledge.ID,
+		"attempt":           currentAttempt,
+		"latest_attempt":    latestAttempt,
+		"parse_status":      knowledge.ParseStatus,
+		"current_attempt":   currentAttempt,
+		"current_stage":     currentStageName,
+		"trace":             tree,
+		"operationalStatus": operationalStatus,
 	}
 	if lastError := knowledgeSpansLastError(
 		currentAttempt,
@@ -702,13 +720,16 @@ func knowledgeSpansLastError(
 	spanFailure *types.KnowledgeProcessingSpan,
 ) gin.H {
 	if spanFailure != nil {
+		message := types.OperationalStatusSummary(
+			knowledgeOperationalStatusCode(spanFailure.Name, spanFailure.ErrorCode),
+		)
 		return gin.H{
 			"stage":         spanFailure.Name,
 			"code":          spanFailure.ErrorCode,
-			"message":       spanFailure.ErrorMessage,
+			"message":       message,
 			"name":          spanFailure.Name,
 			"error_code":    spanFailure.ErrorCode,
-			"error_message": spanFailure.ErrorMessage,
+			"error_message": message,
 			"finished_at":   spanFailure.FinishedAt,
 		}
 	}
@@ -720,14 +741,45 @@ func knowledgeSpansLastError(
 		"Task interrupted due to application restart") {
 		errorCode = "SERVER_RESTART"
 	}
+	message := types.OperationalStatusSummary(
+		knowledgeOperationalStatusCode("knowledge_processing", errorCode),
+	)
 	return gin.H{
 		"stage":         "knowledge_processing",
 		"code":          errorCode,
-		"message":       knowledgeErrorMessage,
+		"message":       message,
 		"name":          "knowledge_processing",
 		"error_code":    errorCode,
-		"error_message": knowledgeErrorMessage,
+		"error_message": message,
 		"finished_at":   knowledgeUpdatedAt,
+	}
+}
+
+func knowledgeOperationalStatusCode(stage, sourceCode string) types.OperationalStatusCode {
+	if strings.HasPrefix(strings.ToUpper(sourceCode), "STORAGE_") {
+		return types.OperationalStatusStorageUnavailable
+	}
+	switch stage {
+	case types.StageDocReader, types.StageChunking, types.StageMultimodal, types.StagePostProcess:
+		return types.OperationalStatusParsingFailed
+	case types.StageEmbedding:
+		return types.OperationalStatusRetrievalUnavailable
+	default:
+		return types.OperationalStatusKnowledgeProcessingFailed
+	}
+}
+
+func projectKnowledgeSpanErrors(node *types.SpanTreeNode) {
+	if node == nil {
+		return
+	}
+	if node.ErrorMessage != "" {
+		node.ErrorMessage = types.OperationalStatusSummary(
+			knowledgeOperationalStatusCode(node.Name, node.ErrorCode),
+		)
+	}
+	for _, child := range node.Children {
+		projectKnowledgeSpanErrors(child)
 	}
 }
 

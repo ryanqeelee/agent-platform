@@ -1,10 +1,16 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	stderrors "errors"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -69,4 +75,29 @@ func TestConsumeModelDebugChatStream(t *testing.T) {
 	require.NotNil(t, got.Usage)
 	assert.Equal(t, 7, got.Usage.TotalTokens)
 	assert.Len(t, got.StreamEvents, 5)
+}
+
+func TestModelDebugFailureReturnsAllowlistedPlatformStatus(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	ctx := context.WithValue(context.Background(), types.RequestIDContextKey, "corr-model-1")
+	c.Request = httptest.NewRequest("POST", "/models/model-1/debug", nil).WithContext(ctx)
+
+	writeModelDebugResult(
+		c,
+		time.Now(),
+		gin.H{"provider": "approved-provider", "model_name": "model-1"},
+		nil,
+		stderrors.New("raw-secret-sentinel https://internal.example stack trace"),
+		gin.H{},
+	)
+
+	body := recorder.Body.String()
+	assert.NotContains(t, body, "raw-secret-sentinel")
+	assert.NotContains(t, body, "internal.example")
+	assert.Contains(t, body, "RoleBoundedOperationalStatusV1")
+	assert.Contains(t, body, "corr-model-1")
+	assert.Contains(t, body, "approved-provider")
+	assert.False(t, strings.Contains(strings.ToLower(body), "stack trace"))
 }

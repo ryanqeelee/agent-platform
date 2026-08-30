@@ -193,8 +193,11 @@ func TestEnterpriseManagedResolveTenantRoleAllowsContributorOnlyInHomeEnterprise
 	}
 }
 
-func TestResolveTenantRole_CrossTenantSuperuserGetsAdmin_NoAutoPromote(t *testing.T) {
-	// 回归 H1：跨空间超管 switch 到他人空间时，绝对不能写入 tenant_members。
+func TestPlatformSuperAdminKnowledgeOpsV1KeepsOwnIdentityWithoutMembership(t *testing.T) {
+	// PlatformSuperAdminKnowledgeOpsV1 reuses the existing cross-tenant
+	// knowledge adapter: the real web user keeps their home identity while the
+	// target workspace receives only a request-scoped Admin role. No customer
+	// membership is created.
 	svc := newFakeMemberService()
 	user := &types.User{ID: "super", TenantID: 1, CanAccessAllTenants: true}
 	cfg := cfgWithRBAC(true)
@@ -206,6 +209,9 @@ func TestResolveTenantRole_CrossTenantSuperuserGetsAdmin_NoAutoPromote(t *testin
 	}
 	if len(svc.addCalls) != 0 {
 		t.Fatalf("cross-tenant superuser must not trigger auto-promote, got %+v", svc.addCalls)
+	}
+	if user.ID != "super" || user.TenantID != 1 {
+		t.Fatalf("platform operator identity changed: id=%q home_tenant=%d", user.ID, user.TenantID)
 	}
 }
 

@@ -19,3 +19,7 @@ type AICapabilityPlanResolver interface {
 type KnowledgeProcessingPlanResolver interface {
 	ResolveKnowledgeProcessingPlan(ctx context.Context, tenantID uint64) (*types.KnowledgeProcessingPlanPin, error)
 }
+
+type PlatformModelRuntimeSettingsResolver interface {
+	ResolvePlatformModelRuntimeSettings(ctx context.Context, tenantID uint64) (*types.PlatformModelRuntimeSettings, error)
+}

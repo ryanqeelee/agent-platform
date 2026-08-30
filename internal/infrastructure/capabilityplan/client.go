@@ -29,6 +29,10 @@ func NewKnowledgeProcessingPlanResolverFromEnv() interfaces.KnowledgeProcessingP
 	return newClientFromEnv()
 }
 
+func NewPlatformModelRuntimeSettingsResolverFromEnv() interfaces.PlatformModelRuntimeSettingsResolver {
+	return newClientFromEnv()
+}
+
 func newClientFromEnv() *Client {
 	return &Client{
 		baseURL: strings.TrimRight(strings.TrimSpace(os.Getenv("RINGXUN_CAPABILITY_PLAN_BASE_URL")), "/"),
@@ -68,6 +72,24 @@ func (c *Client) Resolve(ctx context.Context, tenantID uint64) (*types.AICapabil
 		return nil, interfaces.ErrAICapabilityUnavailable
 	}
 	return &resolution, nil
+}
+
+func (c *Client) ResolvePlatformModelRuntimeSettings(
+	ctx context.Context,
+	tenantID uint64,
+) (*types.PlatformModelRuntimeSettings, error) {
+	var settings types.PlatformModelRuntimeSettings
+	if err := c.get(ctx, tenantID, "model-runtime-settings", &settings); err != nil ||
+		settings.ContractVersion != "PlatformModelRuntimeSettingsV1" ||
+		(settings.Scope.Kind != "platform_shared" && settings.Scope.Kind != "enterprise_assigned") ||
+		settings.Scope.ProductBaseTenantID != strconv.FormatUint(tenantID, 10) ||
+		settings.ActivePlan.ContractVersion != "AICapabilityPlanV1" ||
+		strings.TrimSpace(settings.ActivePlan.VersionID) == "" ||
+		strings.TrimSpace(settings.RequestRuntimeRefs.EmployeeAssistantRequestRuntime) == "" ||
+		strings.TrimSpace(settings.RequestRuntimeRefs.OperatingAnalysisRequestRuntime) == "" {
+		return nil, interfaces.ErrAICapabilityUnavailable
+	}
+	return &settings, nil
 }
 
 func (c *Client) get(ctx context.Context, tenantID uint64, route string, target any) error {

@@ -1909,6 +1909,12 @@ export default {
   modelSettings: {
     title: '모델 설정',
     description: '다양한 유형의 AI 모델을 관리합니다. Ollama 로컬 모델과 원격 API를 지원합니다',
+    runtimeContext: {
+      eyebrow: '플랫폼 실행 컨텍스트', title: '현재 기능 플랜', scope: '설정 범위',
+      platform_shared: '플랫폼 공유', enterprise_assigned: '기업 지정', activePlan: '활성 Plan 버전',
+      employeeAssistant: '직원 도우미 실행 참조', operatingAnalysis: '경영 분석 실행 참조',
+      unavailable: '기능 플랜 컨텍스트를 불러올 수 없습니다. 모델 설정은 플랫폼 전용입니다.'
+    },
     copySuffix: ' 사본',
     builtinTag: '기본제공',
     confirmDelete: '모델 "{name}"을(를) 삭제하시겠습니까?',

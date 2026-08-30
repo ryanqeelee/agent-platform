@@ -24,6 +24,7 @@ import (
 // It implements the necessary methods to create, retrieve, update, and delete models
 type ModelHandler struct {
 	service interfaces.ModelService
+	audit   interfaces.AuditLogService
 }
 
 // NewModelHandler creates a new instance of ModelHandler
@@ -32,8 +33,8 @@ type ModelHandler struct {
 //   - service: An implementation of the ModelService interface
 //
 // Returns a pointer to the newly created ModelHandler
-func NewModelHandler(service interfaces.ModelService) *ModelHandler {
-	return &ModelHandler{service: service}
+func NewModelHandler(service interfaces.ModelService, audit interfaces.AuditLogService) *ModelHandler {
+	return &ModelHandler{service: service, audit: audit}
 }
 
 // Per-response redaction/stripping for Model now lives in
@@ -115,6 +116,8 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 		secutils.SanitizeForLog(model.ID),
 		secutils.SanitizeForLog(model.Name),
 	)
+	emitModelRuntimeAudit(ctx, h.audit, types.AuditActionSystemModelRuntimeChanged,
+		"create", "model", model.ID, modelRuntimeScope(model), modelRuntimeRevision(model), nil)
 
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
@@ -640,6 +643,8 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	}
 
 	logger.Infof(ctx, "Model updated successfully, ID: %s", id)
+	emitModelRuntimeAudit(ctx, h.audit, types.AuditActionSystemModelRuntimeChanged,
+		"update", "model", model.ID, modelRuntimeScope(model), modelRuntimeRevision(model), nil)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -672,6 +677,7 @@ func (h *ModelHandler) DeleteModel(c *gin.Context) {
 	}
 
 	logger.Infof(ctx, "Deleting model, ID: %s", id)
+	modelBeforeDelete, _ := h.service.GetModelByID(ctx, id)
 	if err := h.service.DeleteModel(ctx, id); err != nil {
 		if err == service.ErrModelNotFound {
 			logger.Warnf(ctx, "Model not found, ID: %s", id)
@@ -688,6 +694,8 @@ func (h *ModelHandler) DeleteModel(c *gin.Context) {
 	}
 
 	logger.Infof(ctx, "Model deleted successfully, ID: %s", id)
+	emitModelRuntimeAudit(ctx, h.audit, types.AuditActionSystemModelRuntimeChanged,
+		"delete", "model", id, modelRuntimeScope(modelBeforeDelete), modelRuntimeRevision(modelBeforeDelete), nil)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Model deleted",

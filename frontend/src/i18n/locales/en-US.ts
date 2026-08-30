@@ -3898,6 +3898,12 @@ export default {
   modelSettings: {
     title: 'Model Settings',
     description: 'Manage different types of AI models, including local Ollama and remote APIs',
+    runtimeContext: {
+      eyebrow: 'Platform runtime context', title: 'Active capability plan', scope: 'Configuration scope',
+      platform_shared: 'Platform shared', enterprise_assigned: 'Enterprise assigned', activePlan: 'Active Plan version',
+      employeeAssistant: 'Employee Assistant runtime reference', operatingAnalysis: 'Operating Analysis runtime reference',
+      unavailable: 'Capability-plan context is unavailable. Model settings remain platform-only.'
+    },
     typeShort: {
       chat: 'Chat',
       embedding: 'Embedding',

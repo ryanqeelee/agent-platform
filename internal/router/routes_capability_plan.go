@@ -1,7 +1,10 @@
 package router
 
 import (
+	"net/http"
+
 	"github.com/Tencent/WeKnora/internal/handler"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/gin-gonic/gin"
 )
 
@@ -15,5 +18,13 @@ func RegisterCapabilityPlanRoutes(
 		g.PathTenantMatch(),
 		g.Viewer(),
 		h.GetEnterpriseProjection,
+	)
+	g.apiKeyRoute(
+		r,
+		http.MethodGet,
+		"/platform/model-runtime-settings",
+		apiKeyPlatform(types.APIKeyCapabilityManageModels),
+		g.SystemAdmin(),
+		h.GetPlatformModelRuntimeSettings,
 	)
 }

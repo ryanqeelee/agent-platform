@@ -23,3 +23,19 @@ type KnowledgeProcessingPlanPin struct {
 	ContractVersion string `json:"contract_version"`
 	PlanVersionID   string `json:"plan_version_id"`
 }
+
+type PlatformModelRuntimeSettings struct {
+	ContractVersion string `json:"contract_version"`
+	Scope           struct {
+		Kind                string `json:"kind"`
+		ProductBaseTenantID string `json:"product_base_tenant_id"`
+	} `json:"scope"`
+	ActivePlan struct {
+		ContractVersion string `json:"contract_version"`
+		VersionID       string `json:"version_id"`
+	} `json:"active_plan"`
+	RequestRuntimeRefs struct {
+		EmployeeAssistantRequestRuntime string `json:"employee_assistant_request_runtime"`
+		OperatingAnalysisRequestRuntime string `json:"operating_analysis_request_runtime"`
+	} `json:"request_runtime_refs"`
+}

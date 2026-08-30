@@ -1909,6 +1909,12 @@ export default {
   modelSettings: {
     title: '模型配置',
     description: '管理不同类型的 AI 模型，支持 Ollama 本地模型和远程 API',
+    runtimeContext: {
+      eyebrow: '平台运行上下文', title: '当前能力方案', scope: '配置范围',
+      platform_shared: '平台共享', enterprise_assigned: '企业指派', activePlan: '活动 Plan 版本',
+      employeeAssistant: '员工助理运行引用', operatingAnalysis: '经营分析运行引用',
+      unavailable: '当前无法读取能力方案上下文；模型配置仍保持平台专属。'
+    },
     copySuffix: ' 副本',
     builtinTag: '内置',
     confirmDelete: '确定删除模型「{name}」吗？',

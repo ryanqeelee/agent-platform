@@ -64,6 +64,7 @@ type InitializationHandler struct {
 	documentReader   interfaces.DocumentReader
 	pooler           embedding.EmbedderPooler
 	storageResolver  interfaces.StorageBackendResolver
+	audit            interfaces.AuditLogService
 }
 
 // NewInitializationHandler 创建初始化处理器
@@ -78,6 +79,7 @@ func NewInitializationHandler(
 	documentReader interfaces.DocumentReader,
 	pooler embedding.EmbedderPooler,
 	storageResolver interfaces.StorageBackendResolver,
+	audit interfaces.AuditLogService,
 ) *InitializationHandler {
 	return &InitializationHandler{
 		config:           config,
@@ -90,6 +92,7 @@ func NewInitializationHandler(
 		documentReader:   documentReader,
 		pooler:           pooler,
 		storageResolver:  storageResolver,
+		audit:            audit,
 	}
 }
 
@@ -1162,6 +1165,8 @@ func (h *InitializationHandler) DownloadOllamaModel(c *gin.Context) {
 	}()
 
 	logger.Infof(ctx, "Created download task for model, task ID: %s", taskID)
+	emitModelRuntimeAudit(ctx, h.audit, types.AuditActionSystemOllamaDownloadStarted,
+		"download_started", "ollama_model", req.ModelName, "platform_shared", task.StartTime.UTC().Format(time.RFC3339Nano), nil)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "模型下载任务已创建",

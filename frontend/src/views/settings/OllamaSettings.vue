@@ -1,5 +1,6 @@
 <template>
   <div class="ollama-settings">
+    <PlatformRuntimeContext />
     <div class="section-header">
       <h2>{{ $t('ollamaSettings.title') }}</h2>
       <p class="section-description">{{ $t('ollamaSettings.description') }}</p>
@@ -181,6 +182,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { checkOllamaStatus, listOllamaModels, downloadOllamaModel, getDownloadProgress, type OllamaModelInfo } from '@/api/initialization'
+import PlatformRuntimeContext from './components/PlatformRuntimeContext.vue'
 
 const settingsStore = useSettingsStore()
 const { t } = useI18n()

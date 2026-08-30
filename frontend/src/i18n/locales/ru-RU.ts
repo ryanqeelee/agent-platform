@@ -1909,6 +1909,12 @@ export default {
   modelSettings: {
     title: 'Настройки моделей',
     description: 'Управление типами AI‑моделей: локальные (Ollama) и удалённые API',
+    runtimeContext: {
+      eyebrow: 'Контекст платформы', title: 'Активный план возможностей', scope: 'Область конфигурации',
+      platform_shared: 'Общая платформа', enterprise_assigned: 'Назначено организации', activePlan: 'Активная версия Plan',
+      employeeAssistant: 'Ссылка среды помощника сотрудника', operatingAnalysis: 'Ссылка среды операционного анализа',
+      unavailable: 'Контекст плана недоступен. Настройки моделей остаются только для платформы.'
+    },
     copySuffix: ' копия',
     builtinTag: 'Встроенная',
     confirmDelete: 'Удалить модель «{name}»?',

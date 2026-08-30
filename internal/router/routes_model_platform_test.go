@@ -25,6 +25,7 @@ func TestPlatformInfrastructureRoutesRequireSystemAdmin(t *testing.T) {
 	v1 := r.Group("/api/v1")
 	g := &rbacGuards{}
 	RegisterModelRoutes(v1, &handler.ModelHandler{}, &handler.ModelCredentialsHandler{}, g)
+	RegisterCapabilityPlanRoutes(v1, &handler.AICapabilityPlanHandler{}, g)
 	RegisterInitializationRoutes(v1, &handler.InitializationHandler{}, g)
 	RegisterMCPServiceRoutes(v1, &handler.MCPServiceHandler{}, &handler.MCPCredentialsHandler{}, &handler.MCPOAuthHandler{}, g)
 	RegisterVectorStoreRoutes(v1, &handler.VectorStoreHandler{}, g)
@@ -41,6 +42,7 @@ func TestPlatformInfrastructureRoutesRequireSystemAdmin(t *testing.T) {
 		{http.MethodGet, "/api/v1/models"},
 		{http.MethodGet, "/api/v1/models/providers"},
 		{http.MethodGet, "/api/v1/models/model-1"},
+		{http.MethodGet, "/api/v1/platform/model-runtime-settings"},
 		{http.MethodPost, "/api/v1/initialization/initialize/kb-1"},
 		{http.MethodGet, "/api/v1/initialization/ollama/models"},
 		{http.MethodGet, "/api/v1/mcp-services"},

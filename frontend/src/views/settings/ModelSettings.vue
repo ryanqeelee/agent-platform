@@ -1,5 +1,6 @@
 <template>
   <div class="model-settings">
+    <PlatformRuntimeContext />
     <div class="section-header">
       <div class="section-header__top">
         <div>
@@ -148,6 +149,7 @@ import { useI18n } from 'vue-i18n'
 import ModelEditorDialog from '@/components/ModelEditorDialog.vue'
 import ModelDebugDrawer from '@/components/ModelDebugDrawer.vue'
 import { listModels, createModel, updateModel as updateModelAPI, deleteModel as deleteModelAPI, type ModelConfig } from '@/api/model'
+import PlatformRuntimeContext from './components/PlatformRuntimeContext.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const { t, te } = useI18n()

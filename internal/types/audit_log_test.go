@@ -42,6 +42,8 @@ func TestAuditAction_DotNamespaceConvention(t *testing.T) {
 		AuditActionOpenSearchReindexExecuted,
 		// System namespace (this PR — system admin & settings)
 		AuditActionSystemSettingChanged,
+		AuditActionSystemModelRuntimeChanged,
+		AuditActionSystemOllamaDownloadStarted,
 		AuditActionSystemAdminPromoted,
 		AuditActionSystemAdminRevoked,
 		AuditActionSystemUserPasswordReset,
@@ -136,6 +138,8 @@ func TestAuditAction_NoCollisionsAcrossNamespaces(t *testing.T) {
 	register("AuditActionOpenSearchIndexDeleted", AuditActionOpenSearchIndexDeleted)
 	register("AuditActionOpenSearchReindexExecuted", AuditActionOpenSearchReindexExecuted)
 	register("AuditActionSystemSettingChanged", AuditActionSystemSettingChanged)
+	register("AuditActionSystemModelRuntimeChanged", AuditActionSystemModelRuntimeChanged)
+	register("AuditActionSystemOllamaDownloadStarted", AuditActionSystemOllamaDownloadStarted)
 	register("AuditActionSystemAdminPromoted", AuditActionSystemAdminPromoted)
 	register("AuditActionSystemAdminRevoked", AuditActionSystemAdminRevoked)
 	register("AuditActionSystemUserPasswordReset", AuditActionSystemUserPasswordReset)
@@ -155,6 +159,8 @@ func TestAuditAction_NoCollisionsAcrossNamespaces(t *testing.T) {
 func TestAuditAction_SystemNamespacePrefix(t *testing.T) {
 	cases := []AuditAction{
 		AuditActionSystemSettingChanged,
+		AuditActionSystemModelRuntimeChanged,
+		AuditActionSystemOllamaDownloadStarted,
 		AuditActionSystemAdminPromoted,
 		AuditActionSystemAdminRevoked,
 		AuditActionSystemUserPasswordReset,
@@ -182,6 +188,8 @@ func TestAuditAction_SystemWireValues(t *testing.T) {
 		wire     string
 	}{
 		{AuditActionSystemSettingChanged, "system.setting_changed"},
+		{AuditActionSystemModelRuntimeChanged, "system.model_runtime_changed"},
+		{AuditActionSystemOllamaDownloadStarted, "system.ollama_download_started"},
 		{AuditActionSystemAdminPromoted, "system.admin_promoted"},
 		{AuditActionSystemAdminRevoked, "system.admin_revoked"},
 		{AuditActionSystemUserPasswordReset, "system.user_password_reset"},

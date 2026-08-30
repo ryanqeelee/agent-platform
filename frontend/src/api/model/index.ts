@@ -49,6 +49,28 @@ export interface ModelConfig {
   deleted_at?: string | null;
 }
 
+export interface PlatformModelRuntimeSettings {
+  contract_version: 'PlatformModelRuntimeSettingsV1'
+  scope: {
+    kind: 'platform_shared' | 'enterprise_assigned'
+    product_base_tenant_id: string
+  }
+  active_plan: {
+    contract_version: 'AICapabilityPlanV1'
+    version_id: string
+  }
+  request_runtime_refs: {
+    employee_assistant_request_runtime: string
+    operating_analysis_request_runtime: string
+  }
+}
+
+export async function getPlatformModelRuntimeSettings(): Promise<PlatformModelRuntimeSettings> {
+  const response: any = await get('/api/v1/platform/model-runtime-settings')
+  if (!response?.success || !response.data) throw new Error('platform runtime context unavailable')
+  return response.data as PlatformModelRuntimeSettings
+}
+
 // 创建模型
 export function createModel(data: ModelConfig): Promise<ModelConfig> {
   return new Promise((resolve, reject) => {

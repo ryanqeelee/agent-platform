@@ -19,11 +19,15 @@ import (
 //
 // Recognized fields: "api_key" (every provider), "app_secret" (WeKnora Cloud).
 type ModelCredentialsHandler struct {
-	svc interfaces.ModelService
+	svc   interfaces.ModelService
+	audit interfaces.AuditLogService
 }
 
-func NewModelCredentialsHandler(svc interfaces.ModelService) *ModelCredentialsHandler {
-	return &ModelCredentialsHandler{svc: svc}
+func NewModelCredentialsHandler(
+	svc interfaces.ModelService,
+	audit interfaces.AuditLogService,
+) *ModelCredentialsHandler {
+	return &ModelCredentialsHandler{svc: svc, audit: audit}
 }
 
 type modelCredentialsPutRequest struct {
@@ -81,6 +85,15 @@ func (h *ModelCredentialsHandler) Put(c *gin.Context) {
 			"app_secret": {Configured: updated.Parameters.AppSecret != ""},
 		},
 	}
+	fields := make([]string, 0, 2)
+	if req.APIKey != nil {
+		fields = append(fields, "api_key")
+	}
+	if req.AppSecret != nil {
+		fields = append(fields, "app_secret")
+	}
+	emitModelRuntimeAudit(ctx, h.audit, types.AuditActionSystemModelRuntimeChanged,
+		"credentials_updated", "model", id, modelRuntimeScope(updated), modelRuntimeRevision(updated), fields)
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": resp})
 }
 
@@ -113,5 +126,8 @@ func (h *ModelCredentialsHandler) DeleteField(c *gin.Context) {
 		c.Error(errors.NewInternalServerError("failed to clear credential: " + err.Error()))
 		return
 	}
+	model, _ := h.svc.GetModelByID(ctx, id)
+	emitModelRuntimeAudit(ctx, h.audit, types.AuditActionSystemModelRuntimeChanged,
+		"credential_cleared", "model", id, modelRuntimeScope(model), modelRuntimeRevision(model), []string{field})
 	c.Status(http.StatusNoContent)
 }

@@ -133,6 +133,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(initDocReaderClient))
 	must(container.Provide(capabilityplan.NewClientFromEnv))
 	must(container.Provide(capabilityplan.NewKnowledgeProcessingPlanResolverFromEnv))
+	must(container.Provide(capabilityplan.NewPlatformModelRuntimeSettingsResolverFromEnv))
 	must(container.Provide(docparser.NewImageResolver))
 	must(container.Provide(initOllamaService))
 	must(container.Provide(initNeo4jClient))

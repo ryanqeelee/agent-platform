@@ -33,6 +33,7 @@ func TestGetSystemInfoHidesRuntimeDetailsFromWorkspace(t *testing.T) {
 
 type capabilityProjectionResolver struct {
 	interfaces.AICapabilityPlanResolver
+	interfaces.PlatformModelRuntimeSettingsResolver
 }
 
 func (capabilityProjectionResolver) Resolve(context.Context, uint64) (*types.AICapabilityPlanResolution, error) {
@@ -55,7 +56,7 @@ func TestEnterpriseAICapabilityProjectionHidesPlanIdentity(t *testing.T) {
 	c.Set(types.TenantIDContextKey.String(), uint64(7))
 	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/tenants/7/ai-capability-plan", nil)
 
-	NewAICapabilityPlanHandler(capabilityProjectionResolver{}).GetEnterpriseProjection(c)
+	NewAICapabilityPlanHandler(capabilityProjectionResolver{}, capabilityProjectionResolver{}).GetEnterpriseProjection(c)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.JSONEq(t, `{
@@ -66,6 +67,48 @@ func TestEnterpriseAICapabilityProjectionHidesPlanIdentity(t *testing.T) {
 			"usage":null,
 			"quota":null,
 			"health":{"status":"unknown"}
+		}
+	}`, recorder.Body.String())
+}
+
+func (capabilityProjectionResolver) ResolvePlatformModelRuntimeSettings(
+	context.Context,
+	uint64,
+) (*types.PlatformModelRuntimeSettings, error) {
+	settings := &types.PlatformModelRuntimeSettings{ContractVersion: "PlatformModelRuntimeSettingsV1"}
+	settings.Scope.Kind = "platform_shared"
+	settings.Scope.ProductBaseTenantID = "7"
+	settings.ActivePlan.ContractVersion = "AICapabilityPlanV1"
+	settings.ActivePlan.VersionID = "plan-v1"
+	settings.RequestRuntimeRefs.EmployeeAssistantRequestRuntime = "assistant-v1"
+	settings.RequestRuntimeRefs.OperatingAnalysisRequestRuntime = "analysis-v1"
+	return settings, nil
+}
+
+func TestPlatformModelRuntimeProjectionIsExact(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Set(types.TenantIDContextKey.String(), uint64(7))
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/platform/model-runtime-settings", nil)
+
+	NewAICapabilityPlanHandler(capabilityProjectionResolver{}, capabilityProjectionResolver{}).
+		GetPlatformModelRuntimeSettings(c)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.NotContains(t, recorder.Body.String(), "provider")
+	require.NotContains(t, recorder.Body.String(), "model_id")
+	require.NotContains(t, recorder.Body.String(), "credential")
+	require.JSONEq(t, `{
+		"success":true,
+		"data":{
+			"contract_version":"PlatformModelRuntimeSettingsV1",
+			"scope":{"kind":"platform_shared","product_base_tenant_id":"7"},
+			"active_plan":{"contract_version":"AICapabilityPlanV1","version_id":"plan-v1"},
+			"request_runtime_refs":{
+				"employee_assistant_request_runtime":"assistant-v1",
+				"operating_analysis_request_runtime":"analysis-v1"
+			}
 		}
 	}`, recorder.Body.String())
 }

@@ -32,10 +32,6 @@
         <p class="showcase-eyebrow">{{ loginCopy.eyebrow }}</p>
         <h1>{{ loginCopy.headline }}</h1>
         <p class="showcase-description">{{ loginCopy.description }}</p>
-        <div class="capability-list" :aria-label="loginCopy.capabilityListLabel">
-          <span>{{ loginCopy.employeeAssistant }}</span>
-          <span>{{ loginCopy.operatingAnalysis }}</span>
-        </div>
       </div>
     </div>
 
@@ -45,7 +41,7 @@
         <!-- Login Card -->
         <div class="form-card" v-if="!isRegisterMode">
           <div class="form-header">
-            <h2 class="form-title">{{ $t('auth.login') }}</h2>
+            <h2 class="form-title">{{ $t('auth.loginTitle') }}</h2>
             <p class="form-welcome">{{ $t('auth.subtitle') }}</p>
             <p v-if="registrationEnabled" class="form-hint">{{ $t('auth.loginHint') }}</p>
           </div>
@@ -1765,23 +1761,6 @@ h1 {
   color: rgba(19, 45, 45, 0.74);
   font-size: 17px;
   line-height: 1.7;
-}
-
-.capability-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 34px;
-}
-
-.capability-list span {
-  padding: 8px 13px;
-  color: var(--product-shell-ink, #132d2d);
-  border: 1px solid rgba(20, 123, 118, 0.32);
-  border-radius: 999px;
-  background: rgba(20, 123, 118, 0.06);
-  font-size: 13px;
-  font-weight: 600;
 }
 
 .form-section {

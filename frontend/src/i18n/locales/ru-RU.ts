@@ -4402,6 +4402,7 @@ export default {
   },
   auth: {
     login: 'Вход',
+    loginTitle: 'Войти в Huanshu',
     logout: 'Выход',
     oidcLogin: 'Войти через OIDC',
     oidcLoginWithProvider: 'Войти через {provider}',
@@ -4424,7 +4425,7 @@ export default {
     firstTime: 'Впервые в Huanshu?',
     registerSuccess: 'Регистрация завершена. Войдите в систему',
     registerFailed: 'Ошибка регистрации',
-    subtitle: 'Одна корпоративная учетная запись для помощника и операционного анализа',
+    subtitle: 'Используйте корпоративную учетную запись, чтобы войти в пространство интеллектуальных агентов вашей организации.',
     registerSubtitle: 'Создайте аккаунт и начните работу с Huanshu',
     emailPlaceholder: 'Введите адрес электронной почты',
     passwordPlaceholder: 'Введите пароль (8-32 символа, включая буквы и цифры)',

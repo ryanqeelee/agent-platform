@@ -16,7 +16,6 @@ type LoginCopy = {
   eyebrow: string
   headline: string
   description: string
-  capabilityListLabel: string
   employeeAssistant: string
   operatingAnalysis: string
 }
@@ -48,34 +47,30 @@ export type RetailAgentHomeCopy = {
 
 const loginCopyByLocale: Record<string, LoginCopy> = {
   'zh-CN': {
-    eyebrow: '面向零售经营的一体化工作空间',
-    headline: '让员工助理与经营分析，回到每天的业务现场。',
-    description: '在同一个企业空间中，支持员工协作与可信的经营分析。',
-    capabilityListLabel: '产品能力',
+    eyebrow: '面向零售企业的智能体平台',
+    headline: '让智能体真正进入零售经营现场。',
+    description: '连接企业知识与业务数据，为零售组织提供可信、实用的智能支持。',
     employeeAssistant: '员工助理',
     operatingAnalysis: '经营分析',
   },
   'en-US': {
-    eyebrow: 'One workspace for retail operations',
-    headline: 'Bring employee assistance and operating analysis into daily retail work.',
-    description: 'A single enterprise space for employee collaboration and trusted operating analysis.',
-    capabilityListLabel: 'Product capabilities',
+    eyebrow: 'An agent platform for retail enterprises',
+    headline: 'Bring agents into real retail operations.',
+    description: 'Connect enterprise knowledge and business data to provide trusted, practical intelligence for retail organizations.',
     employeeAssistant: 'Employee Assistant',
     operatingAnalysis: 'Operating Analysis',
   },
   'ru-RU': {
-    eyebrow: 'Единое рабочее пространство для розницы',
-    headline: 'Помощник сотрудника и операционный анализ для ежедневной работы в рознице.',
-    description: 'Единое пространство предприятия для совместной работы и достоверного операционного анализа.',
-    capabilityListLabel: 'Возможности продукта',
+    eyebrow: 'Платформа интеллектуальных агентов для предприятий розничной торговли',
+    headline: 'Интеллектуальные агенты в реальных процессах розничной торговли.',
+    description: 'Объединяем знания предприятия и бизнес-данные, чтобы предоставлять розничным организациям надёжную и практичную интеллектуальную поддержку.',
     employeeAssistant: 'Помощник сотрудника',
     operatingAnalysis: 'Операционный анализ',
   },
   'ko-KR': {
-    eyebrow: '리테일 운영을 위한 하나의 업무 공간',
-    headline: '직원 지원과 운영 분석을 매일의 리테일 업무로 가져옵니다.',
-    description: '직원 협업과 신뢰할 수 있는 운영 분석을 위한 하나의 엔터프라이즈 공간입니다.',
-    capabilityListLabel: '제품 기능',
+    eyebrow: '리테일 기업을 위한 에이전트 플랫폼',
+    headline: '에이전트를 실제 리테일 운영 현장으로 연결합니다.',
+    description: '기업 지식과 비즈니스 데이터를 연결해 리테일 조직에 신뢰할 수 있고 실용적인 지능형 지원을 제공합니다.',
     employeeAssistant: '직원 지원',
     operatingAnalysis: '운영 분석',
   },

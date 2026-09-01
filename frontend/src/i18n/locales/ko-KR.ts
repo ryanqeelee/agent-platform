@@ -4402,6 +4402,7 @@ export default {
   },
   auth: {
     login: '로그인',
+    loginTitle: 'Huanshu 로그인',
     logout: '로그아웃',
     oidcLogin: 'OIDC로 로그인',
     oidcLoginWithProvider: '{provider}(으)로 로그인',
@@ -4424,7 +4425,7 @@ export default {
     firstTime: 'Huanshu가 처음이신가요?',
     registerSuccess: '가입이 완료되었습니다. 로그인해주세요',
     registerFailed: '가입 실패',
-    subtitle: '하나의 기업 계정으로 직원 도우미와 경영 분석을 이용하세요',
+    subtitle: '기업 계정으로 소속 조직의 에이전트 업무 공간에 로그인하세요.',
     registerSubtitle: '계정을 만들고 Huanshu를 시작하세요',
     emailPlaceholder: '이메일 주소 입력',
     passwordPlaceholder: '비밀번호 입력 (8-32자, 문자와 숫자 포함)',

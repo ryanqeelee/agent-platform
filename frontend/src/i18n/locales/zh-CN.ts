@@ -4402,6 +4402,7 @@ export default {
   },
   auth: {
     login: '登录',
+    loginTitle: '登录环枢',
     logout: '退出',
     oidcLogin: '使用 OIDC 登录',
     oidcLoginWithProvider: '使用 {provider} 登录',
@@ -4424,7 +4425,7 @@ export default {
     firstTime: '首次使用环枢？',
     registerSuccess: '注册成功，请登录',
     registerFailed: '注册失败',
-    subtitle: '使用统一企业账号，进入员工助理与经营分析',
+    subtitle: '使用统一企业账号，进入所属企业的智能体工作空间。',
     registerSubtitle: '创建账户并开始使用环枢',
     emailPlaceholder: '输入邮箱地址',
     passwordPlaceholder: '输入密码（8-32个字符，包含字母和数字）',

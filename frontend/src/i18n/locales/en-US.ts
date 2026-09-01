@@ -1474,6 +1474,7 @@ export default {
   },
   auth: {
     login: 'Login',
+    loginTitle: 'Sign in to Huanshu',
     logout: 'Logout',
     oidcLogin: 'Sign in with OIDC',
     oidcLoginWithProvider: 'Sign in with {provider}',
@@ -1496,7 +1497,7 @@ export default {
     firstTime: 'New to Huanshu?',
     registerSuccess: 'Registration successful. Please sign in',
     registerFailed: 'Registration failed',
-    subtitle: 'Use one enterprise account for the employee assistant and operating analysis',
+    subtitle: 'Use your enterprise account to enter your organization’s agent workspace.',
     registerSubtitle: 'Create your account and start using Huanshu',
     emailPlaceholder: 'Enter email address',
     passwordPlaceholder: 'Enter password (8-32 characters, including letters and numbers)',

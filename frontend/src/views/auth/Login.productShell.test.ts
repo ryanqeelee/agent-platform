@@ -9,17 +9,20 @@ test('login renders the ProductShellBrandV1 surface without upstream capability 
   const template = source.match(/<template>([\s\S]*?)<\/template>/)?.[1] || ''
 
   assert.match(template, /productShellBrand\.name/)
-  assert.match(template, /loginCopy\.employeeAssistant/)
-  assert.match(template, /loginCopy\.operatingAnalysis/)
-  assert.match(template, /:aria-label="loginCopy\.capabilityListLabel"/)
+  assert.match(template, /loginCopy\.headline/)
+  assert.match(template, /auth\.loginTitle/)
+  assert.doesNotMatch(template, /capability-list/)
+  assert.doesNotMatch(template, /loginCopy\.(employeeAssistant|operatingAnalysis)/)
   assert.doesNotMatch(template, /\$t\('platform\.(rag|wiki|agent|hybridSearch)/)
   assert.doesNotMatch(template, /WeKnora/i)
   assert.match(source, /@media \(prefers-reduced-motion: reduce\)/)
 })
 
-test('capability list labels are localized for every supported login locale', () => {
-  const labels = ['zh-CN', 'en-US', 'ru-RU', 'ko-KR'].map(locale =>
-    getProductShellLoginCopy(locale).capabilityListLabel,
-  )
-  assert.deepEqual(labels, ['产品能力', 'Product capabilities', 'Возможности продукта', '제품 기능'])
+test('login copy stays platform-led across every supported locale', () => {
+  for (const locale of ['zh-CN', 'en-US', 'ru-RU', 'ko-KR']) {
+    const copy = getProductShellLoginCopy(locale)
+    assert.ok(copy.eyebrow)
+    assert.ok(copy.headline)
+    assert.ok(copy.description)
+  }
 })

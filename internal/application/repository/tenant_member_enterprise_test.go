@@ -55,7 +55,8 @@ func TestEnterpriseManagedTenantBindingConcurrent(t *testing.T) {
         )`,
 		`CREATE TABLE tenant_members (
             id bigserial PRIMARY KEY, user_id varchar(36) NOT NULL, tenant_id bigint NOT NULL,
-            role varchar(20) NOT NULL, status varchar(20) NOT NULL, invited_by varchar(36),
+            role varchar(20) NOT NULL, status varchar(20) NOT NULL,
+            operating_analysis_access boolean NOT NULL DEFAULT false, invited_by varchar(36),
             joined_at timestamptz, created_at timestamptz, updated_at timestamptz, deleted_at timestamptz
         )`,
 		`CREATE UNIQUE INDEX uniq_user_tenant ON tenant_members(user_id, tenant_id) WHERE deleted_at IS NULL`,

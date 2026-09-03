@@ -121,17 +121,14 @@
           <p>{{ copy.roadmapDescription }}</p>
         </div>
         <ol class="roadmap-track">
-          <li>
-            <span>{{ copy.current }}</span>
-            <strong>{{ loginCopy.employeeAssistant }}</strong>
-          </li>
-          <li>
-            <span>{{ copy.current }}</span>
-            <strong>{{ loginCopy.operatingAnalysis }}</strong>
-          </li>
-          <li class="roadmap-future" aria-disabled="true">
-            <span>{{ copy.planned }}</span>
-            <strong>{{ copy.procurementOrdering }}</strong>
+          <li
+            v-for="(step, index) in copy.loopSteps"
+            :key="step"
+            :class="{ 'roadmap-future': index > 1 }"
+            :aria-disabled="index > 1 ? true : undefined"
+          >
+            <span>{{ index > 1 ? copy.planned : copy.current }}</span>
+            <strong>{{ step }}</strong>
           </li>
         </ol>
       </section>
@@ -597,7 +594,7 @@ onMounted(() => {
 
 .roadmap-track {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   grid-auto-flow: dense;
   margin: 0;
   padding: 0;

@@ -2,11 +2,12 @@ export default {
   menu: {
     knowledgeBase: 'Knowledge Base',
     operatingAnalysis: 'Operating Analysis',
+    continueInOperatingAnalysis: 'Continue in Operating Analysis',
     operatingAnalysisContactAdmin: 'Contact an enterprise administrator for operating analysis access',
     operatingAnalysisUnavailable: 'Operating analysis is temporarily unavailable',
     agents: 'Agents',
     organizations: 'Shared Spaces',
-    newChat: 'New Chat',
+    newChat: 'Employee Assistant',
     settings: 'System Settings',
     logout: 'Logout',
     clearMessages: 'Clear Messages',
@@ -817,7 +818,7 @@ export default {
     durationSuffix: '<strong>{duration}</strong>',
     stepSummarySeparator: ' · ',
     title: 'Agents',
-    subtitle: 'Configure and manage your agents to customize conversation behavior and capabilities',
+    subtitle: 'Configure Employee Assistant scenarios so knowledge, processes, and tools can be reused when needed.',
     createAgent: 'Create Agent',
     builtin: 'Built-in',
     disabled: 'Disabled',
@@ -1051,7 +1052,7 @@ export default {
     versionInfo: 'Version Info',
     taskQueue: 'Task Queues',
     tenantInfo: 'Workspace Info',
-    workspaceSettings: 'Workspace Settings',
+    workspaceSettings: 'Workspace & Members',
     navGroups: {
       account: 'Account',
       workspace: 'Workspace',
@@ -1698,14 +1699,14 @@ export default {
   },
   input: {
     addModel: 'Add Model',
-    placeholder: 'Ask questions directly to the model',
+    placeholder: 'Ask about enterprise policies, processes, or business knowledge',
     placeholderWithContext: 'Enter your question, will answer based on selected knowledge bases/files above',
     placeholderWebOnly: 'Enter your question, will answer with web search',
     placeholderKbAndWeb: 'Enter your question, will answer based on knowledge base and web search',
     placeholderAgent: 'Ask {name}',
     agentMode: 'Smart Reasoning',
-    normalMode: 'Quick Answer',
-    normalModeDesc: 'Knowledge base RAG Q&A',
+    normalMode: 'Enterprise Knowledge',
+    normalModeDesc: 'Answers from enterprise knowledge you are authorized to access',
     agentModeDesc: 'Multi-step thinking, deep analysis',
     agentMissingAllowedTools: 'Allowed tools',
     agentMissingSummaryModel: 'Chat model',
@@ -1731,7 +1732,7 @@ export default {
       enterContent: 'Please enter content first!',
       replying: 'Currently replying, please try again later!',
       agentSwitchedOn: 'Switched to Intelligent Reasoning',
-      agentSwitchedOff: 'Switched to Quick Q&A',
+      agentSwitchedOff: 'Switched to Enterprise Knowledge',
       agentSelected: 'Selected agent "{name}"',
       webSearchNotConfigured: 'Web search engine is not configured. Please configure a provider and credentials in settings.',
       webSearchEnabled: 'Web search enabled',
@@ -1749,7 +1750,7 @@ export default {
     goToAgentSettings: 'Go to agent settings'
   },
   createChat: {
-    title: 'Hi, I am Huanshu, your enterprise assistant',
+    title: 'What would you like to understand or handle today?',
     newSessionTitle: 'New Session',
     messages: {
       createFailed: 'Failed to create session',
@@ -1758,7 +1759,7 @@ export default {
   },
   knowledgeList: {
     create: 'Create Knowledge Base',
-    subtitle: 'Manage and organize your knowledge bases, supporting document-based and FAQ-based knowledge bases',
+    subtitle: 'Maintain enterprise policies, processes, and business materials for the Employee Assistant to query.',
     sharedToOrgs: 'Shared to {count} space(s)',
     uninitializedBanner: 'Some knowledge bases are not initialized. Configure model information in settings before adding documents.',
     empty: {
@@ -3705,7 +3706,7 @@ export default {
   general: {
     title: 'General Settings',
     allSettings: 'All Settings',
-    personalSettings: 'Personal Settings',
+    personalSettings: 'Personal Preferences',
     helpAndDocs: 'Help & Documentation',
     description: 'Configure language, appearance and other basic options',
     settings: 'Settings',

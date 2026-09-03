@@ -2224,7 +2224,7 @@ export default {
   general: {
     title: '일반 설정',
     allSettings: '모든 설정',
-    personalSettings: '개인 설정',
+    personalSettings: '개인 환경설정',
     helpAndDocs: '도움말 및 문서',
     description: '언어, 외관 등 기본 옵션 설정',
     settings: '설정',
@@ -4100,7 +4100,7 @@ export default {
   },
   knowledgeList: {
     create: '지식베이스 생성',
-    subtitle: '지식베이스를 관리하고 구성합니다. 문서형과 Q&A형 지식베이스를 지원합니다',
+    subtitle: '직원 도우미가 조회할 수 있도록 기업 규정, 절차, 업무 자료를 관리합니다.',
     sharedToOrgs: '{count} 스페이스에 공유됨',
     uninitializedBanner: '일부 지식베이스가 아직 초기화되지 않았습니다. 지식 문서를 추가하려면 먼저 설정에서 모델 정보를 구성해야 합니다',
     uploadProgress: {
@@ -4177,7 +4177,7 @@ export default {
     }
   },
   createChat: {
-    title: '안녕하세요, Huanshu 기업 도우미입니다',
+    title: '오늘 무엇을 알아보거나 처리할까요?',
     newSessionTitle: '새 세션',
     messages: {
       createFailed: '세션 생성 실패',
@@ -4186,14 +4186,14 @@ export default {
   },
   input: {
     addModel: '모델 추가',
-    placeholder: '모델에 직접 질문',
+    placeholder: '기업 규정, 절차 또는 업무 지식에 대해 질문하세요',
     placeholderWithContext: '질문을 입력하면 위에서 선택한 지식베이스/파일을 기반으로 답변합니다',
     placeholderWebOnly: '질문을 입력하면 웹 검색을 결합하여 답변합니다',
     placeholderKbAndWeb: '질문을 입력하면 지식베이스와 웹 검색을 기반으로 답변합니다',
     placeholderAgent: '{name} 질문하기',
     agentMode: 'Agent 모드',
-    normalMode: '일반 모드',
-    normalModeDesc: '지식베이스 기반 RAG Q&A',
+    normalMode: '기업 지식',
+    normalModeDesc: '권한이 있는 기업 지식을 기반으로 답변합니다',
     agentModeDesc: 'ReAct 추론 프레임워크, 다단계 사고',
     agentMissingAllowedTools: '허용된 도구',
     agentMissingSummaryModel: '대화 모델',
@@ -4220,7 +4220,7 @@ export default {
       enterContent: '먼저 내용을 입력해주세요!',
       replying: '응답 중입니다. 잠시 후 다시 시도해주세요!',
       agentSwitchedOn: 'Agent 모드로 전환되었습니다',
-      agentSwitchedOff: '일반 모드로 전환되었습니다',
+      agentSwitchedOff: '기업 지식으로 전환되었습니다',
       agentSelected: '"{name}" 에이전트가 선택되었습니다.',
       webSearchNotConfigured: '웹 검색 엔진이 구성되지 않았습니다. 먼저 설정에서 검색 엔진 선택 및 인터페이스 구성을 완료해주세요.',
       webSearchEnabled: '웹 검색이 켜졌습니다',
@@ -4659,7 +4659,7 @@ export default {
     versionInfo: '버전 정보',
     taskQueue: '작업 큐',
     tenantInfo: '워크스페이스 정보',
-    workspaceSettings: '워크스페이스 설정',
+    workspaceSettings: '작업 공간 및 구성원',
     system: '시스템 설정',
     storage: {
       title: '스토리지 엔진',
@@ -4908,7 +4908,7 @@ export default {
     durationSuffix: '소요 시간 <strong>{duration}</strong>',
     stepSummarySeparator: ' · ',
     title: '에이전트',
-    subtitle: '에이전트 구성 및 관리, 대화 동작 및 기능 맞춤화',
+    subtitle: '직원 도우미의 업무 시나리오를 구성해 지식, 절차, 도구를 필요할 때 재사용합니다.',
     createAgent: '에이전트 만들기',
     builtin: '내장',
     disabled: '비활성화됨',
@@ -5906,11 +5906,12 @@ export default {
   menu: {
     knowledgeBase: '지식베이스',
     operatingAnalysis: '경영 분석',
+    continueInOperatingAnalysis: '경영 분석에서 계속',
     operatingAnalysisContactAdmin: '경영 분석 권한은 기업 관리자에게 문의하세요',
     operatingAnalysisUnavailable: '경영 분석 서비스를 일시적으로 사용할 수 없습니다',
     agents: '에이전트',
     organizations: '공유 공간',
-    newChat: '새 대화',
+    newChat: '직원 도우미',
     settings: '시스템 설정',
     logout: '로그아웃',
     clearMessages: '메시지 지우기',
@@ -5931,6 +5932,6 @@ export default {
     logoutSuccess: '로그아웃되었습니다',
     myChats: '내 대화',
     apiChats: 'API 세션',
-    noSessions: '대화가 없습니다'
+    noSessions: '최근 대화가 없습니다'
   }
 }

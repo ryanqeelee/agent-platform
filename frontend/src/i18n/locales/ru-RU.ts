@@ -2224,7 +2224,7 @@ export default {
   general: {
     title: 'Общие настройки',
     allSettings: 'Все настройки',
-    personalSettings: 'Личные настройки',
+    personalSettings: 'Личные предпочтения',
     helpAndDocs: 'Справка и документация',
     description: 'Настройка языка, внешнего вида и других базовых параметров',
     settings: 'Настройки',
@@ -4100,7 +4100,7 @@ export default {
   },
   knowledgeList: {
     create: 'Создать базу знаний',
-    subtitle: 'Управляйте и организуйте свои базы знаний, поддерживаются документные и FAQ-базы знаний',
+    subtitle: 'Ведите корпоративные правила, процессы и рабочие материалы для поиска через помощника сотрудника.',
     sharedToOrgs: 'Shared to {count} space(s)',
     uninitializedBanner: 'Некоторые базы знаний не инициализированы. Сначала настройте модели в разделе настроек, чтобы добавлять документы.',
     uploadProgress: {
@@ -4177,7 +4177,7 @@ export default {
     }
   },
   createChat: {
-    title: 'Привет, я корпоративный помощник Huanshu',
+    title: 'Что нужно узнать или решить сегодня?',
     newSessionTitle: 'Новая сессия',
     messages: {
       createFailed: 'Не удалось создать сессию',
@@ -4186,14 +4186,14 @@ export default {
   },
   input: {
     addModel: 'Добавить модель',
-    placeholder: 'Задайте вопрос напрямую модели',
+    placeholder: 'Спросите о корпоративных правилах, процессах или рабочих знаниях',
     placeholderWithContext: 'Введите вопрос, ответ будет основан на выбранных выше базах знаний/файлах',
     placeholderWebOnly: 'Введите вопрос, ответ будет основан на веб-поиске',
     placeholderKbAndWeb: 'Введите вопрос, ответ будет основан на базе знаний и веб-поиске',
     placeholderAgent: 'Спросить {name}',
     agentMode: 'Умный анализ',
-    normalMode: 'Быстрый ответ',
-    normalModeDesc: 'RAG-вопросы и ответы по базе знаний',
+    normalMode: 'Корпоративные знания',
+    normalModeDesc: 'Ответы на основе доступных вам корпоративных знаний',
     agentModeDesc: 'Многошаговое мышление, глубокий анализ',
     agentMissingAllowedTools: 'Разрешённые инструменты',
     agentMissingSummaryModel: 'Модель беседы',
@@ -4220,7 +4220,7 @@ export default {
       enterContent: 'Сначала введите содержимое!',
       replying: 'Ответ формируется, попробуйте позже!',
       agentSwitchedOn: 'Переключено в Agent режим',
-      agentSwitchedOff: 'Переключено в обычный режим',
+      agentSwitchedOff: 'Включены корпоративные знания',
       agentSelected: 'Selected agent "{name}"',
       webSearchNotConfigured: 'Веб-поиск не настроен. Сначала выберите провайдера и настройте ключи в разделе настроек.',
       webSearchEnabled: 'Веб-поиск включён',
@@ -4659,7 +4659,7 @@ export default {
     versionInfo: 'Информация о версии',
     taskQueue: 'Очереди задач',
     tenantInfo: 'Информация о пространстве',
-    workspaceSettings: 'Настройки пространства',
+    workspaceSettings: 'Пространство и участники',
     system: 'Настройки системы',
     storage: {
       title: 'Хранилище',
@@ -4908,7 +4908,7 @@ export default {
     durationSuffix: '<strong>{duration}</strong>',
     stepSummarySeparator: ' · ',
     title: 'Agents',
-    subtitle: 'Configure and manage your agents to customize conversation behavior and capabilities',
+    subtitle: 'Настраивайте рабочие сценарии помощника, чтобы повторно использовать знания, процессы и инструменты.',
     createAgent: 'Create Agent',
     builtin: 'Built-in',
     disabled: 'Disabled',
@@ -5906,11 +5906,12 @@ export default {
   menu: {
     knowledgeBase: 'База знаний',
     operatingAnalysis: 'Операционный анализ',
+    continueInOperatingAnalysis: 'Продолжить в операционном анализе',
     operatingAnalysisContactAdmin: 'Обратитесь к администратору предприятия за доступом к операционному анализу',
     operatingAnalysisUnavailable: 'Операционный анализ временно недоступен',
     agents: 'Агенты',
     organizations: 'Общие пространства',
-    newChat: 'Новый диалог',
+    newChat: 'Помощник сотрудника',
     settings: 'Настройки системы',
     logout: 'Выход',
     clearMessages: 'Очистить сообщения',
@@ -5931,6 +5932,6 @@ export default {
     logoutSuccess: 'Вы вышли из системы',
     myChats: 'Мои чаты',
     apiChats: 'Сессии API',
-    noSessions: 'Пока нет диалогов'
+    noSessions: 'Недавних диалогов пока нет'
   }
 }

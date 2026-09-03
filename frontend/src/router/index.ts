@@ -126,7 +126,9 @@ const router = createRouter({
         {
           path: "settings",
           name: "settings",
-          component: () => import("../views/settings/Settings.vue"),
+          // Platform already mounts the settings overlay once. The child route
+          // only supplies addressable state, avoiding a duplicate modal tree.
+          component: { render: () => null },
           meta: { requiresInit: true, requiresAuth: true }
         },
         {

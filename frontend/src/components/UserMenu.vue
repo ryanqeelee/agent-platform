@@ -74,7 +74,7 @@
             :title="$t('tenant.switcher.menuLabel')" />
         </div>
         <div class="menu-divider"></div>
-        <!-- 账号与空间是头像菜单的核心上下文；基础设施类配置统一收进「全部设置」。 -->
+        <!-- 账号与空间是头像菜单的核心上下文；两个入口直接定位到对应设置分区。 -->
         <div class="menu-item" @click="handleQuickNav('general')">
           <t-icon name="user" class="menu-icon" />
           <span>{{ $t('general.personalSettings') }}</span>
@@ -95,11 +95,6 @@
         <div v-if="canManageModels" class="menu-item" @click="handleQuickNav('models')">
           <t-icon name="control-platform" class="menu-icon" />
           <span>{{ $t('settings.modelManagement') }}</span>
-        </div>
-        <div class="menu-divider"></div>
-        <div class="menu-item" @click="handleSettings">
-          <t-icon name="setting" class="menu-icon" />
-          <span>{{ $t('general.allSettings') }}</span>
         </div>
         <!--
           System administration entry — visible only to users with the
@@ -273,13 +268,6 @@ const handleQuickNav = (section: string) => {
   menuVisible.value = false
   uiStore.openSettings()
   router.push({ path: '/platform/settings', query: { section } })
-}
-
-// 打开设置
-const handleSettings = () => {
-  menuVisible.value = false
-  uiStore.openSettings()
-  router.push('/platform/settings')
 }
 
 const handleEnterpriseAdministration = () => {

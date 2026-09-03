@@ -89,7 +89,7 @@
                         <div class="menu_item-box">
                             <div class="menu_icon">
                                 <img class="icon"
-                                    :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)"
+                                    :src="getImgSrc(menuIconFor(item.icon))"
                                     alt="">
                             </div>
                             <template v-if="!uiStore.sidebarCollapsed">
@@ -1050,12 +1050,26 @@ watch([() => route.name, () => route.params], (newvalue, oldvalue) => {
     }
 });
 let knowledgeIcon = ref('zhishiku-green.svg');
-let prefixIcon = ref('prefixIcon.svg');
+let assistantIcon = ref('assistant.svg');
+let analysisIcon = ref('analysis.svg');
 let logoutIcon = ref('logout.svg');
 let settingIcon = ref('setting.svg');
 let agentIcon = ref('agent.svg');
 let organizationIcon = ref('organization.svg');
 let pathPrefix = ref(route.name)
+const menuIconFor = (icon: string) => {
+    const icons: Record<string, string> = {
+        zhishiku: knowledgeIcon.value,
+        assistant: assistantIcon.value,
+        analysis: analysisIcon.value,
+        agent: agentIcon.value,
+        organization: organizationIcon.value,
+        logout: logoutIcon.value,
+        setting: settingIcon.value,
+    };
+    return icons[icon] || assistantIcon.value;
+}
+
 const getIcon = (path: string) => {
     // 根据当前路由状态更新所有图标
     const kbActiveState = getIconActiveState('knowledge-bases');
@@ -1073,8 +1087,11 @@ const getIcon = (path: string) => {
     // 组织图标：只在组织页面显示绿色
     organizationIcon.value = organizationsActiveState ? 'organization-green.svg' : 'organization.svg';
 
-    // 对话图标：只在对话创建页面显示绿色，其他情况显示默认
-    prefixIcon.value = creatChatActiveState.isCreatChatActive ? 'prefixIcon-green.svg' : 'prefixIcon.svg';
+    // 员工助理覆盖新建与既有对话；经营分析保留独立的趋势图标。
+    assistantIcon.value = creatChatActiveState.isCreatChatActive || route.name === 'chat'
+        ? 'assistant-green.svg'
+        : 'assistant.svg';
+    analysisIcon.value = route.name === 'operatingAnalysis' ? 'analysis-green.svg' : 'analysis.svg';
 
     // 设置图标：只在设置页面显示绿色
     settingIcon.value = settingsActiveState.isSettingsActive ? 'setting-green.svg' : 'setting.svg';

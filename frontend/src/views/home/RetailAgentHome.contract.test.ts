@@ -19,3 +19,11 @@ test('home keeps future work non-interactive and the employee surface free of up
   assert.doesNotMatch(source, /WeKnora|RAG|model|provider/i)
   assert.match(source, /@media \(prefers-reduced-motion: reduce\)/)
 })
+
+test('home presents the two authorities as connected workspaces without merging their histories', () => {
+  assert.match(source, /copy\.handoffHint/)
+  assert.match(source, /copy\.employeeRecentWork/)
+  assert.match(source, /copy\.analysisRecentWork/)
+  assert.match(source, /assistant-green\.svg/)
+  assert.match(source, /analysis-green\.svg/)
+})

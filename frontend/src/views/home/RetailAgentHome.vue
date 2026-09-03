@@ -18,7 +18,7 @@
         </h1>
         <p class="hero-description">{{ copy.description }}</p>
 
-        <div class="operating-loop" aria-label="Retail operating loop">
+        <div class="operating-loop" :aria-label="copy.loopTitle">
           <template v-for="(step, index) in copy.loopSteps" :key="step">
             <span class="loop-step">{{ step }}</span>
             <span v-if="index < copy.loopSteps.length - 1" class="loop-arrow" aria-hidden="true">→</span>
@@ -35,6 +35,11 @@
           <p>{{ copy.loopDescription }}</p>
         </div>
 
+        <p v-if="analysisState !== 'absent'" class="workspace-bridge">
+          <img src="@/assets/img/analysis-green.svg" alt="" aria-hidden="true" />
+          {{ copy.handoffHint }}
+        </p>
+
         <div
           class="work-grid"
           :class="{ 'work-grid--single': analysisState === 'absent' }"
@@ -43,10 +48,7 @@
           <article class="work-card work-card--assistant">
             <div class="card-heading">
               <span class="card-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none">
-                  <path d="M5.5 5.5h13v9h-7l-4 3v-3h-2v-9Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
-                  <path d="M8.5 9h7M8.5 12h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-                </svg>
+                <img src="@/assets/img/assistant-green.svg" alt="" />
               </span>
               <div>
                 <h3>{{ loginCopy.employeeAssistant }}</h3>
@@ -55,7 +57,7 @@
             </div>
 
             <div class="recent-work" aria-live="polite">
-              <span class="recent-label">{{ copy.recentWork }}</span>
+              <span class="recent-label">{{ copy.employeeRecentWork }}</span>
               <template v-if="employeeRecentWork">
                 <RouterLink class="recent-title" :to="`/platform/chat/${employeeRecentWork.id}`">
                   {{ employeeRecentWork.title }}
@@ -64,7 +66,7 @@
                   {{ formatTime(employeeRecentWork.updatedAt) }}
                 </time>
               </template>
-              <span v-else class="recent-empty">{{ copy.noRecentWork }}</span>
+              <span v-else class="recent-empty">{{ copy.noEmployeeRecentWork }}</span>
             </div>
 
             <div class="card-actions">
@@ -87,10 +89,7 @@
           >
             <div class="card-heading">
               <span class="card-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none">
-                  <path d="M5 18.5V11m4.7 7.5V6.5m4.6 12v-5m4.7 5V9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
-                  <path d="M4 20h16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-                </svg>
+                <img src="@/assets/img/analysis-green.svg" alt="" />
               </span>
               <div>
                 <h3>{{ loginCopy.operatingAnalysis }}</h3>
@@ -99,7 +98,7 @@
             </div>
 
             <div class="recent-work" aria-live="polite">
-              <span class="recent-label">{{ copy.recentWork }}</span>
+              <span class="recent-label">{{ copy.analysisRecentWork }}</span>
               <template v-if="analysisState === 'enabled' && analysisRecentWork">
                 <RouterLink class="recent-title" to="/platform/operating-analysis">
                   {{ analysisRecentWork.title }}
@@ -174,7 +173,7 @@ const analysisLoading = ref(true)
 const analysisNextAction = ref<OperatingAnalysisRevocationHistoryV1['availability']['nextAction']>('none')
 
 const analysisStatusText = computed(() => {
-  if (analysisState.value === 'enabled') return copy.value.noRecentWork
+  if (analysisState.value === 'enabled') return copy.value.noAnalysisRecentWork
   if (analysisNextAction.value === 'contact_admin') return copy.value.contactAdmin
   return copy.value.serviceUnavailable
 })
@@ -186,7 +185,7 @@ const loadEmployeeRecentWork = async () => {
     if (!session?.id) return
     employeeRecentWork.value = {
       id: String(session.id),
-      title: String(session.title || copy.value.noRecentWork),
+      title: String(session.title || copy.value.noEmployeeRecentWork),
       updatedAt: String(session.updated_at || session.created_at || ''),
     }
   } catch {
@@ -288,8 +287,8 @@ onMounted(() => {
 .hero {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  text-align: center;
+  align-items: flex-start;
+  text-align: left;
   animation: home-enter 360ms ease-out both;
 }
 
@@ -304,7 +303,7 @@ onMounted(() => {
 }
 
 .hero h1 {
-  max-width: 840px;
+  max-width: 1040px;
   margin: 0;
   font-size: clamp(38px, 4vw, 52px);
   font-weight: 650;
@@ -318,7 +317,7 @@ onMounted(() => {
 }
 
 .hero-description {
-  max-width: 760px;
+  max-width: 720px;
   margin: 14px 0 0;
   color: rgba(19, 45, 45, 0.7);
   font-size: 16px;
@@ -329,7 +328,8 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 100%;
+  width: 82%;
+  margin-left: auto;
   margin-top: 20px;
   padding: 12px 20px;
   border: 1px solid rgba(19, 45, 45, 0.12);
@@ -349,7 +349,7 @@ onMounted(() => {
 }
 
 .work-section {
-  margin-top: 24px;
+  margin-top: 30px;
 }
 
 .section-heading {
@@ -373,11 +373,31 @@ onMounted(() => {
   }
 }
 
+.workspace-bridge {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 12px;
+  color: var(--product-shell-teal);
+  font-size: 13px;
+  font-weight: 650;
+
+  img {
+    width: 17px;
+    height: 17px;
+  }
+}
+
 .work-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-auto-flow: dense;
-  gap: 16px;
+  gap: 1px;
+  padding: 1px;
+  overflow: hidden;
+  border-radius: 24px;
+  background: rgba(19, 45, 45, 0.13);
+  box-shadow: 0 16px 44px rgba(19, 45, 45, 0.07);
 
   &--single {
     grid-template-columns: minmax(0, 1fr);
@@ -394,47 +414,43 @@ onMounted(() => {
   flex-direction: column;
   padding: 24px;
   overflow: hidden;
-  border: 1px solid rgba(19, 45, 45, 0.12);
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.78);
-  box-shadow: 0 16px 44px rgba(19, 45, 45, 0.07);
-  transition: transform 220ms ease, border-color 220ms ease, box-shadow 220ms ease;
+  border: 0;
+  border-radius: 0;
+  background: rgba(255, 255, 255, 0.82);
+  transition: background-color 220ms ease;
 
   &:hover {
-    transform: translateY(-3px);
-    border-color: rgba(20, 123, 118, 0.38);
-    box-shadow: 0 20px 52px rgba(19, 45, 45, 0.1);
+    background: rgba(255, 255, 255, 0.96);
   }
 
   &--analysis {
-    color: #f8fbf8;
-    border-color: rgba(255, 255, 255, 0.12);
+    color: var(--product-shell-ink);
     background:
-      radial-gradient(circle at 90% 0%, rgba(93, 190, 177, 0.24), transparent 45%),
-      #123f3e;
+      radial-gradient(circle at 92% -10%, rgba(20, 123, 118, 0.18), transparent 54%),
+      rgba(236, 247, 242, 0.88);
 
     .card-heading p,
     .recent-label,
     .recent-empty {
-      color: rgba(248, 251, 248, 0.68);
+      color: rgba(19, 45, 45, 0.64);
     }
 
     .recent-work time {
-      color: rgba(248, 251, 248, 0.68);
+      color: rgba(19, 45, 45, 0.58);
     }
 
     .recent-work {
-      border-color: rgba(255, 255, 255, 0.13);
-      background: rgba(255, 255, 255, 0.06);
+      border-color: rgba(20, 123, 118, 0.14);
+      background: rgba(255, 255, 255, 0.5);
     }
 
     .recent-title {
-      color: #fff;
+      color: var(--product-shell-ink);
     }
   }
 
   &--disabled {
-    background: #315453;
+    background: rgba(226, 235, 230, 0.84);
   }
 }
 
@@ -464,10 +480,9 @@ onMounted(() => {
   flex: 0 0 44px;
   place-items: center;
   border-radius: 13px;
-  color: currentColor;
-  background: color-mix(in srgb, currentColor 9%, transparent);
+  background: rgba(20, 123, 118, 0.09);
 
-  svg {
+  img {
     width: 24px;
     height: 24px;
   }
@@ -546,16 +561,6 @@ onMounted(() => {
   }
 }
 
-.work-card--analysis .primary-action {
-  color: var(--product-shell-ink);
-  background: #f7f2e9;
-
-  &:hover,
-  &:focus-visible {
-    background: #fff;
-  }
-}
-
 .text-action {
   color: var(--product-shell-teal);
 
@@ -568,24 +573,25 @@ onMounted(() => {
 .roadmap {
   display: grid;
   grid-template-columns: minmax(240px, 0.65fr) minmax(0, 1.35fr);
-  gap: 54px;
-  margin-top: 88px;
-  padding: 40px 0 0;
+  gap: 36px;
+  margin-top: 32px;
+  padding: 24px 0 0;
   border-top: 1px solid rgba(19, 45, 45, 0.14);
 }
 
 .roadmap-copy {
   h2 {
     margin: 0;
-    font-size: 27px;
+    font-size: 20px;
     line-height: 1.22;
     letter-spacing: -0.02em;
   }
 
   p {
-    margin: 14px 0 0;
+    margin: 8px 0 0;
     color: rgba(19, 45, 45, 0.64);
-    line-height: 1.7;
+    font-size: 13px;
+    line-height: 1.6;
   }
 }
 
@@ -602,10 +608,10 @@ onMounted(() => {
 
   li {
     display: flex;
-    min-height: 112px;
+    min-height: 76px;
     flex-direction: column;
     justify-content: space-between;
-    padding: 20px;
+    padding: 14px 16px;
     border-right: 1px solid rgba(19, 45, 45, 0.12);
     background: rgba(255, 255, 255, 0.5);
 
@@ -620,7 +626,7 @@ onMounted(() => {
     }
 
     strong {
-      font-size: 17px;
+      font-size: 15px;
     }
   }
 
@@ -695,6 +701,8 @@ onMounted(() => {
     align-items: stretch;
     padding: 16px;
     gap: 12px;
+    width: 100%;
+    margin-left: 0;
   }
 
   .loop-step {
@@ -721,7 +729,7 @@ onMounted(() => {
 
   .work-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
+    gap: 1px;
   }
 
   .work-grid--single {
@@ -731,7 +739,7 @@ onMounted(() => {
   .work-card {
     min-height: 250px;
     padding: 16px;
-    border-radius: 18px;
+    border-radius: 0;
   }
 
   .card-heading {
@@ -789,7 +797,7 @@ onMounted(() => {
   }
 
   .roadmap {
-    margin-top: 64px;
+    margin-top: 32px;
   }
 
   .roadmap-track {

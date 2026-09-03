@@ -44,9 +44,9 @@
             {{ content }}
         </div>
         <button v-if="handoffAvailable && messageId && content" type="button" class="analysis_handoff"
-            :disabled="handoffPending" :aria-label="t('menu.operatingAnalysis')" @click="emit('handoff', messageId)">
-            <span aria-hidden="true">↗</span>
-            {{ t('menu.operatingAnalysis') }}
+            :disabled="handoffPending" :aria-label="t('menu.continueInOperatingAnalysis')" @click="emit('handoff', messageId)">
+            <img src="@/assets/img/analysis-green.svg" alt="" aria-hidden="true">
+            {{ t('menu.continueInOperatingAnalysis') }}
         </button>
         <picturePreview :reviewImg="reviewImg" :reviewUrl="reviewUrl" @closePreImg="closePreImg" />
     </div>
@@ -264,15 +264,20 @@ const closePreImg = () => {
     font: inherit;
     font-size: 12px;
     cursor: pointer;
-    opacity: 0;
-    transform: translateY(-2px);
-    transition: color 0.16s ease, background-color 0.16s ease, opacity 0.16s ease, transform 0.16s ease;
+    opacity: 0.72;
+    transition: color 0.16s ease, background-color 0.16s ease, opacity 0.16s ease;
+
+    img {
+        width: 14px;
+        height: 14px;
+    }
 
     &:hover,
     &:focus-visible {
         color: var(--td-brand-color);
         background: var(--td-brand-color-light);
         outline: none;
+        opacity: 1;
     }
 
     &:disabled {
@@ -281,23 +286,9 @@ const closePreImg = () => {
     }
 }
 
-.user_msg_container:hover .analysis_handoff,
-.analysis_handoff:focus-visible {
-    opacity: 1;
-    transform: translateY(0);
-}
-
-@media (hover: none) {
-    .analysis_handoff {
-        opacity: 1;
-        transform: none;
-    }
-}
-
 @media (prefers-reduced-motion: reduce) {
     .analysis_handoff {
         transition: none;
-        transform: none;
     }
 }
 

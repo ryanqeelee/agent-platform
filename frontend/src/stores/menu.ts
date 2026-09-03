@@ -21,13 +21,13 @@ export const useMenuStore = defineStore('menuStore', () => {
     {
       title: '',
       titleKey: 'menu.newChat',
-      icon: 'prefixIcon',
+      icon: 'assistant',
       path: 'creatChat',
       childrenPath: 'chat',
       children: createMenuChildren()
     },
     { title: '', titleKey: 'menu.knowledgeBase', icon: 'zhishiku', path: 'knowledge-bases' },
-    { title: '', titleKey: 'menu.operatingAnalysis', icon: 'prefixIcon', path: 'operating-analysis' },
+    { title: '', titleKey: 'menu.operatingAnalysis', icon: 'analysis', path: 'operating-analysis' },
     { title: '', titleKey: 'menu.agents', icon: 'agent', path: 'agents' },
     { title: '', titleKey: 'menu.organizations', icon: 'organization', path: 'organizations' },
     { title: '', titleKey: 'menu.settings', icon: 'setting', path: 'settings' },

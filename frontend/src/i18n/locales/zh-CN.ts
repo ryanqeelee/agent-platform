@@ -2224,7 +2224,7 @@ export default {
   general: {
     title: '常规设置',
     allSettings: '全部设置',
-    personalSettings: '个人设置',
+    personalSettings: '个人偏好',
     helpAndDocs: '帮助与文档',
     description: '配置语言、外观等基础选项',
     settings: '设置',
@@ -4100,7 +4100,7 @@ export default {
   },
   knowledgeList: {
     create: '新建知识库',
-    subtitle: '管理和组织您的知识库，支持文档型和问答型知识库',
+    subtitle: '维护企业制度、流程与业务资料，供员工助理统一查询。',
     sharedToOrgs: '已共享给 {count} 个空间',
     uninitializedBanner: '部分知识库尚未初始化，需要先在设置中配置模型信息才能添加知识文档',
     uploadProgress: {
@@ -4177,7 +4177,7 @@ export default {
     }
   },
   createChat: {
-    title: 'Hi，我是环枢员工助理',
+    title: '今天需要了解或处理什么？',
     newSessionTitle: '新会话',
     messages: {
       createFailed: '创建会话失败',
@@ -4186,14 +4186,14 @@ export default {
   },
   input: {
     addModel: '添加模型',
-    placeholder: '直接向模型提问',
+    placeholder: '询问企业制度、流程或业务知识',
     placeholderWithContext: '输入问题，将基于上方选中的知识库/文件回答',
     placeholderWebOnly: '输入问题，将结合网络搜索回答',
     placeholderKbAndWeb: '输入问题，将基于知识库和网络搜索回答',
     placeholderAgent: '向 {name} 提问',
     agentMode: '智能推理',
-    normalMode: '快速问答',
-    normalModeDesc: '基于知识库的 RAG 问答',
+    normalMode: '企业知识',
+    normalModeDesc: '基于已授权的企业知识回答',
     agentModeDesc: '多步思考，深度分析',
     agentMissingAllowedTools: '允许的工具',
     agentMissingSummaryModel: '对话模型',
@@ -4220,7 +4220,7 @@ export default {
       enterContent: '请先输入内容!',
       replying: '正在回复中，请稍后再试!',
       agentSwitchedOn: '已切换到智能推理',
-      agentSwitchedOff: '已切换到快速问答',
+      agentSwitchedOff: '已切换到企业知识',
       agentSelected: '已选择智能体「{name}」',
       webSearchNotConfigured: '未配置网络搜索引擎，请先在设置中完成搜索引擎选择与接口配置。',
       webSearchEnabled: '网络搜索已开启',
@@ -4659,7 +4659,7 @@ export default {
     versionInfo: '版本信息',
     taskQueue: '任务队列',
     tenantInfo: '空间信息',
-    workspaceSettings: '空间设置',
+    workspaceSettings: '空间与成员',
     system: '系统设置',
     storage: {
       title: '存储引擎',
@@ -4908,7 +4908,7 @@ export default {
     durationSuffix: '耗时 <strong>{duration}</strong>',
     stepSummarySeparator: ' · ',
     title: '智能体',
-    subtitle: '配置和管理您的智能体，自定义对话行为和能力',
+    subtitle: '配置员工助理中的业务场景，让知识、流程与工具按需复用。',
     createAgent: '创建智能体',
     builtin: '内置',
     disabled: '已停用',
@@ -5906,11 +5906,12 @@ export default {
   menu: {
     knowledgeBase: '知识库',
     operatingAnalysis: '经营分析',
+    continueInOperatingAnalysis: '带到经营分析',
     operatingAnalysisContactAdmin: '请联系企业管理员开通经营分析权限',
     operatingAnalysisUnavailable: '经营分析服务暂不可用',
     agents: '智能体',
     organizations: '共享空间',
-    newChat: '新对话',
+    newChat: '员工助理',
     settings: '系统设置',
     logout: '退出登录',
     clearMessages: '清空消息',
@@ -5931,6 +5932,6 @@ export default {
     logoutSuccess: '已退出登录',
     myChats: '我的对话',
     apiChats: 'API 会话',
-    noSessions: '暂无对话'
+    noSessions: '还没有最近对话'
   }
 }

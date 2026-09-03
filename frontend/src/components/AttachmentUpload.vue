@@ -4,6 +4,7 @@ import { MessagePlugin } from 'tdesign-vue-next';
 import { useI18n } from 'vue-i18n';
 import { MAX_FILE_SIZE_MB } from '@/utils';
 import { getParserEngines } from '@/api/system';
+import { useAuthStore } from '@/stores/auth';
 import {
   deleteTemporaryAttachment,
   getTemporaryAttachment,
@@ -12,6 +13,7 @@ import {
 } from '@/api/chat/temporary-attachments';
 
 const { t } = useI18n();
+const authStore = useAuthStore();
 
 export interface AttachmentFile {
   file: File;
@@ -51,15 +53,16 @@ const supportedTypes = ref([
   '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.epub', '.mhtml',
   // Text
   '.txt', '.md', '.csv', '.json', '.xml', '.html',
-	'.markdown', '.yaml', '.yml', '.log',
-	// Images are parsed as documents here; the dedicated image button remains
-	// available for direct multimodal chat.
-	'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp',
+  '.markdown', '.yaml', '.yml', '.log',
+  // Images are parsed as documents here; the dedicated image button remains
+  // available for direct multimodal chat.
+  '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp',
   // Audio
   '.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac',
 ]);
 
 onMounted(async () => {
+  if (!authStore.isSystemAdmin) return;
   try {
     const response = await getParserEngines();
     const discovered = (response.data || [])

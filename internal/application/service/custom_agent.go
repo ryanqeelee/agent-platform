@@ -70,6 +70,10 @@ func applyWorkspaceAgentConfig(dst *types.CustomAgentConfig, src types.CustomAge
 	dst.KnowledgeBases = src.KnowledgeBases
 	dst.RetrieveKBOnlyWhenMentioned = src.RetrieveKBOnlyWhenMentioned
 	dst.SupportedFileTypes = src.SupportedFileTypes
+	// Capability booleans are safe workspace-facing UI contracts. Provider/model/storage
+	// bindings remain platform-only, but hiding these flags made enabled features look absent.
+	dst.WebSearchEnabled = src.WebSearchEnabled
+	dst.ImageUploadEnabled = src.ImageUploadEnabled
 	dst.FallbackStrategy = src.FallbackStrategy
 	dst.FallbackResponse = src.FallbackResponse
 	dst.FallbackPrompt = src.FallbackPrompt
@@ -86,7 +90,6 @@ func applyEnterpriseScenarioConfig(dst *types.CustomAgentConfig, src types.Custo
 	dst.AllowedTools = src.AllowedTools
 	dst.MCPSelectionMode = src.MCPSelectionMode
 	dst.MCPServices = src.MCPServices
-	dst.WebSearchEnabled = src.WebSearchEnabled
 }
 
 func preserveAgentPlatformBindings(next *types.CustomAgentConfig, current types.CustomAgentConfig) {

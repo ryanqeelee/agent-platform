@@ -5,14 +5,14 @@ import test from 'node:test'
 const inputField = readFileSync(new URL('./Input-field.vue', import.meta.url), 'utf8')
 const settingsStore = readFileSync(new URL('../stores/settings.ts', import.meta.url), 'utf8')
 
-test('selecting an agent leaves web search off until the user enables it', () => {
+test('selecting a search-capable agent enables web search by default', () => {
   const selectAgentStart = settingsStore.indexOf('selectAgent(agentId: string')
   const getSelectedAgentStart = settingsStore.indexOf('getSelectedAgentId()', selectAgentStart)
   const selectAgentAction = settingsStore.slice(selectAgentStart, getSelectedAgentStart)
 
   assert.notEqual(selectAgentStart, -1)
   assert.notEqual(getSelectedAgentStart, -1)
-  assert.match(selectAgentAction, /this\.settings\.webSearchEnabled = false/)
+  assert.match(selectAgentAction, /this\.settings\.webSearchEnabled = true/)
 
   const handleSelectAgentStart = inputField.indexOf('const handleSelectAgent = async')
   const handleSelectAgentEnd = inputField.indexOf('const clearvalue', handleSelectAgentStart)
@@ -25,7 +25,7 @@ test('selecting an agent leaves web search off until the user enables it', () =>
   assert.doesNotMatch(handleSelectAgent, /settingsStore\.toggleWebSearch/)
 })
 
-test('shared-agent web search button waits for source readiness metadata', () => {
+test('search capability stays visible while provider readiness controls its disabled state', () => {
   const showWebSearchStart = inputField.indexOf('const showWebSearchButton = computed')
   const showWebSearchEnd = inputField.indexOf('const showImageUploadButton', showWebSearchStart)
   const showWebSearchButton = inputField.slice(showWebSearchStart, showWebSearchEnd)
@@ -33,5 +33,22 @@ test('shared-agent web search button waits for source readiness metadata', () =>
   assert.notEqual(showWebSearchStart, -1)
   assert.notEqual(showWebSearchEnd, -1)
   assert.match(showWebSearchButton, /isWebSearchReadinessKnown/)
-  assert.match(showWebSearchButton, /selectedSharedAgent\.value\?\.web_search_ready/)
+  assert.match(showWebSearchButton, /isWebSearchEnabledByAgent\.value === true/)
+  assert.doesNotMatch(showWebSearchButton, /isAgentWebSearchReady/)
+})
+
+test('images remain attachable when the selected agent has no direct vision channel', () => {
+  assert.match(inputField, /const showImageUploadButton = computed\(\(\) => true\)/)
+  assert.match(inputField, /else void attachmentUploadRef\.value\?\.addFiles\(files\)/)
+  assert.match(inputField, /void attachmentUploadRef\.value\?\.addFiles\(imageFiles\)/)
+})
+
+test('employee viewers do not call management-only MCP discovery', () => {
+  const resourcesStart = inputField.indexOf('const resources = [')
+  const managementGate = inputField.indexOf('if (canManageAgents.value) resources.push', resourcesStart)
+
+  assert.notEqual(resourcesStart, -1)
+  assert.notEqual(managementGate, -1)
+  assert.doesNotMatch(inputField.slice(resourcesStart, managementGate), /loadMCPServices\(\)/)
+  assert.match(inputField, /if \(canManageAgents\.value\) resources\.push\(loadMCPServices\(\)\)/)
 })

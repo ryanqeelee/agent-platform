@@ -97,7 +97,7 @@ const handleDroppedFiles = (files: File[]) => {
     if (isImageUploadEnabledByAgent.value) {
       addImageFiles(imageFiles);
     } else {
-      MessagePlugin.warning(t('input.imageUploadDisabledByAgent'));
+      void attachmentUploadRef.value?.addFiles(imageFiles);
     }
   }
 
@@ -116,7 +116,9 @@ const handleChatFileDrop = (event: Event) => {
 const handleImageSelect = (event: Event) => {
   const input = event.target as HTMLInputElement;
   if (!input.files) return;
-  addImageFiles(Array.from(input.files));
+  const files = Array.from(input.files);
+  if (isImageUploadEnabledByAgent.value) addImageFiles(files);
+  else void attachmentUploadRef.value?.addFiles(files);
   input.value = '';
 };
 
@@ -234,7 +236,7 @@ const agentKBSelectionMode = computed(() => {
 // 共享智能体下的知识库列表（来自 listKnowledgeBases(agent_id)），用于已选知识库展示与 org 角标
 const sharedAgentKbList = ref<Array<{ id: string; name: string; type?: string; knowledge_count?: number; chunk_count?: number }>>([]);
 
-// 当智能体改变时，模型、可@知识库列表均跟随新智能体配置；网络搜索由用户主动开启
+// 当智能体改变时，模型、可@知识库列表均跟随新智能体配置；可用的网络搜索默认开启
 // 知识库：用新智能体配置的列表替换当前选中，使已选与可@列表一致（含共享智能体）
 watch([selectedAgentId, agentKnowledgeBases, agentKBSelectionMode], ([newAgentId, newAgentKbs, newKbMode], [oldAgentId]) => {
   if (settingsStore._isApplyingSessionState) return;
@@ -446,21 +448,16 @@ const isImageUploadEnabledByAgent = computed(() => {
   return currentAgentConfig.value?.image_upload_enabled === true;
 });
 
-// Input 工具栏：仅当智能体已启用且搜索引擎可用时才显示
+// 能力开关始终可见；提供商未配置时显示禁用态和明确说明，避免用户误以为功能消失。
 const showWebSearchButton = computed(() => {
   if (hasAgentConfig.value && settingsStore.selectedAgentSourceTenantId && !isWebSearchReadinessKnown.value) {
     return false;
   }
-  if (!hasAgentConfig.value) {
-    return isTenantWebSearchReady(webSearchProviders.value);
-  }
-  return isAgentWebSearchReady(
-    currentAgentConfig.value,
-    webSearchProviders.value,
-    selectedSharedAgent.value?.web_search_ready,
-  );
+  if (!hasAgentConfig.value) return true;
+  return isWebSearchEnabledByAgent.value === true;
 });
-const showImageUploadButton = computed(() => isImageUploadEnabledByAgent.value);
+// 图片始终可作为会话附件上传；配置了视觉模型时沿用直接多模态通道。
+const showImageUploadButton = computed(() => true);
 
 // 模型选择是否被智能体锁定 - 已移除锁定逻辑，允许用户自由切换模型
 const isModelLockedByAgent = computed(() => {
@@ -1774,8 +1771,8 @@ onMounted(() => {
     loadKnowledgeBases(),
     loadWebSearchConfig(),
     loadAgents(),
-    loadMCPServices(),
   ];
+  if (canManageAgents.value) resources.push(loadMCPServices());
   if (canSelectChatModel.value) {
     initChatModelSelection();
     resources.push(loadChatModels());
@@ -2158,7 +2155,7 @@ const handleSelectAgent = async (agent: CustomAgent, sourceTenantId?: string) =>
   settingsStore.toggleAgent(!!isAgentType);
 
   // 同步模型（选中的对话模型随智能体切换，含共享智能体）。
-  // 网络搜索已由 selectAgent 重置为关闭，智能体配置只控制该开关是否可用。
+  // 网络搜索按产品默认开启；提供商与智能体能力门禁仍由 loadWebSearchConfig 统一收口。
   const agentModel = agent.config?.model_id;
   if (agentModel && agentModel.trim() !== '') {
     selectedModelId.value = agentModel;
@@ -2262,9 +2259,10 @@ const onPaste = (e: ClipboardEvent) => {
       if (file) imageFiles.push(file);
     }
   }
-  if (imageFiles.length > 0 && isImageUploadEnabledByAgent.value) {
+  if (imageFiles.length > 0) {
     e.preventDefault();
-    addImageFiles(imageFiles);
+    if (isImageUploadEnabledByAgent.value) addImageFiles(imageFiles);
+    else void attachmentUploadRef.value?.addFiles(imageFiles);
   }
 };
 
@@ -2571,7 +2569,7 @@ defineExpose({
             :currentAgentId="selectedAgentId" :agents="enabledAgents" :all-models="allModels"
             @close="closeAgentModeSelector" @select="handleSelectAgent" @not-ready="handleAgentNotReady" />
 
-          <!-- WebSearch 开关按钮（智能体未启用时不显示） -->
+          <!-- WebSearch 开关：能力存在但提供商未配置时保留禁用态和说明 -->
           <t-tooltip v-if="showWebSearchButton" placement="top" theme="light"
             :popupProps="{ overlayClassName: 'input-field-tooltip' }">
             <template #content>
@@ -2600,7 +2598,7 @@ defineExpose({
             </div>
           </t-tooltip>
 
-          <!-- 图片上传按钮（智能体未启用时不显示） -->
+          <!-- 图片上传：视觉模型走多模态，否则作为可解析附件上传 -->
           <t-tooltip v-if="showImageUploadButton" placement="top" theme="light"
             :popupProps="{ overlayClassName: 'input-field-tooltip' }">
             <template #content>

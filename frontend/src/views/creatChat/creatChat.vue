@@ -214,9 +214,12 @@ async function createNewSession(value: string, modelId: string, mentionedItems: 
             console.error('[createChat] Failed to create session');
             MessagePlugin.error(t('createChat.messages.createFailed'));
         }
-    } catch (error) {
+    } catch (error: any) {
         console.error('[createChat] Create session error:', error);
-        MessagePlugin.error(t('createChat.messages.createError'));
+        const status = error?.status ?? error?.response?.status;
+        MessagePlugin.error(status === 503
+            ? '员工助理暂时无法连接 AI 服务，请稍后重试'
+            : t('createChat.messages.createError'));
     }
 }
 

@@ -259,7 +259,7 @@ import UserMenu from '@/components/UserMenu.vue';
 import TenantSelector from '@/components/TenantSelector.vue';
 import { useI18n } from 'vue-i18n';
 import { getSystemInfo } from '@/api/system';
-import { getOperatingAnalysisAvailability, type OperatingAnalysisAvailabilityV1 } from '@/api/operatingAnalysis';
+import { getOperatingAnalysisAvailability, prefetchOperatingBrief, type OperatingAnalysisAvailabilityV1 } from '@/api/operatingAnalysis';
 
 const chatResources = useChatResourcesStore();
 // Platform logos reused from IMChannelsOverviewPanel — keeps the session list
@@ -454,6 +454,10 @@ const topMenuItems = computed<MenuItem[]>(() => {
 const refreshOperatingAnalysisAvailability = async () => {
     try {
         operatingAnalysisAvailability.value = await getOperatingAnalysisAvailability();
+        if (operatingAnalysisAvailability.value.availability.state === 'enabled'
+            && operatingAnalysisAvailability.value.availability.canExchange) {
+            void prefetchOperatingBrief();
+        }
     } catch {
         operatingAnalysisAvailability.value = null;
     }

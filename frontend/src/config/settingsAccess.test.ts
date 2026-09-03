@@ -16,10 +16,12 @@ test('management shortcuts are stricter than read-only settings pages', () => {
 
 test('employee viewers cannot deep-link into management surfaces', () => {
   assert.deepEqual(EMPLOYEE_SURFACE_MIN_ROLE, {
+    enterpriseAdministration: 'contributor',
     knowledgeBases: 'contributor',
     agents: 'admin',
     organizations: 'admin',
   })
+  assert.equal(employeeSurfaceMinRoleForPath('/platform/enterprise'), 'contributor')
   assert.equal(employeeSurfaceMinRoleForPath('/platform/knowledge-bases'), 'contributor')
   assert.equal(employeeSurfaceMinRoleForPath('/platform/knowledge-bases/kb-1'), undefined)
   assert.equal(employeeSurfaceMinRoleForPath('/platform/agents'), 'admin')

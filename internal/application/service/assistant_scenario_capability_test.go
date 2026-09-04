@@ -56,8 +56,11 @@ func TestAssistantScenarioPolicyGatesSaveAndExecution(t *testing.T) {
 	require.ErrorIs(t, validateAssistantScenarioCapabilities(
 		ctx, assistantScenarioResolverStub{settings: assistantScenarioSettings(false, false, false)}, 7, webAgent.Config, false,
 	), ErrAssistantScenarioCapabilityDenied)
-	require.ErrorIs(t, validateAssistantScenarioExecution(
+	require.NoError(t, validateAssistantScenarioExecution(
 		ctx, assistantScenarioResolverStub{settings: assistantScenarioSettings(false, false, false)}, nil, 7, webAgent, &types.QARequest{},
+	))
+	require.ErrorIs(t, validateAssistantScenarioExecution(
+		ctx, assistantScenarioResolverStub{settings: assistantScenarioSettings(false, false, false)}, nil, 7, webAgent, &types.QARequest{WebSearchEnabled: true},
 	), ErrAssistantScenarioCapabilityDenied)
 	require.ErrorIs(t, validateAssistantScenarioCapabilities(
 		ctx, assistantScenarioResolverStub{err: interfaces.ErrAICapabilityUnavailable}, 7, webAgent.Config, false,
@@ -104,6 +107,6 @@ func TestAssistantScenarioPolicyGatesSaveAndExecution(t *testing.T) {
 		nil,
 		20,
 		sharedAgent,
-		&types.QARequest{SharedAgentReadOnly: true},
+		&types.QARequest{SharedAgentReadOnly: true, WebSearchEnabled: true},
 	), ErrAssistantScenarioCapabilityDenied)
 }

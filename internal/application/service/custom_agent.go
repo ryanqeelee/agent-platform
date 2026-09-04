@@ -246,7 +246,13 @@ func validateAssistantScenarioExecution(
 		}
 		return nil
 	}
-	if err := validateAssistantScenarioCapabilities(ctx, resolver, tenantID, agent.Config, true); err != nil {
+	// Execution is gated by the capabilities this request will actually use. An agent may be
+	// configured to offer optional web search while the current request keeps it off; treating
+	// that dormant option as active makes ordinary knowledge Q&A unavailable for plans without
+	// external search. Authoring still validates the full saved configuration above.
+	executionConfig := agent.Config
+	executionConfig.WebSearchEnabled = req.WebSearchEnabled && agent.Config.WebSearchEnabled
+	if err := validateAssistantScenarioCapabilities(ctx, resolver, tenantID, executionConfig, true); err != nil {
 		return err
 	}
 	if req.SharedAgentReadOnly {
@@ -254,7 +260,7 @@ func validateAssistantScenarioExecution(
 		if !ok || sourceTenantID != tenantID || agentID != agent.ID {
 			return ErrAssistantScenarioCapabilityDenied
 		}
-		if err := validateAssistantScenarioCapabilities(ctx, resolver, callerTenantID, agent.Config, true); err != nil {
+		if err := validateAssistantScenarioCapabilities(ctx, resolver, callerTenantID, executionConfig, true); err != nil {
 			return err
 		}
 	}

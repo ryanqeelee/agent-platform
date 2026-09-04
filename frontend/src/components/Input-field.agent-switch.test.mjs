@@ -43,6 +43,12 @@ test('images remain attachable when the selected agent has no direct vision chan
   assert.match(inputField, /void attachmentUploadRef\.value\?\.addFiles\(imageFiles\)/)
 })
 
+test('the agent picker reports the available image attachment path as supported', () => {
+  const selector = readFileSync(new URL('./AgentSelector.vue', import.meta.url), 'utf8')
+  assert.match(selector, /imageUploadCapability[\s\S]*capabilitySupported/)
+  assert.doesNotMatch(selector, /getImageUploadCapabilityState/)
+})
+
 test('employee viewers do not call management-only MCP discovery', () => {
   const resourcesStart = inputField.indexOf('const resources = [')
   const managementGate = inputField.indexOf('if (canManageAgents.value) resources.push', resourcesStart)

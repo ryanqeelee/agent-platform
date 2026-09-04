@@ -150,14 +150,12 @@
                 <span class="detail-capability-name">{{ $t('agent.selector.webSearchCapability') }}</span>
                 <span class="detail-capability-state">{{ getWebSearchCapabilityState(activeDetail.agent) }}</span>
               </span>
-              <span class="detail-tag detail-capability-tag"
-                :class="isImageUploadEnabledForAgent(activeDetail.agent) ? 'detail-capability-tag--on' : 'detail-capability-tag--off'">
+              <span class="detail-tag detail-capability-tag detail-capability-tag--on">
                 <span class="detail-capability-icon-wrap">
-                  <TIcon :name="isImageUploadEnabledForAgent(activeDetail.agent) ? 'check' : 'close'" size="10px"
-                    class="detail-capability-icon" />
+                  <TIcon name="check" size="10px" class="detail-capability-icon" />
                 </span>
                 <span class="detail-capability-name">{{ $t('agent.selector.imageUploadCapability') }}</span>
-                <span class="detail-capability-state">{{ getImageUploadCapabilityState(activeDetail.agent) }}</span>
+                <span class="detail-capability-state">{{ $t('agent.selector.capabilitySupported') }}</span>
               </span>
             </div>
           </div>
@@ -356,12 +354,6 @@ const getWebSearchCapabilityState = (agent: CustomAgent): string => {
   if (isWebSearchReadyForAgent(agent)) return t('agent.selector.capabilityEnabled');
   if (isWebSearchEnabledForAgent(agent)) return t('agent.selector.capabilityUnconfigured');
   return t('agent.selector.capabilityDisabled');
-};
-
-const getImageUploadCapabilityState = (agent: CustomAgent): string => {
-  return isImageUploadEnabledForAgent(agent)
-    ? t('agent.selector.capabilitySupported')
-    : t('agent.selector.capabilityUnsupported');
 };
 
 const getMcpCapability = (agent: CustomAgent): string => {

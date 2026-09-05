@@ -1,8 +1,17 @@
 <template>
     <div class="dialogue-wrap">
         <div class="dialogue-answers">
-            <div class="dialogue-title" style="--wails-draggable: drag">
-                <span style="--wails-draggable: drag">{{ $t('createChat.title') }}</span>
+            <header class="dialogue-intro">
+                <p class="dialogue-kicker">{{ $t('createChat.workspaceLabel') }}</p>
+                <h1 class="dialogue-title" style="--wails-draggable: drag">{{ $t('createChat.title') }}</h1>
+                <p class="dialogue-description">{{ $t('createChat.description') }}</p>
+            </header>
+            <InputField ref="inputFieldRef" @send-msg="sendMsg"></InputField>
+            <div v-if="!sqLoading && suggestedQuestions.length === 0" class="starter-questions">
+                <button v-for="key in ['returns', 'handover', 'training']" :key="key" type="button"
+                    @click="handleSuggestedQuestionClick(t(`createChat.starters.${key}`))">
+                    <span>{{ t(`createChat.starters.${key}`) }}</span><span aria-hidden="true">↗</span>
+                </button>
             </div>
             <!-- 推荐问题 -->
             <div ref="sqContainerRef" class="suggested-questions-container">
@@ -32,18 +41,17 @@
                             </p>
                         </div>
                         <div class="suggested-questions-grid">
-                            <div v-for="(item, index) in suggestedQuestions" :key="item.question"
+                            <button type="button" v-for="(item, index) in suggestedQuestions" :key="item.question"
                                 class="suggested-question-card" :class="{ 'sq-card-visible': sqCardsRevealed }"
                                 :style="{ transitionDelay: sqCardsRevealed ? `${index * 50}ms` : '0ms' }"
                                 @click="handleSuggestedQuestionClick(item.question)">
                                 <span class="suggested-question-text">{{ item.question }}</span>
                                 <span v-if="item.source === 'faq'" class="suggested-question-badge faq">FAQ</span>
-                            </div>
+                            </button>
                         </div>
                     </div>
                 </transition>
             </div>
-            <InputField ref="inputFieldRef" @send-msg="sendMsg"></InputField>
         </div>
     </div>
 
@@ -182,7 +190,7 @@ onMounted(() => { fetchSuggestedQuestions(); });
 const inputFieldRef = ref();
 
 const handleSuggestedQuestionClick = (question: string) => {
-    inputFieldRef.value?.triggerSend(question);
+    inputFieldRef.value?.setDraft(question);
 };
 
 const sendMsg = (value: string, modelId: string, mentionedItems: any[], imageFiles: any[] = [], attachmentFiles: any[] = []) => {
@@ -250,8 +258,9 @@ const handleKBEditorSuccess = (kbId: string) => {
     flex: 1;
     display: flex;
     justify-content: center;
-    align-items: center;
-    // position: relative;
+    align-items: flex-start;
+    overflow: auto;
+    padding: clamp(36px, 12vh, 100px) 28px 40px;
 }
 
 .dialogue-answers {
@@ -259,8 +268,8 @@ const handleKBEditorSuccess = (kbId: string) => {
     flex-flow: column;
     align-items: center;
     width: 100%;
-    max-width: 960px;
-    gap: 24px;
+    max-width: 760px;
+    gap: 26px;
 
     :deep(.answers-input) {
         position: static;
@@ -272,7 +281,10 @@ const handleKBEditorSuccess = (kbId: string) => {
     display: flex;
     color: var(--td-text-color-primary);
     font-family: var(--app-font-family);
-    font-size: 28px;
+    font-size: clamp(28px, 3.2vw, 40px);
+    letter-spacing: -.035em;
+    line-height: 1.3;
+    margin: 0;
     font-weight: 600;
     align-items: center;
     margin-bottom: 0;
@@ -308,7 +320,7 @@ const handleKBEditorSuccess = (kbId: string) => {
 }
 
 .suggested-questions-container {
-    max-width: 960px;
+    max-width: 760px;
     margin: 0;
     padding: 0 16px;
     transition: height 0.35s @suggested-ease;
@@ -366,45 +378,17 @@ const handleKBEditorSuccess = (kbId: string) => {
     }
 }
 
-@media (max-width: 1250px) and (min-width: 1045px) {
-    .answers-input {
-        transform: translateX(-329px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 654px !important;
-    }
-}
-
-@media (max-width: 1045px) {
-    .answers-input {
-        transform: translateX(-250px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 500px !important;
-    }
-}
-
-@media (max-width: 750px) {
-    .answers-input {
-        transform: translateX(-250px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 340px !important;
-    }
-}
-
-@media (max-width: 600px) {
-    .answers-input {
-        transform: translateX(-250px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 300px !important;
-    }
-}
+.dialogue-intro { width:100%; }
+.dialogue-kicker { margin:0 0 14px; color:var(--td-brand-color); font-size:12px; font-weight:600; letter-spacing:.06em; }
+.dialogue-description { max-width:56ch; margin:16px 0 0; color:var(--td-text-color-secondary); font-size:15px; line-height:1.8; }
+.dialogue-answers :deep(.answers-input) { width:100%; max-width:100%; margin:0; }
+.dialogue-answers :deep(.rich-input-container) { max-width:none; border-radius:16px; }
+.dialogue-answers :deep(.t-textarea__inner) { width:100% !important; min-height:96px; font-size:15px; line-height:1.7; }
+.suggested-questions-container { width:100%; padding:0; }
+.suggested-question-card { font:inherit; text-align:left; cursor:pointer; }
+.suggested-question-card:focus-visible { outline:2px solid var(--td-brand-color); outline-offset:3px; }
+@media(max-width:760px) { .dialogue-wrap { padding:32px 18px; } .dialogue-title { font-size:28px; } }
+@media(prefers-reduced-motion:reduce) { .suggested-question-card, .suggested-questions-container { transition:none; } }
 </style>
 <style lang="less">
 .del-menu-popup {
@@ -420,4 +404,10 @@ const handleKBEditorSuccess = (kbId: string) => {
 
     }
 }
+</style>
+<style scoped>
+.starter-questions { width:100%; display:grid; gap:0; margin-top:24px; }
+.starter-questions button { display:flex; justify-content:space-between; gap:16px; align-items:center; padding:15px 4px; border:0; border-bottom:1px solid var(--td-component-border); background:transparent; color:var(--td-text-color-primary); font:inherit; font-size:14px; text-align:left; cursor:pointer; }
+.starter-questions button:hover { color:var(--td-brand-color); }
+.starter-questions button:focus-visible { outline:2px solid var(--td-brand-color); outline-offset:3px; }
 </style>

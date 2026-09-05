@@ -4177,6 +4177,13 @@ export default {
     }
   },
   createChat: {
+    starters: {
+      returns: '顾客申请退货，应该按什么流程处理？请注明制度依据。',
+      handover: '帮我整理一份门店交接班检查清单。',
+      training: '新员工上岗前，需要了解哪些服务规范？',
+    },
+    workspaceLabel: '员工助理',
+    description: '查制度、理流程、找依据。未找到企业资料时，会明确告知。',
     title: '今天需要了解或处理什么？',
     newSessionTitle: '新会话',
     messages: {

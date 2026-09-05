@@ -240,3 +240,31 @@ select:-webkit-autofill {
     --td-brand-color-hover: #74beb7;
     --td-brand-color-active: #106b67;
 }
+
+/* Shared employee workspace palette: match Operating Analysis. */
+:root:root, :root:root[theme-mode="light"] {
+  --product-shell-paper:#f7f8f6;
+  --product-shell-ink:#20332f;
+  --td-bg-color-sidebar:#f7f8f6;
+  --td-bg-color-page:#f7f8f6;
+  --td-bg-color-container:#ffffff;
+  --td-component-stroke:#e2e6e2;
+  --td-component-border:#c6ceca;
+  --td-text-color-primary:#20332f;
+  --td-text-color-secondary:#65736d;
+  --td-brand-color-1:#eaf3f0;
+  --td-brand-color:#147b76;
+}
+:root:root[theme-mode="dark"] {
+  --product-shell-paper:#0e1716;
+  --product-shell-ink:#e6f0ed;
+  --td-bg-color-sidebar:#101b19;
+  --td-bg-color-page:#0e1716;
+  --td-bg-color-container:#14211f;
+  --td-component-stroke:#2a403c;
+  --td-component-border:#3b5953;
+  --td-text-color-primary:#e6f0ed;
+  --td-text-color-secondary:#9bb0aa;
+  --td-brand-color:#54b7ae;
+  --td-brand-color-1:rgba(84,183,174,.16);
+}

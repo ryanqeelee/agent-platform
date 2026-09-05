@@ -1750,6 +1750,13 @@ export default {
     goToAgentSettings: 'Go to agent settings'
   },
   createChat: {
+    starters: {
+      returns: 'What is our customer returns process? Please cite the policy.',
+      handover: 'Help me prepare a store shift handover checklist.',
+      training: 'What service standards should a new employee learn?',
+    },
+    workspaceLabel: 'Employee assistant',
+    description: 'Find policies, clarify procedures, and move work forward. Answers identify their sources and tell you when evidence is missing.',
     title: 'What would you like to understand or handle today?',
     newSessionTitle: 'New Session',
     messages: {

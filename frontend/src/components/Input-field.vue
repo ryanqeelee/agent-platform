@@ -2489,6 +2489,10 @@ onBeforeRouteUpdate((to, from, next) => {
 })
 
 defineExpose({
+  setDraft(text: string) {
+    query.value = text;
+    nextTick(() => textareaRef.value?.focus());
+  },
   triggerSend(text: string) {
     if (!text.trim()) return;
     query.value = text;
@@ -2717,18 +2721,18 @@ defineExpose({
         <div class="control-right">
           <!-- 停止按钮（仅在回复中时显示） -->
           <t-tooltip v-if="isReplying" :content="$t('input.stopGeneration')" placement="top">
-            <div @click="handleStop" class="control-btn stop-btn">
+            <button type="button" @click="handleStop" class="control-btn stop-btn" :aria-label="$t('input.stopGeneration')">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                 <rect x="5" y="5" width="6" height="6" rx="1" />
               </svg>
-            </div>
+            </button>
           </t-tooltip>
 
           <!-- 发送按钮 -->
-          <div v-if="!isReplying" @click="createSession(query)" class="control-btn send-btn" data-guide="chat-send"
-            :class="{ 'disabled': !query.length }">
-            <img src="../assets/img/sending-aircraft.svg" :alt="$t('input.send')" />
-          </div>
+          <button type="button" v-if="!isReplying" @click="createSession(query)" class="control-btn send-btn" data-guide="chat-send"
+            :aria-label="$t('input.send')" :disabled="!query.trim()" :class="{ 'disabled': !query.trim() }">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6" /></svg>
+          </button>
         </div>
       </div>
     </div>
@@ -2753,6 +2757,11 @@ const getImgSrc = (url: string) => {
 </script>
 <style scoped lang="less">
 @import './css/chat-resource-chips.less';
+button.control-btn { border:0; font:inherit; color:inherit; }
+button.control-btn:focus-visible { outline:2px solid var(--td-brand-color); outline-offset:3px; }
+button.send-btn:not(:disabled) { background:var(--td-brand-color); color:#fff; }
+button.send-btn:disabled { cursor:not-allowed; opacity:.45; }
+
 
 .answers-input {
   position: absolute;
@@ -2783,12 +2792,13 @@ const getImgSrc = (url: string) => {
   width: 100%;
   max-width: 960px;
   background: var(--td-bg-color-container, #FFF);
-  border-radius: 12px;
+  border-radius: 14px;
   border: 1px solid var(--td-component-stroke, #dcdcdc);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04), 0 8px 16px -4px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 4px 20px rgba(32, 51, 47, 0.05);
 
   &:focus-within {
-    border-color: var(--td-brand-color, #07C05F);
+    border-color: var(--td-brand-color, #147b76);
+    box-shadow: 0 0 0 3px var(--td-brand-color-light);
   }
 }
 

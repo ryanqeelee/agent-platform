@@ -1,6 +1,12 @@
 <template>
-    <div class="main" ref="dropzone">
-        <Menu></Menu>
+    <div class="main" :class="{ 'mobile-menu-open': mobileMenuOpen }" @keydown.esc="mobileMenuOpen = false" ref="dropzone">
+        <header class="mobile-workspace-header">
+            <button type="button" @click="router.push('/home')">环枢</button>
+            <span aria-hidden="true"></span>
+            <button type="button" :aria-expanded="mobileMenuOpen" aria-controls="mobile-workspace-menu" @click="mobileMenuOpen = !mobileMenuOpen">{{ mobileMenuOpen ? t('menu.collapseSidebar') : t('menu.expandSidebar') }}</button>
+        </header>
+        <button v-if="mobileMenuOpen" class="mobile-menu-scrim" type="button" :aria-label="t('menu.collapseSidebar')" @click="mobileMenuOpen = false" />
+        <Menu id="mobile-workspace-menu"></Menu>
         <div v-if="isRouterAlive" class="platform-route-outlet">
             <RouterView />
         </div>
@@ -33,7 +39,9 @@ import { getKnowledgeBaseById } from '@/api/knowledge-base/index'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 
+const mobileMenuOpen = ref(false);
 const route = useRoute();
+watch(() => route.fullPath, () => { mobileMenuOpen.value = false; });
 const router = useRouter();
 const commandPaletteStore = useCommandPaletteStore();
 let ismask = ref(false)
@@ -257,7 +265,7 @@ onUnmounted(() => {
     align-items: stretch;
     width: 100%;
     height: 100%;
-    min-width: 600px;
+    min-width: 0;
     min-height: 0;
     /* 统一整页背景，让左侧菜单与右侧内容区视觉连贯 */
     background: var(--td-bg-color-container);
@@ -290,5 +298,17 @@ img {
     -moz-user-drag: none;
     -o-user-drag: none;
     user-drag: none;
+}
+.mobile-workspace-header, .mobile-menu-scrim { display:none; }
+@media(max-width:560px) {
+    .main { flex-direction:column; }
+    .mobile-workspace-header { display:flex; align-items:center; gap:12px; min-height:48px; flex:0 0 48px; padding:0 12px; border-bottom:1px solid var(--td-component-border); background:var(--td-bg-color-sidebar); }
+    .mobile-workspace-header > span { flex:1; color:var(--td-text-color-secondary); font-size:12px; }
+    .mobile-workspace-header button { border:0; background:transparent; color:var(--td-text-color-primary); font:inherit; min-height:36px; cursor:pointer; }
+    .mobile-workspace-header button:focus-visible { outline:2px solid var(--td-brand-color); outline-offset:2px; }
+    .main > .aside_box { display:none; }
+    .main.mobile-menu-open > .aside_box { display:flex; position:fixed; top:48px; left:0; bottom:0; height:calc(100dvh - 48px); z-index:101; }
+    .mobile-menu-scrim { display:block; position:fixed; inset:48px 0 0; z-index:100; border:0; background:rgba(15,30,26,.25); }
+    .platform-route-outlet .chat, .platform-route-outlet .chat.is-sidebar-collapsed { min-width:0; max-width:100%; width:100%; }
 }
 </style>

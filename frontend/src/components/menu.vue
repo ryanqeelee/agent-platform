@@ -83,7 +83,8 @@
                         ? 'menu.operatingAnalysisContactAdmin'
                         : 'menu.operatingAnalysisUnavailable')
                     : item.title" placement="right" :disabled="!uiStore.sidebarCollapsed && !item.disabled">
-                    <div @click="handleMenuClick(item.path)" @mouseenter="mouseenteMenu(item.path)"
+                    <button type="button" :aria-label="item.title" :aria-disabled="item.disabled || undefined"
+                        :aria-current="isMenuItemActive(item.path) ? 'page' : undefined" @click="handleMenuClick(item.path)" @mouseenter="mouseenteMenu(item.path)"
                         @mouseleave="mouseleaveMenu(item.path)" :data-guide="`nav-${item.path}`"
                         :class="['menu_item', { 'menu_item--disabled': item.disabled }, item.childrenPath && item.childrenPath == currentpath ? 'menu_item_c_active' : isMenuItemActive(item.path) ? 'menu_item_active' : '']">
                         <div class="menu_item-box">
@@ -100,7 +101,7 @@
                                         orgStore.totalPendingJoinRequestCount }}</span>
                             </template>
                         </div>
-                    </div>
+                    </button>
                 </t-tooltip>
             </div>
 
@@ -1211,6 +1212,8 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 
 </script>
 <style lang="less" scoped>
+button.menu_item { width:100%; border:0; background:transparent; color:inherit; font:inherit; text-align:left; }
+button.menu_item:focus-visible { outline:2px solid var(--td-brand-color); outline-offset:2px; }
 .aside_box {
     // 侧栏水平栅格：图标列与文案列统一对齐（Logo / 菜单 / 会话分组 / 会话行）
     --sidebar-inset-x: 14px;
@@ -1221,7 +1224,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 
     min-width: 260px;
     width: 260px;
-    padding: 8px 6px 6px;
+    padding: 8px 10px 6px;
     background: var(--td-bg-color-sidebar);
     box-sizing: border-box;
     /* Avoid 100vh because <html> carries a `zoom` multiplier for font-size
@@ -1290,7 +1293,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         flex-shrink: 0;
         cursor: pointer;
         color: var(--td-text-color-secondary);
-        border-radius: 4px;
+        border-radius: 8px;
         transition: background-color 0.2s ease;
         box-sizing: border-box;
 
@@ -1455,7 +1458,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     }
 
     .menu_item_active {
-        border-radius: 4px;
+        border-radius: 8px;
         background: var(--td-bg-color-secondarycontainer) !important;
 
         .menu_icon,
@@ -1483,11 +1486,11 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        height: 38px;
+        height: 40px;
         padding: 8px 10px 8px var(--sidebar-inset-x);
         box-sizing: border-box;
         margin-bottom: 2px;
-        border-radius: 4px;
+        border-radius: 8px;
         transition: background-color 0.2s ease;
 
         .menu_item-box {
@@ -1496,7 +1499,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         }
 
         &:hover {
-            border-radius: 4px;
+            border-radius: 8px;
             background: var(--td-bg-color-container-hover);
 
             .menu_icon,

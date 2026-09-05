@@ -4177,6 +4177,13 @@ export default {
     }
   },
   createChat: {
+    starters: {
+      returns: '고객 반품은 어떤 절차로 처리하나요? 근거 규정을 알려주세요.',
+      handover: '매장 교대 인수인계 체크리스트를 정리해 주세요.',
+      training: '신입 직원이 알아야 할 서비스 기준은 무엇인가요?',
+    },
+    workspaceLabel: '직원 도우미',
+    description: '규정을 찾고 절차를 확인하세요. 답변은 출처와 근거가 부족한 부분을 알려줍니다.',
     title: '오늘 무엇을 알아보거나 처리할까요?',
     newSessionTitle: '새 세션',
     messages: {

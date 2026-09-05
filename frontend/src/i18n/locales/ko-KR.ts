@@ -5911,6 +5911,7 @@ export default {
     }
   },
   menu: {
+    operatingBrief: '경영 브리핑',
     knowledgeBase: '지식베이스',
     operatingAnalysis: '경영 분석',
     continueInOperatingAnalysis: '경영 분석에서 계속',

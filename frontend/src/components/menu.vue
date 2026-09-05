@@ -408,8 +408,10 @@ const isMenuItemActive = (itemPath: string): boolean => {
             return currentRoute === 'knowledgeBaseList' ||
                 currentRoute === 'knowledgeBaseDetail' ||
                 currentRoute === 'knowledgeBaseSettings';
+        case 'operating-brief':
+            return route.path === '/platform/operating-brief';
         case 'operating-analysis':
-            return currentRoute === 'operatingAnalysis';
+            return route.path === '/platform/operating-analysis';
         case 'agents':
             return currentRoute === 'agentList';
         case 'organizations':
@@ -442,10 +444,10 @@ const getIconActiveState = (itemPath: string) => {
 // 分离上下两部分菜单（使用 visibleMenuArr 以便 lite 模式过滤 logout）
 const topMenuItems = computed<MenuItem[]>(() => {
     return (visibleMenuArr.value as unknown as MenuItem[]).flatMap((item: MenuItem) => {
-        if (!(item.path === 'knowledge-bases' || item.path === 'operating-analysis' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat')) {
+        if (!(item.path === 'knowledge-bases' || (item.path === 'operating-analysis' || item.path === 'operating-brief') || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat')) {
             return [];
         }
-        if (item.path !== 'operating-analysis') return [item];
+        if (item.path !== 'operating-analysis' && item.path !== 'operating-brief') return [item];
         const state = operatingAnalysisAvailability.value?.availability.state;
         if (!state || state === 'hidden') return [];
         return [{ ...item, disabled: state !== 'enabled' }];
@@ -466,7 +468,7 @@ const refreshOperatingAnalysisAvailability = async () => {
 
 const bottomMenuItems = computed<MenuItem[]>(() => {
     return (visibleMenuArr.value as unknown as MenuItem[]).filter((item: MenuItem) => {
-        if (item.path === 'knowledge-bases' || item.path === 'operating-analysis' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat') {
+        if (item.path === 'knowledge-bases' || (item.path === 'operating-analysis' || item.path === 'operating-brief') || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat') {
             return false;
         }
         return true;
@@ -1067,6 +1069,7 @@ const menuIconFor = (icon: string) => {
         zhishiku: knowledgeIcon.value,
         assistant: assistantIcon.value,
         analysis: analysisIcon.value,
+        brief: 'brief.svg',
         agent: agentIcon.value,
         organization: organizationIcon.value,
         logout: logoutIcon.value,
@@ -1106,7 +1109,7 @@ const getIcon = (path: string) => {
 }
 getIcon(typeof route.name === 'string' ? route.name as string : (route.name ? String(route.name) : ''))
 const handleMenuClick = async (path: string) => {
-    if (path === 'operating-analysis' && operatingAnalysisAvailability.value?.availability.state !== 'enabled') {
+    if ((path === 'operating-analysis' || path === 'operating-brief') && operatingAnalysisAvailability.value?.availability.state !== 'enabled') {
         const nextAction = operatingAnalysisAvailability.value?.availability.nextAction;
         MessagePlugin.info(t(nextAction === 'contact_admin'
             ? 'menu.operatingAnalysisContactAdmin'

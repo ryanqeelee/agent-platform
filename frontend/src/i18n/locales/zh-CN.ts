@@ -5911,6 +5911,7 @@ export default {
     }
   },
   menu: {
+    operatingBrief: '经营简报',
     knowledgeBase: '知识库',
     operatingAnalysis: '经营分析',
     continueInOperatingAnalysis: '带到经营分析',

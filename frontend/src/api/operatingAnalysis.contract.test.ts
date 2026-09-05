@@ -19,7 +19,7 @@ test('employee-assistant handoff carries only an opaque reference across routes'
   assert.match(api, /post\('\/api\/v1\/operating-analysis-handoffs', \{\s*sourceSessionId,\s*sourceMessageId,\s*\}\)/)
   assert.match(api, /\/api\/auth\/operating-analysis-handoffs\/\$\{encodeURIComponent\(handoffRef\)\}\/consume/)
   assert.match(router, /sessionStorage\.setItem\(\s*OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY/)
-  assert.match(router, /window\.location\.assign\(handoffPrompt \? '\/app\/\?data_workspace=data' : '\/app\/'\)/)
+  assert.match(router, /window\.location\.assign\(handoffPrompt \? '\/app\/\?data_surface=analysis&data_workspace=data' : `\/app\/\?data_surface=\$\{surface\}`\)/)
   assert.doesNotMatch(router, /[?&](?:question|prompt)=/)
   assert.match(message, /emit\('handoff', messageId\)/)
 })

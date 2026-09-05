@@ -28,6 +28,8 @@ export type RetailAgentHomeCopy = {
   currentWork: string
   employeeDescription: string
   analysisDescription: string
+  briefDescription: string
+  openBrief: string
   startWork: string
   enterWork: string
   continueWork: string
@@ -84,6 +86,8 @@ export function getProductShellLoginCopy(locale: string): LoginCopy {
 
 const homeCopyByLocale: Record<string, RetailAgentHomeCopy> = {
   'zh-CN': {
+    briefDescription: '先看本周销售与毛利变化，定位值得优先核查的门店和品类。',
+    openBrief: '查看经营简报',
     eyebrow: '环枢·零售智能体',
     headline: '让零售经营中的知识、数据与判断不再分散。',
     compactHeadline: '让知识、数据与判断不再分散。',
@@ -101,8 +105,8 @@ const homeCopyByLocale: Record<string, RetailAgentHomeCopy> = {
     handoffHint: '遇到需要经营数据判断的问题，可带着原问题进入经营分析。',
     contactAdmin: '请联系企业管理员开通经营分析权限',
     serviceUnavailable: '经营分析服务暂不可用',
-    loopTitle: '一个产品，两种当前工作入口',
-    loopDescription: '员工助理处理企业知识，经营分析核验受治理数据；需要时可带着原问题继续。',
+    loopTitle: '从当前问题，选择工作入口',
+    loopDescription: '员工助理解答工作问题，经营简报发现变化，经营分析核查原因。',
     loopSteps: ['发现问题', '分析判断', '人工确认', '执行协同', '结果复盘'],
     roadmapTitle: '持续改进的经营闭环',
     roadmapDescription: '先把问题看清、判断做实，再把确认后的行动持续跟进。',
@@ -110,6 +114,8 @@ const homeCopyByLocale: Record<string, RetailAgentHomeCopy> = {
     planned: '待业务接入',
   },
   'en-US': {
+    briefDescription: 'Review weekly sales and margin changes, then locate stores and categories worth investigating.',
+    openBrief: 'Open operating brief',
     eyebrow: 'HuanShu Retail Agent',
     headline: 'Bring retail knowledge, data, and judgment together.',
     compactHeadline: 'Bring knowledge, data, and judgment together.',
@@ -127,7 +133,7 @@ const homeCopyByLocale: Record<string, RetailAgentHomeCopy> = {
     handoffHint: 'When a question needs operating data, carry the original question into Operating Analysis.',
     contactAdmin: 'Contact an enterprise administrator for operating analysis access',
     serviceUnavailable: 'Operating analysis is temporarily unavailable',
-    loopTitle: 'One product, two current ways to work',
+    loopTitle: 'Choose where to start',
     loopDescription: 'Employee Assistant handles enterprise knowledge; Operating Analysis verifies governed data. Carry the original question across when needed.',
     loopSteps: ['Discover', 'Analyze', 'Confirm', 'Coordinate', 'Review'],
     roadmapTitle: 'A continuously improving operating loop',
@@ -136,6 +142,8 @@ const homeCopyByLocale: Record<string, RetailAgentHomeCopy> = {
     planned: 'Awaiting integration',
   },
   'ru-RU': {
+    briefDescription: 'Оцените недельные изменения продаж и маржи и выберите магазины и категории для проверки.',
+    openBrief: 'Открыть обзор бизнеса',
     eyebrow: 'Розничный агент HuanShu',
     headline: 'Объедините знания, данные и решения в розничной торговле.',
     compactHeadline: 'Объедините знания, данные и решения.',
@@ -153,7 +161,7 @@ const homeCopyByLocale: Record<string, RetailAgentHomeCopy> = {
     handoffHint: 'Если вопрос требует операционных данных, перенесите его в операционный анализ.',
     contactAdmin: 'Обратитесь к администратору предприятия для получения доступа',
     serviceUnavailable: 'Операционный анализ временно недоступен',
-    loopTitle: 'Один продукт, два доступных способа работы',
+    loopTitle: 'Выберите, с чего начать',
     loopDescription: 'Помощник работает с корпоративными знаниями, операционный анализ проверяет управляемые данные. При необходимости исходный вопрос можно перенести.',
     loopSteps: ['Выявить', 'Проанализировать', 'Подтвердить', 'Выполнить', 'Оценить результат'],
     roadmapTitle: 'Непрерывный цикл улучшения операций',
@@ -162,6 +170,8 @@ const homeCopyByLocale: Record<string, RetailAgentHomeCopy> = {
     planned: 'Ожидает интеграции',
   },
   'ko-KR': {
+    briefDescription: '주간 매출과 매출총이익 변화를 보고 먼저 확인할 매장과 품목군을 찾습니다.',
+    openBrief: '경영 브리핑 보기',
     eyebrow: 'HuanShu 리테일 에이전트',
     headline: '리테일 운영의 지식, 데이터, 판단을 하나로 연결합니다.',
     compactHeadline: '지식, 데이터, 판단을 하나로 연결합니다.',
@@ -179,7 +189,7 @@ const homeCopyByLocale: Record<string, RetailAgentHomeCopy> = {
     handoffHint: '운영 데이터 판단이 필요한 질문은 원래 질문과 함께 운영 분석으로 이어갈 수 있습니다.',
     contactAdmin: '운영 분석 권한은 기업 관리자에게 문의하세요',
     serviceUnavailable: '운영 분석 서비스를 일시적으로 사용할 수 없습니다',
-    loopTitle: '하나의 제품, 두 가지 현재 업무 진입점',
+    loopTitle: '현재 업무에 맞는 시작점 선택',
     loopDescription: '직원 도우미는 기업 지식을 다루고 운영 분석은 거버넌스 데이터를 검증합니다. 필요하면 원래 질문을 이어갈 수 있습니다.',
     loopSteps: ['문제 감지', '분석 판단', '사람 확인', '실행 협업', '결과 검토'],
     roadmapTitle: '지속적으로 개선되는 운영 루프',

@@ -5,7 +5,7 @@ import test from 'node:test'
 
 const source = readFileSync(fileURLToPath(new URL('./RetailAgentHome.vue', import.meta.url)), 'utf8')
 const copySource = readFileSync(fileURLToPath(new URL('../../config/productShellBrand.ts', import.meta.url)), 'utf8')
-test('home reads the two current work cards from their existing authorities', () => {
+test('home reads the current work cards from their existing authorities', () => {
   assert.match(source, /getSessionsList\(1, 1, 'web'\)/)
   assert.match(source, /getOperatingAnalysisHistory\(\)/)
   assert.match(source, /response\.availability\.state === 'hidden'[\s\S]*?\? 'absent'/)
@@ -33,6 +33,6 @@ test('home presents the two authorities as connected workspaces without merging 
 test('home frames current work inside the durable retail operating loop', () => {
   assert.match(copySource, /让零售经营中的知识、数据与判断不再分散/)
   assert.match(copySource, /loopSteps: \['发现问题', '分析判断', '人工确认', '执行协同', '结果复盘'\]/)
-  assert.match(copySource, /loopTitle: '一个产品，两种当前工作入口'/)
+  assert.match(copySource, /loopTitle: '从当前问题，选择工作入口'/)
   assert.doesNotMatch(copySource, /能力开放说明|当前从员工助理|未来逐步进入/)
 })

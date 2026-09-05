@@ -161,10 +161,11 @@ const router = createRouter({
         },
         {
           path: "operating-analysis",
+          alias: "operating-brief",
           name: "operatingAnalysis",
           component: { render: () => null },
           meta: { requiresInit: true, requiresAuth: true },
-          beforeEnter: async () => {
+          beforeEnter: async (to) => {
             try {
               const handoffRef = sessionStorage.getItem(OPERATING_ANALYSIS_HANDOFF_REF_KEY)
               let response
@@ -194,7 +195,8 @@ const router = createRouter({
               }
               localStorage.setItem('retail_ai_app_auth_token', response.access_token)
               document.cookie = `retail_ai_app_auth_token=${response.access_token}; Path=/app; Max-Age=900; SameSite=Lax`
-              window.location.assign(handoffPrompt ? '/app/?data_workspace=data' : '/app/')
+              const surface = !handoffPrompt && to.path === '/platform/operating-brief' ? 'brief' : 'analysis'
+              window.location.assign(handoffPrompt ? '/app/?data_surface=analysis&data_workspace=data' : `/app/?data_surface=${surface}`)
               return false
             } catch {
               return '/platform/creatChat'

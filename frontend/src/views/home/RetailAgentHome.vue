@@ -83,6 +83,22 @@
 
           <article
             v-if="analysisState !== 'absent'"
+            class="work-card work-card--brief"
+            :class="{ 'work-card--disabled': analysisState === 'disabled' }"
+            :aria-disabled="analysisState === 'enabled' ? undefined : true"
+          >
+            <div class="card-heading">
+              <span class="card-icon" aria-hidden="true"><img src="@/assets/img/brief.svg" alt="" /></span>
+              <div><h3>{{ t('menu.operatingBrief') }}</h3><p>{{ copy.briefDescription }}</p></div>
+            </div>
+            <p v-if="analysisState !== 'enabled'" class="recent-empty">{{ analysisStatusText }}</p>
+            <div v-if="analysisState === 'enabled'" class="card-actions">
+              <RouterLink class="primary-action" to="/platform/operating-brief">{{ copy.openBrief }}</RouterLink>
+            </div>
+          </article>
+
+          <article
+            v-if="analysisState !== 'absent'"
             class="work-card work-card--analysis"
             :class="{ 'work-card--disabled': analysisState === 'disabled' }"
             :aria-disabled="analysisState === 'enabled' ? undefined : true"
@@ -160,7 +176,7 @@ type RecentWork = {
 
 type AnalysisState = 'absent' | 'disabled' | 'enabled'
 
-const { locale } = useI18n()
+const { locale, t } = useI18n()
 const copy = computed(() => getRetailAgentHomeCopy(locale.value))
 const loginCopy = computed(() => getProductShellLoginCopy(locale.value))
 
@@ -391,7 +407,7 @@ onMounted(() => {
 
 .work-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   grid-auto-flow: dense;
   gap: 1px;
   padding: 1px;
@@ -825,4 +841,5 @@ onMounted(() => {
     transition: none;
   }
 }
+@media (max-width: 640px) { .work-grid { grid-template-columns: 1fr; } }
 </style>

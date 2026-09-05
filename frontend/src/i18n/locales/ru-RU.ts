@@ -5911,6 +5911,7 @@ export default {
     }
   },
   menu: {
+    operatingBrief: 'Обзор бизнеса',
     knowledgeBase: 'База знаний',
     operatingAnalysis: 'Операционный анализ',
     continueInOperatingAnalysis: 'Продолжить в операционном анализе',

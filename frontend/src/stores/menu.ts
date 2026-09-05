@@ -27,6 +27,7 @@ export const useMenuStore = defineStore('menuStore', () => {
       children: createMenuChildren()
     },
     { title: '', titleKey: 'menu.knowledgeBase', icon: 'zhishiku', path: 'knowledge-bases' },
+    { title: '', titleKey: 'menu.operatingBrief', icon: 'brief', path: 'operating-brief' },
     { title: '', titleKey: 'menu.operatingAnalysis', icon: 'analysis', path: 'operating-analysis' },
     { title: '', titleKey: 'menu.agents', icon: 'agent', path: 'agents' },
     { title: '', titleKey: 'menu.organizations', icon: 'organization', path: 'organizations' },

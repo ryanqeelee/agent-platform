@@ -1,5 +1,6 @@
 export default {
   menu: {
+    operatingBrief: 'Operating Brief',
     knowledgeBase: 'Knowledge Base',
     operatingAnalysis: 'Operating Analysis',
     continueInOperatingAnalysis: 'Continue in Operating Analysis',

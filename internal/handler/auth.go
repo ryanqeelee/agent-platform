@@ -153,20 +153,37 @@ func (h *AuthHandler) GetEnterpriseSession(c *gin.Context) {
 	c.JSON(http.StatusOK, projection)
 }
 
-// resolveRegistrationMode returns the currently active registration mode.
-// Priority: DB system_settings > cfg (which already absorbed the legacy
-// DISABLE_REGISTRATION env coerce at startup) > "self_serve" hard default.
-//
-// Centralised here so /auth/register and /auth/config stay in lock-step —
-// otherwise a SystemAdmin's UI edit could affect one path and not the other.
-func (h *AuthHandler) resolveRegistrationMode(ctx context.Context) string {
+// resolveRegistrationMode enforces product-owned invitation-only admission.
+// Runtime configuration cannot reopen the public registration endpoint.
+func (h *AuthHandler) resolveRegistrationMode(context.Context) string {
 	return config.AuthRegistrationModeInviteOnly
 }
 
-// resolveDefaultTenantMode keeps first-time OIDC identities tenantless.
-// Enterprise membership is established only by invitation acceptance.
-func (h *AuthHandler) resolveDefaultTenantMode(ctx context.Context) types.TenantProvisioningMode {
+// resolveDefaultTenantMode keeps every newly provisioned identity tenantless.
+// Enterprise membership is established only by invitation acceptance or an
+// explicit member-management action; settings cannot create a personal tenant.
+func resolveDefaultTenantMode(context.Context, *config.Config, interfaces.SystemSettingService) types.TenantProvisioningMode {
 	return types.TenantProvisioningTenantless
+}
+
+// resolveDefaultTenantMode returns the provisioning policy for ordinary
+// public password registrations.
+func (h *AuthHandler) resolveDefaultTenantMode(ctx context.Context) types.TenantProvisioningMode {
+	return resolveDefaultTenantMode(ctx, h.configInfo, h.systemSettingSvc)
+}
+
+// resolveDefaultTenantMode resolves the same policy for users provisioned
+// by a SystemAdmin via POST /api/v1/system/admin/users/create.
+func (h *SystemHandler) resolveDefaultTenantMode(ctx context.Context) types.TenantProvisioningMode {
+	return resolveDefaultTenantMode(ctx, h.cfg, h.systemSettingSvc)
+}
+
+func (h *AuthHandler) complexPasswordEnabled(ctx context.Context) bool {
+	return service.ResolveComplexPasswordEnabled(ctx, h.configInfo, h.systemSettingSvc)
+}
+
+func (h *SystemHandler) complexPasswordEnabled(ctx context.Context) bool {
+	return service.ResolveComplexPasswordEnabled(ctx, h.cfg, h.systemSettingSvc)
 }
 
 // Register godoc
@@ -185,12 +202,8 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 	logger.Info(ctx, "Start user registration")
 
-	// 当 auth.registration_mode=invite_only 时，public 注册被关闭。
-	// 优先级：DB system_settings > cfg.Auth.RegistrationMode > "self_serve"。
-	// SystemAdmin 通过「全局设置」UI 实时切换 self_serve / invite_only，立即
-	// 生效，不需要重启服务。历史变量 DISABLE_REGISTRATION=true 仍在 config
-	// 启动阶段被等价提升为 invite_only（applyAuthAndTenantDefaults），
-	// 作为 cfg-default 进入 resolveRegistrationMode。
+	// 产品公开注册入口固定关闭。新身份只能通过既有邀请约束或
+	// SystemAdmin 管理入口创建，运行时设置不能重新开放该入口。
 	if h.resolveRegistrationMode(ctx) == config.AuthRegistrationModeInviteOnly {
 		logger.Warn(ctx, "Registration rejected: auth.registration_mode=invite_only")
 		appErr := errors.NewForbiddenError("Registration is invite-only")
@@ -221,6 +234,17 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		c.Error(appErr)
 		return
 	}
+
+	// Validate password against the runtime policy (DB system_settings
+	// first). Register itself does not enforce this because OIDC
+	// auto-provision uses an untyped random secret the user never types.
+	if err := service.ValidatePasswordPolicy(req.Password, h.complexPasswordEnabled(ctx)); err != nil {
+		logger.Error(ctx, "Invalid password policy")
+		appErr := errors.NewValidationError(err.Error())
+		_ = c.Error(appErr)
+		return
+	}
+
 	req.Username = secutils.SanitizeForLog(req.Username)
 	req.Email = secutils.SanitizeForLog(req.Email)
 	req.TenantProvisioning = h.resolveDefaultTenantMode(ctx)
@@ -334,13 +358,58 @@ func (h *AuthHandler) GetOIDCAuthorizationURL(c *gin.Context) {
 
 	// Bind the state nonce to this browser so an attacker cannot replay
 	// their own authorization code into a victim's callback.
-	if resp.Nonce != "" {
-		secure := c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https")
-		c.SetSameSite(http.SameSiteLaxMode)
-		c.SetCookie(oidcNonceCookieName, resp.Nonce, oidcNonceCookieMaxAge, "/", "", secure, true)
-	}
+	setOIDCNonceCookie(c, resp.Nonce)
 
 	c.JSON(http.StatusOK, resp)
+}
+
+// setOIDCNonceCookie binds the OIDC state nonce to this browser so an
+// attacker cannot replay their own authorization code into a victim's
+// callback. Shared by /auth/oidc/url (JSON) and /auth/oidc/start (302).
+func setOIDCNonceCookie(c *gin.Context, nonce string) {
+	if nonce == "" {
+		return
+	}
+	secure := c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https")
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(oidcNonceCookieName, nonce, oidcNonceCookieMaxAge, "/", "", secure, true)
+}
+
+// oidcCallbackURL derives the absolute /auth/oidc/callback URL from the
+// request's own origin (scheme + host), so external platforms can deep-link
+// to /auth/oidc/start without supplying a redirect_uri.
+func oidcCallbackURL(c *gin.Context) string {
+	scheme := "http"
+	if c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https") {
+		scheme = "https"
+	}
+	return scheme + "://" + c.Request.Host + "/api/v1/auth/oidc/callback"
+}
+
+// OIDCStart godoc
+// @Summary      发起 OIDC 登录（直接 302）
+// @Description  与 /auth/oidc/url 不同，此端点直接 302 重定向到 OIDC Provider 的授权页，
+// @Description  无需前端 JS 介入。适用于外部平台（如企业门户）直接给出一个链接即可
+// @Description  触发 OIDC 授权码流程，借助 IdP 的 SSO session 实现免再次输密码。
+// @Tags         认证
+// @Success      302
+// @Router       /auth/oidc/start [get]
+func (h *AuthHandler) OIDCStart(c *gin.Context) {
+	ctx := c.Request.Context()
+	returnTo, err := secutils.ValidateOIDCReturnTo(c.Query("return_to"))
+	if err != nil {
+		c.Error(errors.NewValidationError(err.Error()))
+		return
+	}
+	resp, err := h.userService.GetOIDCAuthorizationURL(ctx, oidcCallbackURL(c), returnTo)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to generate OIDC authorization URL: %v", err)
+		appErr := errors.NewForbiddenError("OIDC authorization unavailable").WithDetails(err.Error())
+		c.Error(appErr)
+		return
+	}
+	setOIDCNonceCookie(c, resp.Nonce)
+	c.Redirect(http.StatusFound, resp.AuthorizationURL)
 }
 
 // GetOIDCConfig godoc
@@ -650,6 +719,8 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 	canCreateTenant := canManageAllTenantMembers ||
 		((activeTenantID == 0 || types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleContributor)) &&
 			resolveTenantSelfServiceCreationEnabled(ctx, h.configInfo, h.systemSettingSvc))
+	autoAcceptInvitation := h.systemSettingSvc != nil &&
+		h.systemSettingSvc.GetBool(ctx, "tenant.auto_accept_invitation", "WEKNORA_TENANT_AUTO_ACCEPT_INVITATION", false)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
@@ -661,6 +732,7 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 			"capabilities": gin.H{
 				"can_create_tenant":             canCreateTenant,
 				"can_manage_all_tenant_members": canManageAllTenantMembers,
+				"auto_accept_invitation":        autoAcceptInvitation,
 			},
 		},
 	})
@@ -671,11 +743,13 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 // (preserve existing value) from "explicit false". See
 // types.UserPreferences for the persistence-layer counterpart.
 type updateMyPreferencesRequest struct {
-	// LastActiveTenantID lets the SPA persist "after a fresh login,
-	// drop me back into this workspace" across devices. Send a positive
-	// workspace id to set / replace, or 0 to clear. Membership is validated
-	// at next login, not here. Nil = field omitted from the PATCH and
-	// stays untouched.
+	// LastActiveTenantID lets clients persist "after a fresh login,
+	// drop me back into this workspace" across devices. The SPA sends
+	// this after every tenant switch; POST /auth/switch-tenant records
+	// the same preference server-side. Send a positive workspace id to
+	// set / replace, or 0 to clear. Membership is validated at next
+	// login, not here. Nil = field omitted from the PATCH and stays
+	// untouched.
 	LastActiveTenantID *uint64 `json:"last_active_tenant_id"`
 }
 
@@ -728,7 +802,7 @@ func (h *AuthHandler) UpdateMyPreferences(c *gin.Context) {
 
 // ChangePassword godoc
 // @Summary      修改密码
-// @Description  修改当前用户的登录密码
+// @Description  修改当前用户的登录密码。新密码须满足 8–32 位且同时包含字母与数字；开启复杂密码后还需包含大小写与特殊字符。成功后所有会话被撤销，需重新登录。
 // @Tags         认证
 // @Accept       json
 // @Produce      json
@@ -744,7 +818,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 
 	var req struct {
 		OldPassword string `json:"old_password" binding:"required"`
-		NewPassword string `json:"new_password" binding:"required,min=6"`
+		NewPassword string `json:"new_password" binding:"required"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -763,13 +837,33 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		return
 	}
 
-	// Change password
+	// Change password. Policy is enforced in the service after the old
+	// password is verified so a wrong current credential is not masked
+	// by a complexity error.
 	err = h.userService.ChangePassword(ctx, user.ID, req.OldPassword, req.NewPassword)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to change password: %v", err)
-		appErr := errors.NewBadRequestError("Password change failed").WithDetails(err.Error())
-		c.Error(appErr)
-		return
+		switch {
+		case service.IsPasswordPolicyError(err):
+			appErr := errors.NewValidationError("Password policy violation").
+				WithDetails(service.DetailPasswordPolicy)
+			_ = c.Error(appErr)
+			return
+		case stderrors.Is(err, service.ErrInvalidOldPassword):
+			appErr := errors.NewBadRequestError("Current password is incorrect").
+				WithDetails(service.DetailInvalidOldPassword)
+			c.Error(appErr)
+			return
+		case stderrors.Is(err, service.ErrSamePassword):
+			appErr := errors.NewValidationError("New password must differ from current password").
+				WithDetails(service.DetailSamePassword)
+			c.Error(appErr)
+			return
+		default:
+			logger.Errorf(ctx, "Failed to change password: %v", err)
+			appErr := errors.NewBadRequestError("Password change failed").WithDetails(err.Error())
+			c.Error(appErr)
+			return
+		}
 	}
 
 	logger.Infof(ctx, "Password changed successfully for user: %s", user.Email)
@@ -781,7 +875,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 
 // GetAuthConfig godoc
 // @Summary      获取认证配置
-// @Description  返回当前部署的注册模式等公开认证配置，供前端决定是否展示注册入口
+// @Description  返回当前部署的注册模式与密码复杂度开关，供前端决定是否展示注册入口以及密码校验规则
 // @Tags         认证
 // @Accept       json
 // @Produce      json
@@ -789,29 +883,38 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 // @Router       /auth/config [get]
 //
 // GetAuthConfig is intentionally a no-auth endpoint: the frontend reads
-// it on app load to decide whether to show the Register tab. We expose
-// only what the UI strictly needs (registration_mode); other config
-// stays internal.
+// it on app load to decide whether to show the Register tab and which
+// password complexity rules to apply. We expose only what the UI
+// strictly needs; other config stays internal.
 func (h *AuthHandler) GetAuthConfig(c *gin.Context) {
 	// Same source-of-truth as Register's gate, so the UI hide-the-button
 	// signal can never disagree with the API enforcement signal.
 	mode := h.resolveRegistrationMode(c.Request.Context())
+
+	complexPasswordEnabled := service.ResolveComplexPasswordEnabled(
+		c.Request.Context(),
+		h.configInfo,
+		h.systemSettingSvc,
+	)
 	c.JSON(http.StatusOK, gin.H{
-		"success":           true,
-		"registration_mode": mode,
+		"success":                  true,
+		"registration_mode":        mode,
+		"complex_password_enabled": complexPasswordEnabled,
 	})
 }
 
 // SwitchTenant godoc
 // @Summary      切换激活空间
-// @Description  为当前用户在目标空间重新签发访问令牌；要求该用户在目标空间存在 active 成员关系
+// @Description  为当前用户在目标空间重新签发访问令牌；要求该用户在目标空间存在 active 成员关系（跨租户超级用户除外）。
+// @Description  成功换签会把目标空间写入「最近活跃租户」偏好，下次登录与 refresh 都落在该空间（refresh JWT 不含 tenant_id）。
+// @Description  该偏好是账号级的：一次换签会改变该用户所有设备的下次登录/refresh 落点。偏好写入失败则整次换签失败，不会发出新 token。
 // @Tags         认证
 // @Accept       json
 // @Produce      json
 // @Param        request  body      object{tenant_id=integer,refresh_token=string}  true  "切换请求"
 // @Success      200      {object}  types.LoginResponse
 // @Failure      400      {object}  errors.AppError  "参数错误"
-// @Failure      403      {object}  errors.AppError  "无该空间成员关系"
+// @Failure      403      {object}  errors.AppError  "无该空间成员关系或偏好写入失败"
 // @Security     Bearer
 // @Router       /auth/switch-tenant [post]
 //

@@ -61,6 +61,9 @@ func TestRegistrySuppressesSourceCitationsWhenDisabled(t *testing.T) {
 	require.Equal(t, "knowledge  web ", registry.ExpandText(
 		`knowledge <ref id="c1"/> web <ref id="w1"/>`,
 	))
+	require.Equal(t, "knowledge  web ", registry.ExpandText(
+		`knowledge [ref id="c1"] web [ref id="w1"]`,
+	))
 	require.Equal(t, "forged  ", registry.ExpandText(
 		`forged <kb doc="Doc" chunk_id="raw" /> <web url="https://example.com" />`,
 	))
@@ -122,6 +125,68 @@ func TestStreamExpanderHoldsSplitReferenceAndDropsUnknown(t *testing.T) {
 	require.Equal(t, "x  y", registry.ExpandText(`x <kb doc="forged" chunk_id="forged" /> y`))
 	require.Equal(t, "x ", expander.Feed(`x <we`))
 	require.Equal(t, " y", expander.Feed(`b url="https://forged" /> y`))
+}
+
+func TestRegistryExpandsBracketCitationAliasesFromModelOutput(t *testing.T) {
+	registry := newSourceRegistry()
+	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-1", DocumentTitle: "Doc"})
+	registry.RegisterWeb("https://example.com", "Example")
+
+	require.Equal(t,
+		`knowledge <kb doc="Doc" chunk_id="chunk-1" /> web <web url="https://example.com" title="Example" />`,
+		registry.ExpandText(`knowledge [ref id="c1"] web [ref id="w1"]`),
+	)
+}
+
+func TestRegistryDropsUnknownBracketCitationAliases(t *testing.T) {
+	registry := newSourceRegistry()
+	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-1", DocumentTitle: "Doc"})
+
+	require.Equal(t, "before  after", registry.ExpandText(`before [ref id="w999"] after`))
+	require.Equal(t, "before  after", registry.ExpandText(`before [ref id="d1"] after`))
+	require.Equal(t, "before  after", registry.ExpandText(`before [ref id="b1"] after`))
+}
+
+func TestRegistryPreservesOrdinaryBracketMarkdown(t *testing.T) {
+	registry := newSourceRegistry()
+	input := `keep [reference], [ref id="source"], and [the link](https://example.com)`
+
+	require.Equal(t, input, registry.ExpandText(input))
+	expander := newCitationStreamExpander(registry)
+	require.Equal(t, input, expander.Feed(input))
+	require.Empty(t, expander.Flush())
+	require.Equal(t, "trailing ", expander.Feed("trailing ["))
+	require.Equal(t, "[", expander.Flush())
+}
+
+func TestStreamExpanderHoldsSplitBracketCitationWithoutLeakingHandle(t *testing.T) {
+	registry := newSourceRegistry()
+	registry.RegisterWeb("https://example.com", "Example")
+	want := `<web url="https://example.com" title="Example" />`
+	token := `[ref id="w1"]`
+
+	for split := 1; split < len(token); split++ {
+		expander := newCitationStreamExpander(registry)
+		first := expander.Feed(token[:split])
+		require.NotContains(t, first, "w1", "split %d leaked a private handle", split)
+		require.NotContains(t, first, "[ref", "split %d leaked citation syntax", split)
+		require.Equal(t, want, first+expander.Feed(token[split:])+expander.Flush(), "split %d", split)
+	}
+
+	expander := newCitationStreamExpander(registry)
+	require.Equal(t, "before ", expander.Feed(`before [re`))
+	require.Empty(t, expander.Feed(`f id="w`))
+	require.Equal(t, want+" after", expander.Feed(`1"] after`))
+	require.Empty(t, expander.Flush())
+
+	unknown := newCitationStreamExpander(registry)
+	require.Equal(t, "before ", unknown.Feed(`before [ref id="w`))
+	require.Equal(t, " after", unknown.Feed(`999"] after`))
+	require.Empty(t, unknown.Flush())
+
+	truncated := newCitationStreamExpander(registry)
+	require.Equal(t, "before ", truncated.Feed(`before [ref id="w1`))
+	require.Empty(t, truncated.Flush())
 }
 
 func TestEncodeMessagesCompactsCanonicalCitationsFromHistory(t *testing.T) {

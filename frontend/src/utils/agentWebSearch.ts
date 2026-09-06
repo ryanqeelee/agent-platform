@@ -30,7 +30,15 @@ export function isAgentWebSearchReady(
 ): boolean {
   if (!isAgentWebSearchEnabled(config)) return false;
   if (sourceWorkspaceReady !== undefined) return sourceWorkspaceReady;
-  return resolveAgentWebSearchProviderId(config, providers) !== null;
+
+  const explicitId = config?.web_search_provider_id?.trim();
+  if (explicitId) {
+    return providers.some((provider) => provider.id === explicitId);
+  }
+
+  // Workspace users receive only the safe default-provider readiness
+  // projection (`{ is_default: true }`), without provider identity/config.
+  return isTenantWebSearchReady(providers);
 }
 
 /** 空间级默认搜索引擎是否可用（无智能体约束时） */

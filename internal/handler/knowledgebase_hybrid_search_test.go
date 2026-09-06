@@ -18,6 +18,7 @@ type hybridSearchTestService struct {
 	interfaces.KnowledgeBaseService
 	searchCalls  int
 	searchParams types.SearchParams
+	results      []*types.SearchResult
 }
 
 func (s *hybridSearchTestService) GetKnowledgeBaseByID(_ context.Context, id string) (*types.KnowledgeBase, error) {
@@ -31,6 +32,9 @@ func (s *hybridSearchTestService) HybridSearch(
 ) ([]*types.SearchResult, error) {
 	s.searchCalls++
 	s.searchParams = params
+	if s.results != nil {
+		return s.results, nil
+	}
 	return []*types.SearchResult{}, nil
 }
 
@@ -41,6 +45,14 @@ func newHybridSearchTestRouter(svc interfaces.KnowledgeBaseService) *gin.Engine 
 	router.Use(func(c *gin.Context) {
 		c.Set(types.TenantIDContextKey.String(), uint64(1))
 		c.Set(types.UserIDContextKey.String(), "u-test")
+		c.Set(middleware.KBAccessContextKey, &middleware.KBAccess{
+			KnowledgeBase:     &types.KnowledgeBase{ID: "kb-1", TenantID: 1},
+			EffectiveTenantID: 1,
+			Permission:        types.OrgRoleAdmin,
+		})
+		ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, uint64(1))
+		ctx = context.WithValue(ctx, types.UserIDContextKey, "u-test")
+		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	})
 	handler := &KnowledgeBaseHandler{service: svc}

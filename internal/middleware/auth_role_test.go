@@ -221,9 +221,8 @@ func TestResolveTenantRole_AutoPromoteRequiresHomeTenant(t *testing.T) {
 	svc := newFakeMemberService() // 空 — 任何空间都是孤儿
 	user := &types.User{ID: "u1", TenantID: 1, CanAccessAllTenants: true}
 
-	got, ok := resolveTenantRole(context.Background(), svc, user, 42, true, cfgWithRBAC(true))
-	if !ok || got != types.TenantRoleAdmin {
-		t.Fatalf("cross-tenant superuser should still get visitor Admin, got (%v, %v)", got, ok)
+	if got, ok := resolveTenantRole(context.Background(), svc, user, 42, true, cfgWithRBAC(true)); ok {
+		t.Fatalf("disabled cross-tenant access must reject the visitor role, got (%v, %v)", got, ok)
 	}
 	if len(svc.addCalls) != 0 {
 		t.Fatalf("auto-promote must skip cross-tenant target, got %+v", svc.addCalls)
@@ -259,13 +258,11 @@ func TestResolveTenantRole_AutoPromoteSkippedIfTenantHasMembers(t *testing.T) {
 	}
 }
 
-func TestResolveTenantRole_FailOpenAdminWhenRBACDisabled(t *testing.T) {
+func TestResolveTenantRole_MissingForeignMembershipFailsClosedWhenRBACDisabled(t *testing.T) {
 	svc := newFakeMemberService()
 	user := &types.User{ID: "u1", TenantID: 7}
-	// targetTenantID != home，所以不进 auto-promote 分支。
-	got, ok := resolveTenantRole(context.Background(), svc, user, 8, false, cfgWithRBAC(false))
-	if !ok || got != types.TenantRoleAdmin {
-		t.Fatalf("EnableRBAC=false should fail open Admin, got (%v, %v)", got, ok)
+	if got, ok := resolveTenantRole(context.Background(), svc, user, 8, false, cfgWithRBAC(false)); ok {
+		t.Fatalf("foreign enterprise without membership must fail closed, got (%v, %v)", got, ok)
 	}
 }
 
@@ -279,18 +276,16 @@ func TestResolveTenantRole_FailClosedWhenRBACEnabled(t *testing.T) {
 	}
 }
 
-func TestResolveTenantRole_LookupErrorFailsOpenWhenRBACDisabled(t *testing.T) {
-	// 短暂 DB 错误时，fail-open 模式不应锁死现有用户。这里 targetTenantID 故意
-	// 选与 home 不同的值，避免进入 home-tenant auto-promote 分支。
+func TestResolveTenantRole_LookupErrorFailsClosedWhenRBACDisabled(t *testing.T) {
+	// Membership lookup is authoritative for the home enterprise. A transient
+	// error must not manufacture an Admin role even if legacy RBAC enforcement
+	// is disabled.
 	svc := newFakeMemberService()
 	svc.failGet = errors.New("transient db failure")
-	// 让 HasAnyMembers 返回 true，关闭孤儿空间自愈路径。
-	svc.seedActive("placeholder", 8, types.TenantRoleAdmin)
 	user := &types.User{ID: "u1", TenantID: 7}
 
-	got, ok := resolveTenantRole(context.Background(), svc, user, 8, false, cfgWithRBAC(false))
-	if !ok || got != types.TenantRoleAdmin {
-		t.Fatalf("transient lookup error under RBAC=false should fail open Admin, got (%v, %v)", got, ok)
+	if got, ok := resolveTenantRole(context.Background(), svc, user, 7, false, cfgWithRBAC(false)); ok {
+		t.Fatalf("membership lookup error must fail closed, got (%v, %v)", got, ok)
 	}
 }
 

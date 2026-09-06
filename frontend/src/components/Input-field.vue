@@ -17,6 +17,11 @@ import AgentSelector from './AgentSelector.vue';
 import { getCaretCoordinates } from '@/utils/caret';
 import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom';
 import { type ModelConfig } from '@/api/model';
+import {
+  formatContextWindow,
+  isDefaultContextWindow,
+  effectiveContextWindow,
+} from '@/utils/contextWindow';
 import { type CustomAgent, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from '@/api/agent';
 import { useChatResourcesStore } from '@/stores/chatResources';
 import { useEditorResourcesStore } from '@/stores/editorResources';
@@ -41,9 +46,9 @@ import {
   type AgentNotReadyReasonKey,
 } from '@/utils/agent-readiness';
 import { formatLocalizedList } from '@/utils/format-list';
-import type { MentionItem, MentionItemType, MentionRequestItem } from '@/types/mention';
 import { useAuthStore } from '@/stores/auth';
 import { EMPLOYEE_SURFACE_MIN_ROLE, SETTINGS_SECTION_MIN_ROLE } from '@/config/settingsAccess';
+import { SKILL_ICON, type MentionItem, type MentionItemType, type MentionRequestItem } from '@/types/mention';
 
 const route = useRoute();
 const router = useRouter();
@@ -670,7 +675,7 @@ const getMentionIcon = (item: MentionItem) => {
     case 'file': return 'file';
     case 'tag': return 'tag';
     case 'mcp': return 'tools';
-    case 'skill': return 'bookmark';
+    case 'skill': return SKILL_ICON;
     default: return 'folder';
   }
 };
@@ -1062,6 +1067,27 @@ const modelDisplayName = (model: ModelConfig) => {
   return displayName || model.name;
 };
 
+const contextWindowTitle = (tokens?: number) => {
+  if (isDefaultContextWindow(tokens)) {
+    return t('model.editor.contextWindowDefaultHint', { value: formatContextWindow(tokens) });
+  }
+  return t('model.editor.contextWindowTokens', { count: effectiveContextWindow(tokens) });
+};
+
+const selectedModelContextLabel = computed(() => {
+  if (!selectedModel.value) return '';
+  return formatContextWindow(selectedModel.value.parameters?.context_window);
+});
+
+const selectedModelContextIsDefault = computed(() => {
+  return isDefaultContextWindow(selectedModel.value?.parameters?.context_window);
+});
+
+const selectedModelContextTitle = computed(() => {
+  if (!selectedModel.value) return '';
+  return contextWindowTitle(selectedModel.value.parameters?.context_window);
+});
+
 const updateModelDropdownPosition = () => {
   const anchor = modelButtonRef.value;
   if (!anchor) {
@@ -1332,7 +1358,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
 
     const skillsMode = agentSkillsSelectionMode.value;
     if (skillsMode !== 'none') {
-      await editorResources.ensureSkills();
+      await editorResources.ensureSkills(currentAgentConfig.value?.sandbox_config_id);
       skillItems = editorResources.skills
         .filter(skill => isSkillAllowedByAgent(skill.name))
         .map(skill => ({
@@ -1857,6 +1883,13 @@ watch(() => uiStore.showSettingsModal, (visible, prevVisible) => {
   if (prevVisible && !visible) {
     loadWebSearchConfig(true);
     if (canSelectChatModel.value) loadChatModels(true);
+  }
+});
+
+watch(() => route.path, (path, prev) => {
+  if (prev === '/platform/settings' && path !== '/platform/settings') {
+    loadWebSearchConfig(true);
+    loadChatModels(true);
   }
 });
 
@@ -2677,6 +2710,12 @@ defineExpose({
                 <span class="model-selector-name">
                   {{ selectedModelDisplayName }}
                 </span>
+                <span
+                  v-if="selectedModelContextLabel"
+                  class="model-selector-ctx"
+                  :class="{ 'is-default': selectedModelContextIsDefault }"
+                  :title="selectedModelContextTitle"
+                >{{ selectedModelContextLabel }}</span>
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" class="model-dropdown-arrow"
                   :class="{ 'rotate': showModelSelector }">
                   <path d="M2.5 4.5L6 8L9.5 4.5H2.5Z" />
@@ -2708,6 +2747,11 @@ defineExpose({
                       <span v-if="model.display_name" class="model-option-raw-name">{{ model.name }}</span>
                     </div>
                   </div>
+                  <span
+                    class="model-option-ctx"
+                    :class="{ 'is-default': isDefaultContextWindow(model.parameters?.context_window) }"
+                    :title="contextWindowTitle(model.parameters?.context_window)"
+                  >{{ formatContextWindow(model.parameters?.context_window) }}</span>
                 </div>
                 <div v-if="availableModels.length === 0" class="model-option empty">
                   {{ $t('input.noModel') }}
@@ -3497,6 +3541,18 @@ button.send-btn:disabled { cursor:not-allowed; opacity:.45; }
   white-space: nowrap;
 }
 
+.model-selector-ctx {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--td-text-color-placeholder, #999);
+  font-weight: 400;
+
+  &.is-default {
+    opacity: 0.85;
+  }
+}
+
 .model-dropdown-arrow {
   width: 10px;
   height: 10px;
@@ -3601,6 +3657,8 @@ button.send-btn:disabled { cursor:not-allowed; opacity:.45; }
 .model-option {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   padding: 6px 8px;
   cursor: pointer;
   transition: background 0.12s;
@@ -3632,8 +3690,8 @@ button.send-btn:disabled { cursor:not-allowed; opacity:.45; }
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
   min-width: 0;
+  flex: 1;
 }
 
 .model-option-icon {
@@ -3667,6 +3725,21 @@ button.send-btn:disabled { cursor:not-allowed; opacity:.45; }
   font-size: 11px;
   color: var(--td-text-color-placeholder);
   flex-shrink: 0;
+}
+
+.model-option-ctx {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--td-text-color-secondary);
+  background: var(--td-bg-color-secondarycontainer);
+  padding: 0 6px;
+  border-radius: 4px;
+  line-height: 18px;
+
+  &.is-default {
+    color: var(--td-text-color-placeholder);
+  }
 }
 
 /* Agent 模式选择下拉菜单 */

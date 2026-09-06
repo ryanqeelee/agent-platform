@@ -168,7 +168,6 @@ func (s *sessionService) resolveChatModelID(
 	summaryModelID := req.SummaryModelID
 	customAgent := req.CustomAgent
 	session := req.Session
-
 	if customAgent != nil {
 		configuredModelID := strings.TrimSpace(customAgent.Config.ModelID)
 		if configuredModelID != "" {

@@ -35,6 +35,10 @@ func (s *stubMoveKBService) GetKnowledgeBaseByID(ctx context.Context, id string)
 	return s.byID(ctx, id)
 }
 
+func (s *stubMoveKBService) GetKnowledgeBaseByIDOnly(ctx context.Context, id string) (*types.KnowledgeBase, error) {
+	return s.byID(ctx, id)
+}
+
 // stubMoveKGService.GetKnowledgeByID always reports not-found, so any request
 // that PASSES the store gate fails at the later knowledge-ID validation with a
 // distinct message — letting the test tell "rejected by gate" apart from

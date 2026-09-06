@@ -19,13 +19,15 @@ RUN if [ -n "$APK_MIRROR_ARG" ]; then \
         sed -i "s@deb.debian.org@${APK_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
     fi && \
     apt-get update && \
-    apt-get install -y git build-essential libsqlite3-dev
+    apt-get install -y git build-essential libsqlite3-dev curl
 
 # Install migrate tool
-RUN go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+RUN go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.19.1
 
-# Copy go mod and sum files
+# Copy go mod files. go.mod replace-points anydoc at ./third_party/anydoc-go,
+# so that module's go.mod must exist before `go mod download`.
 COPY go.mod go.sum ./
+COPY third_party/anydoc-go/go.mod third_party/anydoc-go/go.mod
 RUN go mod download
 COPY cmd/download cmd/download
 RUN go run cmd/download/duckdb/duckdb.go
@@ -43,8 +45,24 @@ ENV COMMIT_ID=${COMMIT_ID_ARG}
 ENV BUILD_TIME=${BUILD_TIME_ARG}
 ENV GO_VERSION=${GO_VERSION_ARG}
 
+# Link the anydoc parser engine when explicitly requested. Product builds keep
+# the existing docreader path and therefore default to the legacy-compatible
+# Go-only build, which also works with Docker builds that have no BuildKit.
+ARG WITH_ANYDOC=0
+ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo
+ENV PATH=/usr/local/cargo/bin:$PATH
+RUN if [ "$WITH_ANYDOC" = "1" ]; then \
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain stable && \
+        ./scripts/build-anydoc-lib.sh; \
+    fi
+
 # Build the application with version info
-RUN make build-prod
+RUN if [ "$WITH_ANYDOC" = "1" ]; then \
+        make build-prod GO_BUILD_TAGS=anydoc; \
+    else \
+        make build-prod; \
+    fi
 RUN cp -r /go/pkg/mod/github.com/yanyiwu/ /app/yanyiwu/
 
 # Final stage

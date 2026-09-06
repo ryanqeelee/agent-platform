@@ -49,6 +49,7 @@ var noAuthAPI = map[string][]string{
 	"/api/v1/auth/config":             {"GET"},
 	"/api/v1/auth/oidc/config":        {"GET"},
 	"/api/v1/auth/oidc/url":           {"GET"},
+	"/api/v1/auth/oidc/start":         {"GET"},
 	"/api/v1/auth/oidc/callback":      {"GET"},
 	// MCP OAuth provider redirect: the third-party authorization server
 	// redirects the browser here without a WeKnora bearer token. The request
@@ -101,6 +102,16 @@ func isTenantOptionalAPI(path, method string) bool {
 	default:
 		return false
 	}
+}
+
+// isTenantlessSystemAdminAPI identifies the platform control-plane namespace
+// that a human SystemAdmin may use before belonging to any workspace. Route
+// registration and RequireSystemAdmin still decide whether the concrete
+// method and endpoint exist and whether the authenticated user is allowed;
+// this helper only prevents the earlier tenant resolver from returning 409.
+func isTenantlessSystemAdminAPI(path string) bool {
+	path = strings.TrimSuffix(strings.TrimSpace(path), "/")
+	return path == "/api/v1/system/admin" || strings.HasPrefix(path, "/api/v1/system/admin/")
 }
 
 func attachTenantlessUserContext(c *gin.Context, user *types.User) {
@@ -211,7 +222,8 @@ func authenticateJWTUser(
 	if targetTenantID == 0 {
 		// 无可用空间：身份级路由（/auth/me 等）放行为 tenantless 会话，
 		// 其余路由返回 TENANT_REQUIRED 让前端引导用户创建/加入空间。
-		if isTenantOptionalAPI(c.Request.URL.Path, c.Request.Method) {
+		if isTenantOptionalAPI(c.Request.URL.Path, c.Request.Method) ||
+			(user.IsSystemAdmin && isTenantlessSystemAdminAPI(c.Request.URL.Path)) {
 			attachTenantlessUserContext(c, user)
 			return true
 		}

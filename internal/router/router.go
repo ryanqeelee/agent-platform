@@ -59,6 +59,9 @@ type RouterParams struct {
 	MessageSuggestionHandler     *handler.MessageSuggestionHandler
 	ModelHandler                 *handler.ModelHandler
 	ModelCredentialsHandler      *handler.ModelCredentialsHandler
+	SandboxConfigHandler         *handler.SandboxConfigHandler
+	SandboxSkillHandler          *handler.SandboxSkillHandler
+	MeEnvVarHandler              *handler.MeEnvVarHandler
 	EvaluationHandler            *handler.EvaluationHandler
 	AuthHandler                  *handler.AuthHandler
 	InitializationHandler        *handler.InitializationHandler
@@ -88,6 +91,7 @@ type RouterParams struct {
 	WeKnoraCloudHandler          *handler.WeKnoraCloudHandler
 	AICapabilityPlanHandler      *handler.AICapabilityPlanHandler
 	WikiPageHandler              *handler.WikiPageHandler
+	MemoryHandler                *handler.MemoryHandler
 }
 
 // NewRouter 创建新的路由
@@ -246,6 +250,20 @@ func NewRouter(params RouterParams) *gin.Engine {
 			params.StorageBackendResolver,
 			params.ResourceCatalog,
 		)
+		// Message-scoped image proxy: shared-agent replies belong to the
+		// caller's session but may reference resources stored in the agent's
+		// source workspace. Authorization is derived from the persisted message,
+		// never from a client-provided workspace ID.
+		serveMessageScopedFiles(
+			v1,
+			rbacGuards,
+			params.MessageService,
+			params.AgentShareService,
+			params.TenantService,
+			params.FileService,
+			params.StorageBackendResolver,
+			params.ResourceCatalog,
+		)
 		RegisterKnowledgeTagRoutes(v1, params.TagHandler, rbacGuards)
 		RegisterKnowledgeRoutes(v1, params.KnowledgeHandler, rbacGuards)
 		RegisterFAQRoutes(v1, params.FAQHandler, rbacGuards)
@@ -255,8 +273,11 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterMessageRoutes(v1, params.MessageHandler, rbacGuards)
 		RegisterOperatingAnalysisHandoffRoutes(v1, params.RedisClient, params.SessionService, params.MessageService, rbacGuards)
 		RegisterModelRoutes(v1, params.ModelHandler, params.ModelCredentialsHandler, rbacGuards)
+		RegisterSandboxConfigRoutes(v1, params.SandboxConfigHandler, params.SandboxSkillHandler, rbacGuards)
+		RegisterMyEnvVarRoutes(v1, params.MeEnvVarHandler)
 		RegisterEvaluationRoutes(v1, params.EvaluationHandler, rbacGuards)
 		RegisterInitializationRoutes(v1, params.InitializationHandler, rbacGuards)
+		params.SystemHandler.BindDeploymentCapabilities(deploymentCapabilitiesFromRouter(params))
 		RegisterSystemRoutes(v1, params.SystemHandler, rbacGuards)
 		RegisterSystemAdminRoutes(v1, params.SystemHandler, params.AuditLogHandler, rbacGuards)
 		RegisterMCPServiceRoutes(v1, params.MCPServiceHandler, params.MCPCredentialsHandler, params.MCPOAuthHandler, rbacGuards)
@@ -272,6 +293,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterDataSourceRoutes(v1, params.DataSourceHandler, params.DataSourceCredentialsHandler, rbacGuards)
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler, rbacGuards)
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler, rbacGuards)
+		RegisterMemoryRoutes(v1, params.MemoryHandler, rbacGuards)
 		RegisterChunkerDebugRoutes(v1, rbacGuards)
 
 		// Fail fast if any declared API-key policy points at a route

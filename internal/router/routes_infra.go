@@ -35,6 +35,42 @@ func RegisterModelRoutes(
 	}
 }
 
+// Sandbox configs are workspace infrastructure that hold provider credentials.
+// Scoped API keys cannot safely receive partial authority over them yet because
+// mutation can strand remote sandboxes.
+func RegisterSandboxConfigRoutes(
+	r *gin.RouterGroup,
+	h *handler.SandboxConfigHandler,
+	skills *handler.SandboxSkillHandler,
+	g *rbacGuards,
+) {
+	configs := g.apiKeyGroup(r.Group("/sandbox-configs", g.SystemAdmin()), apiKeyFullAccess())
+	{
+		configs.GET("", h.List)
+		configs.PUT("/workspace-policy", h.SetWorkspacePolicy)
+		configs.POST("/templates/query", h.QueryTemplates)
+		configs.POST("", h.Create)
+		configs.GET("/:id", h.Get)
+		configs.PUT("/:id", h.Update)
+		configs.DELETE("/:id", h.Delete)
+		configs.GET("/:id/sandboxes", h.Inventory)
+		// Skills are platform-only throughout, reads included: an upload drives a
+		// root shell whose output is baked into the image every session of
+		// this config boots, and the listing names what that image carries.
+		configs.GET("/:id/skills", skills.List)
+		configs.POST("/:id/skills", skills.Upload)
+		configs.GET("/:id/skills/:skillId", skills.Get)
+		configs.GET("/:id/skills/:skillId/files", skills.ListFiles)
+		configs.GET("/:id/skills/:skillId/files/content", skills.GetFile)
+		configs.POST("/:id/skills/:skillId/reinstall", skills.Reinstall)
+		configs.POST("/:id/skills/:skillId/stop", skills.Stop)
+		configs.PATCH("/:id/skills/:skillId", skills.Patch)
+		configs.DELETE("/:id/skills/:skillId", skills.Delete)
+		configs.GET("/:id/skills/:skillId/install-events", skills.InstallEvents)
+		configs.GET("/:id/skills/:skillId/transcript", skills.InstallTranscript)
+	}
+}
+
 // RegisterEvaluationRoutes registers evaluation endpoints. Running an
 // evaluation drives LLM calls (cost) and reads from KBs across the
 // tenant; gate to Admin+ until product asks for a finer-grained

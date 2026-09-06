@@ -69,9 +69,20 @@ func RegisterUserFavoriteRoutes(r *gin.RouterGroup, h *handler.UserResourceFavor
 //
 // Installed skill metadata and sandbox state are platform runtime details.
 func RegisterSkillRoutes(r *gin.RouterGroup, skillHandler *handler.SkillHandler, g *rbacGuards) {
-	skills := r.Group("/skills")
+	skills := r.Group("/skills", g.SystemAdmin())
 	{
-		skills.GET("", g.SystemAdmin(), skillHandler.ListSkills)
+		skills.GET("", skillHandler.ListSkills)
+		skills.GET("/catalog", skillHandler.ListCatalog)
+	}
+	// Catalog writes bake into sandbox images; scoped API keys cannot hold them,
+	// and tenant roles do not grant platform-runtime administration.
+	catalogWrite := g.apiKeyGroup(r.Group("/skills/catalog", g.SystemAdmin()), apiKeyFullAccess())
+	{
+		catalogWrite.POST("", skillHandler.RegisterCatalog)
+		catalogWrite.POST("/:id/install", skillHandler.InstallCatalog)
+		catalogWrite.GET("/:id/files", skillHandler.ListCatalogFiles)
+		catalogWrite.GET("/:id/files/content", skillHandler.GetCatalogFile)
+		catalogWrite.DELETE("/:id", skillHandler.DeleteCatalog)
 	}
 }
 

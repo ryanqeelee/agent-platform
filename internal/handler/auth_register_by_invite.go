@@ -171,6 +171,12 @@ func (h *AuthHandler) RegisterByInvite(c *gin.Context) {
 		return
 	}
 
+	if err := service.ValidatePasswordPolicy(req.Password, h.complexPasswordEnabled(ctx)); err != nil {
+		logger.Error(ctx, "Invalid password policy")
+		_ = c.Error(apperrors.NewValidationError(err.Error()))
+		return
+	}
+
 	user, err := h.userService.Register(ctx, &types.RegisterRequest{
 		Username:           req.Username,
 		Email:              req.Email,

@@ -11,6 +11,11 @@ import {
 } from '@/api/operatingAnalysis'
 import { employeeSurfaceMinRoleForPath, SETTINGS_SECTION_MIN_ROLE } from '@/config/settingsAccess'
 import { DEFAULT_EMPLOYEE_WORKSPACE_PATH, loginDestination, safeReturnTo } from './safeReturnTo'
+import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
+import type { DeploymentCapabilityKey } from '@/config/deploymentCapabilities'
+import { MessagePlugin } from 'tdesign-vue-next'
+import i18n from '@/i18n'
+import { normalizeSettingsSection } from '@/config/settingsRoute'
 
 /** Lite /桌面 WebView 硬刷新时可能只打开 `/`，用 session 记住上次页面以便恢复 */
 const LITE_LAST_PATH_KEY = 'weknora_lite_last_path'
@@ -224,17 +229,23 @@ const router = createRouter({
           path: "agents",
           name: "agentList",
           component: () => import("../views/agent/AgentList.vue"),
-          meta: { requiresInit: true, requiresAuth: true }
+          meta: { requiresInit: true, requiresAuth: true, requiredCapability: 'agents' }
         },
         {
           path: "integrations",
-          redirect: (to) => ({
-            path: "/platform/settings",
-            query: {
-              ...to.query,
-              section: "integrations",
-            },
-          }),
+          redirect: (to) => {
+            const tab = typeof to.query.tab === 'string' ? to.query.tab : undefined
+            const incoming = typeof to.query.section === 'string' ? to.query.section : 'integrations'
+            const rest = { ...to.query }
+            delete rest.tab
+            return {
+              path: '/platform/settings',
+              query: {
+                ...rest,
+                section: normalizeSettingsSection(incoming, tab),
+              },
+            }
+          },
           meta: { requiresInit: true, requiresAuth: true }
         },
         {
@@ -259,7 +270,7 @@ const router = createRouter({
           path: "organizations",
           name: "organizationList",
           component: () => import("../views/organization/OrganizationList.vue"),
-          meta: { requiresInit: true, requiresAuth: true }
+          meta: { requiresInit: true, requiresAuth: true, requiredCapability: 'organizations' }
         },
         // Compatibility redirects for /platform/system/* URLs. System
         // administration surfaces live as dedicated sections inside the
@@ -376,6 +387,10 @@ async function hydrateSessionFromToken(authStore: ReturnType<typeof useAuthStore
       response.data?.capabilities?.can_manage_all_tenant_members === true,
     )
 
+    authStore.setAutoAcceptInvitation(
+      response.data?.capabilities?.auto_accept_invitation === true,
+    )
+
     return true
   } catch {
     return false
@@ -490,6 +505,17 @@ router.beforeEach(async (to, from, next) => {
   const minimumRole = employeeWorkspaceMinRole(to)
   if (minimumRole && !authStore.hasRole(minimumRole)) {
     next(DEFAULT_EMPLOYEE_WORKSPACE_PATH)
+    return
+  }
+
+  // 部署能力只描述“后端是否提供该功能”，不反映服务健康或是否已配置。
+  // 探测失败时 Store 会 fail-open，真正的权限和可用性仍由后端接口校验。
+  const deploymentCapabilities = useDeploymentCapabilitiesStore()
+  await deploymentCapabilities.ensureLoaded()
+  const requiredCapability = to.meta.requiredCapability as DeploymentCapabilityKey | undefined
+  if (requiredCapability && !deploymentCapabilities.isSupported(requiredCapability)) {
+    MessagePlugin.warning(i18n.global.t('settings.capabilityUnavailable'))
+    next('/platform/knowledge-bases')
     return
   }
 

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -260,29 +261,39 @@ func (h *TenantMemberHandler) AddMember(c *gin.Context) {
 		invitedBy = &caller
 	}
 
-	member, err := h.memberService.AddMember(ctx, user.ID, tenantID, req.Role, invitedBy)
-	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrInvalidTenantRole):
-			c.Error(apperrors.NewValidationError(err.Error()))
-		case errors.Is(err, service.ErrAPIKeyCannotAssignOwner):
-			c.Error(apperrors.NewForbiddenError(err.Error()))
-		case errors.Is(err, service.ErrOwnerRoleReserved), errors.Is(err, service.ErrMemberActionForbidden), errors.Is(err, service.ErrCannotManageSelf):
-			c.Error(apperrors.NewForbiddenError(err.Error()))
-		case errors.Is(err, service.ErrMembershipAlreadyExists):
-			// 409 reads better than 400 here: the request was syntactically
-			// fine, the conflict is semantic ("already a member").
-			c.Error(apperrors.NewConflictError(err.Error()))
-		case errors.Is(err, service.ErrUserBoundToAnotherEnterprise):
-			c.Error(apperrors.NewConflictError(err.Error()))
-		default:
-			logger.Errorf(ctx, "AddMember failed: user=%s tenant=%d err=%v",
-				user.ID, tenantID, err)
-			c.Error(apperrors.NewInternalServerError("failed to add member").WithDetails(err.Error()))
-		}
-		return
-	}
+	// Add the member and write the 201 / mapped-error response through the
+	// shared helper (also used by the invitation auto-accept path).
+	addMemberAndRespond(c, ctx, h.memberService, user, tenantID, req.Role, invitedBy)
+}
 
+func writeAddMemberError(
+	c *gin.Context,
+	ctx context.Context,
+	user *types.User,
+	tenantID uint64,
+	err error,
+) {
+	switch {
+	case errors.Is(err, service.ErrInvalidTenantRole):
+		c.Error(apperrors.NewValidationError(err.Error()))
+	case errors.Is(err, service.ErrAPIKeyCannotAssignOwner):
+		c.Error(apperrors.NewForbiddenError(err.Error()))
+	case errors.Is(err, service.ErrOwnerRoleReserved), errors.Is(err, service.ErrMemberActionForbidden), errors.Is(err, service.ErrCannotManageSelf):
+		c.Error(apperrors.NewForbiddenError(err.Error()))
+	case errors.Is(err, service.ErrMembershipAlreadyExists):
+		// 409 reads better than 400 here: the request was syntactically
+		// fine, the conflict is semantic ("already a member").
+		c.Error(apperrors.NewConflictError(err.Error()))
+	case errors.Is(err, service.ErrUserBoundToAnotherEnterprise):
+		c.Error(apperrors.NewConflictError(err.Error()))
+	default:
+		logger.Errorf(ctx, "AddMember failed: user=%s tenant=%d err=%v",
+			user.ID, tenantID, err)
+		c.Error(apperrors.NewInternalServerError("failed to add member").WithDetails(err.Error()))
+	}
+}
+
+func writeAddMemberSuccess(c *gin.Context, user *types.User, member *types.TenantMember) {
 	// Project the freshly added row through the same response shape the
 	// list endpoint uses, so the UI can swap "Add Member" UX into the
 	// table without an extra round-trip.
@@ -298,10 +309,7 @@ func (h *TenantMemberHandler) AddMember(c *gin.Context) {
 	}
 	enabled := member.OperatingAnalysisAccess
 	resp.OperatingAnalysisAccess = &enabled
-	c.JSON(http.StatusCreated, gin.H{
-		"success": true,
-		"data":    resp,
-	})
+	c.JSON(http.StatusCreated, gin.H{"success": true, "data": resp})
 }
 
 // UpdateOperatingAnalysisAccess grants or revokes the explicit, role-
@@ -403,6 +411,29 @@ func (h *TenantMemberHandler) TransferOwnership(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// addMemberAndRespond calls TenantMemberService.AddMember and writes the
+// HTTP response: 201 with a TenantMemberResponse on success, or the service
+// sentinel mapped to its HTTP status (400 / 403 / 409 / 500) on error. It
+// always writes exactly one response, so the caller MUST return right after.
+// Shared by TenantMemberHandler.AddMember and the auto-accept branch of
+// TenantInvitationHandler.CreateInvitation so the mapping never drifts.
+func addMemberAndRespond(
+	c *gin.Context,
+	ctx context.Context,
+	memberService interfaces.TenantMemberService,
+	user *types.User,
+	tenantID uint64,
+	role types.TenantRole,
+	invitedBy *string,
+) {
+	member, err := memberService.AddMember(ctx, user.ID, tenantID, role, invitedBy)
+	if err != nil {
+		writeAddMemberError(c, ctx, user, tenantID, err)
+		return
+	}
+	writeAddMemberSuccess(c, user, member)
 }
 
 // UpdateMemberRole godoc

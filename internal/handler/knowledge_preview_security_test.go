@@ -19,6 +19,17 @@ type previewKnowledgeServiceStub struct {
 	filename string
 }
 
+type previewKnowledgeBaseServiceStub struct {
+	interfaces.KnowledgeBaseService
+}
+
+func (*previewKnowledgeBaseServiceStub) GetKnowledgeBaseByIDOnly(
+	context.Context,
+	string,
+) (*types.KnowledgeBase, error) {
+	return &types.KnowledgeBase{ID: "kb1", TenantID: 42}, nil
+}
+
 type closeNotifyRecorder struct {
 	*httptest.ResponseRecorder
 }
@@ -42,10 +53,16 @@ func TestPreviewKnowledgeFileForcesActiveContentDownload(t *testing.T) {
 	router.Use(middleware.ErrorHandler())
 	router.Use(func(c *gin.Context) {
 		c.Set(types.TenantIDContextKey.String(), uint64(42))
+		ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, uint64(42))
+		ctx = context.WithValue(ctx, types.UserIDContextKey, "u-test")
+		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	})
 
-	h := &KnowledgeHandler{kgService: &previewKnowledgeServiceStub{filename: "payload.html"}}
+	h := &KnowledgeHandler{
+		kgService: &previewKnowledgeServiceStub{filename: "payload.html"},
+		kbService: &previewKnowledgeBaseServiceStub{},
+	}
 	router.GET("/knowledge/:id/preview", h.PreviewKnowledgeFile)
 
 	req := httptest.NewRequest(http.MethodGet, "/knowledge/k1/preview", nil)

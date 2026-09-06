@@ -26,6 +26,10 @@ func (s *stubFolderKBService) GetKnowledgeBaseByID(_ context.Context, id string)
 	return &types.KnowledgeBase{ID: "kb-1", TenantID: 1, Type: types.KnowledgeBaseTypeDocument}, nil
 }
 
+func (s *stubFolderKBService) GetKnowledgeBaseByIDOnly(ctx context.Context, id string) (*types.KnowledgeBase, error) {
+	return s.GetKnowledgeBaseByID(ctx, id)
+}
+
 type stubFolderKGService struct {
 	interfaces.KnowledgeService
 
@@ -58,6 +62,11 @@ func newFolderRouter(kg interfaces.KnowledgeService) *gin.Engine {
 	r.Use(func(c *gin.Context) {
 		c.Set(types.TenantIDContextKey.String(), uint64(1))
 		c.Set(types.UserIDContextKey.String(), "u-test")
+		c.Set(types.TenantRoleContextKey.String(), types.TenantRoleAdmin)
+		ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, uint64(1))
+		ctx = context.WithValue(ctx, types.UserIDContextKey, "u-test")
+		ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleAdmin)
+		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	})
 	h := &KnowledgeHandler{kbService: &stubFolderKBService{}, kgService: kg}

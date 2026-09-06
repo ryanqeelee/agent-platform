@@ -165,6 +165,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useCommandPaletteStore } from '@/stores/commandPalette'
 import { useAuthStore } from '@/stores/auth'
+import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import { useCmdkSearch, type CmdkFileGroup, type CmdkChunk, type CmdkMsgGroup } from './GlobalCommandPalette/useSearch'
 import { highlightText } from './GlobalCommandPalette/useHighlight'
 import { useStartChat } from './GlobalCommandPalette/useStartChat'
@@ -180,6 +181,7 @@ const route = useRoute()
 const router = useRouter()
 const commandPaletteStore = useCommandPaletteStore()
 const authStore = useAuthStore()
+const deploymentCapabilities = useDeploymentCapabilitiesStore()
 const { open, initialQuery, recentQueries } = storeToRefs(commandPaletteStore)
 const { startChat } = useStartChat()
 
@@ -201,6 +203,7 @@ const {
   clearResults,
 } = useCmdkSearch({
   lockedKbIds: () => (activeKbScope.value ? [activeKbScope.value.id] : []),
+  agentsEnabled: () => deploymentCapabilities.isSupported('agents'),
 })
 
 const drawerVisible = ref(false)
@@ -264,9 +267,11 @@ const allCommands = computed(() => {
     }
     if (command.id === 'open-agents') {
       return authStore.hasRole(EMPLOYEE_SURFACE_MIN_ROLE.agents)
+        && deploymentCapabilities.isSupported('agents')
     }
     if (command.id === 'open-organizations') {
       return authStore.hasRole(EMPLOYEE_SURFACE_MIN_ROLE.organizations)
+        && deploymentCapabilities.isSupported('organizations')
     }
     return true
   })

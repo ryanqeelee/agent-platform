@@ -63,6 +63,10 @@ func (c *catalogStub) Bind(_ context.Context, _ string, ownerType, ownerID, _ st
 	return nil
 }
 func (c *catalogStub) MarkDeleted(context.Context, string) error { return nil }
+
+func (c *catalogStub) Release(context.Context, string, string, string) (int64, error) {
+	return 0, nil
+}
 func (c *catalogStub) CreateAccessGrant(context.Context, string, time.Duration) (string, error) {
 	c.grants++
 	return "GrantTokenAbCdEfGhIjKl", nil

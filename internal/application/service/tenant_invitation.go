@@ -266,6 +266,48 @@ func (s *tenantInvitationService) emitMemberAdded(ctx context.Context, member *t
 	})
 }
 
+// MarkPendingAcceptedIfExists reconciles a stale per-user pending row when
+// tenant.auto_accept_invitation joins the invitee directly. member_added
+// audit from AddMember is the authoritative trail; we only flip status here.
+func (s *tenantInvitationService) MarkPendingAcceptedIfExists(
+	ctx context.Context,
+	tenantID uint64,
+	inviteeUserID string,
+) error {
+	s.sweep(ctx)
+	inv, err := s.repo.GetPendingByPair(ctx, tenantID, inviteeUserID)
+	if err != nil {
+		return err
+	}
+	if inv == nil {
+		return nil
+	}
+	return s.repo.MarkStatusIfPending(
+		ctx,
+		types.MemberActorAuthority{ServicePrincipal: true},
+		inv.ID,
+		types.TenantInvitationStatusAccepted,
+		s.now(),
+	)
+}
+
+// reconcilePendingInvitation closes a per-user invitation after another
+// successful join path (for example a multi-use share link) has already
+// established the membership. This keeps the invitation inbox consistent
+// without turning a bookkeeping failure into a failed join after the member
+// row has already been committed.
+func (s *tenantInvitationService) reconcilePendingInvitation(
+	ctx context.Context,
+	tenantID uint64,
+	inviteeUserID string,
+) {
+	if err := s.MarkPendingAcceptedIfExists(ctx, tenantID, inviteeUserID); err != nil {
+		logger.Warnf(ctx,
+			"failed to reconcile pending invitation for tenant %d user %s: %v",
+			tenantID, inviteeUserID, err)
+	}
+}
+
 // emitInvitationAccepted writes the rbac.invitation_accepted audit row.
 // Actor is the invitee (acting on their own inbox); target is the same
 // user since the action is self-directed.
@@ -578,6 +620,14 @@ func (s *tenantInvitationService) AcceptByToken(
 			return nil, ErrOwnerRoleReserved
 		}
 		if errors.Is(err, apprepo.ErrInvitationMemberExists) {
+			existing, getErr := s.memberSvc.GetMembership(ctx, newUserID, inv.TenantID)
+			if getErr == nil && existing != nil {
+				if existing.Status != types.TenantMemberStatusActive {
+					return nil, ErrAlreadyMember
+				}
+				s.reconcilePendingInvitation(ctx, inv.TenantID, newUserID)
+				return existing, nil
+			}
 			return nil, ErrAlreadyMember
 		}
 		logger.Errorf(ctx,
@@ -586,6 +636,19 @@ func (s *tenantInvitationService) AcceptByToken(
 		return nil, err
 	}
 	s.emitMemberAdded(ctx, member)
+	// Bump usage counter so the management UI can show "N 人已加入".
+	// Best-effort: a failure here doesn't undo the membership the user
+	// just earned — log and move on. The counter is for display only;
+	// audit log + tenant_members rows are the authoritative trail.
+	if incErr := s.repo.IncrementAcceptedCount(ctx, inv.ID); incErr != nil {
+		logger.Warnf(ctx,
+			"share-link %d accepted_count bump failed (membership still created): %v",
+			inv.ID, incErr)
+	}
+	// A user may have received a direct invitation and then joined through
+	// a share link first. Close that direct invitation now so its notification
+	// cannot be accepted a second time and produce a misleading audit event.
+	s.reconcilePendingInvitation(ctx, inv.TenantID, newUserID)
 	s.emitAudit(ctx, &types.AuditLog{
 		TenantID:     inv.TenantID,
 		ActorUserID:  auditActor(ctx),

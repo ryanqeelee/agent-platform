@@ -29,6 +29,24 @@ test('employee viewers cannot deep-link into management surfaces', () => {
   assert.equal(employeeSurfaceMinRoleForPath('/platform/creatChat'), undefined)
 })
 
+test('the skill catalog and sandbox require platform administration', () => {
+  assert.equal(SETTINGS_SECTION_MIN_ROLE.skills, 'admin')
+  assert.equal(SETTINGS_SECTION_MIN_ROLE.skills, SETTINGS_SECTION_MIN_ROLE.sandbox)
+  assert.equal(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.skills, 'admin')
+  assert.equal(SYSTEM_ADMIN_SETTINGS_SECTIONS.has('skills'), true)
+  assert.equal(SYSTEM_ADMIN_SETTINGS_SECTIONS.has('sandbox'), true)
+})
+
+test('personal skill environment variables are visible to every member', () => {
+  assert.equal(SETTINGS_SECTION_MIN_ROLE.envvars, 'viewer')
+  // Workspace-wide skill env values live on the Admin+ skills page; a
+  // management shortcut on the avatar menu would only duplicate that entrance.
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE, 'envvars'),
+    false,
+  )
+})
+
 test('system administration settings stay explicitly system-admin-only', () => {
   assert.deepEqual(
     [...SYSTEM_ADMIN_SETTINGS_SECTIONS],
@@ -42,6 +60,8 @@ test('system administration settings stay explicitly system-admin-only', () => {
       'weknoracloud',
       'vectorstore',
       'storage',
+      'sandbox',
+      'skills',
       'system-global',
       'runtime-queues',
       'platform-api-keys',

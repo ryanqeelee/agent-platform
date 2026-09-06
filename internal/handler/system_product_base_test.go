@@ -25,7 +25,7 @@ func TestGetProductBaseDescriptor(t *testing.T) {
 	want := `"schema_version":"ProductShellBrandV1"`
 	if body := w.Body.String(); !strings.Contains(body, want) ||
 		!strings.Contains(body, `"type":"weknora"`) ||
-		!strings.Contains(body, `"product_version":"v0.7.2"`) ||
+		!strings.Contains(body, `"product_version":"v0.8.0"`) ||
 		!strings.Contains(body, `"source_commit":"0123456789abcdef"`) {
 		t.Fatalf("descriptor = %s", body)
 	}

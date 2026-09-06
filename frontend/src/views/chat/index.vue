@@ -5,8 +5,9 @@
         'has-references-panel': referencesDrawerVisible,
     }">
         <ChatHeader v-if="!embeddedMode" :session="currentSession" :has-references-panel="referencesDrawerVisible" />
-        <div ref="scrollContainer" class="chat_scroll_box" @scroll="handleScroll">
-            <div class="msg_list" :class="{ 'is-embedded': embeddedMode }">
+        <div class="chat_thread">
+            <div ref="scrollContainer" class="chat_scroll_box" @scroll="handleScroll">
+                <div class="msg_list" :class="{ 'is-embedded': embeddedMode }">
                 <!-- 消息列表骨架屏 -->
                 <div v-if="historyLoading && messagesList.length === 0" class="msg-skeleton-list">
                     <div class="msg-skeleton msg-skeleton-user">
@@ -74,39 +75,51 @@
                   仅对极少数尚未拿到 id 的本地占位消息 fallback 到 role+created_at+index。
                 -->
                 <div v-for="(session, index) in messagesList"
-                    :key="session.id || `${session.role}-${session.created_at}-${index}`" class="msg-item-wrapper">
+                        :key="session.id || `${session.role}-${session.created_at}-${index}`" class="msg-item-wrapper">
+                        <MessageTimestamp v-if="shouldShowConversationTimestamp(messagesList, index)"
+                            :value="session.created_at" />
 
-                    <div v-if="session.role == 'user'">
-                        <usermsg :content="session.content" :mentioned_items="session.mentioned_items"
-                            :images="session.images" :attachments="session.attachments" :embeddedMode="embeddedMode"
-                            :session-id="session_id" :message-id="session.id"
-                            :handoff-available="operatingAnalysisHandoffAvailable"
-                            :handoff-pending="handoffPendingMessageId === session.id"
-                            @handoff="handoffToOperatingAnalysis">
-                        </usermsg>
+                        <div v-if="session.role == 'user'" class="message-row"
+                            :data-message-id="session.id || undefined"
+                            :class="{ 'is-minimap-target': session.id && session.id === minimapTargetId }">
+                            <usermsg :content="session.content" :mentioned_items="session.mentioned_items"
+                                :images="session.images" :attachments="session.attachments" :embeddedMode="embeddedMode"
+                                :session-id="session_id" :message-id="session.id"
+                                :handoff-available="operatingAnalysisHandoffAvailable"
+                                :handoff-pending="handoffPendingMessageId === session.id"
+                                @handoff="handoffToOperatingAnalysis">
+                            </usermsg>
+                        </div>
+                        <div v-if="session.role == 'assistant' && shouldRenderAssistantMessage(session)"
+                            class="message-row">
+                            <botmsg :content="session.content" :session="session" :session-id="session_id"
+                                :user-query="getUserQuery(index)" @scroll-bottom="scrollToBottom"
+                                :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"
+                                :follow-up-loading="Boolean(session.suggestionLoading && !session.suggestionSet?.questions?.length)"
+                                @render-complete-change="(ready) => handleAnswerRenderComplete(session, ready)">
+                            </botmsg>
+                            <FollowUpSuggestions v-if="session.answerFullyRendered && !session.suggestionsDismissed"
+                                :suggestion-set="session.suggestionSet"
+                                :loading="session.suggestionLoading"
+                                :allow-regenerate="session.suggestionSet?.allow_regenerate"
+                                @select="(item) => handleFollowUpSelect(session, item)"
+                                @regenerate="loadFollowUpSuggestions(session, true, true)"
+                                @impression="(set) => recordSuggestionEvent(session, set, 'impression')"
+                                @dismiss="(set) => dismissSuggestions(session, set)" />
+                        </div>
                     </div>
-                    <div v-if="session.role == 'assistant' && shouldRenderAssistantMessage(session)">
-                        <botmsg :content="session.content" :session="session" :session-id="session_id"
-                            :user-query="getUserQuery(index)" @scroll-bottom="scrollToBottom"
-                            :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"
-                            :follow-up-loading="Boolean(session.suggestionLoading && !session.suggestionSet?.questions?.length)"
-                            @render-complete-change="(ready) => handleAnswerRenderComplete(session, ready)">
-                        </botmsg>
-                        <FollowUpSuggestions v-if="session.answerFullyRendered && !session.suggestionsDismissed"
-                            :suggestion-set="session.suggestionSet"
-                            :loading="session.suggestionLoading"
-                            :allow-regenerate="session.suggestionSet?.allow_regenerate"
-                            @select="(item) => handleFollowUpSelect(session, item)"
-                            @regenerate="loadFollowUpSuggestions(session, true, true)"
-                            @impression="(set) => recordSuggestionEvent(session, set, 'impression')"
-                            @dismiss="(set) => dismissSuggestions(session, set)" />
+                    <div v-if="showGlobalTypingIndicator" class="chat-global-wait" role="status"
+                        :aria-label="t('chat.thinkingAlt')">
+                        <span class="chat-global-wait__spinner" aria-hidden="true"></span>
                     </div>
-                </div>
-                <div v-if="showGlobalTypingIndicator" class="chat-global-wait" role="status"
-                    :aria-label="t('chat.thinkingAlt')">
-                    <span class="chat-global-wait__spinner" aria-hidden="true"></span>
                 </div>
             </div>
+            <ChatQuestionMinimap
+                v-if="!embeddedMode"
+                :scroll-container="scrollContainer"
+                :messages="messagesList"
+                @jump="jumpToQuestion"
+            />
         </div>
         <transition name="scroll-btn-fade">
             <div v-show="userHasScrolledUp" class="scroll-to-bottom-btn" @click="onClickScrollToBottom">
@@ -150,6 +163,9 @@ import { clearCitationChunkCache } from '@/utils/citationChunkCache';
 import ChatReferencesDrawer from '@/components/ChatReferencesDrawer.vue';
 import ChatAttachmentPreviewDrawer from '@/components/ChatAttachmentPreviewDrawer.vue';
 import FollowUpSuggestions from '@/components/chat/FollowUpSuggestions.vue';
+import MessageTimestamp from '@/components/chat/MessageTimestamp.vue';
+import ChatQuestionMinimap from '@/components/chat/ChatQuestionMinimap.vue';
+import { shouldShowConversationTimestamp } from '@/utils/messageTimestamp';
 import ChatHeader from '@/components/ChatHeader.vue';
 import {
     notifySessionMutation,
@@ -300,11 +316,41 @@ let fullContent = ref('')
 const scrollContainer = ref(null)
 const userHasScrolledUp = ref(false)
 const SCROLL_BOTTOM_THRESHOLD = 80
+const minimapTargetId = ref('')
+let minimapFlashTimer = null
 
 const isNearBottom = () => {
     if (!scrollContainer.value) return true;
     const { scrollTop, scrollHeight, clientHeight } = scrollContainer.value;
     return scrollHeight - scrollTop - clientHeight < SCROLL_BOTTOM_THRESHOLD;
+}
+
+const clearMinimapFlash = () => {
+    if (minimapFlashTimer) {
+        clearTimeout(minimapFlashTimer)
+        minimapFlashTimer = null
+    }
+    minimapTargetId.value = ''
+}
+
+const jumpToQuestion = (id) => {
+    const root = scrollContainer.value
+    if (!root || !id) return
+    const el = root.querySelector(`[data-message-id="${CSS.escape(id)}"]`)
+    if (!el) return
+
+    const offset = el.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop
+    const nearEnd = root.scrollHeight - offset < root.clientHeight + SCROLL_BOTTOM_THRESHOLD
+    userHasScrolledUp.value = !nearEnd
+
+    el.scrollIntoView({ block: 'start', behavior: 'smooth' })
+
+    minimapTargetId.value = id
+    if (minimapFlashTimer) clearTimeout(minimapFlashTimer)
+    minimapFlashTimer = setTimeout(() => {
+        minimapTargetId.value = ''
+        minimapFlashTimer = null
+    }, 1200)
 }
 
 const handleKBEditorSuccess = (kbId) => {
@@ -375,7 +421,7 @@ const handleSuggestedQuestionClick = (question) => {
     }
 };
 
-const resolveAssistantMessageId = (message) => message?.id || message?.assistant_message_id;
+const resolveAssistantMessageId = (message) => message?.assistant_message_id || message?.id;
 
 const handleAnswerRenderComplete = (message, ready) => {
     message.answerFullyRendered = Boolean(ready);
@@ -811,7 +857,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     }
 
     // 将@提及的知识库和文件信息存入用户消息
-    messagesList.push({ content: value, role: 'user', mentioned_items: mentionedItems, images: userImages, attachments: attachmentFiles.map(a => ({ id: a.documentId, file_name: a.name, file_size: a.size, file_type: '.' + a.name.split('.').pop()?.toLowerCase() })), channel: 'web' });
+    messagesList.push({ content: value, role: 'user', mentioned_items: mentionedItems, images: userImages, attachments: attachmentFiles.map(a => ({ id: a.documentId, file_name: a.name, file_size: a.size, file_type: '.' + a.name.split('.').pop()?.toLowerCase() })), channel: 'web', created_at: new Date().toISOString() });
     userHasScrolledUp.value = false;
     scrollToBottom(true);
 
@@ -1038,12 +1084,14 @@ const clearData = () => {
     referencesDrawer.close();
     isReplying.value = false;
     fullContent.value = '';
+    clearMinimapFlash();
     // Stop any IM-reply recovery poll for the session we're leaving/switching.
     if (recoverPollTimer) { clearTimeout(recoverPollTimer); recoverPollTimer = null; }
     isImRecovering.value = false;
 }
 onUnmounted(() => {
     window.removeEventListener(SESSION_MUTATION_EVENT, handleSessionMutation);
+    clearMinimapFlash();
     if (recoverPollTimer) { clearTimeout(recoverPollTimer); recoverPollTimer = null; }
 });
 onBeforeRouteLeave((to, from, next) => {
@@ -1068,8 +1116,8 @@ onBeforeRouteUpdate((to, from, next) => {
     flex: 1;
     // The parent .platform-route-outlet is a flex column with min-height:0
     // and overflow:hidden — we also need min-height:0 here so that our
-    // own flex:1 child (.chat_scroll_box) can shrink below its content
-    // height and scroll instead of pushing .input-container out of view.
+    // own flex:1 child (.chat_thread) can shrink below its content
+    // height and keep the input container in view.
     min-height: 0;
     position: relative;
     display: flex;
@@ -1136,13 +1184,18 @@ onBeforeRouteUpdate((to, from, next) => {
     }
 }
 
+.chat_thread {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
 .chat_scroll_box {
     flex: 1;
-    // Without min-height: 0, a flex-column child defaults to min-height: auto
-    // and expands to fit all inner content. When there are many messages,
-    // that pushes .input-container out of the viewport. Clamping min-height
-    // to 0 lets overflow-y: auto take effect so the messages scroll inside
-    // this box instead of stretching it.
     min-height: 0;
     width: 100%;
     padding-top: 8px;
@@ -1287,6 +1340,16 @@ onBeforeRouteUpdate((to, from, next) => {
         contain: layout style;
     }
 
+    .message-row {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+
+        &.is-minimap-target {
+            animation: minimap-target-flash 1.2s ease;
+        }
+    }
+
     .botanswer_laoding_gif {
         width: 24px;
         height: 18px;
@@ -1314,6 +1377,16 @@ onBeforeRouteUpdate((to, from, next) => {
 @keyframes chatGlobalWaitSpin {
     to {
         transform: rotate(360deg);
+    }
+}
+
+@keyframes minimap-target-flash {
+    0% {
+        background: color-mix(in srgb, var(--td-brand-color) 18%, transparent);
+    }
+
+    100% {
+        background: transparent;
     }
 }
 

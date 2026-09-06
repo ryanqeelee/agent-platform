@@ -41,7 +41,7 @@ func TestAuthLoginResponse_OwnerOmitsLegacyTenantAPIKey(t *testing.T) {
 	s := string(body)
 	assert.NotContains(t, s, `"api_key"`)
 	assert.NotContains(t, s, "legacy-search-secret-999")
-	assert.Contains(t, s, "web_search_config")
+	assert.NotContains(t, s, "web_search_config")
 }
 
 func TestAuthOIDCCallbackResponse_ViewerOmitsTenantSecrets(t *testing.T) {

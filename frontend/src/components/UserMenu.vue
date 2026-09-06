@@ -96,6 +96,15 @@
           <t-icon name="control-platform" class="menu-icon" />
           <span>{{ $t('settings.modelManagement') }}</span>
         </div>
+        <div v-if="canManageSkills" class="menu-item" @click="handleQuickNav('skills')">
+          <t-icon :name="SKILL_ICON" class="menu-icon" />
+          <span>{{ $t('settings.skills.title') }}</span>
+        </div>
+        <div class="menu-divider"></div>
+        <div class="menu-item" @click="handleQuickNav('general')">
+          <t-icon name="setting" class="menu-icon" />
+          <span>{{ $t('general.allSettings') }}</span>
+        </div>
         <!--
           System administration entry — visible only to users with the
           platform-wide is_system_admin flag. Hidden for everyone else,
@@ -193,6 +202,7 @@ import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom'
 import { openNewUserGuide } from '@/config/contextualGuides'
 import { SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE } from '@/config/settingsAccess'
 import { getEnterpriseAdministrationCopy } from '@/config/productShellBrand'
+import { SKILL_ICON } from '@/types/mention'
 
 const { t, locale } = useI18n()
 
@@ -234,6 +244,11 @@ const canEnterEnterpriseAdministration = computed(() =>
   !authStore.isLiteMode && authStore.hasRole('contributor'),
 )
 const enterpriseAdministrationCopy = computed(() => getEnterpriseAdministrationCopy(locale.value))
+const canManageSkills = computed(() =>
+  authStore.canAccessAllTenants ||
+  authStore.isSystemAdmin ||
+  authStore.hasRole(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.skills),
+)
 
 const menuRef = ref<HTMLElement>()
 const tenantMenuItemRef = ref<HTMLElement>()

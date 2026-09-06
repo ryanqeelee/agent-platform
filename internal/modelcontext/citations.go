@@ -117,10 +117,11 @@ func publicAttr(expression *regexp.Regexp, tag string) string {
 }
 
 var (
-	refTagRE       = regexp.MustCompile(`(?i)<ref\s+id\s*=\s*"([^"]+)"\s*/?>`)
-	refCandidateRE = regexp.MustCompile(`(?is)<ref(?:\s|$)[^>]*(?:>|$)`)
-	modelKBTagRE   = regexp.MustCompile(`(?is)<kb(?:\s|$)[^>]*(?:>|$)`)
-	modelWebTagRE  = regexp.MustCompile(`(?is)<web(?:\s|$)[^>]*(?:>|$)`)
+	refTagRE        = regexp.MustCompile(`(?i)<ref\s+id\s*=\s*"([^"]+)"\s*/?>`)
+	refCandidateRE  = regexp.MustCompile(`(?is)<ref(?:\s|$)[^>]*(?:>|$)`)
+	bracketRefTagRE = regexp.MustCompile(`(?i)\[ref id="([cdbw]\d+)"\]`)
+	modelKBTagRE    = regexp.MustCompile(`(?is)<kb(?:\s|$)[^>]*(?:>|$)`)
+	modelWebTagRE   = regexp.MustCompile(`(?is)<web(?:\s|$)[^>]*(?:>|$)`)
 )
 
 var (
@@ -164,32 +165,44 @@ func (r *sourceRegistry) ExpandText(text string) string {
 	text = modelKBTagRE.ReplaceAllString(text, "")
 	text = modelWebTagRE.ReplaceAllString(text, "")
 	if !r.citationsEnabled {
-		return refCandidateRE.ReplaceAllString(text, "")
+		text = refCandidateRE.ReplaceAllString(text, "")
+		return bracketRefTagRE.ReplaceAllString(text, "")
 	}
-	return refCandidateRE.ReplaceAllStringFunc(text, func(tag string) string {
+	text = refCandidateRE.ReplaceAllStringFunc(text, func(tag string) string {
 		match := refTagRE.FindStringSubmatch(tag)
 		if len(match) != 2 {
 			return ""
 		}
-		handle := strings.ToLower(match[1])
-		if chunkID, chunkRef, ok := r.chunks.resolve(handle); ok {
-			attrs := fmt.Sprintf(`doc="%s" chunk_id="%s"`, escapeAttr(chunkRef.DocumentTitle), escapeAttr(chunkID))
-			if chunkRef.KnowledgeBaseID != "" {
-				attrs += fmt.Sprintf(` kb_id="%s"`, escapeAttr(chunkRef.KnowledgeBaseID))
-			}
-			return "<kb " + attrs + " />"
-		}
-		if rawURL, web, ok := r.webs.resolve(handle); ok {
-			return fmt.Sprintf(`<web url="%s" title="%s" />`, escapeAttr(rawURL), escapeAttr(web.title))
-		}
-		return ""
+		return r.expandReference(match[1])
 	})
+	return bracketRefTagRE.ReplaceAllStringFunc(text, func(tag string) string {
+		match := bracketRefTagRE.FindStringSubmatch(tag)
+		if len(match) != 2 {
+			return ""
+		}
+		return r.expandReference(match[1])
+	})
+}
+
+func (r *sourceRegistry) expandReference(rawHandle string) string {
+	handle := strings.ToLower(rawHandle)
+	if chunkID, chunkRef, ok := r.chunks.resolve(handle); ok {
+		attrs := fmt.Sprintf(`doc="%s" chunk_id="%s"`, escapeAttr(chunkRef.DocumentTitle), escapeAttr(chunkID))
+		if chunkRef.KnowledgeBaseID != "" {
+			attrs += fmt.Sprintf(` kb_id="%s"`, escapeAttr(chunkRef.KnowledgeBaseID))
+		}
+		return "<kb " + attrs + " />"
+	}
+	if rawURL, web, ok := r.webs.resolve(handle); ok {
+		return fmt.Sprintf(`<web url="%s" title="%s" />`, escapeAttr(rawURL), escapeAttr(web.title))
+	}
+	return ""
 }
 
 func escapeAttr(value string) string { return html.EscapeString(value) }
 
-// citationStreamExpander prevents partial private <ref/> tags from reaching SSE while
-// preserving normal streaming for all other content.
+// citationStreamExpander prevents partial private citation aliases from reaching SSE
+// while preserving normal streaming for all other content.
 type citationStreamExpander struct {
 	registry *sourceRegistry
 	pending  string
@@ -207,7 +220,7 @@ func (d *citationStreamExpander) Feed(chunk string) string {
 	d.pending = ""
 	var out strings.Builder
 	for data != "" {
-		idx := strings.Index(data, "<")
+		idx := firstMarkerIndex(data)
 		if idx < 0 {
 			out.WriteString(data)
 			break
@@ -215,6 +228,20 @@ func (d *citationStreamExpander) Feed(chunk string) string {
 		out.WriteString(data[:idx])
 		data = data[idx:]
 		lower := strings.ToLower(data)
+		if data[0] == '[' {
+			if match := bracketRefTagRE.FindStringIndex(data); match != nil && match[0] == 0 {
+				out.WriteString(d.registry.ExpandText(data[:match[1]]))
+				data = data[match[1]:]
+				continue
+			}
+			if isBracketRefPending(lower) {
+				d.pending = data
+				break
+			}
+			out.WriteByte('[')
+			data = data[1:]
+			continue
+		}
 		if isSourceTagPending(lower) && !strings.Contains(data, ">") {
 			d.pending = data
 			break
@@ -247,6 +274,18 @@ func (d *citationStreamExpander) Feed(chunk string) string {
 	return out.String()
 }
 
+func firstMarkerIndex(value string) int {
+	angle := strings.IndexByte(value, '<')
+	bracket := strings.IndexByte(value, '[')
+	if angle < 0 {
+		return bracket
+	}
+	if bracket < 0 || angle < bracket {
+		return angle
+	}
+	return bracket
+}
+
 func isRefTagStart(value string) bool {
 	return isNamedTagStart(value, "ref")
 }
@@ -273,6 +312,41 @@ func isSourceTagPending(value string) bool {
 	return false
 }
 
+func isBracketRefPending(value string) bool {
+	const prefix = `[ref id="`
+	if len(value) <= len(prefix) {
+		return strings.HasPrefix(prefix, value)
+	}
+	if !strings.HasPrefix(value, prefix) {
+		return false
+	}
+	handle := value[len(prefix):]
+	if handle == "" || !strings.ContainsRune("cdbw", rune(handle[0])) {
+		return false
+	}
+	handle = handle[1:]
+	digitCount := 0
+	for digitCount < len(handle) && handle[digitCount] >= '0' && handle[digitCount] <= '9' {
+		digitCount++
+	}
+	if digitCount == len(handle) {
+		return true
+	}
+	return digitCount > 0 && handle[digitCount:] == `"`
+}
+
+func containsBracketSourceHandle(value string) bool {
+	const prefix = `[ref id="`
+	if !strings.HasPrefix(value, prefix) || len(value) <= len(prefix)+1 {
+		return false
+	}
+	handle := value[len(prefix):]
+	if !strings.ContainsRune("cdbw", rune(handle[0])) {
+		return false
+	}
+	return handle[1] >= '0' && handle[1] <= '9'
+}
+
 func (d *citationStreamExpander) Flush() string {
 	if d == nil {
 		return ""
@@ -280,7 +354,7 @@ func (d *citationStreamExpander) Flush() string {
 	pending := d.pending
 	d.pending = ""
 	lower := strings.ToLower(pending)
-	if isSourceTagPending(lower) {
+	if isSourceTagPending(lower) || (isBracketRefPending(lower) && containsBracketSourceHandle(lower)) {
 		return ""
 	}
 	return d.registry.ExpandText(pending)

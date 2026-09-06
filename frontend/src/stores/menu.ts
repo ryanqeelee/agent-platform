@@ -2,6 +2,8 @@ import { reactive, ref, computed, watch } from 'vue'
 import { defineStore } from 'pinia'
 import i18n from '@/i18n'
 import { useAuthStore } from '@/stores/auth'
+import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
+import type { DeploymentCapabilityKey } from '@/config/deploymentCapabilities'
 
 type MenuChild = Record<string, any>
 
@@ -12,6 +14,7 @@ interface MenuItem {
   path: string
   childrenPath?: string
   children?: MenuChild[]
+  requiredCapability?: DeploymentCapabilityKey
 }
 
 const createMenuChildren = () => reactive<MenuChild[]>([])
@@ -29,8 +32,8 @@ export const useMenuStore = defineStore('menuStore', () => {
     { title: '', titleKey: 'menu.knowledgeBase', icon: 'zhishiku', path: 'knowledge-bases' },
     { title: '', titleKey: 'menu.operatingBrief', icon: 'brief', path: 'operating-brief' },
     { title: '', titleKey: 'menu.operatingAnalysis', icon: 'analysis', path: 'operating-analysis' },
-    { title: '', titleKey: 'menu.agents', icon: 'agent', path: 'agents' },
-    { title: '', titleKey: 'menu.organizations', icon: 'organization', path: 'organizations' },
+    { title: '', titleKey: 'menu.agents', icon: 'agent', path: 'agents', requiredCapability: 'agents' },
+    { title: '', titleKey: 'menu.organizations', icon: 'organization', path: 'organizations', requiredCapability: 'organizations' },
     { title: '', titleKey: 'menu.settings', icon: 'setting', path: 'settings' },
     { title: '', titleKey: 'menu.logout', icon: 'logout', path: 'logout' }
   ])
@@ -67,6 +70,7 @@ export const useMenuStore = defineStore('menuStore', () => {
   // 入口在侧栏只会徒增噪音；后端 RBAC 才是权限的最终来源（见 middleware/rbac.go）。
   const visibleMenuArr = computed(() => {
     const authStore = useAuthStore()
+    const deploymentCapabilities = useDeploymentCapabilitiesStore()
     return menuArr.filter(item => {
       if (authStore.isLiteMode && liteHiddenPaths.has(item.path)) {
         return false
@@ -75,6 +79,9 @@ export const useMenuStore = defineStore('menuStore', () => {
         return false
       }
       if ((item.path === 'knowledge-bases' || item.path === 'agents') && !authStore.hasRole('contributor')) {
+        return false
+      }
+      if (item.requiredCapability && !deploymentCapabilities.isSupported(item.requiredCapability)) {
         return false
       }
       return true

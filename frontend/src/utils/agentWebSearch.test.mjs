@@ -50,6 +50,19 @@ test('isAgentWebSearchReady requires enabled flag and resolvable provider', () =
   );
 });
 
+test('isAgentWebSearchReady accepts the workspace-safe default readiness projection', () => {
+  const workspaceProjection = [{ is_default: true }];
+
+  assert.equal(
+    isAgentWebSearchReady({ web_search_enabled: true }, workspaceProjection),
+    true,
+  );
+  assert.equal(
+    resolveAgentWebSearchProviderId({ web_search_provider_id: '' }, workspaceProjection),
+    null,
+  );
+});
+
 test('isAgentWebSearchReady trusts source workspace readiness for a shared agent', () => {
   assert.equal(
     isAgentWebSearchReady(

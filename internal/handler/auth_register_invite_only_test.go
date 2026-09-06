@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/config"
@@ -71,7 +72,7 @@ func validRegisterBody() map[string]string {
 	return map[string]string{
 		"username": "alice",
 		"email":    "alice@example.com",
-		"password": "supersecret",
+		"password": "supersecret1",
 	}
 }
 
@@ -100,18 +101,11 @@ func TestRegister_InviteOnlyRejects(t *testing.T) {
 	}
 }
 
-func TestRegister_SelfServeAllowsRegistration(t *testing.T) {
-	// Default registration_mode keeps PR 1 behaviour intact: the gate
-	// is dormant and the request reaches the user service. We don't
-	// exercise the real service here — just confirm the gate let it
-	// through by observing the stub being invoked.
+func TestRegister_SelfServeConfigCannotReopenRegistration(t *testing.T) {
 	called := false
 	us := &stubRegisterUserService{
-		register: func(_ context.Context, req *types.RegisterRequest) (*types.User, error) {
+		register: func(_ context.Context, _ *types.RegisterRequest) (*types.User, error) {
 			called = true
-			if req.TenantProvisioning != types.TenantProvisioningCreatePersonal {
-				t.Fatalf("default provisioning = %q, want create_personal", req.TenantProvisioning)
-			}
 			return &types.User{ID: "u1", Email: "alice@example.com"}, nil
 		},
 	}
@@ -120,84 +114,68 @@ func TestRegister_SelfServeAllowsRegistration(t *testing.T) {
 	}, us, nil, nil, nil, nil)
 
 	w := doRegister(t, newRegisterTestRouter(h), validRegisterBody())
-	if w.Code != http.StatusCreated {
-		t.Fatalf("self_serve must allow registration, got %d body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("product admission must remain invite-only, got %d body=%s", w.Code, w.Body.String())
 	}
-	if !called {
-		t.Fatalf("UserService.Register should have been invoked")
+	if called {
+		t.Fatalf("self_serve configuration must not reach UserService.Register")
 	}
 }
 
-func TestRegister_TenantlessProvisioningFromConfig(t *testing.T) {
-	us := &stubRegisterUserService{
-		register: func(_ context.Context, req *types.RegisterRequest) (*types.User, error) {
-			if req.TenantProvisioning != types.TenantProvisioningTenantless {
-				t.Fatalf("provisioning = %q, want tenantless", req.TenantProvisioning)
-			}
-			return &types.User{ID: "u1", Email: "alice@example.com"}, nil
-		},
+func TestGetAuthConfigExposesComplexPassword(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := &AuthHandler{
+		configInfo: &config.Config{Auth: &config.AuthConfig{
+			RegistrationMode: config.AuthRegistrationModeSelfServe,
+		}},
+		systemSettingSvc: &tenantPolicySettingService{enabled: true},
 	}
-	h := NewAuthHandler(&config.Config{
-		Auth: &config.AuthConfig{
-			RegistrationMode:  config.AuthRegistrationModeSelfServe,
-			DefaultTenantMode: config.AuthDefaultTenantModeTenantless,
-		},
-	}, us, nil, nil, nil, nil)
-
-	w := doRegister(t, newRegisterTestRouter(h), validRegisterBody())
-	if w.Code != http.StatusCreated {
-		t.Fatalf("tenantless self-serve registration got %d body=%s", w.Code, w.Body.String())
+	r := gin.New()
+	r.GET("/auth/config", h.GetAuthConfig)
+	req := httptest.NewRequest(http.MethodGet, "/auth/config", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"complex_password_enabled":true`) {
+		t.Fatalf("body=%s, want complex_password_enabled true", w.Body.String())
 	}
 }
 
 func TestRegister_NilAuthConfigDoesNotPanic(t *testing.T) {
-	// Defensive: a nil Auth section means the operator hasn't set the
-	// registration mode at all, which must not crash and must keep the
-	// legacy "registration enabled" behaviour. Mirrors the nil guard in
-	// the handler so a config-loading bug doesn't take the server down.
+	called := false
 	us := &stubRegisterUserService{
 		register: func(_ context.Context, _ *types.RegisterRequest) (*types.User, error) {
+			called = true
 			return &types.User{ID: "u1", Email: "alice@example.com"}, nil
 		},
 	}
 	h := NewAuthHandler(&config.Config{}, us, nil, nil, nil, nil)
 
 	w := doRegister(t, newRegisterTestRouter(h), validRegisterBody())
-	if w.Code != http.StatusCreated {
-		t.Fatalf("nil Auth config must fall back to allow, got %d body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("nil Auth config must stay invite-only, got %d body=%s", w.Code, w.Body.String())
+	}
+	if called {
+		t.Fatal("nil Auth config reached UserService.Register")
 	}
 }
 
-// TestRegister_PreservesPasswordBytes is the regression for #2521.
-// SanitizeForLog is for log output only; applying it to credentials
-// rewrites tabs/newlines/control chars before hashing, so a password
-// that registers successfully cannot be used at login.
-func TestRegister_PreservesPasswordBytes(t *testing.T) {
-	// Password contains a tab and a newline — both are rewritten by
-	// SanitizeForLog (tab → space, newline → space). The handler must
-	// pass the exact original string to UserService.Register.
-	const originalPassword = "abc\t123!\nX"
-
-	var gotPassword string
+func TestRegister_InviteOnlyRejectsBeforeParsingCredentials(t *testing.T) {
+	called := false
 	us := &stubRegisterUserService{
-		register: func(_ context.Context, req *types.RegisterRequest) (*types.User, error) {
-			gotPassword = req.Password
+		register: func(_ context.Context, _ *types.RegisterRequest) (*types.User, error) {
+			called = true
 			return &types.User{ID: "u1", Email: "alice@example.com"}, nil
 		},
 	}
-	h := NewAuthHandler(&config.Config{
-		Auth: &config.AuthConfig{RegistrationMode: config.AuthRegistrationModeSelfServe},
-	}, us, nil, nil, nil, nil)
-
-	body := validRegisterBody()
-	body["password"] = originalPassword
-	w := doRegister(t, newRegisterTestRouter(h), body)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("registration with control chars in password must succeed, got %d body=%s",
-			w.Code, w.Body.String())
+	h := NewAuthHandler(&config.Config{}, us, nil, nil, nil, nil)
+	w := doRegister(t, newRegisterTestRouter(h), map[string]string{"password": "abc\t123!\nX"})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("invite-only admission must reject before parsing, got %d body=%s", w.Code, w.Body.String())
 	}
-	if gotPassword != originalPassword {
-		t.Fatalf("password mutated before UserService.Register:\n  got  %q\n  want %q",
-			gotPassword, originalPassword)
+	if called {
+		t.Fatal("closed public registration reached UserService.Register")
 	}
 }

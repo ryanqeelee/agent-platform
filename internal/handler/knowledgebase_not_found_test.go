@@ -18,13 +18,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-// validateAndGetKnowledgeBase (knowledgebase.go) and the four sibling
-// helpers in faq.go / knowledge.go / tag.go / initialization.go used to
-// wrap every Get*ByID error — including the well-known
-// repository.ErrKnowledgeBaseNotFound sentinel — as a 500. That turned
-// every probe of a stale or cross-tenant KB id into a fake "internal
-// server error" envelope. These tests pin the corrected mapping (404)
-// at the HTTP boundary so a future refactor can't quietly regress it.
+// The route-level KB access guard must preserve the repository's not-found
+// sentinel as a 404 before the handler runs. That keeps a stale KB id from
+// becoming either an authorization error or a fake internal error.
 //
 // The wrapped-sentinel cases are the actual security boundary: if a
 // caller drops the stderrors.Is comparison and reverts to `==`, the
@@ -32,16 +28,20 @@ import (
 // fail before the change ships.
 
 // stubKBOnlyService implements just enough of KnowledgeBaseService to
-// drive validateAndGetKnowledgeBase. Embedding the interface keeps every
+// drive the route-level KB access guard. Embedding the interface keeps every
 // other method nil-panicky on purpose so a future test that reaches
 // outside the contract fails loudly.
 type stubKBOnlyService struct {
 	interfaces.KnowledgeBaseService
-	getByID            func(ctx context.Context, id string) (*types.KnowledgeBase, error)
+	getByID                 func(ctx context.Context, id string) (*types.KnowledgeBase, error)
 	fillKnowledgeBaseCounts func(ctx context.Context, kb *types.KnowledgeBase) error
 }
 
 func (s *stubKBOnlyService) GetKnowledgeBaseByID(ctx context.Context, id string) (*types.KnowledgeBase, error) {
+	return s.getByID(ctx, id)
+}
+
+func (s *stubKBOnlyService) GetKnowledgeBaseByIDOnly(ctx context.Context, id string) (*types.KnowledgeBase, error) {
 	return s.getByID(ctx, id)
 }
 
@@ -54,8 +54,8 @@ func (s *stubKBOnlyService) FillKnowledgeBaseCounts(ctx context.Context, kb *typ
 
 // newKBHandlerTestRouter mounts the production ErrorHandler so
 // c.Error(NewNotFoundError(...)) renders as the real 404 envelope.
-// Tenant id and user id are injected by a tiny middleware so
-// validateAndGetKnowledgeBase doesn't bail at the unauthorized branch.
+// Tenant id and user id are injected by a tiny middleware, followed by the
+// same KB access guard that production routes use.
 func newKBHandlerTestRouter(svc interfaces.KnowledgeBaseService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -63,10 +63,24 @@ func newKBHandlerTestRouter(svc interfaces.KnowledgeBaseService) *gin.Engine {
 	r.Use(func(c *gin.Context) {
 		c.Set(types.TenantIDContextKey.String(), uint64(1))
 		c.Set(types.UserIDContextKey.String(), "u-test")
+		ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, uint64(1))
+		ctx = context.WithValue(ctx, types.UserIDContextKey, "u-test")
+		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	})
 	h := &KnowledgeBaseHandler{service: svc}
-	r.GET("/knowledge-bases/:id", h.GetKnowledgeBase)
+	r.GET(
+		"/knowledge-bases/:id",
+		middleware.RequireKBAccess(
+			middleware.KBIDFromParam("id"),
+			types.OrgRoleViewer,
+			svc,
+			nil,
+			nil,
+			nil,
+		),
+		h.GetKnowledgeBase,
+	)
 	return r
 }
 
@@ -117,19 +131,19 @@ func TestKnowledgeBaseDirectResolverRejectsForeignKBForAPIKey(t *testing.T) {
 	ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, uint64(1))
 	ctx = types.WithTenantAPIKeyScope(ctx, types.TenantAPIKeyScope{FullAccess: true})
 	c.Request = c.Request.WithContext(ctx)
-	h := &KnowledgeBaseHandler{service: &stubKBOnlyService{getByID: func(context.Context, string) (*types.KnowledgeBase, error) {
+	svc := &stubKBOnlyService{getByID: func(context.Context, string) (*types.KnowledgeBase, error) {
 		return &types.KnowledgeBase{ID: "foreign", TenantID: 2}, nil
-	}}}
+	}}
 
-	if _, _, _, _, err := h.validateAndGetKnowledgeBase(c); err == nil {
+	if _, err := middleware.ResolveKBAccess(c, "foreign", types.OrgRoleViewer, svc, nil, nil, nil); err == nil {
 		t.Fatal("API key must not inherit a foreign KB share in the direct knowledge-base resolver")
 	}
 }
 
-func TestKBHandlerKeeps500ForGenuineInfraErrors(t *testing.T) {
+func TestKBGuardMapsGenuineInfraErrorsToServiceUnavailable(t *testing.T) {
 	// The mapping is *only* for the not-found sentinel — every other
-	// error must still surface as a real 5xx so monitoring catches
-	// genuine DB / repo failures.
+	// error must surface as a retryable 503 so monitoring catches genuine
+	// DB / repo failures without misrepresenting the resource as missing.
 	svc := &stubKBOnlyService{
 		getByID: func(_ context.Context, _ string) (*types.KnowledgeBase, error) {
 			return nil, stderrors.New("connection refused")
@@ -138,8 +152,8 @@ func TestKBHandlerKeeps500ForGenuineInfraErrors(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/knowledge-bases/some-kb", nil)
 	newKBHandlerTestRouter(svc).ServeHTTP(w, req)
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("non-sentinel errors must remain 500, got %d body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("non-sentinel errors must map to 503, got %d body=%s", w.Code, w.Body.String())
 	}
 }
 

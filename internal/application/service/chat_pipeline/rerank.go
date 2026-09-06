@@ -200,7 +200,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		sr.Metadata["base_score"] = fmt.Sprintf("%.4f", base)
 		modelScore := rr.RelevanceScore
 		sr.Metadata["model_score"] = fmt.Sprintf("%.4f", modelScore)
-		sr.Score = compositeScore(sr, modelScore, base)
+		sr.Score = modelScore
 
 		// Apply FAQ score boost if enabled
 		if chatManage.FAQPriorityEnabled && chatManage.FAQScoreBoost > 1.0 &&
@@ -433,25 +433,6 @@ func safeTopScore(results []rerank.RankResult) float64 {
 		return 0
 	}
 	return results[0].RelevanceScore
-}
-
-// compositeScore calculates the composite score for a search result
-func compositeScore(sr *types.SearchResult, modelScore, baseScore float64) float64 {
-	sourceWeight := 1.0
-	switch strings.ToLower(sr.KnowledgeSource) {
-	case "web_search":
-		sourceWeight = 0.95
-	default:
-		sourceWeight = 1.0
-	}
-	composite := 0.6*modelScore + 0.3*baseScore + 0.1*sourceWeight
-	if composite < 0 {
-		composite = 0
-	}
-	if composite > 1 {
-		composite = 1
-	}
-	return composite
 }
 
 // applyMMR applies the MMR algorithm to the search results with pre-computed token sets

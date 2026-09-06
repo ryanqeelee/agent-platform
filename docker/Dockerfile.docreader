@@ -67,7 +67,10 @@ RUN if [ -z "$TARGETARCH" ]; then \
 COPY docreader/pyproject.toml docreader/uv.lock ./
 ARG PIP_INDEX_URL=https://pypi.org/simple
 RUN pip install uv --break-system-packages && \
-    python -m uv sync --locked --no-dev
+    python -m uv export --locked --no-dev --no-emit-project --format requirements.txt -o /tmp/requirements.txt && \
+    python -m uv venv .venv && \
+    python -m uv pip sync --python .venv/bin/python --require-hashes \
+        --default-index "$PIP_INDEX_URL" /tmp/requirements.txt
 
 # 复制源代码和生成脚本
 COPY docreader docreader
@@ -157,4 +160,4 @@ RUN mkdir -p /tmp/docreader
 EXPOSE 50051
 
 # 直接运行 Python 服务（日志输出到 stdout/stderr）
-CMD ["uv", "run", "-m", "docreader.main"]
+CMD ["uv", "run", "--no-sync", "-m", "docreader.main"]

@@ -65,6 +65,7 @@ RUN if [ -z "$TARGETARCH" ]; then \
 
 # 复制依赖文件
 COPY docreader/pyproject.toml docreader/uv.lock ./
+ARG PIP_INDEX_URL=https://pypi.org/simple
 RUN pip install uv --break-system-packages && \
     python -m uv sync --locked --no-dev
 

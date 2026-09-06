@@ -682,10 +682,13 @@ func TestInvitationService_AcceptByToken_HappyPath(t *testing.T) {
 	if len(rows) == 0 || rows[0].Status != types.TenantInvitationStatusPending {
 		t.Fatalf("share-link row must remain pending after accept, got %+v", rows)
 	}
+	if rows[0].AcceptedCount != 1 {
+		t.Fatalf("one accepted member must count once, got %d", rows[0].AcceptedCount)
+	}
 }
 
 func TestInvitationService_AcceptByToken_AllowsMultipleUsers(t *testing.T) {
-	svc, _, memberSvc := newInvitationSvc()
+	svc, repo, memberSvc := newInvitationSvc()
 	ctx := context.Background()
 	_, plain, err := svc.CreateShareLink(ctx, 1, types.TenantRoleViewer, nil, "")
 	if err != nil {
@@ -701,6 +704,10 @@ func TestInvitationService_AcceptByToken_AllowsMultipleUsers(t *testing.T) {
 	b, _ := memberSvc.GetMembership(ctx, "u-bob", 1)
 	if a == nil || b == nil {
 		t.Fatalf("both users should have membership: alice=%v bob=%v", a, b)
+	}
+	rows, _ := repo.ListByTenant(ctx, 1, true)
+	if len(rows) != 1 || rows[0].AcceptedCount != 2 {
+		t.Fatalf("two accepted members must count twice, got %+v", rows)
 	}
 }
 

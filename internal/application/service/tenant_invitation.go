@@ -636,15 +636,6 @@ func (s *tenantInvitationService) AcceptByToken(
 		return nil, err
 	}
 	s.emitMemberAdded(ctx, member)
-	// Bump usage counter so the management UI can show "N 人已加入".
-	// Best-effort: a failure here doesn't undo the membership the user
-	// just earned — log and move on. The counter is for display only;
-	// audit log + tenant_members rows are the authoritative trail.
-	if incErr := s.repo.IncrementAcceptedCount(ctx, inv.ID); incErr != nil {
-		logger.Warnf(ctx,
-			"share-link %d accepted_count bump failed (membership still created): %v",
-			inv.ID, incErr)
-	}
 	// A user may have received a direct invitation and then joined through
 	// a share link first. Close that direct invitation now so its notification
 	// cannot be accepted a second time and produce a misleading audit event.

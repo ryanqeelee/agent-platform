@@ -98,3 +98,26 @@ func TestCastParams_StringToStringArray(t *testing.T) {
 		t.Fatalf("expected [OpenClaw], got %v", patterns)
 	}
 }
+
+func TestCastParamsGeneratedNullableWebFetchArray(t *testing.T) {
+	raw := json.RawMessage(`{"items":"[{\"url\":\"w1\",\"prompt\":\"read\"}]"}`)
+	got := CastParams(raw, NewWebFetchTool(nil).Parameters())
+	var input WebFetchInput
+	if err := json.Unmarshal(got, &input); err != nil {
+		t.Fatal(err)
+	}
+	if len(input.Items) != 1 || input.Items[0].URL != "w1" {
+		t.Fatalf("unexpected items: %+v", input.Items)
+	}
+	if string(CastParams(got, NewWebFetchTool(nil).Parameters())) != string(got) {
+		t.Fatal("not idempotent")
+	}
+	ambiguous := json.RawMessage(`{"type":"object","properties":{"items":{"type":["null","array","string"]}}}`)
+	if string(CastParams(raw, ambiguous)) != string(raw) {
+		t.Fatal("ambiguous union changed")
+	}
+	fragment := json.RawMessage(`{"items":"[`)
+	if string(CastParams(fragment, NewWebFetchTool(nil).Parameters())) != string(fragment) {
+		t.Fatal("partial payload changed")
+	}
+}

@@ -119,6 +119,15 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		return nil, nil, errors.NewBadRequestError(err.Error())
 	}
 	request.SummaryModelID = platformModelOverride(ctx, request.SummaryModelID)
+	if request.AgentID == "" && logPrefix == "AgentQA" && request.Channel == "web" {
+		if _, isAPIKey := types.TenantAPIKeyScopeFromContext(ctx); !isAPIKey {
+			request.AgentID = types.BuiltinEmployeeAssistantID
+		}
+	}
+	if request.AgentID == types.BuiltinEmployeeAssistantID &&
+		(request.AgentSourceTenantID != 0 || len(request.MCPServiceIDs) > 0 || len(request.SkillNames) > 0) {
+		return nil, nil, errors.NewBadRequestError("员工助理仅使用当前企业授权的基础能力")
+	}
 
 	// Validate query content
 	if request.Query == "" {
@@ -169,6 +178,9 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	// Get custom agent if agent_id is provided. Backend resolves shared agent from
 	// the exact share relation; API keys cannot inherit human workspace shares.
 	customAgent, effectiveTenantID, sharedAgentReadOnly := h.resolveAgent(ctx, c, request.AgentID, request.AgentSourceTenantID)
+	if request.AgentID == types.BuiltinEmployeeAssistantID && customAgent == nil {
+		return nil, nil, errors.NewServiceUnavailableError("员工助理暂不可用，请稍后重试")
+	}
 	if request.AgentSourceTenantID != 0 && customAgent == nil {
 		return nil, nil, errors.NewNotFoundError("Shared agent not found")
 	}
@@ -561,6 +573,16 @@ func (h *Handler) resolveAgent(
 ) (*types.CustomAgent, uint64, bool) {
 	if agentID == "" {
 		return nil, 0, false
+	}
+	if agentID == types.BuiltinEmployeeAssistantID {
+		if sourceTenantID != 0 {
+			return nil, 0, false
+		}
+		agent, err := h.customAgentService.GetAgentByID(ctx, agentID)
+		if err != nil {
+			return nil, 0, false
+		}
+		return agent, 0, false
 	}
 
 	logger.Infof(ctx, "Resolving agent, agent ID: %s", secutils.SanitizeForLog(agentID))

@@ -2,15 +2,17 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"io"
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
+	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -126,6 +128,10 @@ type DataAnalysisTool struct {
 	storageResolver interfaces.StorageBackendResolver
 	searchTargets   types.SearchTargets
 	scopeEnforced   bool
+
+	temporaryDocuments    interfaces.TemporaryDocumentService
+	sessionDocumentTenant uint64
+	sessionDocumentIDs    map[string]struct{}
 }
 
 // WithSearchTargets enables the Agent-only authorization boundary. Other
@@ -137,6 +143,36 @@ func (t *DataAnalysisTool) WithSearchTargets(searchTargets types.SearchTargets) 
 	t.searchTargets = searchTargets
 	t.scopeEnforced = true
 	return t
+}
+
+// WithSessionDocuments captures the temporary-document IDs that the server
+// authorized for this Agent session. Only the IDs are retained: model-provided
+// paths, URLs, and attachment metadata never participate in file resolution.
+func (t *DataAnalysisTool) WithSessionDocuments(
+	service interfaces.TemporaryDocumentService,
+	tenantID uint64,
+	attachments types.MessageAttachments,
+) *DataAnalysisTool {
+	t.temporaryDocuments = service
+	t.sessionDocumentTenant = tenantID
+	t.sessionDocumentIDs = make(map[string]struct{}, len(attachments))
+	for _, attachment := range attachments {
+		if id := strings.TrimSpace(attachment.ID); id != "" {
+			t.sessionDocumentIDs[id] = struct{}{}
+		}
+	}
+	return t
+}
+
+// IsSessionDocument reports whether documentID was captured from the
+// server-authorized session history. It does not imply that the document is
+// still present or unexpired; every load performs a live scoped check.
+func (t *DataAnalysisTool) IsSessionDocument(documentID string) bool {
+	if t == nil {
+		return false
+	}
+	_, ok := t.sessionDocumentIDs[strings.TrimSpace(documentID)]
+	return ok
 }
 
 func NewDataAnalysisTool(
@@ -214,7 +250,7 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 			Error:   fmt.Sprintf("Failed to parse input args: %v", err),
 		}, err
 	}
-	if t.scopeEnforced {
+	if t.scopeEnforced && !t.IsSessionDocument(input.KnowledgeID) {
 		if _, err := authorizeKnowledgeInSearchTargets(ctx, t.searchTargets, input.KnowledgeID, t.knowledgeService); err != nil {
 			return &types.ToolResult{Success: false, Error: err.Error()}, err
 		}
@@ -675,6 +711,10 @@ func (t *DataAnalysisTool) materializeKnowledgeFile(ctx context.Context, knowled
 //   - *TableSchema: schema information of the created table
 //   - error: any error that occurred during the operation
 func (t *DataAnalysisTool) LoadFromKnowledgeID(ctx context.Context, knowledgeID string) (*TableSchema, error) {
+	if t.IsSessionDocument(knowledgeID) {
+		return t.loadFromSessionDocument(ctx, strings.TrimSpace(knowledgeID))
+	}
+
 	// Use GetKnowledgeByIDOnly to support cross-tenant shared KB
 	knowledge, err := t.knowledgeService.GetKnowledgeByIDOnly(ctx, knowledgeID)
 	if err != nil || knowledge == nil {
@@ -686,6 +726,100 @@ func (t *DataAnalysisTool) LoadFromKnowledgeID(ctx context.Context, knowledgeID 
 	}
 
 	return t.LoadFromKnowledge(ctx, knowledge)
+}
+
+// loadFromSessionDocument loads an authorized temporary CSV/Excel source into
+// the same DuckDB path used by permanent knowledge files. The allowlist only
+// selects this branch; tenant/session ownership, expiry, and source type are
+// revalidated against the live temporary-document service before every load.
+func (t *DataAnalysisTool) loadFromSessionDocument(ctx context.Context, documentID string) (*TableSchema, error) {
+	if t.temporaryDocuments == nil {
+		return nil, fmt.Errorf("session document service is unavailable")
+	}
+	if t.sessionDocumentTenant == 0 || strings.TrimSpace(t.sessionID) == "" {
+		return nil, fmt.Errorf("session document scope is unavailable")
+	}
+
+	document, err := t.temporaryDocuments.Get(ctx, t.sessionDocumentTenant, t.sessionID, documentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session document: %w", err)
+	}
+	if document == nil {
+		return nil, fmt.Errorf("session document not found")
+	}
+	if document.ID != documentID || document.TenantID != t.sessionDocumentTenant || document.SessionID != t.sessionID {
+		return nil, fmt.Errorf("session document scope mismatch")
+	}
+	if !document.ExpiresAt.After(time.Now()) {
+		return nil, fmt.Errorf("session document has expired")
+	}
+
+	fileType := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(document.FileType)), ".")
+	if fileType != "csv" && fileType != "xlsx" && fileType != "xls" {
+		return nil, fmt.Errorf("unsupported session document type: %s (supported types: csv, xlsx, xls)", fileType)
+	}
+
+	reader, _, err := t.temporaryDocuments.OpenFile(ctx, t.sessionDocumentTenant, t.sessionID, documentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open session document: %w", err)
+	}
+	if reader == nil {
+		return nil, fmt.Errorf("session document file is unavailable")
+	}
+
+	localPath, cleanup, err := t.materializeSessionDocumentFile(ctx, reader, documentID, fileType)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	tableName := t.sessionDocumentTableName(documentID)
+	switch fileType {
+	case "csv":
+		return t.LoadFromCSV(ctx, localPath, tableName)
+	case "xlsx", "xls":
+		return t.LoadFromExcel(ctx, localPath, tableName)
+	default:
+		return nil, fmt.Errorf("unsupported session document type: %s", fileType)
+	}
+}
+
+func (t *DataAnalysisTool) materializeSessionDocumentFile(
+	ctx context.Context,
+	reader io.ReadCloser,
+	documentID string,
+	fileType string,
+) (string, func(), error) {
+	noop := func() {}
+	defer reader.Close()
+
+	tmp, err := os.CreateTemp("", "weknora-session-data-analysis-*."+fileType)
+	if err != nil {
+		return "", noop, fmt.Errorf("failed to create temp file for session document: %w", err)
+	}
+	tmpPath := tmp.Name()
+	cleanup := func() {
+		if err := os.Remove(tmpPath); err != nil && !os.IsNotExist(err) {
+			logger.Warnf(ctx, "[Tool][DataAnalysis] Failed to remove session document temp file %s: %v", tmpPath, err)
+		}
+	}
+
+	if _, err := io.Copy(tmp, reader); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return "", noop, fmt.Errorf("failed to copy session document '%s' to temp file: %w", documentID, err)
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return "", noop, fmt.Errorf("failed to finalize temp file for session document '%s': %w", documentID, err)
+	}
+
+	return tmpPath, cleanup, nil
+}
+
+func (t *DataAnalysisTool) sessionDocumentTableName(documentID string) string {
+	digest := sha256.Sum256([]byte(t.sessionID + "\x00" + documentID))
+	return fmt.Sprintf("session_document_%x", digest[:16])
 }
 
 // LoadFromTable retrieves the schema information of an existing table

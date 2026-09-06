@@ -4399,7 +4399,9 @@ export default {
     webSearch: {
       toggleOn: 'Включить веб-поиск',
       toggleOff: 'Выключить веб-поиск',
-      notConfigured: 'Веб-поиск не настроен'
+      notConfigured: 'Веб-поиск не настроен',
+      loading: 'Проверка доступности веб-поиска для организации',
+      enterpriseUnavailable: 'Веб-поиск не включён для вашей организации. Обратитесь к администратору.'
     }
   },
   manualEditor: {

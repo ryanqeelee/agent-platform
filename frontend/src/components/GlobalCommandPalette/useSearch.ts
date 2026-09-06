@@ -11,16 +11,6 @@ export interface CmdkKb {
   type?: string
 }
 
-export interface CmdkAgent {
-  id: string
-  name: string
-  description?: string
-  avatar?: string
-  isBuiltin: boolean
-  source: 'own' | 'shared'
-  orgName?: string
-}
-
 export interface CmdkSessionItem {
   id: string
   title: string
@@ -74,8 +64,6 @@ export function useCmdkSearch(options: {
   chunkLimit?: number
   /** Debounce delay in ms. */
   debounceMs?: number
-  /** 当前部署是否提供智能体路由；不提供时不发起预加载请求。 */
-  agentsEnabled?: () => boolean
 }) {
   const debounceMs = options.debounceMs ?? 350
   const query = ref('')
@@ -91,11 +79,6 @@ export function useCmdkSearch(options: {
   const messageGroups = ref<CmdkMsgGroup[]>([])
   const totalChunks = ref(0)
   const totalMessages = ref(0)
-
-  // Agents the current user can access (own + builtin + shared via orgs).
-  const agents = ref<CmdkAgent[]>([])
-  const agentsLoaded = ref(false)
-  let agentsLoadingPromise: Promise<void> | null = null
 
   const orgStore = useOrganizationStore()
   const menuStore = useMenuStore()
@@ -146,61 +129,6 @@ export function useCmdkSearch(options: {
     return knowledgeBases.value
       .filter(k => k.name.toLowerCase().includes(q))
       .slice(0, 4)
-  })
-
-  // Agents (own + shared). Lazily loaded & cached; no backend search endpoint
-  // exists so we always filter client-side.
-  const ensureAgents = async (): Promise<void> => {
-    if (options.agentsEnabled?.() === false) return
-    if (agentsLoaded.value) return
-    if (agentsLoadingPromise) return agentsLoadingPromise
-    agentsLoadingPromise = (async () => {
-      try {
-        const chatResources = useChatResourcesStore()
-        await chatResources.ensureAgents()
-        const own: CmdkAgent[] = chatResources.agents.map((a: any) => ({
-          id: String(a.id),
-          name: a.name || '',
-          description: a.description,
-          avatar: a.avatar,
-          isBuiltin: !!a.is_builtin,
-          source: 'own',
-        }))
-        const ownIds = new Set(own.map(a => a.id))
-        const sharedList: CmdkAgent[] = (orgStore.sharedAgents || [])
-          .filter((s: any) => s?.agent != null)
-          .map((s: any) => ({
-            id: String(s.agent.id),
-            name: s.agent.name || '',
-            description: s.agent.description,
-            avatar: s.agent.avatar,
-            isBuiltin: !!s.agent.is_builtin,
-            source: 'shared' as const,
-            orgName: s.org_name,
-          }))
-          .filter((a: CmdkAgent) => !ownIds.has(a.id))
-        agents.value = [...own, ...sharedList]
-        agentsLoaded.value = true
-      } catch (e) {
-        console.error('[cmdk] failed to load agents', e)
-      } finally {
-        agentsLoadingPromise = null
-      }
-    })()
-    return agentsLoadingPromise
-  }
-
-  const agentMatches = computed<CmdkAgent[]>(() => {
-    if (options.agentsEnabled?.() === false) return []
-    const q = query.value.trim().toLowerCase()
-    if (!q) return []
-    return agents.value
-      .filter(a => {
-        const name = (a.name || '').toLowerCase()
-        const desc = (a.description || '').toLowerCase()
-        return name.includes(q) || desc.includes(q)
-      })
-      .slice(0, 5)
   })
 
   // Sessions: no dedicated list API; we re-use whatever menuStore already has
@@ -350,13 +278,9 @@ export function useCmdkSearch(options: {
   })
 
   onMounted(() => {
-    // Preload KB and agent lists so name matches show up instantly on first
-    // keystroke. Sessions come from the menuStore (already populated by the
-    // sidebar) so no extra fetch needed here.
+    // Preload KB names so name matches show up instantly on first keystroke.
+    // Sessions come from the menuStore, so no extra fetch is needed here.
     ensureKbs()
-    if (options.agentsEnabled?.() !== false) {
-      ensureAgents()
-    }
   })
 
   return {
@@ -367,13 +291,10 @@ export function useCmdkSearch(options: {
     fileGroups,
     messageGroups,
     kbMatches,
-    agents,
-    agentMatches,
     sessionMatches,
     totalChunks,
     totalMessages,
     clearResults,
     ensureKbs,
-    ensureAgents,
   }
 }

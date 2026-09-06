@@ -1,9 +1,8 @@
 import { defineStore } from "pinia";
 import { nextTick } from "vue";
-import { BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from "@/api/agent";
+import { BUILTIN_EMPLOYEE_ASSISTANT_ID } from "@/api/agent";
 import { getApiBaseUrl } from "@/utils/api-base";
-import { isAgentStreamAgentId } from "@/utils/agent-mode";
-import { loadAndReconcileSettings } from "@/stores/settingsStorage";
+import { enforceEmployeeAssistantSelection, loadAndReconcileSettings } from "@/stores/settingsStorage";
 
 // 定义设置接口
 interface Settings {
@@ -23,8 +22,8 @@ interface Settings {
   ollamaConfig: OllamaConfig;  // Ollama配置
   webSearchEnabled: boolean;  // 网络搜索是否启用
   conversationModels: ConversationModels;
-  selectedAgentId: string;  // 当前选中的智能体ID
-  selectedAgentSourceTenantId: string | null;  // 当使用共享智能体时，来源空间 ID（用于后端 model/KB/MCP 解析）
+  selectedAgentId: string;  // 员工聊天固定的统一助理 ID
+  selectedAgentSourceTenantId: string | null;  // 员工聊天始终为空；保留字段以迁移旧存储
   autoCheckUpdate?: boolean; // 是否自动检查并下载更新
 }
 
@@ -74,7 +73,7 @@ const defaultSettings: Settings = {
   endpoint: getApiBaseUrl(),
   apiKey: "",
   knowledgeBaseId: "",
-  isAgentEnabled: false,
+  isAgentEnabled: true,
   agentConfig: {
     maxIterations: 5,
     temperature: 0.7,
@@ -97,14 +96,14 @@ const defaultSettings: Settings = {
     baseUrl: "http://localhost:11434",
     enabled: true
   },
-  webSearchEnabled: true,  // 搜索服务就绪时默认开启；未配置提供商时输入框会自动关闭
+  webSearchEnabled: true,  // 员工允许联网默认开启；租户是否就绪由服务端投影决定
   conversationModels: {
     summaryModelId: "",
     rerankModelId: "",
     selectedChatModelId: "",  // 用户当前选择的对话模型ID
   },
-  selectedAgentId: BUILTIN_QUICK_ANSWER_ID,  // 默认选中快速问答模式
-  selectedAgentSourceTenantId: null as string | null,  // 共享智能体来源空间 ID
+  selectedAgentId: BUILTIN_EMPLOYEE_ASSISTANT_ID,
+  selectedAgentSourceTenantId: null as string | null,
   autoCheckUpdate: true,
 };
 
@@ -121,18 +120,13 @@ export const useSettingsStore = defineStore("settings", {
 
   getters: {
     // Agent 是否启用
-    isAgentEnabled: (state) => state.settings.isAgentEnabled || false,
+    isAgentEnabled: () => true,
 
-    // 当前是否为内置快速问答（优先看 selectedAgentId，避免与 isAgentEnabled 漂移）
-    isQuickAnswerMode: (state) =>
-      (state.settings.selectedAgentId || BUILTIN_QUICK_ANSWER_ID) === BUILTIN_QUICK_ANSWER_ID,
+    // 旧 getter 仍供少量视图使用；统一员工助理始终执行 Agent 路径。
+    isQuickAnswerMode: () => false,
 
     // 是否走 Agent 流式管线（智能推理 / 自定义 Agent）；快速问答走 RAG 管线
-    isAgentStreamMode: (state) =>
-      isAgentStreamAgentId(
-        state.settings.selectedAgentId,
-        state.settings.isAgentEnabled || false,
-      ),
+    isAgentStreamMode: () => true,
     
     // Agent 是否就绪（配置完整）
     // 需要满足：1) 配置了允许的工具 2) 设置了对话模型 3) 设置了重排模型
@@ -171,15 +165,16 @@ export const useSettingsStore = defineStore("settings", {
     isAutoCheckUpdateEnabled: (state) => state.settings.autoCheckUpdate ?? true,
 
     // 当前选中的智能体ID
-    selectedAgentId: (state) => state.settings.selectedAgentId || BUILTIN_QUICK_ANSWER_ID,
+    selectedAgentId: () => BUILTIN_EMPLOYEE_ASSISTANT_ID,
     // 共享智能体来源空间 ID（可选）
-    selectedAgentSourceTenantId: (state) => state.settings.selectedAgentSourceTenantId ?? null,
+    selectedAgentSourceTenantId: () => null,
   },
 
   actions: {
     // 保存设置
     saveSettings(settings: Settings) {
       this.settings = { ...settings };
+      enforceEmployeeAssistantSelection(this.settings);
       // 保存到localStorage
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
@@ -202,12 +197,6 @@ export const useSettingsStore = defineStore("settings", {
     // 获取知识库ID
     getKnowledgeBaseId(): string {
       return this.settings.knowledgeBaseId;
-    },
-    
-    // 启用/禁用 Agent
-    toggleAgent(enabled: boolean) {
-      this.settings.isAgentEnabled = enabled;
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
     
     // 更新 Agent 配置
@@ -446,34 +435,9 @@ export const useSettingsStore = defineStore("settings", {
       };
     },
     
-    // 选择智能体（sourceTenantId 仅在使用共享智能体时传入）
-    selectAgent(agentId: string, sourceTenantId?: string | null) {
-      this.settings.selectedAgentId = agentId;
-      this.settings.selectedAgentSourceTenantId = (sourceTenantId != null && sourceTenantId !== "") ? sourceTenantId : null;
-      // 每次进入一个具备搜索能力的智能体时默认开启；输入框仍会在提供商未就绪时关闭。
-      this.settings.webSearchEnabled = true;
-      // 根据智能体类型自动切换 Agent 模式
-      if (agentId === BUILTIN_QUICK_ANSWER_ID) {
-        this.settings.isAgentEnabled = false;
-      } else if (agentId === BUILTIN_SMART_REASONING_ID) {
-        this.settings.isAgentEnabled = true;
-      }
-      // 自定义智能体需要根据其配置来决定
-      
-      // 切换智能体时重置知识库和文件选择状态
-      // 因为不同智能体关联的知识库不同，需要清空用户之前的选择
-      this.settings.selectedKnowledgeBases = [];
-      this.settings.selectedFiles = [];
-      this.settings.selectedFileKbMap = {};
-      this.settings.selectedTags = [];
-      this.settings.selectedMCPServices = [];
-      this.settings.selectedSkills = [];
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
-    },
-    
     // 获取选中的智能体ID
     getSelectedAgentId(): string {
-      return this.settings.selectedAgentId || BUILTIN_QUICK_ANSWER_ID;
+      return BUILTIN_EMPLOYEE_ASSISTANT_ID;
     },
 
     // —— 会话级输入态恢复 —— //
@@ -496,6 +460,7 @@ export const useSettingsStore = defineStore("settings", {
     restoreDefaultsIfSnapshotted() {
       if (!this._defaultsSnapshot) return;
       this.settings = this._defaultsSnapshot;
+      enforceEmployeeAssistantSelection(this.settings);
       this._defaultsSnapshot = null;
       // 不写 localStorage：默认值在快照之前已经写过 localStorage，这里恢复
       // 的就是 localStorage 中既有的值，再写一次只会增加无意义的 IO。
@@ -508,15 +473,9 @@ export const useSettingsStore = defineStore("settings", {
       if (!state) return;
       this._isApplyingSessionState = true;
       try {
-        if (typeof state.agent_enabled === "boolean") {
-          this.settings.isAgentEnabled = state.agent_enabled;
-        }
-        if (typeof state.agent_id === "string" && state.agent_id) {
-          this.settings.selectedAgentId = state.agent_id;
-          // 上次记录是自有 agent 还是共享 agent，目前服务端不区分回传 sourceTenantId。
-          // 与 selectAgent() 不同，这里**不**重置 KB/文件选择 —— 因为我们紧接着
-          // 就要用 state 里的 KB/文件覆盖，不需要先清空再写。
-        }
+        // Historical agent fields are intentionally ignored. Authenticated employee
+        // chat always uses the server-owned employee assistant; the remaining fields
+        // still restore the session's KB, file, tag, and permission context.
         if (Array.isArray(state.knowledge_base_ids)) {
           this.settings.selectedKnowledgeBases = [...state.knowledge_base_ids];
         }
@@ -560,10 +519,9 @@ export const useSettingsStore = defineStore("settings", {
           this.settings.webSearchEnabled = state.web_search_enabled;
         }
       } finally {
-        // 复位必须延后到下一次 flush 之后：监听 selectedAgentId 的 watcher 默认
-        // flush:'pre'，是异步执行的；若在此处同步复位，watcher 真正运行时标志早已
-        // 为 false，守卫形同虚设、恢复出来的 KB 仍会被 agent 配置覆盖。放到 nextTick
-        // 可保证本次状态变更触发的 watcher 在标志仍为 true 时执行。
+        enforceEmployeeAssistantSelection(this.settings);
+        // Keep the guard through the current Vue flush so resource watchers see one
+        // coherent restored state.
         nextTick(() => {
           this._isApplyingSessionState = false;
         });

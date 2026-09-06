@@ -1,5 +1,7 @@
 import { get, post, put, del } from "../../utils/request";
 
+export { BUILTIN_EMPLOYEE_ASSISTANT_ID } from './constants';
+
 // 智能体配置
 // 智能推理下的智能体类型预设 ID
 // 'rag-qa'       : 经典文档/FAQ 分块 RAG
@@ -151,6 +153,8 @@ export interface CustomAgent {
   // creator_name 由后端 list 接口批量回填，仅用于列表卡片来源徽章。
   creator_name?: string;
   config: CustomAgentConfig;
+  /** Safe runtime projection for the current tenant; absent while readiness is unknown. */
+  web_search_ready?: boolean;
   created_at?: string;
   updated_at?: string;
 }
@@ -189,7 +193,6 @@ export interface UpdateAgentRequest {
 // 内置智能体 ID（常用的保留常量，便于代码引用）
 export const BUILTIN_QUICK_ANSWER_ID = 'builtin-quick-answer';
 export const BUILTIN_SMART_REASONING_ID = 'builtin-smart-reasoning';
-
 // AgentMode 常量
 export const AGENT_MODE_QUICK_ANSWER = 'quick-answer';
 export const AGENT_MODE_SMART_REASONING = 'smart-reasoning';

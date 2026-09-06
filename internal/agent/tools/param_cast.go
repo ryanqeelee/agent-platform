@@ -42,6 +42,20 @@ func CastParams(args json.RawMessage, schema json.RawMessage) json.RawMessage {
 			continue
 		}
 		targetType, _ := prop["type"].(string)
+		// jsonschema-go represents nullable slices as ["null", "array"].
+		// Cast only when there is one unambiguous non-null target type.
+		if types, ok := prop["type"].([]interface{}); ok {
+			for _, candidate := range types {
+				name, ok := candidate.(string)
+				if !ok || (name != "null" && targetType != "" && targetType != name) {
+					targetType = ""
+					break
+				}
+				if name != "null" {
+					targetType = name
+				}
+			}
+		}
 		if targetType == "" {
 			continue
 		}

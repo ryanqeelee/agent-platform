@@ -4401,7 +4401,9 @@ export default {
     webSearch: {
       toggleOn: '开启网络搜索',
       toggleOff: '关闭网络搜索',
-      notConfigured: '未配置网络搜索引擎'
+      notConfigured: '未配置网络搜索引擎',
+      loading: '正在确认企业联网能力',
+      enterpriseUnavailable: '当前企业暂未开通联网搜索，请联系管理员'
     }
   },
   manualEditor: {

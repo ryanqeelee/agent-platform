@@ -147,11 +147,13 @@ import InputField from '../../components/Input-field.vue';
 import botmsg from './components/botmsg.vue';
 import usermsg from './components/usermsg.vue';
 import { getMessageList, getSession } from "@/api/chat/index";
-import { getSuggestedQuestions } from "@/api/agent/index";
+import { BUILTIN_EMPLOYEE_ASSISTANT_ID, getSuggestedQuestions } from "@/api/agent/index";
 import { deleteTemporaryAttachment, uploadTemporaryAttachment } from '@/api/chat/temporary-attachments';
 import { useStream } from '../../api/chat/streame'
 import { useMenuStore } from '@/stores/menu';
 import { useSettingsStore } from '@/stores/settings';
+import { useChatResourcesStore } from '@/stores/chatResources';
+import { employeeWebSearchEnabled } from '@/api/agent/constants';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useI18n } from 'vue-i18n';
 import { useUIStore } from '@/stores/ui';
@@ -203,7 +205,7 @@ const isAgentStreamSession = () => {
     if (props.embeddedMode) {
         return !!(props.agentId && props.agentId !== 'builtin-quick-answer');
     }
-    return useSettingsStoreInstance.isAgentStreamMode;
+    return true;
 };
 
 const uiStore = useUIStore();
@@ -395,9 +397,7 @@ const fetchSuggestedQuestions = async () => {
     suggestedQuestionsLoading.value = true;
     // 加载期间保留旧数据，不清空，避免布局抖动
     try {
-        const agentId = useSettingsStoreInstance.selectedAgentId;
-        if (!agentId) return;
-        const res = await getSuggestedQuestions(agentId, useSettingsStoreInstance.getSuggestedQuestionsParams());
+        const res = await getSuggestedQuestions(BUILTIN_EMPLOYEE_ASSISTANT_ID, useSettingsStoreInstance.getSuggestedQuestionsParams());
         if (fetchId === suggestedQuestionsFetchId) {
             suggestedQuestions.value = res?.data?.questions || [];
         }
@@ -486,7 +486,6 @@ const debouncedFetchSuggestions = () => {
 // 监听 Agent / 知识库 / 文件 / 标签 / MCP / Skill @mention，重新获取推荐问题
 watch(
     () => ({
-        agentId: useSettingsStoreInstance.selectedAgentId,
         kbs: useSettingsStoreInstance.settings.selectedKnowledgeBases,
         files: useSettingsStoreInstance.settings.selectedFiles,
         tags: useSettingsStoreInstance.settings.selectedTags,
@@ -746,10 +745,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     prepareForNewOutgoingMessage();
     isReplying.value = true;
     loading.value = true;
-    const selectedAgentId = props.embeddedMode ? props.agentId : (useSettingsStoreInstance.selectedAgentId || '');
-    const selectedAgentSourceTenantId = props.embeddedMode
-        ? undefined
-        : (useSettingsStoreInstance.selectedAgentSourceTenantId || undefined);
+    const selectedAgentId = props.embeddedMode ? props.agentId : BUILTIN_EMPLOYEE_ASSISTANT_ID;
 
     // Images are unified with the attachment pipeline: on the authenticated web
     // client they upload as temporary documents (understood in the background by
@@ -777,7 +773,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
             }
             try {
                 const upload = await uploadTemporaryAttachment(
-                    session_id.value, file, selectedAgentId, selectedAgentSourceTenantId, 'auto'
+                    session_id.value, file, selectedAgentId, undefined, 'auto'
                 );
                 imageAttachmentIds.push(upload.data.id);
             } catch (e) {
@@ -798,7 +794,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
             await Promise.all(localAttachments.map(async (attachment) => {
                 attachment.status = 'uploading';
                 const upload = await uploadTemporaryAttachment(
-                    session_id.value, attachment.file, selectedAgentId, selectedAgentSourceTenantId, 'auto'
+                    session_id.value, attachment.file, selectedAgentId, undefined, 'auto'
                 );
                 attachment.documentId = upload.data.id;
                 attachment.status = upload.data.status;
@@ -861,13 +857,17 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     userHasScrolledUp.value = false;
     scrollToBottom(true);
 
-    // Get agent mode status from settings store (prefer selectedAgentId for builtins)
+    // Embedded consumers retain their deliberate binding; authenticated web
+    // chat always executes the unified employee assistant.
     const agentEnabled = props.embeddedMode
         ? (props.agentId && props.agentId !== 'builtin-quick-answer')
-        : useSettingsStoreInstance.isAgentStreamMode;
+        : true;
 
     // Get web search status from settings store
-    const webSearchEnabled = props.embeddedMode ? false : useSettingsStoreInstance.isWebSearchEnabled;
+    const webSearchEnabled = !props.embeddedMode && employeeWebSearchEnabled(
+        useSettingsStoreInstance.isWebSearchEnabled,
+        useChatResourcesStore().agents.find(agent => agent.id === BUILTIN_EMPLOYEE_ASSISTANT_ID),
+    );
 
     // Get knowledge_base_ids from settings store (selected by user via KnowledgeBaseSelector)
     // Merge @mentioned KB/file IDs so retrieval uses the same targets user @mentioned (including shared KBs)
@@ -892,7 +892,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     const mcpServiceIds = [...new Set((mentionedItems || []).filter(item => item.type === 'mcp' && item.id).map(item => item.id))];
     const skillNames = [...new Set((mentionedItems || []).filter(item => item.type === 'skill' && item.id).map(item => item.skill_name || item.id))];
 
-    const endpoint = agentEnabled ? '/api/v1/agent-chat' : '/api/v1/knowledge-chat';
+    const endpoint = props.embeddedMode && !agentEnabled ? '/api/v1/knowledge-chat' : '/api/v1/agent-chat';
 
     const requestMcpServiceIds = agentEnabled ? mcpServiceIds : [];
     const requestSkillNames = agentEnabled ? skillNames : [];
@@ -906,7 +906,6 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         knowledge_ids: knowledgeIds,
         agent_enabled: agentEnabled,
         agent_id: selectedAgentId,
-        agent_source_tenant_id: selectedAgentSourceTenantId,
         web_search_enabled: webSearchEnabled,
         summary_model_id: modelId,
         mcp_service_ids: requestMcpServiceIds,
@@ -1029,15 +1028,6 @@ const handleSessionMutation = (event) => {
 };
 
 onBeforeMount(async () => {
-    // 若从智能体列表点击共享智能体进入，URL 带 agent_id 与 source_tenant_id，同步到 store
-    const agentIdFromQuery = props.agentId || (route.query.agent_id && String(route.query.agent_id));
-    const sourceTenantIdFromQuery = route.query.source_tenant_id && String(route.query.source_tenant_id);
-    if (agentIdFromQuery && sourceTenantIdFromQuery) {
-        useSettingsStoreInstance.selectAgent(agentIdFromQuery, sourceTenantIdFromQuery);
-    } else if (agentIdFromQuery) {
-        useSettingsStoreInstance.selectAgent(agentIdFromQuery, null);
-    }
-
     if (props.kbIds && props.kbIds.length > 0) {
         useSettingsStoreInstance.selectKnowledgeBases(props.kbIds);
     }

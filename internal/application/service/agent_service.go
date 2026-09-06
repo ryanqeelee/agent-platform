@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -112,6 +113,7 @@ type agentService struct {
 	agentShareService     interfaces.AgentShareService
 	messageService        interfaces.MessageService
 	memoryService         interfaces.MemoryService
+	temporaryDocuments    interfaces.TemporaryDocumentService
 	storageResolver       interfaces.StorageBackendResolver
 	toolApprovalGate      approval.MCPApproval
 	sandboxMgr            sandbox.Manager
@@ -148,9 +150,11 @@ func NewAgentService(
 	sandboxResolver sandbox.TenantSandboxResolver,
 	sandboxPinner *SessionSandboxPinner,
 	sandboxPolicy WorkspaceSandboxPolicy,
+	temporaryDocuments interfaces.TemporaryDocumentService,
 ) interfaces.AgentService {
 	return &agentService{
 		cfg:                   cfg,
+		temporaryDocuments:    temporaryDocuments,
 		modelService:          modelService,
 		knowledgeBaseService:  knowledgeBaseService,
 		knowledgeService:      knowledgeService,
@@ -235,12 +239,14 @@ func (s *agentService) CreateAgentEngine(
 		systemPromptTemplate,
 	)
 	engine.SetAppConfig(s.cfg)
-	pinnedMCP := s.resolvePinnedMCPServiceInfos(ctx, config)
-	s.attachPinnedMCPToolNames(toolRegistry, pinnedMCP)
-	engine.SetPinnedMentions(
-		pinnedMCP,
-		s.resolvePinnedSkillInfos(config),
-	)
+	if !config.EmployeeAssistant {
+		pinnedMCP := s.resolvePinnedMCPServiceInfos(ctx, config)
+		s.attachPinnedMCPToolNames(toolRegistry, pinnedMCP)
+		engine.SetPinnedMentions(
+			pinnedMCP,
+			s.resolvePinnedSkillInfos(config),
+		)
+	}
 
 	// Set VLM image describer for MCP tool result image analysis.
 	// When an MCP tool returns images, the engine uses VLM to generate text descriptions
@@ -269,7 +275,7 @@ func (s *agentService) CreateAgentEngine(
 	// tools that need it). A sandbox whose skills are still installing —
 	// or that simply has none yet — therefore gets a shell without an
 	// empty skills manager or skill tools that cannot succeed.
-	offerSkills := config.SkillsEnabled &&
+	offerSkills := !config.EmployeeAssistant && config.SkillsEnabled &&
 		(len(config.SkillDirs) > 0 || len(config.TenantSkills) > 0)
 	if offerSkills {
 		skillsManager, err := s.initializeSkillsManager(ctx, sessionID, config, toolRegistry)
@@ -293,6 +299,10 @@ func (s *agentService) registerMCPTools(
 	eventBus *event.EventBus,
 	sessionID, assistantMessageID string,
 ) {
+	if config != nil && config.EmployeeAssistant {
+		return
+	}
+
 	tenantID := uint64(0)
 	if tid, ok := types.TenantIDFromContext(ctx); ok {
 		tenantID = tid
@@ -416,6 +426,10 @@ func (s *agentService) registerSandboxFileTools(
 	sessionID string,
 	config *types.AgentConfig,
 ) {
+	if config != nil && config.EmployeeAssistant {
+		return
+	}
+
 	if config != nil && config.SkillInstallMode() {
 		logger.Infof(ctx, "Skipping session file tools in skill install mode")
 		s.registerSkillFileTools(ctx, toolRegistry, sessionID, config)
@@ -505,6 +519,10 @@ func (s *agentService) registerSandboxShellIfAllowed(
 	sessionID string,
 	config *types.AgentConfig,
 ) {
+	if config != nil && config.EmployeeAssistant {
+		return
+	}
+
 	if config == nil || (!config.SkillsEnabled && !config.SkillInstallMode()) {
 		return
 	}
@@ -528,6 +546,10 @@ func (s *agentService) resolveWorkspaceSandbox(
 	sessionID string,
 	config *types.AgentConfig,
 ) (sandbox.Manager, error) {
+	if config != nil && config.EmployeeAssistant {
+		return nil, nil
+	}
+
 	if s == nil {
 		return nil, nil
 	}
@@ -848,6 +870,15 @@ func (s *agentService) registerTools(
 		allowedTools = tools.DefaultAllowedTools()
 		logger.Infof(ctx, "Using default allowed tools: %v", allowedTools)
 	}
+	if config.EmployeeAssistant {
+		filtered := make([]string, 0, len(allowedTools))
+		for _, name := range allowedTools {
+			if employeeAssistantReadTool(name) {
+				filtered = append(filtered, name)
+			}
+		}
+		allowedTools = filtered
+	}
 	if config.SharedAgentReadOnly {
 		allowedTools = filterSharedAgentWriteTools(allowedTools)
 	}
@@ -900,8 +931,8 @@ func (s *agentService) registerTools(
 			tools.ToolQueryKnowledgeGraph: true,
 			tools.ToolGetDocumentInfo:     true,
 			tools.ToolDatabaseQuery:       true,
-			tools.ToolDataAnalysis:        true,
-			tools.ToolDataSchema:          true,
+			tools.ToolDataAnalysis:        len(config.SessionAttachments) == 0,
+			tools.ToolDataSchema:          len(config.SessionAttachments) == 0,
 			// Wiki tools also require at least one KB in scope.
 			tools.ToolWikiReadPage:      true,
 			tools.ToolWikiSearch:        true,
@@ -945,7 +976,7 @@ func (s *agentService) registerTools(
 	// still names it — a preset, an API caller, or a config saved while memory
 	// was on — cannot outlive the switch being turned off.
 	allowedTools = withoutString(allowedTools, tools.ToolSearchMemory)
-	if s.memoryService != nil &&
+	if !config.EmployeeAssistant && s.memoryService != nil &&
 		s.memoryService.MemoryAvailable(types.ApplyAgentMemoryPreference(ctx, config.MemoryEnabled)) {
 		allowedTools = append(allowedTools, tools.ToolSearchMemory)
 	} else {
@@ -1016,6 +1047,10 @@ func (s *agentService) registerTools(
 	// Deduplicate while preserving original order.
 	allowedTools = dedupStrings(allowedTools)
 
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	dataAnalysis := tools.NewDataAnalysisTool(s.knowledgeBaseService, s.knowledgeService, s.tenantService, s.fileService, s.duckdb, sessionID, s.storageResolver).
+		WithSearchTargets(config.SearchTargets).WithSessionDocuments(s.temporaryDocuments, tenantID, config.SessionAttachments)
+
 	// logger.Infof(ctx, "Registering tools: %v, webSearchEnabled: %v", allowedTools, config.WebSearchEnabled)
 	// Register each allowed tool
 	for _, toolName := range allowedTools {
@@ -1076,13 +1111,16 @@ func (s *agentService) registerTools(
 			logger.Infof(ctx, "Registered web_fetch tool for session: %s", sessionID)
 
 		case tools.ToolDataAnalysis:
-			toolToRegister = tools.NewDataAnalysisTool(s.knowledgeBaseService, s.knowledgeService, s.tenantService, s.fileService, s.duckdb, sessionID, s.storageResolver).
-				WithSearchTargets(config.SearchTargets)
+			toolToRegister = dataAnalysis
 			logger.Infof(ctx, "Registered data_analysis tool for session: %s", sessionID)
 
 		case tools.ToolDataSchema:
-			toolToRegister = tools.NewDataSchemaTool(s.knowledgeService, s.chunkService.GetRepository()).
-				WithSearchTargets(config.SearchTargets)
+			var chunkRepo interfaces.ChunkRepository
+			if s.chunkService != nil {
+				chunkRepo = s.chunkService.GetRepository()
+			}
+			toolToRegister = tools.NewDataSchemaTool(s.knowledgeService, chunkRepo).
+				WithSearchTargets(config.SearchTargets).WithSessionDocuments(dataAnalysis)
 			logger.Infof(ctx, "Registered data_schema tool")
 
 		// Wiki tools — only registered when wiki KBs are detected
@@ -1125,10 +1163,14 @@ func (s *agentService) registerTools(
 
 		if toolToRegister != nil {
 			if isKnowledgeScopedTool(toolName) {
+				delegate := toolToRegister
 				toolToRegister = tools.NewLiveKnowledgeAccessTool(
 					toolToRegister, config.SearchTargets, s.knowledgeBaseService,
 					s.tenantMemberService, isWikiWriteTool(toolName),
 				)
+				if toolName == tools.ToolDataAnalysis || toolName == tools.ToolDataSchema {
+					toolToRegister = &sessionDocumentTool{Tool: toolToRegister, sessionTool: delegate, documents: dataAnalysis}
+				}
 			}
 			if toolToRegister.Name() != toolName {
 				logger.Warnf(ctx, "Tool name mismatch: expected %s, got %s", toolName, toolToRegister.Name())
@@ -1521,4 +1563,40 @@ func (s *agentService) resolvePinnedSkillInfos(config *types.AgentConfig) []*age
 		})
 	}
 	return result
+}
+
+// employeeAssistantReadTool is the baseline knowledge/file-reading capability.
+// Optional web access is registered separately after tenant capability validation.
+func employeeAssistantReadTool(name string) bool {
+	switch name {
+	case tools.ToolKnowledgeSearch, tools.ToolGrepChunks, tools.ToolListKnowledgeChunks,
+		tools.ToolGetDocumentInfo, tools.ToolQueryKnowledgeGraph, tools.ToolWikiSearch,
+		tools.ToolWikiReadPage, tools.ToolWikiReadSourceDoc, tools.ToolDataSchema, tools.ToolDataAnalysis:
+		return true
+	default:
+		return false
+	}
+}
+
+// Session files carry conversation authority; knowledge files retain live KB authority.
+// The captured document set chooses the boundary before any content is opened.
+type sessionDocumentTool struct {
+	types.Tool
+	sessionTool types.Tool
+	documents   *tools.DataAnalysisTool
+}
+
+func (t *sessionDocumentTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	var input struct {
+		KnowledgeID string `json:"knowledge_id"`
+	}
+	if err := json.Unmarshal(args, &input); err == nil && t.documents.IsSessionDocument(input.KnowledgeID) {
+		return t.sessionTool.Execute(ctx, args)
+	}
+	return t.Tool.Execute(ctx, args)
+}
+
+// Both table tools share one loader; its cleanup is idempotent.
+func (t *sessionDocumentTool) Cleanup(ctx context.Context) {
+	t.documents.Cleanup(ctx)
 }

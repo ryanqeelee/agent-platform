@@ -52,6 +52,55 @@ func (r *webSearchProviderRepository) GetDefault(ctx context.Context, tenantID u
 	return &provider, nil
 }
 
+// EnsureDefault provisions the tenant-owned keyless provider only before any
+// provider history exists. Locking the tenant row makes concurrent activation
+// and tenant-creation replays converge on one provider.
+func (r *webSearchProviderRepository) EnsureDefault(
+	ctx context.Context,
+	tenantID uint64,
+) (*types.WebSearchProviderEntity, error) {
+	var provider *types.WebSearchProviderEntity
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var tenant types.Tenant
+		if err := tx.WithContext(ctx).Clauses(forUpdateClause()).Select("id").
+			Where("id = ?", tenantID).Take(&tenant).Error; err != nil {
+			return err
+		}
+
+		var providerCount int64
+		if err := tx.WithContext(ctx).Unscoped().Model(&types.WebSearchProviderEntity{}).
+			Where("tenant_id = ?", tenantID).Count(&providerCount).Error; err != nil {
+			return err
+		}
+		if providerCount > 0 {
+			var existing types.WebSearchProviderEntity
+			err := tx.WithContext(ctx).Where(
+				"tenant_id = ? AND is_default = ?", tenantID, true,
+			).First(&existing).Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				provider = nil
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			provider = &existing
+			return nil
+		}
+
+		provider = &types.WebSearchProviderEntity{
+			TenantID:    tenantID,
+			Name:        "Keenable",
+			Provider:    types.WebSearchProviderTypeKeenable,
+			Description: "Platform-provisioned keyless web search",
+			Parameters:  types.WebSearchProviderParameters{},
+			IsDefault:   true,
+		}
+		return tx.WithContext(ctx).Create(provider).Error
+	})
+	return provider, err
+}
+
 // List lists all web search providers for a tenant
 func (r *webSearchProviderRepository) List(ctx context.Context, tenantID uint64) ([]*types.WebSearchProviderEntity, error) {
 	var providers []*types.WebSearchProviderEntity

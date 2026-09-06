@@ -790,11 +790,6 @@
               </div>
             </template>
           </div>
-          <div class="shared-detail-drawer-footer">
-            <t-button theme="primary" block @click="handleUseSharedAgentInChat(currentSharedAgent)">
-              {{ $t('agent.detail.useInChat') }}
-            </t-button>
-          </div>
         </div>
       </div>
     </Transition>
@@ -819,11 +814,8 @@ import { deleteAgent, copyAgent, type CustomAgent } from '@/api/agent'
 import { useChatResourcesStore } from '@/stores/chatResources'
 import { formatStringDate } from '@/utils/index'
 import { useI18n } from 'vue-i18n'
-import { createSessions } from '@/api/chat/index'
 import { useOrganizationStore } from '@/stores/organization'
 import { setSharedAgentDisabledByMe, listOrganizationSharedAgents } from '@/api/organization'
-import { useSettingsStore } from '@/stores/settings'
-import { useMenuStore } from '@/stores/menu'
 import type { SharedAgentInfo, OrganizationSharedAgentItem } from '@/api/organization'
 import AgentEditorModal from './AgentEditorModal.vue'
 import ContextualGuide from '@/components/ContextualGuide.vue'
@@ -1294,41 +1286,6 @@ function handleSpaceAgentCardClick(shared: OrganizationSharedAgentItem) {
 function closeSharedAgentDetail() {
   sharedDetailVisible.value = false
   currentSharedAgent.value = null
-}
-
-/** 在对话中使用共享智能体：创建新会话并跳转 */
-async function handleUseSharedAgentInChat(shared: SharedAgentInfo) {
-  if (!shared.agent?.id) return
-  closeSharedAgentDetail()
-  const settingsStore = useSettingsStore()
-  const menuStore = useMenuStore()
-  settingsStore.selectAgent(shared.agent.id, String(shared.source_tenant_id))
-  try {
-    const res = await createSessions({})
-    if (res?.data?.id) {
-      const sessionId = res.data.id
-      const now = new Date().toISOString()
-      menuStore.updataMenuChildren({
-        title: t('createChat.newSessionTitle'),
-        path: `chat/${sessionId}`,
-        id: sessionId,
-        isMore: false,
-        isNoTitle: true,
-        created_at: now,
-        updated_at: now
-      })
-      menuStore.changeIsFirstSession(false)
-      router.push({
-        path: `/platform/chat/${sessionId}`,
-        query: { agent_id: shared.agent.id, source_tenant_id: String(shared.source_tenant_id) }
-      })
-    } else {
-      MessagePlugin.error(t('createChat.messages.createFailed'))
-    }
-  } catch (e) {
-    console.error('Create session for shared agent failed', e)
-    MessagePlugin.error(t('createChat.messages.createError'))
-  }
 }
 
 const handleEdit = (agent: AgentWithUI) => {
@@ -2652,13 +2609,6 @@ defineExpose({
   width: 14px;
   height: 14px;
   flex-shrink: 0;
-}
-
-.shared-detail-drawer-footer {
-  padding: 16px 24px;
-  border-top: 1px solid var(--td-component-stroke);
-  flex-shrink: 0;
-  background: var(--td-bg-color-container);
 }
 
 .shared-detail-drawer-enter-active,

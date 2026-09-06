@@ -4399,7 +4399,9 @@ export default {
     webSearch: {
       toggleOn: '웹 검색 켜기',
       toggleOff: '웹 검색 끄기',
-      notConfigured: '웹 검색 엔진이 구성되지 않았습니다'
+      notConfigured: '웹 검색 엔진이 구성되지 않았습니다',
+      loading: '기업 웹 검색 사용 가능 여부를 확인하는 중입니다',
+      enterpriseUnavailable: '현재 기업에서 웹 검색을 사용할 수 없습니다. 관리자에게 문의하세요.'
     }
   },
   manualEditor: {

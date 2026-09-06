@@ -14,6 +14,9 @@ type WebSearchProviderRepository interface {
 	GetByID(ctx context.Context, tenantID uint64, id string) (*types.WebSearchProviderEntity, error)
 	// GetDefault retrieves the default provider (is_default=true) for a tenant, or nil if none.
 	GetDefault(ctx context.Context, tenantID uint64) (*types.WebSearchProviderEntity, error)
+	// EnsureDefault creates the built-in keyless default only when the tenant has never had a provider.
+	// A tenant with any live or soft-deleted provider is left unchanged; nil means it has no live default.
+	EnsureDefault(ctx context.Context, tenantID uint64) (*types.WebSearchProviderEntity, error)
 	// List lists all web search providers for a tenant
 	List(ctx context.Context, tenantID uint64) ([]*types.WebSearchProviderEntity, error)
 	// Update updates a web search provider

@@ -2438,7 +2438,9 @@ export default {
     webSearch: {
       toggleOn: 'Enable Web Search',
       toggleOff: 'Disable Web Search',
-      notConfigured: 'Web search engine not configured'
+      notConfigured: 'Web search engine not configured',
+      loading: 'Checking enterprise web search availability',
+      enterpriseUnavailable: 'Web search is not enabled for your enterprise. Contact an administrator.'
     },
     knowledgeBase: 'Knowledge Base',
     knowledgeBaseWithCount: 'Knowledge Base ({count})',

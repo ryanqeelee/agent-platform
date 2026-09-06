@@ -45,11 +45,11 @@ func TestResolveFileServiceUsesWorkspaceDefaultForStubTenant(t *testing.T) {
 	t.Setenv("STORAGE_TYPE", "local")
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&types.Tenant{}, &types.StorageBackend{}))
+	require.NoError(t, db.AutoMigrate(&types.Tenant{}, &types.StorageBackend{}, &types.WebSearchProviderEntity{}))
 
 	tenantRepo := repository.NewTenantRepository(db)
 	storageRepo := repository.NewStorageBackendRepository(db)
-	tenant, err := service.NewTenantService(tenantRepo, storageRepo).CreateTenant(
+	tenant, err := service.NewTenantService(tenantRepo, storageRepo, repository.NewWebSearchProviderRepository(db)).CreateTenant(
 		context.Background(), &types.Tenant{Name: "workspace"})
 	require.NoError(t, err)
 	require.NotNil(t, tenant.DefaultStorageBackendID)

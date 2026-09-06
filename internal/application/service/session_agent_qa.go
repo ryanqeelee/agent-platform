@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
@@ -80,6 +81,14 @@ func (s *sessionService) AgentQA(
 		return err
 	}
 
+	if agentConfig.EmployeeAssistant {
+		attachments, err := s.messageRepo.GetSessionAttachments(ctx, sessionID)
+		if err != nil {
+			return fmt.Errorf("load conversation documents: %w", err)
+		}
+		agentConfig.SessionAttachments = sessionTableAttachments(attachments)
+	}
+
 	// Set VLM model ID for tool result image analysis (runtime-only field)
 	if req.CustomAgent != nil && req.CustomAgent.Config.VLMModelID != "" {
 		agentConfig.VLMModelID = req.CustomAgent.Config.VLMModelID
@@ -123,7 +132,7 @@ func (s *sessionService) AgentQA(
 	// actually run. A disabled KB scope makes all KB tools ineffective, so it
 	// must not force users to configure an otherwise-unused rerank model.
 	var rerankModel rerank.Reranker
-	if agentRequiresRerankModel(req.CustomAgent) {
+	if agentRequiresRerankModel(req.CustomAgent) && agentHasKnowledgeScope(agentConfig) {
 		rerankModelID := req.CustomAgent.Config.RerankModelID
 		if rerankModelID != "" {
 			rerankModel, err = s.modelService.GetRerankModel(ctx, rerankModelID)
@@ -171,35 +180,38 @@ func (s *sessionService) AgentQA(
 	// are running cannot rebuild the VM between tool calls. Staging below is
 	// the first resolve: if the previous turn left a stale mark, that is
 	// where the new image is picked up.
-	releaseTurn := s.holdSandboxTurn(ctx, sessionID, agentConfig.SandboxConfigID)
-	defer releaseTurn()
-
-	// Reconcile all durable session attachments into the session's remote
-	// sandbox before the model can request shell or skill execution. The
-	// durable storage URL — not the ephemeral sandbox path — remains the
-	// source of truth. Gated on the sandbox manager advertising a session
-	// filesystem capability so provider-neutral remote wiring stays here.
 	var stagedAttachments []stagedSessionAttachment
-	stager, ok := s.agentService.(sessionAttachmentStager)
-	if !ok {
-		return errors.New("agent service does not support session attachment staging")
-	}
-	// Probe the backend this session's sandbox actually runs on. Gating on the
-	// process-wide manager instead could inspect a different backend than the
-	// named workspace config selected by this agent.
-	inputStore, storeErr := stager.sessionSandboxInputStore(ctx, sessionID, agentConfig.SandboxConfigID)
-	if storeErr != nil {
-		return fmt.Errorf("resolve sandbox file store for session %s: %w", sessionID, storeErr)
-	}
-	if inputStore != nil {
-		sessionAttachments, loadErr := s.messageRepo.GetSessionAttachments(ctx, sessionID)
-		if loadErr != nil {
-			return fmt.Errorf("load session attachments for sandbox staging: %w", loadErr)
+	if !agentConfig.EmployeeAssistant {
+		releaseTurn := s.holdSandboxTurn(ctx, sessionID, agentConfig.SandboxConfigID)
+		defer releaseTurn()
+
+		// Reconcile all durable session attachments into the session's remote
+		// sandbox before the model can request shell or skill execution. The
+		// durable storage URL — not the ephemeral sandbox path — remains the
+		// source of truth. Gated on the sandbox manager advertising a session
+		// filesystem capability so provider-neutral remote wiring stays here.
+		stager, ok := s.agentService.(sessionAttachmentStager)
+		if !ok {
+			return errors.New("agent service does not support session attachment staging")
 		}
-		stagedAttachments, err = stager.stageSessionAttachments(ctx, sessionID, agentConfig.SandboxConfigID, req.Session.TenantID, sessionAttachments)
-		if err != nil {
-			return fmt.Errorf("restore session attachments into sandbox: %w", err)
+		// Probe the backend this session's sandbox actually runs on. Gating on the
+		// process-wide manager instead could inspect a different backend than the
+		// named workspace config selected by this agent.
+		inputStore, storeErr := stager.sessionSandboxInputStore(ctx, sessionID, agentConfig.SandboxConfigID)
+		if storeErr != nil {
+			return fmt.Errorf("resolve sandbox file store for session %s: %w", sessionID, storeErr)
 		}
+		if inputStore != nil {
+			sessionAttachments, loadErr := s.messageRepo.GetSessionAttachments(ctx, sessionID)
+			if loadErr != nil {
+				return fmt.Errorf("load session attachments for sandbox staging: %w", loadErr)
+			}
+			stagedAttachments, err = stager.stageSessionAttachments(ctx, sessionID, agentConfig.SandboxConfigID, req.Session.TenantID, sessionAttachments)
+			if err != nil {
+				return fmt.Errorf("restore session attachments into sandbox: %w", err)
+			}
+		}
+
 	}
 
 	// Create agent engine with EventBus
@@ -221,7 +233,7 @@ func (s *sessionService) AgentQA(
 	// Recall long-term memory for this turn. Like the RAG path this is a
 	// no-model read, and an agent may opt out of it entirely.
 	memoryCtx := types.ApplyAgentMemoryPreference(ctx, agentConfig.MemoryEnabled)
-	if s.memoryService != nil {
+	if !agentConfig.EmployeeAssistant && s.memoryService != nil {
 		recall := s.memoryService.Recall(memoryCtx, req.Query)
 		if recall.Prompt != "" {
 			engine.SetMemoryPrompt(recall.Prompt)
@@ -295,6 +307,7 @@ func (s *sessionService) buildAgentConfig(
 ) (*types.AgentConfig, *sharedAgentSearchScope, error) {
 	customAgent := req.CustomAgent
 	agentConfig := &types.AgentConfig{
+		EmployeeAssistant:           customAgent.ID == types.BuiltinEmployeeAssistantID,
 		MaxIterations:               customAgent.Config.MaxIterations,
 		Temperature:                 customAgent.Config.Temperature,
 		WebSearchEnabled:            customAgent.Config.WebSearchEnabled && req.WebSearchEnabled,
@@ -321,7 +334,9 @@ func (s *sessionService) buildAgentConfig(
 	}
 
 	// Configure skills based on CustomAgentConfig
-	s.configureSkillsFromAgent(ctx, agentConfig, customAgent)
+	if !agentConfig.EmployeeAssistant {
+		s.configureSkillsFromAgent(ctx, agentConfig, customAgent)
+	}
 
 	sharedScope, err := s.buildSharedAgentSearchScope(ctx, req)
 	if err != nil {
@@ -332,18 +347,21 @@ func (s *sessionService) buildAgentConfig(
 	// The workspace is the one on the context rather than the agent's owner,
 	// because that is where resolveSandboxForExecution reads it; skillsForRun
 	// picks the config the same way the sandbox resolution does.
-	sandboxTenantID, _ := types.TenantIDFromContext(ctx)
-	skillConfigID, tenantSkills := skillsForRun(
-		ctx, s.sandboxPinner, s.sandboxConfigRepo, s.tenantSkillRepo,
-		sandboxTenantID, req.Session.ID, agentConfig.SandboxConfigID,
-	)
-	agentConfig.TenantSkills = tenantSkills
-	if len(tenantSkills) > 0 {
-		// The config named here is the one the skills came from, which is the
-		// pinned one whenever it differs from the agent's - the only case the
-		// line is worth reading.
-		logger.Infof(ctx, "Sandbox config %s offers %d installed skill(s) to this run",
-			skillConfigID, len(tenantSkills))
+	if !agentConfig.EmployeeAssistant {
+		sandboxTenantID, _ := types.TenantIDFromContext(ctx)
+		skillConfigID, tenantSkills := skillsForRun(
+			ctx, s.sandboxPinner, s.sandboxConfigRepo, s.tenantSkillRepo,
+			sandboxTenantID, req.Session.ID, agentConfig.SandboxConfigID,
+		)
+		agentConfig.TenantSkills = tenantSkills
+		if len(tenantSkills) > 0 {
+			// The config named here is the one the skills came from, which is the
+			// pinned one whenever it differs from the agent's - the only case the
+			// line is worth reading.
+			logger.Infof(ctx, "Sandbox config %s offers %d installed skill(s) to this run",
+				skillConfigID, len(tenantSkills))
+		}
+
 	}
 
 	// Resolve knowledge bases using shared helper
@@ -646,4 +664,22 @@ func (s *sessionService) configureSkillsFromAgent(
 		agentConfig.SkillsEnabled = false
 		logger.Warnf(ctx, "Unknown SkillsSelectionMode=%s: skills disabled", customAgent.Config.SkillsSelectionMode)
 	}
+}
+
+// Only persisted, identified table attachments are offered to SQL tools. Text
+// and image attachments already enter the existing parsed-content/vision path.
+func sessionTableAttachments(attachments types.MessageAttachments) types.MessageAttachments {
+	result := make(types.MessageAttachments, 0, len(attachments))
+	seen := make(map[string]bool)
+	for _, att := range attachments {
+		if att.ID == "" || seen[att.ID] {
+			continue
+		}
+		switch strings.TrimPrefix(strings.ToLower(att.FileType), ".") {
+		case "csv", "xlsx", "xls":
+			seen[att.ID] = true
+			result = append(result, att)
+		}
+	}
+	return result
 }

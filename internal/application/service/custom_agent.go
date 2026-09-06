@@ -119,6 +119,7 @@ type customAgentService struct {
 	knowledgeRepo        interfaces.KnowledgeRepository
 	scenarioCapabilities interfaces.AssistantScenarioCapabilityResolver
 	mcpServices          interfaces.MCPServiceService
+	webSearchProviders   interfaces.WebSearchProviderRepository
 }
 
 // NewCustomAgentService creates a new custom agent service
@@ -132,6 +133,7 @@ func NewCustomAgentService(
 	knowledgeRepo interfaces.KnowledgeRepository,
 	scenarioCapabilities interfaces.AssistantScenarioCapabilityResolver,
 	mcpServices interfaces.MCPServiceService,
+	webSearchProviders interfaces.WebSearchProviderRepository,
 ) interfaces.CustomAgentService {
 	return &customAgentService{
 		repo:                 repo,
@@ -143,6 +145,7 @@ func NewCustomAgentService(
 		knowledgeRepo:        knowledgeRepo,
 		scenarioCapabilities: scenarioCapabilities,
 		mcpServices:          mcpServices,
+		webSearchProviders:   webSearchProviders,
 	}
 }
 
@@ -156,7 +159,22 @@ func assistantScenarioCapabilityUse(
 ) (types.AssistantScenarioCapabilities, error) {
 	use := types.AssistantScenarioCapabilities{
 		ExternalSearch: config.WebSearchEnabled,
-		Tools:          config.AgentMode == types.AgentModeSmartReasoning,
+	}
+	// Basic read tools belong to employee assistance, not optional execution extensions.
+	allowed := config.AllowedTools
+	if config.AgentMode == types.AgentModeSmartReasoning && len(allowed) == 0 {
+		allowed = tools.DefaultAllowedTools()
+	}
+	for _, name := range allowed {
+		if name == tools.ToolWebSearch || name == tools.ToolWebFetch {
+			use.ExternalSearch = true
+		} else if !employeeAssistantReadTool(name) {
+			use.Tools = true
+		}
+	}
+	if config.SandboxConfigID != "" || config.SkillsSelectionMode == "all" ||
+		config.SkillsSelectionMode == "selected" && len(config.SelectedSkills) > 0 {
+		use.Tools = true
 	}
 	switch config.MCPSelectionMode {
 	case "", "none":
@@ -404,6 +422,9 @@ func (s *customAgentService) GetAgentByID(ctx context.Context, id string) (*type
 	if !ok {
 		return nil, ErrInvalidTenantID
 	}
+	if id == types.BuiltinEmployeeAssistantID {
+		return s.employeeAssistant(ctx, tenantID)
+	}
 
 	// Check if it's a built-in agent using the registry
 	if types.IsBuiltinAgentID(id) {
@@ -485,6 +506,14 @@ func (s *customAgentService) ListAgents(ctx context.Context) ([]*types.CustomAge
 
 	// Add built-in agents in order
 	for _, builtinID := range builtinIDs {
+		if builtinID == types.BuiltinEmployeeAssistantID {
+			agent, err := s.employeeAssistant(ctx, tenantID)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, agent)
+			continue
+		}
 		if builtinInDB[builtinID] {
 			// Use customized config from database
 			for _, agent := range allAgents {
@@ -514,6 +543,9 @@ func (s *customAgentService) ListAgents(ctx context.Context) ([]*types.CustomAge
 
 // UpdateAgent updates an agent's information
 func (s *customAgentService) UpdateAgent(ctx context.Context, agent *types.CustomAgent) (*types.CustomAgent, error) {
+	if agent.ID == types.BuiltinEmployeeAssistantID {
+		return nil, ErrCannotModifyBuiltin
+	}
 	if agent.ID == "" {
 		logger.Error(ctx, "Agent ID is empty")
 		return nil, errors.New("agent ID cannot be empty")

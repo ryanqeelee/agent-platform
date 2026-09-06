@@ -12,6 +12,7 @@ import (
 
 // BuiltinAgentID constants for built-in agents
 const (
+	BuiltinEmployeeAssistantID = "builtin-employee-assistant"
 	// BuiltinQuickAnswerID is the ID for the built-in quick answer (RAG) agent
 	BuiltinQuickAnswerID = "builtin-quick-answer"
 	// BuiltinSmartReasoningID is the ID for the built-in smart reasoning (ReAct) agent
@@ -63,6 +64,8 @@ const (
 
 // CustomAgent represents a configurable AI agent (similar to GPTs)
 type CustomAgent struct {
+	// Runtime readiness only; provider credentials remain platform-owned.
+	WebSearchReady *bool `json:"web_search_ready,omitempty" gorm:"-"`
 	// Unique identifier of the agent (composite primary key with TenantID)
 	// For built-in agents, this is 'builtin-quick-answer' or 'builtin-smart-reasoning'
 	// For custom agents, this is a UUID
@@ -580,6 +583,7 @@ var BuiltinAgentRegistry = map[string]func(uint64) *CustomAgent{}
 // fully usable via GetAgentByID because the YAML entries still register them in
 // BuiltinAgentRegistry.
 var builtinAgentIDsOrdered = []string{
+	BuiltinEmployeeAssistantID,
 	BuiltinQuickAnswerID,
 	BuiltinSmartReasoningID,
 	BuiltinWikiResearcherID,

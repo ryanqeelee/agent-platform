@@ -67,7 +67,7 @@ import { ref, watch, onMounted, nextTick, computed } from 'vue';
 import ContextualGuide from '@/components/ContextualGuide.vue';
 import InputField from '@/components/Input-field.vue';
 import { createSessions } from "@/api/chat/index";
-import { getSuggestedQuestions } from "@/api/agent/index";
+import { BUILTIN_EMPLOYEE_ASSISTANT_ID, getSuggestedQuestions } from "@/api/agent/index";
 import type { SuggestedQuestion } from "@/api/agent/index";
 import { useMenuStore } from '@/stores/menu';
 import { useSettingsStore } from '@/stores/settings';
@@ -145,9 +145,7 @@ const fetchSuggestedQuestions = async () => {
     const fetchId = ++suggestedQuestionsFetchId;
     sqLoading.value = true;
     try {
-        const agentId = settingsStore.selectedAgentId;
-        if (!agentId) return;
-        const res = await getSuggestedQuestions(agentId, settingsStore.getSuggestedQuestionsParams());
+        const res = await getSuggestedQuestions(BUILTIN_EMPLOYEE_ASSISTANT_ID, settingsStore.getSuggestedQuestionsParams());
         if (fetchId === suggestedQuestionsFetchId) {
             sqCardsRevealed.value = false;
             sqRenderKey.value++;
@@ -174,7 +172,6 @@ const debouncedFetch = () => {
 // 监听 Agent / 知识库 / 文件 / 标签 / MCP / Skill @mention
 watch(
     () => ({
-        agentId: settingsStore.selectedAgentId,
         kbs: settingsStore.settings.selectedKnowledgeBases,
         files: settingsStore.settings.selectedFiles,
         tags: settingsStore.settings.selectedTags,
@@ -198,24 +195,10 @@ const sendMsg = (value: string, modelId: string, mentionedItems: any[], imageFil
 }
 
 async function createNewSession(value: string, modelId: string, mentionedItems: any[] = [], imageFiles: any[] = [], attachmentFiles: any[] = []) {
-    const selectedKbs = settingsStore.settings.selectedKnowledgeBases || [];
-    const selectedFiles = settingsStore.settings.selectedFiles || [];
-
-    // 构建 session 数据，包含 Agent 配置
-    const sessionData: any = {};
-
-    // 添加 Agent 配置（知识库信息在 agent_config 中）
-    sessionData.agent_config = {
-        enabled: true,
-        max_iterations: settingsStore.agentConfig.maxIterations,
-        temperature: settingsStore.agentConfig.temperature,
-        knowledge_bases: selectedKbs,  // 所有选中的知识库
-        knowledge_ids: selectedFiles,  // 所有选中的普通知识/文件
-        allowed_tools: settingsStore.agentConfig.allowedTools
-    };
-
     try {
-        const res = await createSessions(sessionData);
+        // Agent execution config is canonical on the backend. The first chat
+        // request carries the user's current KB/file selections and uploads.
+        const res = await createSessions({});
         if (res.data && res.data.id) {
             await navigateToSession(res.data.id, value, modelId, mentionedItems, imageFiles, attachmentFiles);
         } else {

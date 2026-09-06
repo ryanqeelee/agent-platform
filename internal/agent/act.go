@@ -425,7 +425,7 @@ func (e *AgentEngine) runToolCall(
 		decoded.ModelArguments = ""
 		decoded.Function.Arguments = repaired
 		decodedCalls := []types.LLMToolCall{decoded}
-		e.modelContext.DecodeToolCalls(decodedCalls)
+		e.normalizeAndDecodeToolCalls(decodedCalls)
 		tc.Function.Arguments = decodedCalls[0].Function.Arguments
 		tc.ArgumentResolution = decodedCalls[0].ArgumentResolution
 		tc.UnresolvedHandles = decodedCalls[0].UnresolvedHandles

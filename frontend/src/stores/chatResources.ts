@@ -252,14 +252,13 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
     })
   }
 
-  /** 并行预取对话输入栏及列表页常用的空间级资源 */
+  /** 并行预取员工对话输入栏需要的空间级资源。 */
   async function prefetchChatInput(force = false): Promise<void> {
     const orgStore = useOrganizationStore()
     await Promise.all([
       ensureKnowledgeBases(force),
       ensureAgents(force),
       ensureModels(force),
-      ensureWebSearchProviders(force),
       orgStore.fetchOrganizations({ force }),
     ])
   }

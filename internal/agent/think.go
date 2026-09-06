@@ -107,7 +107,7 @@ func (e *AgentEngine) streamLLMToEventBus(
 				chunk.Content += answerDecoder.Flush()
 			}
 		}
-		e.modelContext.DecodeToolCalls(chunk.ToolCalls)
+		e.normalizeAndDecodeToolCalls(chunk.ToolCalls)
 
 		if chunk.Content != "" {
 			isExtracted := chunk.Data != nil && chunk.Data["source"] != nil
@@ -151,7 +151,7 @@ func (e *AgentEngine) streamLLMToEventBus(
 	// Some providers stream tool-call argument fragments but expose the
 	// accumulated call in the final chunk. Decode once more after assembly so
 	// handles split across provider chunks cannot leak into tool execution.
-	e.modelContext.DecodeToolCalls(result.ToolCalls)
+	e.normalizeAndDecodeToolCalls(result.ToolCalls)
 	for _, toolCall := range result.ToolCalls {
 		if len(toolCall.UnresolvedHandles) == 0 {
 			continue

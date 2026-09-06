@@ -168,6 +168,13 @@ func (s *sessionService) resolveChatModelID(
 	summaryModelID := req.SummaryModelID
 	customAgent := req.CustomAgent
 	session := req.Session
+	if customAgent != nil && customAgent.ID == types.BuiltinEmployeeAssistantID {
+		models, err := s.modelService.ListModels(ctx)
+		if err != nil {
+			return "", err
+		}
+		return activePlatformModelID(models, types.ModelTypeKnowledgeQA), nil
+	}
 	if customAgent != nil {
 		configuredModelID := strings.TrimSpace(customAgent.Config.ModelID)
 		if configuredModelID != "" {

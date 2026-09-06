@@ -98,9 +98,6 @@
                       {{ detailCache[item.id].data.org_name || item.orgName }}
                     </span>
                   </span>
-                  <span v-if="agentIdForDetail && (detailCache[item.id].data.org_name || item.orgName)" class="detail-readonly-hint">
-                    {{ $t('mentionDetail.readOnlyFromAgent') }}
-                  </span>
                 </div>
               </template>
             </div>
@@ -264,7 +261,6 @@ import { useI18n } from 'vue-i18n';
 import { getKnowledgeBaseById } from '@/api/knowledge-base';
 import { getKnowledgeDetails } from '@/api/knowledge-base';
 import { useOrganizationStore } from '@/stores/organization';
-import { useSettingsStore } from '@/stores/settings';
 import { SKILL_ICON, type MentionItem, type MentionItemType } from '@/types/mention';
 
 type DetailState = { loading: boolean; error?: string; data?: any };
@@ -289,7 +285,6 @@ const emit = defineEmits(['select', 'update:activeIndex', 'loadMore']);
 const router = useRouter();
 const { t } = useI18n();
 const orgStore = useOrganizationStore();
-const settingsStore = useSettingsStore();
 const menuRef = ref<HTMLElement | null>(null);
 const listRef = ref<HTMLElement | null>(null);
 const detailCache = ref<Record<string, DetailState>>({});
@@ -301,14 +296,6 @@ let scrollTimer: ReturnType<typeof setTimeout> | null = null;
 onBeforeUnmount(() => {
   if (scrollTimer) clearTimeout(scrollTimer);
 });
-
-// 共享智能体上下文：用于请求知识库/知识详情时带 agent_id，后端据此校验权限
-const agentIdForDetail = computed(() => {
-  const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
-  const agentId = settingsStore.selectedAgentId;
-  return sourceTenantId && agentId ? agentId : undefined;
-});
-const agentSourceTenantIdForDetail = computed(() => settingsStore.selectedAgentSourceTenantId ?? undefined);
 
 const kbItems = computed(() => props.items.filter(item => item.type === 'kb'));
 const fileItems = computed(() => props.items.filter(item => item.type === 'file'));
@@ -446,11 +433,7 @@ async function fetchKbDetail(item: { id: string }) {
   if (detailCache.value[item.id]?.data || detailCache.value[item.id]?.loading) return;
   detailCache.value = { ...detailCache.value, [item.id]: { loading: true } };
   try {
-    const opts = agentIdForDetail.value ? {
-      agent_id: agentIdForDetail.value,
-      agent_source_tenant_id: agentSourceTenantIdForDetail.value,
-    } : undefined;
-    const res: any = await getKnowledgeBaseById(item.id, opts);
+    const res: any = await getKnowledgeBaseById(item.id);
     detailCache.value = { ...detailCache.value, [item.id]: { loading: false, data: res?.data ?? res } };
   } catch (e: any) {
     detailCache.value = { ...detailCache.value, [item.id]: { loading: false, error: e?.message || 'Failed to load' } };
@@ -461,11 +444,7 @@ async function fetchFileDetail(item: { id: string }) {
   if (detailCache.value[item.id]?.data || detailCache.value[item.id]?.loading) return;
   detailCache.value = { ...detailCache.value, [item.id]: { loading: true } };
   try {
-    const opts = agentIdForDetail.value ? {
-      agent_id: agentIdForDetail.value,
-      agent_source_tenant_id: agentSourceTenantIdForDetail.value,
-    } : undefined;
-    const res: any = await getKnowledgeDetails(item.id, opts);
+    const res: any = await getKnowledgeDetails(item.id);
     detailCache.value = { ...detailCache.value, [item.id]: { loading: false, data: res?.data ?? res } };
   } catch (e: any) {
     detailCache.value = { ...detailCache.value, [item.id]: { loading: false, error: e?.message || 'Failed to load' } };

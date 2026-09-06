@@ -1,5 +1,5 @@
 import { safeRemoveItem, safeSetItem } from "@/composables/preferenceStorage";
-import { reconcileBuiltinAgentMode } from "@/utils/agent-mode";
+import { BUILTIN_EMPLOYEE_ASSISTANT_ID } from "../api/agent/constants";
 
 export const SETTINGS_STORAGE_KEY = "WeKnora_settings";
 
@@ -21,9 +21,29 @@ type ReconcilableSettings = {
   selectedTools?: unknown;
   selectedFileKbMap?: unknown;
   enableMemory?: unknown;
+  webSearchEnabled?: boolean;
   isAgentEnabled: boolean;
   selectedAgentId?: string;
+  selectedAgentSourceTenantId?: string | null;
 };
+
+/** Keep legacy browser state from selecting a different authenticated employee agent. */
+export function enforceEmployeeAssistantSelection<T extends ReconcilableSettings>(loaded: T): boolean {
+  let changed = false;
+  if (loaded.selectedAgentId !== BUILTIN_EMPLOYEE_ASSISTANT_ID) {
+    loaded.selectedAgentId = BUILTIN_EMPLOYEE_ASSISTANT_ID;
+    changed = true;
+  }
+  if (loaded.selectedAgentSourceTenantId !== null) {
+    loaded.selectedAgentSourceTenantId = null;
+    changed = true;
+  }
+  if (loaded.isAgentEnabled !== true) {
+    loaded.isAgentEnabled = true;
+    changed = true;
+  }
+  return changed;
+}
 
 function reconcileLoadedSettings<T extends ReconcilableSettings>(loaded: T): T {
   loaded.selectedTags ||= [];
@@ -34,8 +54,12 @@ function reconcileLoadedSettings<T extends ReconcilableSettings>(loaded: T): T {
   if (removedLegacyMemorySetting) {
     delete loaded.enableMemory;
   }
-  const reconciledAgentMode = reconcileBuiltinAgentMode(loaded);
-  if (removedLegacyMemorySetting || reconciledAgentMode) {
+  const addedWebSearchDefault = typeof loaded.webSearchEnabled !== "boolean";
+  if (addedWebSearchDefault) {
+    loaded.webSearchEnabled = true;
+  }
+  const reconciledEmployeeAssistant = enforceEmployeeAssistantSelection(loaded);
+  if (removedLegacyMemorySetting || addedWebSearchDefault || reconciledEmployeeAssistant) {
     safeSetItem(SETTINGS_STORAGE_KEY, JSON.stringify(loaded));
   }
   return loaded;
@@ -53,7 +77,7 @@ function resetStoredSettings<T extends ReconcilableSettings>(
   return reconcileLoadedSettings(cloneSettings(defaultSettings));
 }
 
-/** Load settings from localStorage, reconcile builtin agent mode, fall back on corruption. */
+/** Load settings from localStorage, enforce employee assistant selection, fall back on corruption. */
 export function loadAndReconcileSettings<T extends ReconcilableSettings>(
   defaultSettings: T,
 ): T {

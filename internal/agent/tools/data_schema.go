@@ -27,6 +27,7 @@ type DataSchemaTool struct {
 	targetChunkTypes []types.ChunkType
 	searchTargets    types.SearchTargets
 	scopeEnforced    bool
+	sessionDocuments *DataAnalysisTool
 }
 
 // WithSearchTargets enables Agent request-scope authorization. An Agent turn
@@ -35,6 +36,14 @@ type DataSchemaTool struct {
 func (t *DataSchemaTool) WithSearchTargets(searchTargets types.SearchTargets) *DataSchemaTool {
 	t.searchTargets = searchTargets
 	t.scopeEnforced = true
+	return t
+}
+
+// WithSessionDocuments reuses DataAnalysisTool's captured-ID and live scoped
+// loader so schema inspection observes the actual uploaded table bytes rather
+// than parsed summary chunks.
+func (t *DataSchemaTool) WithSessionDocuments(loader *DataAnalysisTool) *DataSchemaTool {
+	t.sessionDocuments = loader
 	return t
 }
 
@@ -58,6 +67,25 @@ func (t *DataSchemaTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 			Success: false,
 			Error:   fmt.Sprintf("Failed to parse input args: %v", err),
 		}, err
+	}
+	if t.sessionDocuments != nil && t.sessionDocuments.IsSessionDocument(input.KnowledgeID) {
+		schema, err := t.sessionDocuments.LoadFromKnowledgeID(ctx, input.KnowledgeID)
+		if err != nil {
+			return &types.ToolResult{
+				Success: false,
+				Error:   fmt.Sprintf("Failed to load session document '%s': %v", input.KnowledgeID, err),
+			}, err
+		}
+		return &types.ToolResult{
+			Success: true,
+			Output:  schema.Description(),
+			Data: map[string]interface{}{
+				"table_name": schema.TableName,
+				"columns":    schema.Columns,
+				"row_count":  schema.RowCount,
+				"metadata":   schema.Metadata,
+			},
+		}, nil
 	}
 
 	// Get knowledge to get TenantID (use IDOnly to support cross-tenant shared KB)

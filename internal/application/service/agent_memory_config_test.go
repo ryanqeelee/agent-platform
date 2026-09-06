@@ -20,6 +20,9 @@ func (*agentMemoryWebSearchRepo) GetByID(context.Context, uint64, string) (*type
 func (*agentMemoryWebSearchRepo) GetDefault(context.Context, uint64) (*types.WebSearchProviderEntity, error) {
 	return nil, nil
 }
+func (*agentMemoryWebSearchRepo) EnsureDefault(context.Context, uint64) (*types.WebSearchProviderEntity, error) {
+	return nil, nil
+}
 func (*agentMemoryWebSearchRepo) List(context.Context, uint64) ([]*types.WebSearchProviderEntity, error) {
 	return nil, nil
 }

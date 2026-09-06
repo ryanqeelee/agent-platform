@@ -26,13 +26,22 @@ type ListTenantsParams struct {
 
 // tenantService implements the TenantService interface
 type tenantService struct {
-	repo        interfaces.TenantRepository // Repository for tenant data operations
-	storageRepo interfaces.StorageBackendRepository
+	repo                  interfaces.TenantRepository // Repository for tenant data operations
+	storageRepo           interfaces.StorageBackendRepository
+	webSearchProviderRepo interfaces.WebSearchProviderRepository
 }
 
 // NewTenantService creates a new tenant service instance
-func NewTenantService(repo interfaces.TenantRepository, storageRepo interfaces.StorageBackendRepository) interfaces.TenantService {
-	return &tenantService{repo: repo, storageRepo: storageRepo}
+func NewTenantService(
+	repo interfaces.TenantRepository,
+	storageRepo interfaces.StorageBackendRepository,
+	webSearchProviderRepo interfaces.WebSearchProviderRepository,
+) interfaces.TenantService {
+	return &tenantService{
+		repo:                  repo,
+		storageRepo:           storageRepo,
+		webSearchProviderRepo: webSearchProviderRepo,
+	}
 }
 
 // ApplyEnterpriseActivation validates the narrow platform command and lets the
@@ -85,6 +94,11 @@ func (s *tenantService) ApplyEnterpriseActivation(
 			return nil, err
 		}
 	}
+	if result.State != types.EnterpriseActivationStateAbandoned {
+		if _, err := s.webSearchProviderRepo.EnsureDefault(ctx, result.TenantID); err != nil {
+			return nil, err
+		}
+	}
 	return result, nil
 }
 
@@ -122,6 +136,13 @@ func (s *tenantService) CreateTenant(ctx context.Context, tenant *types.Tenant) 
 	if err := s.createDefaultStorageBackend(ctx, tenant); err != nil {
 		// No related rows exist yet, so rolling the tenant back is safe and
 		// avoids leaving a workspace that cannot bind new knowledge bases.
+		_ = s.repo.DeleteTenant(ctx, tenant.ID)
+		return nil, err
+	}
+	if _, err := s.webSearchProviderRepo.EnsureDefault(ctx, tenant.ID); err != nil {
+		if tenant.DefaultStorageBackendID != nil {
+			_ = s.storageRepo.Delete(ctx, tenant.ID, *tenant.DefaultStorageBackendID)
+		}
 		_ = s.repo.DeleteTenant(ctx, tenant.ID)
 		return nil, err
 	}

@@ -96,14 +96,6 @@
               icon-name="folder" :title="kb.name" @primary="openKb(kb.id)" @hover="selectItemAt($event)" />
           </ResultGroup>
 
-          <!-- Agent matches -->
-          <ResultGroup v-if="isGroupVisible('agents') && agentMatches.length" :label="t('commandPalette.group.agents')">
-            <ResultItem v-for="(a, i) in agentMatches" :key="'a-' + a.id" :index="flatIndexFor('agents', i)"
-              :selected="selectedIndex === flatIndexFor('agents', i)" :shortcut="shortcutFor(flatIndexFor('agents', i))"
-              icon-name="user-circle" :title="a.name" :subtitle="a.description" @primary="openAgent(a.id)"
-              @hover="selectItemAt($event)" />
-          </ResultGroup>
-
           <!-- Session (chat) title matches -->
           <ResultGroup v-if="isGroupVisible('sessions') && sessionMatches.length"
             :label="t('commandPalette.group.sessionsByTitle')">
@@ -198,12 +190,11 @@ const {
   query, loading, hasSearched,
   fileGroups, messageGroups, kbMatches,
   knowledgeBases,
-  agentMatches, sessionMatches,
+  sessionMatches,
   totalChunks, totalMessages,
   clearResults,
 } = useCmdkSearch({
   lockedKbIds: () => (activeKbScope.value ? [activeKbScope.value.id] : []),
-  agentsEnabled: () => deploymentCapabilities.isSupported('agents'),
 })
 
 const drawerVisible = ref(false)
@@ -292,7 +283,7 @@ const groupOrder = computed<readonly string[]>(() => {
     // Scoped to one KB: only chunks make sense (messages disabled in useSearch).
     return ['chunks'] as const
   }
-  return ['chunks', 'messages', 'kbs', 'agents', 'sessions', 'commands'] as const
+  return ['chunks', 'messages', 'kbs', 'sessions', 'commands'] as const
 })
 
 const groupSizes = computed<Record<string, number>>(() => ({
@@ -301,7 +292,6 @@ const groupSizes = computed<Record<string, number>>(() => ({
   chunks: flatChunkItems.value.length,
   messages: flatMessageItems.value.length,
   kbs: kbMatches.value.length,
-  agents: agentMatches.value.length,
   sessions: sessionMatches.value.length,
 }))
 
@@ -360,10 +350,6 @@ const flatItems = computed<FlatItem[]>(() => {
     } else if (g === 'kbs') {
       kbMatches.value.forEach((kb) => {
         out.push({ key: `kb:${kb.id}`, group: g, run: () => openKb(kb.id) })
-      })
-    } else if (g === 'agents') {
-      agentMatches.value.forEach((a) => {
-        out.push({ key: `agent:${a.id}`, group: g, run: () => openAgent(a.id) })
       })
     } else if (g === 'sessions') {
       sessionMatches.value.forEach((s) => {
@@ -445,15 +431,6 @@ const openKb = (kbId: string) => {
   commandPaletteStore.pushRecent(query.value)
   commandPaletteStore.closePalette()
   router.push(`/platform/knowledge-bases/${kbId}`)
-}
-
-// Agents have no standalone detail route; the natural "jump" is opening a new
-// chat pre-scoped to that agent — the agent editor is a modal that requires
-// more context (permissions, edit intent) so we don't trigger it from ⌘K.
-const openAgent = (agentId: string) => {
-  commandPaletteStore.pushRecent(query.value)
-  commandPaletteStore.closePalette()
-  router.push({ path: '/platform/creatChat', query: { agent_id: agentId } })
 }
 
 const openSession = (sessionId: string) => {

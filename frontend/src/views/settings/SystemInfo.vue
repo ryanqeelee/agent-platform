@@ -32,20 +32,21 @@
           <span class="info-value">
               {{ systemInfo?.version || $t('system.unknown') }}
               <t-tag
-                v-if="systemInfo?.edition"
+                v-if="diagnostics && systemInfo?.edition"
                 :theme="systemInfo.edition === 'lite' ? 'primary' : 'default'"
                 variant="light"
                 size="small"
                 style="margin-left: 8px;"
               >{{ systemInfo.edition === 'lite' ? 'Lite' : 'Standard' }}</t-tag>
-              <span v-if="systemInfo?.commit_id" class="commit-info">
+              <span v-if="diagnostics && systemInfo?.commit_id" class="commit-info">
                 ({{ systemInfo.commit_id }})
               </span>
           </span>
         </div>
       </div>
 
-      <div v-if="authStore.isSystemAdmin && productBase" class="setting-row">
+      <template v-if="diagnostics && authStore.isSystemAdmin">
+      <div v-if="productBase" class="setting-row">
         <div class="setting-info">
           <label>产品基座诊断</label>
           <p class="desc">仅系统管理员可见</p>
@@ -203,6 +204,7 @@
         </div>
       </div>
 
+      </template>
     </div>
   </div>
 </template>
@@ -213,6 +215,7 @@ import { getProductBaseDescriptor, getSystemInfo, type ProductBaseDescriptor, ty
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
 
+const { diagnostics = false } = defineProps<{ diagnostics?: boolean }>()
 const { t, locale } = useI18n()
 const authStore = useAuthStore()
 
@@ -303,7 +306,7 @@ const loadInfo = async () => {
     
     if (systemResponse.data) {
       systemInfo.value = systemResponse.data
-      if (authStore.isSystemAdmin) {
+      if (diagnostics && authStore.isSystemAdmin) {
         try {
           const productBaseResponse = await getProductBaseDescriptor()
           productBase.value = productBaseResponse.data || null

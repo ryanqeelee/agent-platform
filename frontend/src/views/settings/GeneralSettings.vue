@@ -47,6 +47,26 @@
         </div>
       </div>
 
+      <!-- 字体大小 -->
+      <div class="setting-row">
+        <div class="setting-info">
+          <label>{{ $t('font.fontSize') }}</label>
+          <p class="desc">{{ $t('font.fontSizeDescription') }}</p>
+        </div>
+        <div class="setting-control">
+          <t-radio-group
+            v-model="localFontSize"
+            @change="handleFontSizeChange"
+          >
+            <t-radio-button value="small">{{ $t('font.size.small') }}</t-radio-button>
+            <t-radio-button value="normal">{{ $t('font.size.normal') }}</t-radio-button>
+            <t-radio-button value="large">{{ $t('font.size.large') }}</t-radio-button>
+          </t-radio-group>
+        </div>
+      </div>
+
+      <details class="advanced-preferences">
+        <summary>{{ $t('settings.personalAdvanced') }}</summary>
       <!-- 界面字体 -->
       <div class="setting-row">
         <div class="setting-info">
@@ -103,23 +123,7 @@
         </div>
       </div>
 
-      <!-- 字体大小 -->
-      <div class="setting-row">
-        <div class="setting-info">
-          <label>{{ $t('font.fontSize') }}</label>
-          <p class="desc">{{ $t('font.fontSizeDescription') }}</p>
-        </div>
-        <div class="setting-control">
-          <t-radio-group
-            v-model="localFontSize"
-            @change="handleFontSizeChange"
-          >
-            <t-radio-button value="small">{{ $t('font.size.small') }}</t-radio-button>
-            <t-radio-button value="normal">{{ $t('font.size.normal') }}</t-radio-button>
-            <t-radio-button value="large">{{ $t('font.size.large') }}</t-radio-button>
-          </t-radio-group>
-        </div>
-      </div>
+      </details>
 
       <!-- 自动下载更新开关 (Lite edition only) -->
       <div class="setting-row" v-if="authStore.isLiteMode">
@@ -275,6 +279,8 @@ const handleFontSizeChange = (val: FontSizeKey) => {
 </script>
 
 <style lang="less" scoped>
+.advanced-preferences > summary { cursor: pointer; padding: 20px 0; color: var(--td-text-color-secondary); }
+
 .general-settings {
   width: 100%;
 }

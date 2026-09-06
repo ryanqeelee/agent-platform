@@ -14,11 +14,14 @@
             <!-- 左侧导航 -->
             <div class="settings-sidebar">
               <div class="sidebar-header">
-                <h2 class="sidebar-title">{{ $t('general.settings') }}</h2>
+                <h2 class="sidebar-title">{{ settingsTitle }}</h2>
+                <p v-if="settingsSurface === 'enterprise' || currentSection === 'memory-runtime'"
+                  class="settings-tenant">{{ authStore.currentTenantName }}</p>
               </div>
               <div class="settings-nav">
-                <template v-for="group in navGroups" :key="group.key">
-                  <div class="nav-group-title">{{ group.label }}</div>
+                <component :is="group.key === 'advanced' ? 'details' : 'div'" v-for="group in navGroups" :key="group.key"
+                  :open="group.key === 'advanced' && currentSection === 'envvars' ? true : undefined">
+                  <component :is="group.key === 'advanced' ? 'summary' : 'div'" class="nav-group-title">{{ group.label }}</component>
                   <template v-for="item in group.items" :key="item.key">
                     <div :class="['nav-item', {
                       'active': currentSection === item.key,
@@ -72,7 +75,7 @@
                       </div>
                     </Transition>
                   </template>
-                </template>
+                </component>
               </div>
             </div>
 
@@ -124,8 +127,8 @@
                   </div>
 
                   <!-- 长期记忆（空间级开关） -->
-                  <div v-if="currentSection === 'memory'" class="section">
-                    <MemoryWorkspaceSettings />
+                  <div v-if="currentSection === 'memory' || currentSection === 'memory-runtime'" class="section">
+                    <MemoryWorkspaceSettings :key="currentSection" :runtime="currentSection === 'memory-runtime'" />
                   </div>
 
                   <!-- 我的记忆（个人记忆管理） -->
@@ -164,8 +167,8 @@
                   </div>
 
                   <!-- 系统信息 -->
-                  <div v-if="currentSection === 'system'" class="section">
-                    <SystemInfo />
+                  <div v-if="currentSection === 'system' || currentSection === 'diagnostics'" class="section">
+                    <SystemInfo :key="currentSection" :diagnostics="currentSection === 'diagnostics'" />
                   </div>
 
                   <!-- 系统管理员可见的全局运行时设置 -->
@@ -266,9 +269,11 @@ import {
 } from '@/config/integrations'
 import {
   SETTINGS_SECTION_MIN_ROLE,
+  settingsSurfaceForSection,
   SYSTEM_ADMIN_SETTINGS_SECTIONS,
 } from '@/config/settingsAccess'
 import { SETTINGS_SECTION_CAPABILITY } from '@/config/deploymentCapabilities'
+import { getEnterpriseAdministrationCopy } from '@/config/productShellBrand'
 import { SKILL_ICON } from '@/types/mention'
 import {
   buildSettingsRouteQuery,
@@ -284,7 +289,7 @@ const router = useRouter()
 const uiStore = useUIStore()
 const authStore = useAuthStore()
 const deploymentCapabilities = useDeploymentCapabilitiesStore()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 const currentSection = ref<string>('general')
 const currentSubSection = ref<string>('')
@@ -304,19 +309,15 @@ type NavGroup = {
   items: NavItem[]
 }
 
-// 设置二级导航的最低可见角色来自 settingsAccess.ts，和
-// internal/router/router.go 的守卫矩阵对齐。
-// 以「页面里至少有 1 个有意义的写操作所要求的最低角色」为基准，把基础设
-// 施配置（models 写、ollama 下载、websearch 写、parser/storage/vector/mcp
-// CRUD、chat-history 配置）统一收到 SystemAdmin；只读类（general / system info /
-// CRUD、sandbox 连接、skills 安装、chat-history 配置）统一收到 admin；只读类（general / system info /
-// tenant-info / members 名册）保留 viewer 可见；最高敏感的 reset api
-// key 是 owner-only。改这张表前请在 router.go 里复核对应路由组。
-//
-// 特别说明：
-// - models 和 chat-history 模型绑定属于平台控制面，只向 SystemAdmin 展示；企业成员只消费业务层
-//   的 configured/enabled 状态，不接触具体模型和供应商信息。
+// Frontend entry visibility only; existing server guards remain authoritative.
 const SYSTEM_ADMIN_SECTIONS = SYSTEM_ADMIN_SETTINGS_SECTIONS
+
+const settingsSurface = computed(() => settingsSurfaceForSection(currentSection.value))
+const settingsTitle = computed(() => {
+  if (settingsSurface.value === 'enterprise') return getEnterpriseAdministrationCopy(locale.value).eyebrow
+  if (settingsSurface.value === 'platform') return t('settings.navGroups.systemAdministration')
+  return t('general.personalSettings')
+})
 
 const normalizeSettingsSection = (section: string) => {
   return normalizeSettingsSectionFromQuery(section, route.query.tab as string | undefined)
@@ -351,7 +352,8 @@ const canSeeSection = (key: string): boolean => {
   if (SYSTEM_ADMIN_SECTIONS.has(key)) {
     return authStore.isSystemAdmin
   }
-  const min = SETTINGS_SECTION_MIN_ROLE[key] ?? 'viewer'
+  const min = SETTINGS_SECTION_MIN_ROLE[key]
+  if (!min) return false
   // Effective cross-tenant authority 和路由层一样必须 bypass，否则 cross-tenant
   // 管理员看不到自己有权操作的入口（参考 TenantMembers.vue 的 canManage）。
   if (authStore.effectiveCrossTenantAccess) return true
@@ -375,6 +377,7 @@ const navItems = computed(() => {
     { key: 'models', icon: 'control-platform', label: t('settings.modelManagement') },
     { key: 'websearch', icon: 'search', label: t('settings.webSearchConfig') },
     { key: 'chathistory', icon: 'chat', label: t('chatHistorySettings.title') },
+    { key: 'memory-runtime', icon: 'bulletpoint', label: t('settings.memoryRuntime') },
     { key: 'memory', icon: 'bulletpoint', label: t('memoryWorkspaceSettings.title') },
     { key: 'vectorstore', icon: 'data-base', label: t('settings.vectorStoreEngine') },
     { key: 'parser', icon: 'file-search', label: t('settings.parserEngine') },
@@ -382,6 +385,7 @@ const navItems = computed(() => {
     { key: 'sandbox', icon: 'code', label: t('settings.sandbox.title') },
     { key: 'skills', icon: SKILL_ICON, label: t('settings.skills.title') },
     { key: 'mcp', icon: 'tools', label: t('settings.mcpService') },
+    { key: 'diagnostics', icon: 'info-circle', label: t('system.title') },
     { key: 'system', icon: 'info-circle', label: t('settings.versionInfo') },
     { key: 'system-global', icon: 'server', label: t('settings.system') },
     { key: 'runtime-queues', icon: 'queue', label: t('settings.taskQueue') },
@@ -401,7 +405,8 @@ const navItems = computed(() => {
   if (!authStore.currentTenantRole && !authStore.effectiveCrossTenantAccess && !authStore.isSystemAdmin) {
     return [] as NavItem[]
   }
-  return all.filter((it) => canSeeSection(it.key) && isSectionSupported(it.key))
+  return all.filter((it) => canSeeSection(it.key) && isSectionSupported(it.key)
+    && settingsSurfaceForSection(it.key) === settingsSurface.value)
 })
 
 const navGroups = computed<NavGroup[]>(() => {
@@ -414,17 +419,22 @@ const navGroups = computed<NavGroup[]>(() => {
     {
       key: 'account',
       label: t('settings.navGroups.account'),
-      items: pickItems(['general', 'userprofile', 'mymemory', 'envvars']),
+      items: pickItems(['general', 'userprofile', 'mymemory', 'system']),
+    },
+    {
+      key: 'advanced',
+      label: t('settings.personalAdvanced'),
+      items: pickItems(['envvars']),
     },
     {
       key: 'workspace',
       label: t('settings.navGroups.workspace'),
-      items: pickItems(['tenant', 'members', 'businessRoles', 'chathistory', 'memory']),
+      items: pickItems(['tenant', 'members', 'businessRoles', 'memory']),
     },
     {
       key: 'models_runtime',
       label: t('settings.navGroups.modelsRuntime'),
-      items: pickItems(['models', 'chathistory', 'ollama', 'weknoracloud']),
+      items: pickItems(['models', 'chathistory', 'memory-runtime', 'ollama', 'weknoracloud']),
     },
     {
       key: 'integrations',
@@ -458,7 +468,7 @@ const navGroups = computed<NavGroup[]>(() => {
     {
       key: 'platform',
       label: t('settings.navGroups.platform'),
-      items: pickItems(['system']),
+      items: pickItems(['diagnostics']),
     },
   ].filter((group) => group.items.length > 0)
 })
@@ -520,6 +530,12 @@ const handleClose = () => {
     }
   }
 }
+
+watch(visible, (isVisible) => {
+  if (isVisible && route.path !== '/platform/settings') {
+    currentSection.value = normalizeSettingsSection(uiStore.settingsInitialSection || 'general')
+  }
+})
 
 // 监听初始导航设置
 watch(() => uiStore.settingsInitialSection, (section) => {
@@ -653,6 +669,7 @@ onUnmounted(() => {
 </script>
 
 <style lang="less" scoped>
+.settings-tenant { margin: 8px 0 0; font-size: 13px; color: var(--td-text-color-secondary); overflow-wrap: anywhere; }
 /* 遮罩层 */
 .settings-overlay {
   position: fixed;

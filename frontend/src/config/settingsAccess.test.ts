@@ -3,15 +3,14 @@ import test from 'node:test'
 
 import {
   employeeSurfaceMinRoleForPath,
+  settingsSurfaceForSection,
   EMPLOYEE_SURFACE_MIN_ROLE,
-  SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE,
   SETTINGS_SECTION_MIN_ROLE,
   SYSTEM_ADMIN_SETTINGS_SECTIONS,
 } from './settingsAccess'
 
-test('management shortcuts are stricter than read-only settings pages', () => {
-  assert.equal(SETTINGS_SECTION_MIN_ROLE.members, 'viewer')
-  assert.equal(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.members, 'admin')
+test('member management pages require enterprise administrators', () => {
+  assert.equal(SETTINGS_SECTION_MIN_ROLE.members, 'admin')
 })
 
 test('employee viewers cannot deep-link into management surfaces', () => {
@@ -32,25 +31,21 @@ test('employee viewers cannot deep-link into management surfaces', () => {
 test('the skill catalog and sandbox require platform administration', () => {
   assert.equal(SETTINGS_SECTION_MIN_ROLE.skills, 'admin')
   assert.equal(SETTINGS_SECTION_MIN_ROLE.skills, SETTINGS_SECTION_MIN_ROLE.sandbox)
-  assert.equal(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.skills, 'admin')
   assert.equal(SYSTEM_ADMIN_SETTINGS_SECTIONS.has('skills'), true)
   assert.equal(SYSTEM_ADMIN_SETTINGS_SECTIONS.has('sandbox'), true)
 })
 
 test('personal skill environment variables are visible to every member', () => {
   assert.equal(SETTINGS_SECTION_MIN_ROLE.envvars, 'viewer')
-  // Workspace-wide skill env values live on the Admin+ skills page; a
-  // management shortcut on the avatar menu would only duplicate that entrance.
-  assert.equal(
-    Object.prototype.hasOwnProperty.call(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE, 'envvars'),
-    false,
-  )
+
 })
 
 test('system administration settings stay explicitly system-admin-only', () => {
   assert.deepEqual(
     [...SYSTEM_ADMIN_SETTINGS_SECTIONS],
     [
+      'memory-runtime',
+      'diagnostics',
       'models',
       'chathistory',
       'websearch',
@@ -68,4 +63,17 @@ test('system administration settings stay explicitly system-admin-only', () => {
       'system-audit-log',
     ],
   )
+})
+
+test('personal, enterprise and platform sections never share a settings surface', () => {
+  for (const section of ['general', 'userprofile', 'mymemory', 'envvars', 'system']) {
+    assert.equal(settingsSurfaceForSection(section), 'personal')
+  }
+  for (const section of ['tenant', 'members', 'businessRoles', 'memory']) {
+    assert.equal(settingsSurfaceForSection(section), 'enterprise')
+    assert.equal(SETTINGS_SECTION_MIN_ROLE[section], 'admin')
+  }
+  for (const section of SYSTEM_ADMIN_SETTINGS_SECTIONS) {
+    assert.equal(settingsSurfaceForSection(section), 'platform')
+  }
 })

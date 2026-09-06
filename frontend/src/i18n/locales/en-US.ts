@@ -1081,6 +1081,8 @@ export default {
     }
   },
   settings: {
+    memoryRuntime: 'Memory runtime',
+    personalAdvanced: 'Advanced options',
     modelManagement: 'Model Management',
     platformCloudService: 'Platform Cloud Service',
     webSearchConfig: 'Web Search',

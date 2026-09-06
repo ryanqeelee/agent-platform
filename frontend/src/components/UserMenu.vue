@@ -79,31 +79,9 @@
           <t-icon name="user" class="menu-icon" />
           <span>{{ $t('general.personalSettings') }}</span>
         </div>
-        <div v-if="!authStore.isLiteMode" class="menu-item" @click="handleQuickNav('tenant')">
-          <t-icon name="user-circle" class="menu-icon" />
-          <span>{{ $t('settings.workspaceSettings') }}</span>
-        </div>
         <div v-if="canEnterEnterpriseAdministration" class="menu-item" @click="handleEnterpriseAdministration">
           <t-icon name="dashboard" class="menu-icon" />
           <span>{{ enterpriseAdministrationCopy.eyebrow }}</span>
-        </div>
-        <!-- “管理”类快捷入口只对真正具备写权限的人展示。 -->
-        <div v-if="canManageMembers" class="menu-item" @click="handleQuickNav('members')">
-          <t-icon name="usergroup" class="menu-icon" />
-          <span>{{ $t('tenantMember.title') }}</span>
-        </div>
-        <div v-if="canManageModels" class="menu-item" @click="handleQuickNav('models')">
-          <t-icon name="control-platform" class="menu-icon" />
-          <span>{{ $t('settings.modelManagement') }}</span>
-        </div>
-        <div v-if="canManageSkills" class="menu-item" @click="handleQuickNav('skills')">
-          <t-icon :name="SKILL_ICON" class="menu-icon" />
-          <span>{{ $t('settings.skills.title') }}</span>
-        </div>
-        <div class="menu-divider"></div>
-        <div class="menu-item" @click="handleQuickNav('general')">
-          <t-icon name="setting" class="menu-icon" />
-          <span>{{ $t('general.allSettings') }}</span>
         </div>
         <!--
           System administration entry — visible only to users with the
@@ -200,9 +178,7 @@ import type { TenantInfo } from '@/api/tenant'
 import { useRoleLabel, useHomeTenant } from '@/composables/useRoleLabel'
 import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom'
 import { openNewUserGuide } from '@/config/contextualGuides'
-import { SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE } from '@/config/settingsAccess'
 import { getEnterpriseAdministrationCopy } from '@/config/productShellBrand'
-import { SKILL_ICON } from '@/types/mention'
 
 const { t, locale } = useI18n()
 
@@ -234,22 +210,10 @@ const showTenantIdentityLine = computed(() => {
   return (authStore.memberships ?? []).length > 1
 })
 
-// 快捷入口使用“管理能力”而不是页面最低可见角色：成员名册和模型列表允许
-// viewer 浏览，但头像菜单里的“管理”入口只服务实际能执行管理操作的角色。
-const canManageMembers = computed(() =>
-  authStore.effectiveCrossTenantAccess || authStore.hasRole(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.members),
-)
-const canManageModels = computed(() => authStore.isSystemAdmin)
 const canEnterEnterpriseAdministration = computed(() =>
   !authStore.isLiteMode && authStore.hasRole('contributor'),
 )
 const enterpriseAdministrationCopy = computed(() => getEnterpriseAdministrationCopy(locale.value))
-const canManageSkills = computed(() =>
-  authStore.canAccessAllTenants ||
-  authStore.isSystemAdmin ||
-  authStore.hasRole(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.skills),
-)
-
 const menuRef = ref<HTMLElement>()
 const tenantMenuItemRef = ref<HTMLElement>()
 const menuVisible = ref(false)
@@ -281,7 +245,7 @@ const toggleMenu = () => {
 // 快捷导航到设置的特定部分
 const handleQuickNav = (section: string) => {
   menuVisible.value = false
-  uiStore.openSettings()
+  uiStore.openSettings(section)
   router.push({ path: '/platform/settings', query: { section } })
 }
 

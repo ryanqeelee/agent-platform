@@ -1,14 +1,14 @@
 <template>
   <div class="memory-workspace-settings">
     <div class="section-header">
-      <h2>{{ t('memoryWorkspaceSettings.title') }}</h2>
+      <h2>{{ runtime ? t('settings.memoryRuntime') : t('memoryWorkspaceSettings.title') }}</h2>
       <p class="section-description">{{ t('memoryWorkspaceSettings.description') }}</p>
     </div>
 
     <!-- The switch defaults to off because memory retains what users say
          across sessions. That makes the feature easy to miss, so the intro
          states plainly what turning it on does. -->
-    <div class="intro">
+    <div v-if="!runtime" class="intro">
       <t-icon name="info-circle" class="intro-icon" />
       <div>
         <p class="intro-title">{{ t('memoryWorkspaceSettings.introTitle') }}</p>
@@ -17,7 +17,7 @@
     </div>
 
     <div class="settings-group">
-      <div class="setting-row">
+      <div v-if="!runtime" class="setting-row">
         <div class="setting-info">
           <label>{{ t('memoryWorkspaceSettings.enableLabel') }}</label>
           <p class="desc">{{ t('memoryWorkspaceSettings.enableDescription') }}</p>
@@ -27,7 +27,7 @@
         </div>
       </div>
 
-      <div v-if="config.enabled" class="setting-row">
+      <div v-if="!runtime && config.enabled" class="setting-row">
         <div class="setting-info">
           <label>{{ t('memoryWorkspaceSettings.writeModeLabel') }}</label>
           <p class="desc">{{ t('memoryWorkspaceSettings.writeModeDescription') }}</p>
@@ -51,7 +51,7 @@
         </div>
       </div>
 
-      <div v-if="config.enabled && config.write_mode === 'auto'" class="setting-row">
+      <div v-if="runtime && config.enabled && config.write_mode === 'auto'" class="setting-row">
         <div class="setting-info">
           <label>{{ t('memoryWorkspaceSettings.extractModelLabel') }}</label>
           <p class="desc">{{ t('memoryWorkspaceSettings.extractModelDescription') }}</p>
@@ -67,7 +67,7 @@
         </div>
       </div>
 
-      <div v-if="config.enabled && config.write_mode === 'auto'" class="setting-row">
+      <div v-if="runtime && config.enabled && config.write_mode === 'auto'" class="setting-row">
         <div class="setting-info">
           <label>{{ t('memoryWorkspaceSettings.extractDelayLabel') }}</label>
           <p class="desc">{{ t('memoryWorkspaceSettings.extractDelayDescription') }}</p>
@@ -85,7 +85,7 @@
         </div>
       </div>
 
-      <div v-if="config.enabled && config.write_mode === 'auto'" class="setting-row">
+      <div v-if="runtime && config.enabled && config.write_mode === 'auto'" class="setting-row">
         <div class="setting-info">
           <label>{{ t('memoryWorkspaceSettings.extractMinIntervalLabel') }}</label>
           <p class="desc">{{ t('memoryWorkspaceSettings.extractMinIntervalDescription') }}</p>
@@ -103,7 +103,7 @@
         </div>
       </div>
 
-      <div v-if="config.enabled" class="setting-row">
+      <div v-if="runtime && config.enabled" class="setting-row">
         <div class="setting-info">
           <label>{{ t('memoryWorkspaceSettings.vectorRecallLabel') }}</label>
           <p class="desc">{{ t('memoryWorkspaceSettings.vectorRecallDescription') }}</p>
@@ -113,7 +113,7 @@
         </div>
       </div>
 
-      <div v-if="config.enabled && config.vector_recall" class="setting-row">
+      <div v-if="runtime && config.enabled && config.vector_recall" class="setting-row">
         <div class="setting-info">
           <label>{{ t('memoryWorkspaceSettings.embeddingModelLabel') }}</label>
           <p class="desc">{{ t('memoryWorkspaceSettings.embeddingModelDescription') }}</p>
@@ -130,7 +130,7 @@
         </div>
       </div>
 
-      <div v-if="config.enabled" class="setting-row">
+      <div v-if="runtime && config.enabled" class="setting-row">
         <div class="setting-info">
           <label>{{ t('memoryWorkspaceSettings.conditioningLabel') }}</label>
           <p class="desc">{{ t('memoryWorkspaceSettings.conditioningDescription') }}</p>
@@ -144,7 +144,7 @@
         </div>
       </div>
 
-      <div v-if="config.enabled && config.write_mode === 'auto'" class="setting-row">
+      <div v-if="runtime && config.enabled && config.write_mode === 'auto'" class="setting-row">
         <div class="setting-info">
           <label>{{ t('memoryWorkspaceSettings.interestThresholdLabel') }}</label>
           <p class="desc">{{ t('memoryWorkspaceSettings.interestThresholdDescription') }}</p>
@@ -161,7 +161,7 @@
         </div>
       </div>
 
-      <div v-if="config.enabled && config.write_mode === 'auto'" class="setting-row instructions-row">
+      <div v-if="runtime && config.enabled && config.write_mode === 'auto'" class="setting-row instructions-row">
         <div class="setting-info">
           <label>{{ t('memoryWorkspaceSettings.instructionsLabel') }}</label>
           <p class="desc">{{ t('memoryWorkspaceSettings.instructionsDescription') }}</p>
@@ -178,7 +178,7 @@
         </div>
       </div>
 
-      <div v-if="config.enabled" class="setting-row">
+      <div v-if="runtime && config.enabled" class="setting-row">
         <div class="setting-info">
           <label>{{ t('memoryWorkspaceSettings.maxItemsLabel') }}</label>
           <p class="desc">{{ t('memoryWorkspaceSettings.maxItemsDescription') }}</p>
@@ -207,6 +207,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useUIStore } from '@/stores/ui'
 import { getTenantMemoryConfig, updateTenantMemoryConfig, type MemoryConfig } from '@/api/memory'
 
+const { runtime = false } = defineProps<{ runtime?: boolean }>()
 const { t } = useI18n()
 const authStore = useAuthStore()
 const uiStore = useUIStore()

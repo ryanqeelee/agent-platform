@@ -2343,7 +2343,7 @@ export default {
   general: {
     title: '常规设置',
     allSettings: '全部设置',
-    personalSettings: '个人偏好',
+    personalSettings: '个人设置',
     helpAndDocs: '帮助与文档',
     description: '配置语言、外观等基础选项',
     settings: '设置',
@@ -5058,6 +5058,8 @@ export default {
     }
   },
   settings: {
+    memoryRuntime: '记忆运行配置',
+    personalAdvanced: '高级选项',
     modelManagement: '模型管理',
     platformCloudService: '平台云服务',
     webSearchConfig: '网络搜索',

@@ -5056,6 +5056,8 @@ export default {
     }
   },
   settings: {
+    memoryRuntime: '메모리 실행 설정',
+    personalAdvanced: '고급 옵션',
     modelManagement: '모델 관리',
     platformCloudService: '플랫폼 클라우드 서비스',
     webSearchConfig: '웹 검색',

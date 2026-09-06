@@ -5056,6 +5056,8 @@ export default {
     }
   },
   settings: {
+    memoryRuntime: 'Настройки обработки памяти',
+    personalAdvanced: 'Дополнительные настройки',
     modelManagement: 'Управление моделями',
     platformCloudService: 'Облачный сервис платформы',
     webSearchConfig: 'Сетевой поиск',

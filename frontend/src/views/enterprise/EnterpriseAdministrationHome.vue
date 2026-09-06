@@ -11,6 +11,11 @@
       </span>
     </header>
 
+    <nav class="enterprise-settings" :aria-label="copy.eyebrow">
+      <button v-for="entry in managementEntries" :key="entry.section" type="button"
+        @click="openSettings(entry.section)">{{ entry.label }}</button>
+    </nav>
+
     <section v-if="queue" class="summary-grid" aria-label="Enterprise summary">
       <article class="summary-card">
         <span>{{ copy.serviceLevel }}</span>
@@ -98,14 +103,27 @@ import {
 import { getEnterpriseAdministrationCopy } from '@/config/productShellBrand'
 import { useAuthStore } from '@/stores/auth'
 import { useUIStore } from '@/stores/ui'
+import { SETTINGS_SECTION_MIN_ROLE } from '@/config/settingsAccess'
 
-const { locale } = useI18n()
+const { t, locale } = useI18n()
 const router = useRouter()
 const authStore = useAuthStore()
 const uiStore = useUIStore()
 const copy = computed(() => getEnterpriseAdministrationCopy(locale.value))
 const queue = ref<EnterpriseAdministrationQueueV1>()
 const loading = ref(true)
+const managementEntries = computed(() => [
+  { section: 'tenant', label: t('settings.tenantInfo') },
+  { section: 'members', label: t('tenantMember.title') },
+  { section: 'businessRoles', label: t('businessRoles.title') },
+  { section: 'memory', label: t('memoryWorkspaceSettings.title') },
+].filter(entry => authStore.effectiveCrossTenantAccess
+  || authStore.hasRole(SETTINGS_SECTION_MIN_ROLE[entry.section])))
+
+function openSettings(section: string) {
+  uiStore.openSettings(section)
+  router.push({ path: '/platform/settings', query: { section } })
+}
 
 const statusLabel = computed(() => {
   if (!queue.value) return copy.value.unknown
@@ -191,6 +209,10 @@ onMounted(() => void loadQueue())
 
   h1 { margin: 4px 0 10px; font-size: clamp(32px, 4vw, 48px); line-height: 1.1; letter-spacing: -0.035em; }
 }
+
+.enterprise-settings { display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0; }
+.enterprise-settings button { padding: 10px 16px; border: 1px solid var(--td-component-stroke); border-radius: 8px; background: var(--td-bg-color-container); color: var(--product-shell-teal); font: inherit; cursor: pointer; }
+.enterprise-settings button:hover { background: var(--td-bg-color-container-hover); }
 
 .eyebrow { margin: 0; color: var(--product-shell-teal); font-size: 13px; font-weight: 700; letter-spacing: .14em; }
 .description { max-width: 680px; margin: 0; color: rgba(19, 45, 45, .67); font-size: 15px; line-height: 1.7; }

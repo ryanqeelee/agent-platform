@@ -20,8 +20,8 @@ export const SETTINGS_SECTION_MIN_ROLE: Record<string, SettingsRoleKey> = {
   mcp: 'admin',
   system: 'viewer',
   userprofile: 'viewer',
-  tenant: 'viewer',
-  members: 'viewer',
+  tenant: 'admin',
+  members: 'admin',
   businessRoles: 'admin',
   mymemory: 'viewer',
   memory: 'admin',
@@ -52,17 +52,9 @@ export const employeeSurfaceMinRoleForPath = (path: string): SettingsRoleKey | u
   return undefined
 }
 
-/**
- * A management-labelled avatar shortcut has a stricter threshold than the
- * corresponding read-only Settings page.
- */
-export const SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE = {
-  members: 'admin',
-  models: 'admin',
-  skills: 'admin',
-} as const satisfies Record<string, SettingsRoleKey>
-
 export const SYSTEM_ADMIN_SETTINGS_SECTIONS = new Set([
+  'memory-runtime',
+  'diagnostics',
   'models',
   'chathistory',
   'websearch',
@@ -79,3 +71,14 @@ export const SYSTEM_ADMIN_SETTINGS_SECTIONS = new Set([
   'platform-api-keys',
   'system-audit-log',
 ])
+
+export type SettingsSurface = 'personal' | 'enterprise' | 'platform'
+
+// Surface placement is independent of API authorization. Reuse the existing
+// panels without mixing an administrator's work into their personal settings.
+export function settingsSurfaceForSection(section: string): SettingsSurface {
+  if (SYSTEM_ADMIN_SETTINGS_SECTIONS.has(section)) return 'platform'
+  if (['tenant', 'members', 'businessRoles', 'memory'].includes(section)
+      || section.startsWith('integration-')) return 'enterprise'
+  return 'personal'
+}

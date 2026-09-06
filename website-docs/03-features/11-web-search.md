@@ -116,43 +116,25 @@ flowchart TD
 
 ## 网页抓取（web_fetch）
 
-### Agent 工具：chromedp 渲染 + LLM 分析
+### Agent 工具：按需获取网页证据
 
-抓取能力已收敛到 `internal/infrastructure/web_fetch` 一个实现里，Agent 工具（`internal/agent/tools/web_fetch.go`）只负责批量编排、LLM 分析与结构化结果——此前工具层与基础设施层各有一份抓取代码，安全策略容易走偏。
+Agent 模式启用 `web_search_enabled` 后注册 `web_search` 与 `web_fetch`；`web_fetch_enabled` / `web_fetch_top_n` 控制普通问答流水线自动抓取重排结果，不是 Agent 工具的总开关。
 
-`WebFetchTool` 接收 `{items: [{url: "wN", prompt}]}` 批量任务，并发处理：
+`WebFetchTool` 接收 `{items: [{url: "wN", prompt}]}`。运行时解析页面引用，按规范化 URL 去重，再逐页获取内容。成功页面在其他页面失败时仍可使用。
 
-```mermaid
-flowchart TD
-    A["web_fetch(items)"] --> A1["按规范化 URL 去重<br/>重复项直接标 skipped"]
-    A1 --> B["webfetch.Fetcher.Fetch:<br/>URL 格式 + ValidateURLForSSRF"]
-    B --> C["DNS 解析并 Pin 单一公网 IP<br/>(白名单主机允许私网 IP)"]
-    C --> D["renderWithChromium:<br/>headless Chrome 渲染<br/>host-resolver-rules=MAP host pinnedIP"]
-    D -->|"失败或空页面"| E["HTTP 兜底:<br/>直连 pinned IP, Host 头保留原域名<br/>(SSRF-safe client)"]
-    D -->|"成功"| F["goquery 转正文文本"]
-    E --> F
-    F --> G["按 prompt 调用 chat 模型总结"]
-    G --> H["逐 URL 结构化结果<br/>status + code + retryable"]
-```
+生产 `NewFetcher` 使用带 URL、DNS 固定和逐跳重定向校验的 HTTP transport。当前不启用内置 Chromium：单纯安装浏览器或设置 DNS host mapping 不能保证其所有子请求遵守同一出站访问边界。纯 JavaScript 页面可能无法读取，应明确说明证据不足。
 
-结构化失败语义是这一版的重点：
+抓取后的处理：
+- 原始响应最多 2 MiB，读取上限加一以检测超限；超限返回不可重试的 `body_too_large`，不把不完整 HTML 前缀当作正文。
+- `text/plain` / `text/markdown` 原样保留；较长 HTML 复用已有 go-readability 提取主内容，无有效正文时保留 HTML 清洗结果。
+- 不超过 12,000 个 Unicode 字符的页面直接交给主 Agent，不额外摘要。长页面沿用按问题摘要，摘要失败时原文仍可用。
+- 模型上下文层继续执行证据预算和截断标记。
 
-- 每个 URL 单独返回状态（`success` / `failed` / `skipped`），**部分失败不会拖垮整批**——成功页面的内容照常可用；
-- 失败带稳定的机器可读错误码与可重试标记（`web_fetch.FetchError`）：`invalid_url`、`dns_failed`、`connection_timeout`、`tls_failed`、`http_403`、`http_429`、`http_5xx`、`http_status`、`ssrf_rejected`、`redirect_rejected`、`read_failed`、`html_parse_failed`、`empty_content`、`connection_failed`；
-- 工具输出末尾附一段「Next Steps」指引：全部失败时明确要求模型改用 `web_search` 的标题/摘要作答、声明未经页面校验、对价格库存这类动态事实降低置信度；部分失败时要求直接用成功证据、不要重试不可重试的错误。这样页面抓不到时模型不会陷入反复搜索或凭空编造；
-- 同一批次里重复的 URL 只抓一次。
+每个页面返回 `success` / `failed` / `skipped`、错误码和可重试标记。全部抓取失败时，回答可以使用已有搜索摘要，但必须说明没有验证网页正文。
 
-安全设计要点：
+超时保持 Agent 60 秒、普通问答流水线 15 秒。GitHub `blob` URL 转换为原始文件 URL。长页面摘要调用继续记录 `purpose=web_fetch_summary`。
 
-- **DNS pinning**：校验时解析并固定一个安全 IP；chromedp 用 `--host-resolver-rules="MAP host ip"` 强制 Chrome 复用该 IP，HTTP 兜底路径直连该 IP 并保留原始 `Host`/SNI——两条路径都无法二次解析，杜绝 DNS rebinding；
-- 超时 60s（`fetchTimeout`；聊天管线内联抓取用更短的 `pipelineFetchTimeout` 15s），单页读取上限 100KB（`maxBodySize`）；GitHub `blob` 链接自动改写为 `raw.githubusercontent.com`；
-- LLM 调用带 `purpose=web_fetch_summary` 元数据，便于用量归因。
-
-### 共享抓取器：`internal/infrastructure/web_fetch`
-
-`fetcher.go` 同时服务 Agent 工具与聊天管线（`WEB_FETCH` 阶段给高分网页取正文）：SSRF 校验 + `utils.NewSSRFSafeHTTPClient`（重定向逐跳复验）+ 浏览器仿真请求头 + 读取上限，正文抽取用 goquery 移除 `script/style/nav/footer/header/iframe/img` 后取纯文本。`ErrorDetails(err)` 把内部错误映射成上面那张错误码表，调用方据此决定是否重试。
-
-> 关于 readability：`codeberg.org/readeck/go-readability/v2`（go.mod）目前用于 RSS 数据源连接器（`internal/datasource/connector/rss/client.go` 的 `extractArticle`，对文章页做正文净化），`web_fetch` 使用 goquery 做正文抽取。
+平台无需为原生 `web_fetch` 配置另一个 API Key。Firecrawl / Crawl4AI 不是现成的后端配置项；接入须通过抓取接口适配，并单独验证服务出站权限、正文质量和延迟。
 
 ## docker/searxng 的角色
 

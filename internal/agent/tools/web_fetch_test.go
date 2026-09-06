@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -29,7 +30,7 @@ func (fetcher *stubWebContentFetcher) Fetch(_ context.Context, rawURL string) (s
 	return fetcher.contents[rawURL], nil
 }
 
-func TestWebFetchToolSingleURLSuccessSurvivesSummaryFailure(t *testing.T) {
+func TestWebFetchToolShortContentSkipsSummary(t *testing.T) {
 	const rawURL = "https://example.com/specs"
 	fetcher := newStubWebContentFetcher(map[string]string{rawURL: "official specifications"}, nil)
 	tool := newWebFetchTool(nil, fetcher)
@@ -43,8 +44,47 @@ func TestWebFetchToolSingleURLSuccessSurvivesSummaryFailure(t *testing.T) {
 	assert.Equal(t, 1, result.Data["successful_count"])
 	items := result.Data["results"].([]map[string]interface{})
 	assert.Equal(t, "success", items[0]["status"])
-	assert.Equal(t, "failed", items[0]["summary_status"])
+	assert.Equal(t, "not_requested", items[0]["summary_status"])
 	assert.Equal(t, "official specifications", items[0]["raw_content"])
+	assert.Contains(t, result.Output, "official specifications")
+	assert.NotContains(t, result.Output, "Summary status: failed")
+}
+
+func TestWebFetchToolSummaryThresholdUsesRunes(t *testing.T) {
+	const rawURL = "https://example.com/reference"
+	content := strings.Repeat("界", 12000)
+	fetcher := newStubWebContentFetcher(map[string]string{rawURL: content}, nil)
+	tool := newWebFetchTool(nil, fetcher)
+
+	result, err := tool.Execute(context.Background(), webFetchArgs(
+		WebFetchItem{URL: rawURL, Prompt: "extract reference"},
+	))
+
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	items := result.Data["results"].([]map[string]interface{})
+	assert.Equal(t, "not_requested", items[0]["summary_status"])
+	assert.Equal(t, content, items[0]["raw_content"])
+}
+
+func TestWebFetchToolLongContentSurvivesSummaryFailure(t *testing.T) {
+	const rawURL = "https://example.com/report"
+	content := strings.Repeat("界", 12001)
+	fetcher := newStubWebContentFetcher(map[string]string{rawURL: content}, nil)
+	tool := newWebFetchTool(nil, fetcher)
+
+	result, err := tool.Execute(context.Background(), webFetchArgs(
+		WebFetchItem{URL: rawURL, Prompt: "extract findings"},
+	))
+
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	items := result.Data["results"].([]map[string]interface{})
+	assert.Equal(t, "failed", items[0]["summary_status"])
+	assert.Equal(t, "summary_failed", items[0]["summary_error_code"])
+	assert.Equal(t, content, items[0]["raw_content"])
+	assert.Contains(t, result.Output, "fetched page content remains usable")
+	assert.Contains(t, result.Output, content)
 }
 
 func TestWebFetchToolPreservesPartialSuccess(t *testing.T) {

@@ -2,6 +2,7 @@
 package web_fetch
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	readability "codeberg.org/readeck/go-readability/v2"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -23,7 +25,7 @@ import (
 const (
 	fetchTimeout         = 60 * time.Second
 	pipelineFetchTimeout = 15 * time.Second
-	maxBodySize          = 100 * 1024
+	maxBodySize          = 2 * 1024 * 1024
 )
 
 // ErrorCode identifies the stage and class of a fetch failure.
@@ -41,6 +43,7 @@ const (
 	ErrorSSRFRejected     ErrorCode = "ssrf_rejected"
 	ErrorRedirectRejected ErrorCode = "redirect_rejected"
 	ErrorRead             ErrorCode = "read_failed"
+	ErrorBodyTooLarge     ErrorCode = "body_too_large"
 	ErrorHTMLParse        ErrorCode = "html_parse_failed"
 	ErrorEmptyContent     ErrorCode = "empty_content"
 	ErrorConnection       ErrorCode = "connection_failed"
@@ -101,13 +104,15 @@ type pinnedTarget struct {
 }
 
 type httpFetchResult struct {
-	body     []byte
-	finalURL string
+	body        []byte
+	finalURL    string
+	contentType string
 }
 
-// NewFetcher creates a production fetcher with DNS and redirect SSRF guards.
+// NewFetcher uses the HTTP transport that enforces DNS and redirect SSRF guards.
+// Browser networking must not be enabled without equivalent per-request controls.
 func NewFetcher() *Fetcher {
-	return newFetcher(fetchTimeout, renderWithChromium)
+	return newFetcher(fetchTimeout, nil)
 }
 
 // NewPipelineFetcher creates an HTTP-only fetcher for the chat pipeline.
@@ -159,7 +164,14 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (string, error) {
 	defer cancel()
 	httpResult, httpErr := f.fetchHTTP(requestCtx, rawURL, parsedURL)
 	if httpErr == nil {
-		content, parseErr := htmlToText(string(httpResult.body))
+		if strings.HasPrefix(httpResult.contentType, "text/plain") || strings.HasPrefix(httpResult.contentType, "text/markdown") {
+			content := string(httpResult.body)
+			if strings.TrimSpace(content) == "" {
+				return "", newFetchError(ErrorEmptyContent, false, "page contains no readable text")
+			}
+			return content, nil
+		}
+		content, parseErr := extractPageText(string(httpResult.body), httpResult.finalURL)
 		requiresBrowser := parseErr == nil && needsBrowserFallback(content, httpResult.body)
 		if parseErr == nil && strings.TrimSpace(content) != "" && !requiresBrowser {
 			logger.Infof(ctx, "[WebFetch] fetched %s → %d chars", rawURL, len(content))
@@ -168,7 +180,7 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (string, error) {
 		if f.renderBrowser != nil {
 			browserURL := firstNonEmpty(httpResult.finalURL, rawURL)
 			if rendered, browserErr := f.fetchWithBrowser(requestCtx, browserURL); browserErr == nil {
-				content, browserParseErr := htmlToText(rendered)
+				content, browserParseErr := extractPageText(rendered, rawURL)
 				if browserParseErr == nil && strings.TrimSpace(content) != "" {
 					logger.Infof(ctx, "[WebFetch] rendered %s → %d chars", rawURL, len(content))
 					return content, nil
@@ -186,7 +198,7 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (string, error) {
 
 	if f.renderBrowser != nil && canRenderAfterHTTPError(httpErr) {
 		if rendered, browserErr := f.fetchWithBrowser(requestCtx, rawURL); browserErr == nil {
-			content, browserParseErr := htmlToText(rendered)
+			content, browserParseErr := extractPageText(rendered, rawURL)
 			if browserParseErr == nil && strings.TrimSpace(content) != "" {
 				logger.Infof(ctx, "[WebFetch] rendered %s → %d chars", rawURL, len(content))
 				return content, nil
@@ -210,15 +222,18 @@ func (f *Fetcher) fetchHTTP(ctx context.Context, rawURL string, parsedURL *url.U
 	if resp.StatusCode != http.StatusOK {
 		return nil, classifyHTTPStatus(resp.StatusCode, resp.Status)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, f.maxBodySize))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, f.maxBodySize+1))
 	if err != nil {
 		return nil, newFetchError(ErrorRead, true, "read failed: %v", err)
+	}
+	if int64(len(body)) > f.maxBodySize {
+		return nil, newFetchError(ErrorBodyTooLarge, false, "page exceeds download limit of %d bytes", f.maxBodySize)
 	}
 	finalURL := rawURL
 	if resp.Request != nil && resp.Request.URL != nil {
 		finalURL = resp.Request.URL.String()
 	}
-	return &httpFetchResult{body: body, finalURL: finalURL}, nil
+	return &httpFetchResult{body: body, finalURL: finalURL, contentType: strings.ToLower(resp.Header.Get("Content-Type"))}, nil
 }
 
 func (f *Fetcher) pinnedDialContext() func(context.Context, string, string) (net.Conn, error) {
@@ -315,7 +330,10 @@ func renderWithChromium(ctx context.Context, target pinnedTarget) (string, error
 	); err != nil {
 		return "", fmt.Errorf("chromium render failed: %w", err)
 	}
-	return string(limitBytes([]byte(html), maxBodySize)), nil
+	if len(html) > maxBodySize {
+		return "", newFetchError(ErrorBodyTooLarge, false, "rendered page exceeds download limit")
+	}
+	return html, nil
 }
 
 func limitBytes(value []byte, max int64) []byte {
@@ -438,6 +456,32 @@ func classifyRequestError(err error) error {
 
 func newFetchError(code ErrorCode, retryable bool, format string, args ...interface{}) error {
 	return &FetchError{Code: code, Retryable: retryable, Err: fmt.Errorf(format, args...)}
+}
+
+// extractPageText uses the existing article extractor for long HTML pages.
+// Short pages and non-article documents retain their original text.
+func extractPageText(source, rawURL string) (string, error) {
+	fallback, err := htmlToText(source)
+	if err != nil || len([]rune(fallback)) < 500 {
+		return fallback, err
+	}
+	pageURL, err := url.Parse(rawURL)
+	if err != nil {
+		return fallback, nil
+	}
+	article, err := readability.FromReader(strings.NewReader(source), pageURL)
+	if err != nil || article.Node == nil {
+		return fallback, nil
+	}
+	var body bytes.Buffer
+	if err := article.RenderHTML(&body); err != nil {
+		return fallback, nil
+	}
+	text, err := htmlToText(body.String())
+	if err != nil || len([]rune(text)) < 200 {
+		return fallback, nil
+	}
+	return text, nil
 }
 
 func htmlToText(html string) (string, error) {

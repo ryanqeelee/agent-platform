@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	webfetch "github.com/Tencent/WeKnora/internal/infrastructure/web_fetch"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -14,6 +15,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
 )
+
+const webFetchSummaryThresholdRunes = 12000
 
 var webFetchTool = BaseTool{
 	name: ToolWebFetch,
@@ -129,15 +132,19 @@ func (t *WebFetchTool) fetchItem(ctx context.Context, item WebFetchItem) *webFet
 		"evidence_type":  "fetched_page",
 		"summary_status": "not_requested",
 	}
-	summary, summaryErr := t.processWithLLM(ctx, item, content)
-	if summaryErr != nil {
-		data["summary_status"] = "failed"
-		data["summary_error_code"] = "summary_failed"
-		data["summary_error_message"] = summaryErr.Error()
-		logger.Warnf(ctx, "[Tool][WebFetch] summary failed url=%s err=%v", displayURL, summaryErr)
-	} else if summary != "" {
-		data["summary_status"] = "success"
-		data["summary"] = summary
+	var summary string
+	var summaryErr error
+	if utf8.RuneCountInString(content) > webFetchSummaryThresholdRunes {
+		summary, summaryErr = t.processWithLLM(ctx, item, content)
+		if summaryErr != nil {
+			data["summary_status"] = "failed"
+			data["summary_error_code"] = "summary_failed"
+			data["summary_error_message"] = summaryErr.Error()
+			logger.Warnf(ctx, "[Tool][WebFetch] summary failed url=%s err=%v", displayURL, summaryErr)
+		} else if summary != "" {
+			data["summary_status"] = "success"
+			data["summary"] = summary
+		}
 	}
 
 	return &webFetchItemResult{

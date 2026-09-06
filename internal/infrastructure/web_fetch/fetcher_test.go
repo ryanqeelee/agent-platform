@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -239,5 +240,65 @@ func newTestFetcher(client *http.Client) *Fetcher {
 		timeout:     time.Second,
 		maxBodySize: maxBodySize,
 		validateURL: func(string) error { return nil },
+	}
+}
+
+func TestFetchPreservesBodyAfterLargeHead(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte("<html><head><script>" + strings.Repeat(" ", 150*1024) + "</script></head><body><main>门店退货流程：请保留购买凭证。</main></body></html>"))
+	}))
+	defer server.Close()
+	text, err := newTestFetcher(server.Client()).Fetch(context.Background(), server.URL)
+	require.NoError(t, err)
+	assert.Contains(t, text, "请保留购买凭证")
+}
+
+func TestFetchRejectsOversizeInsteadOfReturningPartialEvidence(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(strings.Repeat("a", 1025))) }))
+	defer server.Close()
+	f := newTestFetcher(server.Client())
+	f.maxBodySize = 1024
+	_, err := f.Fetch(context.Background(), server.URL)
+	code, retryable, _ := ErrorDetails(err)
+	assert.Equal(t, ErrorBodyTooLarge, code)
+	assert.False(t, retryable)
+}
+
+func TestExtractArticleExcludesNavigation(t *testing.T) {
+	paragraph := strings.Repeat("门店交接班需要核对商品、库存和收银记录，异常情况应记录并移交。", 20)
+	source := "<html><body><nav>导航噪声</nav><article><h1>门店交接班</h1><p>" + paragraph + "</p></article><aside>推荐广告</aside></body></html>"
+	text, err := extractPageText(source, "https://example.com/article")
+	require.NoError(t, err)
+	assert.Contains(t, text, "异常情况应记录并移交")
+	assert.NotContains(t, text, "推荐广告")
+	assert.NotContains(t, text, "导航噪声")
+}
+
+func TestFetchPreservesMarkdownWithoutArticleExtraction(t *testing.T) {
+	markdown := "# 产品说明\n" + strings.Repeat("完整的产品使用说明与功能介绍。\n", 100) + "<details><summary>示例</summary>必须保留</details>"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Write([]byte(markdown))
+	}))
+	defer server.Close()
+	text, err := newTestFetcher(server.Client()).Fetch(context.Background(), server.URL)
+	require.NoError(t, err)
+	assert.Equal(t, markdown, text)
+}
+
+func TestFetchPreservesTextBoundaryWhitespace(t *testing.T) {
+	for _, contentType := range []string{"text/plain", "text/markdown"} {
+		t.Run(contentType, func(t *testing.T) {
+			body := "    indented code block\n\n"
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", contentType)
+				_, _ = w.Write([]byte(body))
+			}))
+			defer server.Close()
+			content, err := newTestFetcher(server.Client()).Fetch(context.Background(), server.URL)
+			require.NoError(t, err)
+			assert.Equal(t, body, content)
+		})
 	}
 }

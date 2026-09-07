@@ -28,6 +28,36 @@ type e2bTestNetError struct {
 	timeout bool
 }
 
+type workspaceFailureTransport struct {
+	controlHost string
+	attempted   bool
+}
+
+func (r *workspaceFailureTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Host == r.controlHost {
+		return http.DefaultTransport.RoundTrip(req)
+	}
+	r.attempted = true
+	return nil, errors.New("workspace provisioning unavailable")
+}
+
+func TestTencentWorkspaceFailureDeletesUnpublishedSandbox(t *testing.T) {
+	mock := newE2BMockServer(t)
+	endpoint, err := url.Parse(mock.URL())
+	require.NoError(t, err)
+	transport := &workspaceFailureTransport{controlHost: endpoint.Host}
+	client, err := newE2BRemoteClient(&Config{
+		E2BAPIKey: "test-key", E2BAPIURL: mock.URL(), E2BTemplate: "template-a",
+		E2BSandboxDomain: "ap-beijing.tencentags.com",
+	}, transport, NewInboundTokenRegistry())
+	require.NoError(t, err)
+	handle, err := client.Create(context.Background(), RemoteCreateRequest{})
+	require.Error(t, err)
+	require.Nil(t, handle)
+	require.True(t, transport.attempted)
+	require.Equal(t, int32(1), mock.deleteCount.Load())
+}
+
 func (e e2bTestNetError) Error() string   { return "network failure" }
 func (e e2bTestNetError) Timeout() bool   { return e.timeout }
 func (e e2bTestNetError) Temporary() bool { return false }

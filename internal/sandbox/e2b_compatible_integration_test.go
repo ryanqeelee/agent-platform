@@ -255,6 +255,7 @@ func e2bCompatibleConfig(t *testing.T) *Config {
 	cfg.E2BProxyURL = strings.TrimSpace(os.Getenv("E2B_INTEGRATION_PROXY_URL"))
 	cfg.E2BSandboxTTL = conformanceTTL
 	cfg.E2BHTTPTimeout = conformanceHTTPTimeut
+	cfg.E2BOnTimeout = RemoteTimeoutAction(strings.TrimSpace(os.Getenv("E2B_INTEGRATION_ON_TIMEOUT")))
 	cfg.DefaultTimeout = 2 * time.Minute
 	return cfg
 }

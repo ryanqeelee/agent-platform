@@ -95,7 +95,7 @@ func ConfigureEmployeeSandboxDefaults(agents interfaces.CustomAgentService,
 				}
 			}
 			_, err = configs.Update(ctx, tenantID, created.ID, UpdateSandboxConfigInput{
-				Name: "employee-assistant", Description: created.Description,
+				Name: "employee-assistant", Description: created.Description, Config: created.Config,
 			})
 			return err
 		})

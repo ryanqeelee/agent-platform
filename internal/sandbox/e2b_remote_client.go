@@ -26,8 +26,9 @@ type E2BRemoteClient struct {
 	client        *e2b.Client
 	inboundTokens *InboundTokenRegistry
 
-	templateID string
-	timeout    time.Duration
+	templateID       string
+	timeout          time.Duration
+	tencentWorkspace bool
 }
 
 // NewE2BRemoteClient builds an E2B-backed RemoteSandboxClient from Config.
@@ -110,10 +111,11 @@ func newE2BRemoteClient(
 		ttl = DefaultE2BSandboxTTL
 	}
 	return &E2BRemoteClient{
-		client:        client,
-		inboundTokens: inboundTokens,
-		templateID:    strings.TrimSpace(cfg.E2BTemplate),
-		timeout:       ttl,
+		client:           client,
+		inboundTokens:    inboundTokens,
+		templateID:       strings.TrimSpace(cfg.E2BTemplate),
+		timeout:          ttl,
+		tencentWorkspace: strings.HasSuffix(strings.TrimSpace(cfg.E2BSandboxDomain), ".tencentags.com"),
 	}, nil
 }
 
@@ -498,10 +500,28 @@ func (c *E2BRemoteClient) Create(
 	// go-e2b keeps this token but never sends it, so register it for the
 	// data-plane transport to attach.
 	c.inboundTokens.Put(sandbox.ID, sandbox.TrafficAccessToken)
-	return &e2bRemoteHandle{
+	handle := &e2bRemoteHandle{
 		sandbox:  sandbox,
 		metadata: cloneMetadata(request.Metadata),
-	}, nil
+	}
+	// Tencent's official code-interpreter template lacks WeKnora's workspace.
+	// Prepare only a newly created instance; reconnect never changes ownership
+	// of a live user's files. All subsequent session commands still run as user.
+	if c.tencentWorkspace {
+		result, initErr := c.Exec(ctx, handle, RemoteExecRequest{
+			Command: "install -d -o user -g user -m 0755 /workspace /workspace/input /workspace/output",
+			Shell:   true, User: "root", Timeout: 30 * time.Second,
+		})
+		if initErr == nil && (result == nil || result.ExitCode != 0 || result.Killed) {
+			initErr = fmt.Errorf("Tencent workspace initialization failed")
+		}
+		if initErr != nil {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			defer cancel()
+			return nil, errors.Join(initErr, c.Delete(cleanupCtx, handle.ID()))
+		}
+	}
+	return handle, nil
 }
 
 func (c *E2BRemoteClient) Connect(

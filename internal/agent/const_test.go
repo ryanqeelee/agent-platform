@@ -9,5 +9,7 @@ import (
 
 func TestToolExecutionTimeout(t *testing.T) {
 	assert.Equal(t, 10*time.Minute+5*time.Second, toolExecutionTimeout("shell_exec"))
+	assert.Equal(t, 10*time.Minute+5*time.Second, toolExecutionTimeout("read_skill"))
+	assert.Equal(t, 10*time.Minute+5*time.Second, toolExecutionTimeout("execute_skill_script"))
 	assert.Equal(t, 60*time.Second, toolExecutionTimeout("web_fetch"))
 }

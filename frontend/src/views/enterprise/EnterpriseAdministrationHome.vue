@@ -102,13 +102,11 @@ import {
 } from '@/api/enterpriseAdministration'
 import { getEnterpriseAdministrationCopy } from '@/config/productShellBrand'
 import { useAuthStore } from '@/stores/auth'
-import { useUIStore } from '@/stores/ui'
 import { SETTINGS_SECTION_MIN_ROLE } from '@/config/settingsAccess'
 
 const { t, locale } = useI18n()
 const router = useRouter()
 const authStore = useAuthStore()
-const uiStore = useUIStore()
 const copy = computed(() => getEnterpriseAdministrationCopy(locale.value))
 const queue = ref<EnterpriseAdministrationQueueV1>()
 const loading = ref(true)
@@ -122,7 +120,6 @@ const managementEntries = computed(() => [
   || authStore.hasRole(SETTINGS_SECTION_MIN_ROLE[entry.section])))
 
 function openSettings(section: string) {
-  uiStore.openSettings(section)
   router.push({ path: '/platform/settings', query: { section } })
 }
 
@@ -170,7 +167,6 @@ function openTarget(target: EnterpriseAdministrationTarget) {
     router.push('/platform/knowledge-bases')
     return
   }
-  uiStore.openSettings('members')
   router.push({
     path: '/platform/settings',
     query: target === 'audit' ? { section: 'members', audit: '1' } : { section: 'members' },

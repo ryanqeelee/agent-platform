@@ -125,7 +125,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		}
 	}
 	if request.AgentID == types.BuiltinEmployeeAssistantID &&
-		(request.AgentSourceTenantID != 0 || len(request.MCPServiceIDs) > 0 || len(request.SkillNames) > 0) {
+		(request.AgentSourceTenantID != 0 || len(request.MCPServiceIDs) > 0) {
 		return nil, nil, errors.NewBadRequestError("员工助理仅使用当前企业授权的基础能力")
 	}
 

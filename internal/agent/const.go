@@ -53,7 +53,9 @@ const (
 )
 
 func toolExecutionTimeout(toolName string) time.Duration {
-	if toolName == "shell_exec" {
+	// Skill reads/execution may prepare dependencies in a fresh session.
+	// Their installer uses shell_exec, so its parent must allow that budget.
+	if toolName == "shell_exec" || toolName == "read_skill" || toolName == "execute_skill_script" {
 		return shellExecToolTimeout
 	}
 	return defaultToolExecTimeout

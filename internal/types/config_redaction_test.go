@@ -151,3 +151,10 @@ func TestParserEngineConfigForResponse_NilSafe(t *testing.T) {
 func TestStorageEngineConfigForResponse_NilSafe(t *testing.T) {
 	assert.Nil(t, StorageEngineConfigForResponse(nil, true))
 }
+
+func TestSandboxEditorPreservesSessionPreparation(t *testing.T) {
+	existing := &TenantSandboxConfig{SandboxType: "e2b", SkillPreparation: "session", E2B: &E2BSandboxConfig{OnTimeout: "kill"}}
+	merged := MergeSandboxConfigForUpdate(&TenantSandboxConfig{SandboxType: "e2b", E2B: &E2BSandboxConfig{}}, existing)
+	require.Equal(t, "session", merged.SkillPreparation)
+	require.Equal(t, "kill", merged.E2B.OnTimeout)
+}

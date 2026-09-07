@@ -432,6 +432,18 @@ func (s *TenantSkillService) runInstall(
 	if !owned {
 		return nil
 	}
+	if cfgEntity.Config.SkillPreparation == "session" {
+		stopHeartbeat()
+		if err := s.writeReadySkillState(ctx, tenantID, configID, skillID, "", bundle); err != nil {
+			return err
+		}
+		s.markConfigSandboxesStale(ctx, tenantID, configID)
+		s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{
+			Percent: 100, Stage: "done", Status: types.SkillStatusReady,
+		})
+		return nil
+	}
+
 	// Generation is max(live pointer, ledger)+1 so a build that died after
 	// the commit but before the pointer moved cannot share a name with the
 	// next install. withConfigLock still serialises writers of SkillImage;
@@ -712,6 +724,8 @@ func (s *TenantSkillService) beginInstallTranscript(
 // because the step takes the union of what the agent side and the image side
 // each need, and a nine-parameter call tells the reader nothing.
 type installerJob struct {
+	sessionPreparation bool
+
 	tenantID   uint64
 	configID   string
 	skillID    string
@@ -755,7 +769,7 @@ func (s *TenantSkillService) installDependenciesAndVerify(
 		if err = run.round(ctx, prompt); err != nil {
 			return err
 		}
-		s.publishProgress(ctx, job.tenantID, job.configID, job.skillID,
+		s.publishInstallerProgress(ctx, job,
 			SkillProgress{Percent: 80, Stage: "agent_done"})
 		// The agent's part of this round is over: mute the asymptotic activity
 		// progress so verification and any repair round — which publish their
@@ -787,7 +801,7 @@ func (s *TenantSkillService) installDependenciesAndVerify(
 
 		logger.Infof(ctx, "[skill] %s failed %s verification with %d fixable finding(s); "+
 			"handing them back to the installer", job.skillID, gate.Language, len(gate.Problems))
-		s.publishProgress(ctx, job.tenantID, job.configID, job.skillID, SkillProgress{
+		s.publishInstallerProgress(ctx, job, SkillProgress{
 			Percent: 82, Stage: "repairing",
 			Log: fmt.Sprintf("%s verification found %d missing dependency/dependencies; "+
 				"asking the installer to add them", gate.Language, len(gate.Problems)),
@@ -797,6 +811,12 @@ func (s *TenantSkillService) installDependenciesAndVerify(
 		}
 		prompt = buildRepairPrompt(job.skillDir, gate)
 		job.transcript.RecordPrompt(prompt)
+	}
+}
+
+func (s *TenantSkillService) publishInstallerProgress(ctx context.Context, job installerJob, progress SkillProgress) {
+	if !job.sessionPreparation {
+		s.publishProgress(ctx, job.tenantID, job.configID, job.skillID, progress)
 	}
 }
 
@@ -889,7 +909,7 @@ func (s *TenantSkillService) reportVerificationNotes(
 	// One event, not one per note. Progress keeps only the latest value, so
 	// publishing them separately would leave a late subscriber holding whichever
 	// note happened to be last.
-	s.publishProgress(ctx, job.tenantID, job.configID, job.skillID, SkillProgress{
+	s.publishInstallerProgress(ctx, job, SkillProgress{
 		Percent: 80, Stage: "verify_note", Log: strings.Join(notes, "\n"),
 	})
 }

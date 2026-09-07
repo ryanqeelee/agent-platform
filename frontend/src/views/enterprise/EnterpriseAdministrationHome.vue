@@ -116,6 +116,7 @@ const managementEntries = computed(() => [
   { section: 'tenant', label: t('settings.tenantInfo') },
   { section: 'members', label: t('tenantMember.title') },
   { section: 'businessRoles', label: t('businessRoles.title') },
+  { section: 'enterprise-skills', label: t('enterpriseSkills.title') },
   { section: 'memory', label: t('memoryWorkspaceSettings.title') },
 ].filter(entry => authStore.effectiveCrossTenantAccess
   || authStore.hasRole(SETTINGS_SECTION_MIN_ROLE[entry.section])))

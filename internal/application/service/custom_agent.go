@@ -48,6 +48,9 @@ func AgentView(ctx context.Context, agent *types.CustomAgent) *types.CustomAgent
 	view := *agent
 	view.Config = types.CustomAgentConfig{}
 	applyWorkspaceAgentConfig(&view.Config, agent.Config)
+	if agent.ID == types.BuiltinEmployeeAssistantID {
+		view.Config.SkillsSelectionMode = agent.Config.SkillsSelectionMode
+	}
 	if types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin) {
 		applyEnterpriseScenarioConfig(&view.Config, agent.Config)
 		if view.Config.MCPSelectionMode == "all" {
@@ -110,6 +113,8 @@ func preserveAgentPlatformBindings(next *types.CustomAgentConfig, current types.
 
 // customAgentService implements the CustomAgentService interface
 type customAgentService struct {
+	provisionEmployeeSandbox func(context.Context, uint64) error
+
 	repo                 interfaces.CustomAgentRepository
 	chunkRepo            interfaces.ChunkRepository
 	kbService            interfaces.KnowledgeBaseService
@@ -120,6 +125,7 @@ type customAgentService struct {
 	scenarioCapabilities interfaces.AssistantScenarioCapabilityResolver
 	mcpServices          interfaces.MCPServiceService
 	webSearchProviders   interfaces.WebSearchProviderRepository
+	sandboxConfigs       repository.TenantSandboxConfigRepository
 }
 
 // NewCustomAgentService creates a new custom agent service
@@ -134,6 +140,7 @@ func NewCustomAgentService(
 	scenarioCapabilities interfaces.AssistantScenarioCapabilityResolver,
 	mcpServices interfaces.MCPServiceService,
 	webSearchProviders interfaces.WebSearchProviderRepository,
+	sandboxConfigs repository.TenantSandboxConfigRepository,
 ) interfaces.CustomAgentService {
 	return &customAgentService{
 		repo:                 repo,
@@ -146,6 +153,7 @@ func NewCustomAgentService(
 		scenarioCapabilities: scenarioCapabilities,
 		mcpServices:          mcpServices,
 		webSearchProviders:   webSearchProviders,
+		sandboxConfigs:       sandboxConfigs,
 	}
 }
 

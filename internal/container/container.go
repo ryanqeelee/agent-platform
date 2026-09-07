@@ -395,6 +395,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// it), but Invoke constructs the whole chain. SessionService needs
 	// *chatpipeline.EventManager, which only exists after the pipeline
 	// block above — starting the reaper any earlier panics.
+	must(container.Invoke(service.ConfigureSessionSkillPreparation))
+	must(container.Invoke(service.ConfigureEmployeeSandboxDefaults))
 	must(container.Invoke(startTenantSkillReaper))
 	logger.Debugf(ctx, "[Container] Tenant skill reaper registered")
 
@@ -440,8 +442,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewCustomAgentHandler))
 	must(container.Provide(handler.NewUserResourceFavoriteHandler))
 	must(container.Provide(service.NewSkillService))
-	must(container.Provide(func(s *service.TenantSkillService) *handler.SkillHandler {
-		return handler.NewSkillHandler(s, s)
+	must(container.Provide(func(s *service.TenantSkillService, agents interfaces.CustomAgentService) *handler.SkillHandler {
+		return handler.NewSkillHandler(s, s).WithEmployeeAgents(agents).WithEmployeeManagement(s)
 	}))
 	must(container.Provide(handler.NewOrganizationHandler))
 	must(container.Provide(handler.NewMemoryHandler))

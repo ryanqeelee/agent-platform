@@ -1,4 +1,14 @@
 export default {
+  enterpriseSkills: {
+    "title": "员工助理技能",
+    "description": "选择本企业员工助理可使用的技能。新技能及运行依赖由平台管理员安装。",
+    "empty": "尚无已安装技能，请联系平台管理员",
+    "ready": "已就绪",
+    "notReady": "尚未就绪",
+    "enable": "启用 {name}",
+    "loadError": "暂时无法读取技能，请确认员工助理沙箱已由平台启用。",
+    "saveError": "技能设置保存失败，请重试。"
+},
   platformApiKeys: {
     title: '平台 API Key',
     description: '为跨空间自动化创建平台级凭据；调用空间接口时通过 X-Tenant-ID 指定目标空间。',

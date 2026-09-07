@@ -1,4 +1,14 @@
 export default {
+  enterpriseSkills: {
+    "title": "Employee assistant skills",
+    "description": "Choose the skills available to your enterprise assistant. Platform administrators install new skills and dependencies.",
+    "empty": "No skills installed. Contact your platform administrator.",
+    "ready": "Ready",
+    "notReady": "Not ready",
+    "enable": "Enable {name}",
+    "loadError": "Skills are unavailable. Ask a platform administrator to check the assistant sandbox.",
+    "saveError": "Could not save the skill setting. Try again."
+},
   menu: {
     operatingBrief: 'Operating Brief',
     knowledgeBase: 'Knowledge Base',

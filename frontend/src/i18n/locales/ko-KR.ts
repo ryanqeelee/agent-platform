@@ -1,4 +1,14 @@
 export default {
+  enterpriseSkills: {
+    "title": "직원 도우미 스킬",
+    "description": "기업 도우미가 사용할 스킬을 선택하세요. 플랫폼 관리자가 새 스킬과 의존성을 설치합니다.",
+    "empty": "설치된 스킬이 없습니다. 플랫폼 관리자에게 문의하세요.",
+    "ready": "준비됨",
+    "notReady": "준비되지 않음",
+    "enable": "{name} 활성화",
+    "loadError": "스킬을 불러올 수 없습니다. 플랫폼 관리자에게 도우미 샌드박스 확인을 요청하세요.",
+    "saveError": "스킬 설정을 저장하지 못했습니다. 다시 시도하세요."
+},
   platformApiKeys: {
     title: '플랫폼 API 키',
     description: '워크스페이스 간 자동화를 위한 플랫폼 자격 증명입니다. 워크스페이스 API에는 X-Tenant-ID를 사용하세요.',

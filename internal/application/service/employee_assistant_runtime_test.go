@@ -7,6 +7,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
@@ -19,7 +20,7 @@ func TestEmployeeAssistantCannotInheritOptionalRuntimeCapabilities(t *testing.T)
 	cfg := &types.AgentConfig{
 		EmployeeAssistant:   true,
 		SandboxConfigID:     "old-session-sandbox",
-		SkillsEnabled:       true,
+		SkillsEnabled:       false,
 		SkillDirs:           []string{"old-skills"},
 		MCPSelectionMode:    "all",
 		PinnedMCPServiceIDs: []string{"old-mcp"},
@@ -88,4 +89,17 @@ func TestSessionDocumentToolUsesOnlyCapturedAttachmentAuthority(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, session.calls)
 	require.Equal(t, 1, kb.calls)
+}
+
+func TestEmployeeAssistantUsesExplicitWorkspaceSandbox(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	named := &stagingSandboxManager{sandboxType: sandbox.SandboxTypeE2B}
+	svc := &agentService{sandboxResolver: stubSandboxResolver{mgr: named}, sandboxPinner: NewSessionSandboxPinner(newPinTestDB(t))}
+	cfg := &types.AgentConfig{EmployeeAssistant: true, SkillsEnabled: true, SandboxConfigID: "cfg-remote"}
+	mgr, err := svc.resolveWorkspaceSandbox(ctx, "s-1", cfg)
+	require.NoError(t, err)
+	require.Same(t, named, mgr)
+	registry := tools.NewToolRegistry()
+	svc.registerSandboxFileTools(ctx, registry, "s-1", cfg)
+	require.Len(t, registry.ListTools(), 4)
 }

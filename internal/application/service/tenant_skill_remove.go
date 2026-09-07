@@ -138,6 +138,9 @@ func (s *TenantSkillService) runRemove(
 
 	// A skill that never made it into any image needs no sandbox at all, and
 	// no live sandbox can be out of date over a skill it never carried.
+	if cfgEntity.Config != nil && cfgEntity.Config.SkillPreparation == "session" {
+		return s.finishRemoval(cleanupBase, tenantID, configID, skillID, true)
+	}
 	if currentSnapshotID(cfgEntity) == "" {
 		return s.finishRemoval(cleanupBase, tenantID, configID, skillID, false)
 	}

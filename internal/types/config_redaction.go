@@ -341,6 +341,9 @@ func MergeSandboxConfigForUpdate(incoming, existing *TenantSandboxConfig) *Tenan
 			prev = *existing.E2B
 		}
 		e2b.APIKey = PreserveIfRedacted(e2b.APIKey, prev.APIKey)
+		if e2b.OnTimeout == "" {
+			e2b.OnTimeout = prev.OnTimeout
+		}
 		out.E2B = &e2b
 	}
 	// Only keys present in incoming survive: deleting a row in the UI must
@@ -389,6 +392,9 @@ func MergeSandboxConfigForUpdate(incoming, existing *TenantSandboxConfig) *Tenan
 		// The runtime form omits skill_rollout. An empty incoming value must
 		// not reset a saved "new_session" choice; the skills panel sends the
 		// explicit next_turn token when the admin switches back.
+		if out.SkillPreparation == "" {
+			out.SkillPreparation = existing.SkillPreparation
+		}
 		if strings.TrimSpace(out.SkillRollout) == "" {
 			out.SkillRollout = existing.SkillRollout
 		}

@@ -21,6 +21,31 @@ func (s *customAgentService) employeeAssistant(ctx context.Context, tenantID uin
 	if err != nil || settings == nil {
 		return nil, ErrAssistantScenarioCapabilityUnavailable
 	}
+	agent.Config.SandboxConfigID = ""
+	agent.Config.SkillsSelectionMode = "none"
+	agent.Config.SelectedSkills = nil
+	if settings.Capabilities.Tools && s.sandboxConfigs != nil {
+		if s.provisionEmployeeSandbox != nil {
+			if err := s.provisionEmployeeSandbox(ctx, tenantID); err != nil {
+				return nil, err
+			}
+		}
+
+		configs, err := s.sandboxConfigs.ListByTenant(ctx, tenantID)
+		if err != nil {
+			return nil, err
+		}
+		for _, config := range configs {
+			if config.Name != "employee-assistant" {
+				continue
+			}
+			if config.TenantID != tenantID || agent.Config.SandboxConfigID != "" {
+				return nil, fmt.Errorf("employee assistant sandbox configuration is ambiguous or outside the workspace")
+			}
+			agent.Config.SandboxConfigID = config.ID
+			agent.Config.SkillsSelectionMode = "all"
+		}
+	}
 	ready := false
 	agent.WebSearchReady = &ready
 	agent.Config.WebSearchEnabled = settings.Capabilities.ExternalSearch
@@ -39,4 +64,11 @@ func (s *customAgentService) employeeAssistant(ctx context.Context, tenantID uin
 		}
 	}
 	return agent, nil
+}
+
+// Employee sandbox authority comes from the canonical platform definition, never
+// from a sandbox pinned by an older conversation after tools were disabled.
+func employeeSandboxDisabled(config *types.AgentConfig) bool {
+	return config != nil && config.EmployeeAssistant &&
+		(!config.SkillsEnabled || config.SandboxConfigID == "")
 }

@@ -85,6 +85,11 @@ func ResolveEffectiveConfig(
 	}
 
 	if e2bCfg := tenantCfg.E2B; e2bCfg != nil {
+		if e2bCfg.OnTimeout != "" && e2bCfg.OnTimeout != "kill" && e2bCfg.OnTimeout != "pause" {
+			return nil, fmt.Errorf("invalid E2B on_timeout")
+		}
+		effective.E2BOnTimeout = RemoteTimeoutAction(e2bCfg.OnTimeout)
+
 		if err := overrideURL(&effective.E2BAPIURL, e2bCfg.APIURL, effective.AllowPrivateEndpoints); err != nil {
 			return nil, err
 		}
@@ -215,6 +220,7 @@ func clearProviderFields(cfg *Config) {
 	cfg.E2BAPIKey = ""
 	cfg.E2BTemplate = ""
 	cfg.E2BSandboxTTL = 0
+	cfg.E2BOnTimeout = ""
 	cfg.E2BHTTPTimeout = 0
 	cfg.Network = RemoteNetworkPolicy{}
 }

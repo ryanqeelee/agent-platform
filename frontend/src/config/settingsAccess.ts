@@ -17,6 +17,7 @@ export const SETTINGS_SECTION_MIN_ROLE: Record<string, SettingsRoleKey> = {
   // Install writes a root shell into the sandbox image every session of
   // that config boots. Same Admin+ bar as the sandbox editor itself.
   skills: 'admin',
+  'enterprise-skills': 'admin',
   mcp: 'admin',
   system: 'viewer',
   userprofile: 'viewer',
@@ -78,7 +79,7 @@ export type SettingsSurface = 'personal' | 'enterprise' | 'platform'
 // panels without mixing an administrator's work into their personal settings.
 export function settingsSurfaceForSection(section: string): SettingsSurface {
   if (SYSTEM_ADMIN_SETTINGS_SECTIONS.has(section)) return 'platform'
-  if (['tenant', 'members', 'businessRoles', 'memory'].includes(section)
+  if (['tenant', 'members', 'businessRoles', 'memory', 'enterprise-skills'].includes(section)
       || section.startsWith('integration-')) return 'enterprise'
   return 'personal'
 }

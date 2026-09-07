@@ -277,3 +277,11 @@ func TestEffectiveTenantSkillsToleratesMissingDependencies(t *testing.T) {
 	require.Empty(t, effectiveTenantSkills(context.Background(), nil, fx.skills, 7, "cfg-1"))
 	require.Empty(t, effectiveTenantSkills(context.Background(), fx.configs, nil, 7, "cfg-1"))
 }
+
+func TestEffectiveSessionSkillsDoNotRequireSnapshot(t *testing.T) {
+	fx := newEffectiveFixture(t)
+	fx.configs.entity.Config.SkillImage = nil
+	require.Empty(t, fx.derive(context.Background()))
+	fx.configs.entity.Config.SkillPreparation = "session"
+	require.ElementsMatch(t, []string{"ready-enabled", "second-ready"}, skillNames(fx.derive(context.Background())))
+}

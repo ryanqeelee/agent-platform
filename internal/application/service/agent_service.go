@@ -93,6 +93,8 @@ func knowledgeBaseScopesForPrompt(config *types.AgentConfig) ([]string, map[stri
 
 // agentService implements agent-related business logic
 type agentService struct {
+	sessionSkills *TenantSkillService
+
 	cfg                   *config.Config
 	modelService          interfaces.ModelService
 	mcpServiceService     interfaces.MCPServiceService
@@ -239,6 +241,9 @@ func (s *agentService) CreateAgentEngine(
 		systemPromptTemplate,
 	)
 	engine.SetAppConfig(s.cfg)
+	if config.EmployeeAssistant && !employeeSandboxDisabled(config) {
+		engine.SetPinnedMentions(nil, s.resolvePinnedSkillInfos(config))
+	}
 	if !config.EmployeeAssistant {
 		pinnedMCP := s.resolvePinnedMCPServiceInfos(ctx, config)
 		s.attachPinnedMCPToolNames(toolRegistry, pinnedMCP)
@@ -275,7 +280,7 @@ func (s *agentService) CreateAgentEngine(
 	// tools that need it). A sandbox whose skills are still installing —
 	// or that simply has none yet — therefore gets a shell without an
 	// empty skills manager or skill tools that cannot succeed.
-	offerSkills := !config.EmployeeAssistant && config.SkillsEnabled &&
+	offerSkills := !employeeSandboxDisabled(config) && config.SkillsEnabled &&
 		(len(config.SkillDirs) > 0 || len(config.TenantSkills) > 0)
 	if offerSkills {
 		skillsManager, err := s.initializeSkillsManager(ctx, sessionID, config, toolRegistry)
@@ -426,7 +431,7 @@ func (s *agentService) registerSandboxFileTools(
 	sessionID string,
 	config *types.AgentConfig,
 ) {
-	if config != nil && config.EmployeeAssistant {
+	if employeeSandboxDisabled(config) {
 		return
 	}
 
@@ -519,7 +524,7 @@ func (s *agentService) registerSandboxShellIfAllowed(
 	sessionID string,
 	config *types.AgentConfig,
 ) {
-	if config != nil && config.EmployeeAssistant {
+	if employeeSandboxDisabled(config) {
 		return
 	}
 
@@ -546,7 +551,7 @@ func (s *agentService) resolveWorkspaceSandbox(
 	sessionID string,
 	config *types.AgentConfig,
 ) (sandbox.Manager, error) {
-	if config != nil && config.EmployeeAssistant {
+	if employeeSandboxDisabled(config) {
 		return nil, nil
 	}
 
@@ -608,6 +613,16 @@ func (s *agentService) initializeSkillsManager(
 	skillsManager := skills.NewManager(skillsConfig, sandboxMgr)
 	if source := s.tenantSkillSource(ctx, config); source != nil {
 		skillsManager.WithTenantSource(source)
+	}
+	if s.sessionSkills != nil && len(config.TenantSkills) > 0 {
+		skillsManager.WithSkillPreparation(func(callCtx context.Context, name string) error {
+			for _, row := range config.TenantSkills {
+				if row != nil && row.Name == name {
+					return s.sessionSkills.prepareSessionSkill(callCtx, sandboxMgr, tenantID, sessionID, configID, row)
+				}
+			}
+			return fmt.Errorf("skill is not available for this run: %s", name)
+		})
 	}
 	if resolver := s.userEnvResolver(ctx, config); resolver != nil {
 		skillsManager.WithEnvResolver(resolver)

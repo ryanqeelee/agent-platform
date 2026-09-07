@@ -3414,3 +3414,17 @@ func (s installFileService) DeleteFile(_ context.Context, ref string) error {
 func (installFileService) CopyFile(context.Context, string, uint64, string) (string, error) {
 	return "", nil
 }
+
+func TestRunInstallSessionPreparationVerifiesWithoutSnapshot(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.configRepo.entity.Config.SkillPreparation = "session"
+	require.NoError(t, fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle))
+	require.Contains(t, fx.events, "verify-python")
+	require.NotContains(t, fx.events, "create-snapshot")
+	require.Contains(t, fx.events, "destroy-sandbox")
+	row, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	require.Equal(t, types.SkillStatusReady, row.Status)
+	require.Empty(t, row.InstalledSnapshotID)
+	require.Equal(t, 0, fx.configRepo.updates)
+}

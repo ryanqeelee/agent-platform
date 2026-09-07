@@ -161,6 +161,7 @@
                     <SandboxSettings />
                   </div>
 
+                  <div v-if="currentSection === 'enterprise-skills'" class="section"><EnterpriseSkillSettings /></div>
                   <!-- 技能目录：登记后可装到多份沙箱，智能体只从当前沙箱的就绪集合选用 -->
                   <div v-if="currentSection === 'skills'" class="section">
                     <SkillSettings :initial-sandbox-id="currentSubSection" />
@@ -254,6 +255,7 @@ import ParserEngineSettings from './ParserEngineSettings.vue'
 import StorageEngineSettings from './StorageBackendSettings.vue'
 import SandboxSettings from './SandboxSettings.vue'
 import SkillSettings from './SkillSettings.vue'
+import EnterpriseSkillSettings from './EnterpriseSkillSettings.vue'
 import WeKnoraCloudSettings from './WeKnoraCloudSettings.vue'
 import TenantMembers from './TenantMembers.vue'
 import BusinessRoles from './BusinessRoles.vue'
@@ -383,6 +385,7 @@ const navItems = computed(() => {
     { key: 'parser', icon: 'file-search', label: t('settings.parserEngine') },
     { key: 'storage', icon: 'cloud', label: t('settings.storageEngine') },
     { key: 'sandbox', icon: 'code', label: t('settings.sandbox.title') },
+    { key: 'enterprise-skills', icon: SKILL_ICON, label: t('enterpriseSkills.title') },
     { key: 'skills', icon: SKILL_ICON, label: t('settings.skills.title') },
     { key: 'mcp', icon: 'tools', label: t('settings.mcpService') },
     { key: 'diagnostics', icon: 'info-circle', label: t('system.title') },
@@ -429,7 +432,7 @@ const navGroups = computed<NavGroup[]>(() => {
     {
       key: 'workspace',
       label: t('settings.navGroups.workspace'),
-      items: pickItems(['tenant', 'members', 'businessRoles', 'memory']),
+      items: pickItems(['tenant', 'members', 'businessRoles', 'memory', 'enterprise-skills']),
     },
     {
       key: 'models_runtime',

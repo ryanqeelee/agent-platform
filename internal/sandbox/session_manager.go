@@ -1106,6 +1106,10 @@ func buildSessionCreateRequest(provider RemoteProvider, cfg *Config) (RemoteCrea
 		if ttl <= 0 {
 			ttl = DefaultE2BSandboxTTL
 		}
+		action := cfg.E2BOnTimeout
+		if action == "" {
+			action = RemoteOnTimeoutPause
+		}
 		return RemoteCreateRequest{
 			TemplateID: cfg.E2BTemplate,
 			EnvVars:    envVars,
@@ -1113,8 +1117,8 @@ func buildSessionCreateRequest(provider RemoteProvider, cfg *Config) (RemoteCrea
 			Timeout: RemoteTimeoutPolicy{
 				Mode:       RemoteTimeoutExplicit,
 				Value:      ttl,
-				Action:     RemoteOnTimeoutPause,
-				AutoResume: true,
+				Action:     action,
+				AutoResume: action == RemoteOnTimeoutPause,
 			},
 		}, nil
 

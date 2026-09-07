@@ -646,6 +646,9 @@ func (c *StorageEngineConfig) Scan(value interface{}) error {
 // It is self-contained: provider fields are not inherited from process
 // environment. Leaving a required provider field empty is rejected on save.
 type TenantSandboxConfig struct {
+	// SkillPreparation selects validated per-session installation instead of snapshots.
+	SkillPreparation string `json:"skill_preparation,omitempty"`
+
 	// SandboxType is cube, e2b, or docker; disabled is the hidden policy row.
 	SandboxType string `json:"sandbox_type,omitempty"`
 
@@ -725,6 +728,9 @@ type CubeSandboxConfig struct {
 // and SandboxDomain are optional because go-e2b resolves both on its own when
 // they are empty.
 type E2BSandboxConfig struct {
+	// OnTimeout is pause (default) or kill for backends without automatic pause.
+	OnTimeout string `json:"on_timeout,omitempty"`
+
 	APIURL        string `json:"api_url,omitempty"`
 	SandboxDomain string `json:"sandbox_domain,omitempty"`
 	APIKey        string `json:"api_key,omitempty"` // 加密

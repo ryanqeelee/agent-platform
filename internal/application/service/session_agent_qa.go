@@ -181,7 +181,7 @@ func (s *sessionService) AgentQA(
 	// the first resolve: if the previous turn left a stale mark, that is
 	// where the new image is picked up.
 	var stagedAttachments []stagedSessionAttachment
-	if !agentConfig.EmployeeAssistant {
+	if !employeeSandboxDisabled(agentConfig) {
 		releaseTurn := s.holdSandboxTurn(ctx, sessionID, agentConfig.SandboxConfigID)
 		defer releaseTurn()
 
@@ -334,9 +334,7 @@ func (s *sessionService) buildAgentConfig(
 	}
 
 	// Configure skills based on CustomAgentConfig
-	if !agentConfig.EmployeeAssistant {
-		s.configureSkillsFromAgent(ctx, agentConfig, customAgent)
-	}
+	s.configureSkillsFromAgent(ctx, agentConfig, customAgent)
 
 	sharedScope, err := s.buildSharedAgentSearchScope(ctx, req)
 	if err != nil {
@@ -347,7 +345,7 @@ func (s *sessionService) buildAgentConfig(
 	// The workspace is the one on the context rather than the agent's owner,
 	// because that is where resolveSandboxForExecution reads it; skillsForRun
 	// picks the config the same way the sandbox resolution does.
-	if !agentConfig.EmployeeAssistant {
+	if !employeeSandboxDisabled(agentConfig) {
 		sandboxTenantID, _ := types.TenantIDFromContext(ctx)
 		skillConfigID, tenantSkills := skillsForRun(
 			ctx, s.sandboxPinner, s.sandboxConfigRepo, s.tenantSkillRepo,

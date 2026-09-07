@@ -226,6 +226,8 @@ func (r *ExecuteResult) IsSuccess() bool {
 
 // Config holds sandbox manager configuration
 type Config struct {
+	E2BOnTimeout RemoteTimeoutAction
+
 	// Type is the preferred sandbox type
 	Type SandboxType
 

@@ -102,6 +102,8 @@ func (m *Manager) SkillOutputDir(sessionID, skillName string) string {
 // Manager manages skills lifecycle including discovery, loading, and script execution
 // It coordinates between the Loader (filesystem operations) and Sandbox (script execution)
 type Manager struct {
+	prepareSkill func(context.Context, string) error
+
 	loader     *Loader
 	sandboxMgr sandbox.Manager
 
@@ -124,6 +126,12 @@ type Manager struct {
 	// Cache
 	metadataCache []*SkillMetadata
 	mu            sync.RWMutex
+}
+
+// WithSkillPreparation prepares a validated skill in the current sandbox before use.
+func (m *Manager) WithSkillPreparation(prepare func(context.Context, string) error) *Manager {
+	m.prepareSkill = prepare
+	return m
 }
 
 // ManagerConfig holds configuration for the skill manager
@@ -264,7 +272,16 @@ func (m *Manager) LoadSkill(ctx context.Context, skillName string) (*Skill, erro
 		return nil, fmt.Errorf("skill not allowed: %s", skillName)
 	}
 
-	return m.resolveSource(skillName).LoadSkillInstructions(skillName)
+	skill, err := m.resolveSource(skillName).LoadSkillInstructions(skillName)
+	if err != nil {
+		return nil, err
+	}
+	if m.prepareSkill != nil {
+		if err := m.prepareSkill(ctx, skillName); err != nil {
+			return nil, err
+		}
+	}
+	return skill, nil
 }
 
 // isSkillAllowed checks if a skill is in the allowed list
@@ -355,6 +372,12 @@ func (m *Manager) ExecuteScript(ctx context.Context, skillName, scriptPath strin
 	basePath, err := source.GetSkillBasePath(skillName)
 	if err != nil {
 		return nil, err
+	}
+
+	if m.prepareSkill != nil {
+		if err := m.prepareSkill(ctx, skillName); err != nil {
+			return nil, err
+		}
 	}
 
 	// Prepare execution config

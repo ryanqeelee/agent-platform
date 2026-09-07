@@ -12,7 +12,7 @@ import {
   type SystemInfo,
 } from '@/api/system'
 import { listMCPServices, type MCPService } from '@/api/mcp-service'
-import { listSkillCatalog, listSkills, type SkillCatalogItem, type SkillInfo } from '@/api/skill'
+import { listSkillCatalog, listSkills, listEmployeeSkills, type SkillCatalogItem, type SkillInfo } from '@/api/skill'
 import { getAgentTypePresets, getPlaceholders, type AgentTypePreset, type PlaceholdersResponse } from '@/api/agent'
 import { getTenantRetrievalConfig } from '@/api/retrieval'
 
@@ -127,7 +127,9 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
         return
       }
       try {
-        const skillsRes = await listSkills(configId)
+        const skillsRes = configId === "builtin-employee-assistant"
+          ? await listEmployeeSkills()
+          : await listSkills(configId)
         skillsAvailable.value = skillsRes.skills_available !== false
         skills.value = skillsRes.data && skillsRes.data.length > 0 ? skillsRes.data : []
       } catch {

@@ -86,3 +86,7 @@ export function getCatalogSkillFile(catalogId: string, path: string) {
     params: { path },
   });
 }
+
+export function listEmployeeSkills() {
+  return get<{ data: SkillInfo[]; skills_available?: boolean }>('/api/v1/employee-assistant/skills');
+}

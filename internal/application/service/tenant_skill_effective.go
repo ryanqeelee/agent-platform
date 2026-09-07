@@ -91,7 +91,7 @@ func effectiveTenantSkills(
 	if cfgEntity == nil || cfgEntity.Config == nil {
 		return nil
 	}
-	if !sandbox.SkillImageActive(cfgEntity.Config) {
+	if cfgEntity.Config.SkillPreparation != "session" && !sandbox.SkillImageActive(cfgEntity.Config) {
 		if image := cfgEntity.Config.SkillImage; image != nil && image.SnapshotID != "" {
 			logger.Warnf(ctx,
 				"[skill] sandbox config %s boots its base template rather than skill image %s; "+

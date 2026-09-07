@@ -384,6 +384,12 @@ func SanitizeSandboxConfig(
 	if _, err := sandbox.ResolveEffectiveConfig(merged, sandbox.DefaultConfig()); err != nil {
 		return nil, err
 	}
+	if merged.SkillPreparation != "" && merged.SkillPreparation != "session" {
+		return nil, apperrors.NewBadRequestError("invalid skill_preparation")
+	}
+	if merged.SkillPreparation == "session" && (merged.SkillImage != nil && merged.SkillImage.SnapshotID != "") {
+		return nil, apperrors.NewBadRequestError("session preparation requires a config without an existing skill image")
+	}
 	if err := validateSkillRollout(merged.SkillRollout); err != nil {
 		return nil, err
 	}

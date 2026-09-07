@@ -69,6 +69,9 @@ func RegisterUserFavoriteRoutes(r *gin.RouterGroup, h *handler.UserResourceFavor
 //
 // Installed skill metadata and sandbox state are platform runtime details.
 func RegisterSkillRoutes(r *gin.RouterGroup, skillHandler *handler.SkillHandler, g *rbacGuards) {
+	r.GET("/employee-assistant/skills", g.Viewer(), skillHandler.ListEmployeeSkills)
+	r.GET("/employee-assistant/skills/manage", g.Admin(), skillHandler.ListEnterpriseSkills)
+	r.PATCH("/employee-assistant/skills/manage/:id", g.Admin(), skillHandler.SetEnterpriseSkillEnabled)
 	skills := r.Group("/skills", g.SystemAdmin())
 	{
 		skills.GET("", skillHandler.ListSkills)

@@ -451,3 +451,18 @@ func zipArchive(t *testing.T, files map[string]string) []byte {
 	require.NoError(t, writer.Close())
 	return buf.Bytes()
 }
+
+func TestPreparationFailureBlocksReadAndDirectExecution(t *testing.T) {
+	source := NewTenantSkillSource([]*types.TenantSkillEntity{{ID: "one", Name: "sample", Status: types.SkillStatusReady, Enabled: true}}, nil)
+	mgr := NewManager(&ManagerConfig{Enabled: true}, sandbox.NewDisabledManager()).WithTenantSource(source)
+	calls := 0
+	mgr.WithSkillPreparation(func(context.Context, string) error { calls++; return errors.New("dependency unavailable") })
+	_, err := mgr.LoadSkill(context.Background(), "sample")
+	require.ErrorContains(t, err, "dependency unavailable")
+	_, err = mgr.ExecuteScript(context.Background(), "sample", "scripts/main.py", nil, "")
+	require.ErrorContains(t, err, "dependency unavailable")
+	require.Equal(t, 2, calls)
+	_, err = mgr.LoadSkill(context.Background(), "missing")
+	require.Error(t, err)
+	require.Equal(t, 2, calls)
+}

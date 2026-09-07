@@ -69,7 +69,7 @@ test('personal, enterprise and platform sections never share a settings surface'
   for (const section of ['general', 'userprofile', 'mymemory', 'envvars', 'system']) {
     assert.equal(settingsSurfaceForSection(section), 'personal')
   }
-  for (const section of ['tenant', 'members', 'businessRoles', 'memory']) {
+  for (const section of ['tenant', 'members', 'businessRoles', 'memory', 'enterprise-skills']) {
     assert.equal(settingsSurfaceForSection(section), 'enterprise')
     assert.equal(SETTINGS_SECTION_MIN_ROLE[section], 'admin')
   }

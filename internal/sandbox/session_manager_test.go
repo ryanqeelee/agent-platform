@@ -453,3 +453,19 @@ func lastExecRequest(t *testing.T, client *fakeRemoteClient) RemoteExecRequest {
 	require.NotEmpty(t, client.execRequests)
 	return client.execRequests[len(client.execRequests)-1]
 }
+
+func TestE2BTimeoutPolicyIsExplicit(t *testing.T) {
+	for _, action := range []RemoteTimeoutAction{"", RemoteOnTimeoutPause, RemoteOnTimeoutKill} {
+		cfg := DefaultConfig()
+		cfg.E2BTemplate = "beijing-tool"
+		cfg.E2BOnTimeout = action
+		request, err := buildSessionCreateRequest(SandboxTypeE2B, cfg)
+		require.NoError(t, err)
+		expected := action
+		if expected == "" {
+			expected = RemoteOnTimeoutPause
+		}
+		require.Equal(t, expected, request.Timeout.Action)
+		require.Equal(t, expected == RemoteOnTimeoutPause, request.Timeout.AutoResume)
+	}
+}

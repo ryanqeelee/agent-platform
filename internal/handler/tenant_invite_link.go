@@ -77,8 +77,8 @@ func (h *TenantInvitationHandler) CreateInviteLink(c *gin.Context) {
 		c.Error(apperrors.NewValidationError("invalid request body").WithDetails(err.Error()))
 		return
 	}
-	if !req.Role.IsValid() || req.Role == types.TenantRoleOwner {
-		c.Error(apperrors.NewValidationError("role must be one of admin/contributor/viewer; ownership uses the transfer endpoint"))
+	if !req.Role.IsValid() {
+		c.Error(apperrors.NewValidationError("角色必须是企业管理员或员工"))
 		return
 	}
 

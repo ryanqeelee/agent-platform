@@ -55,9 +55,9 @@ func TestEnterpriseSessionProjectionV1(t *testing.T) {
 		wantRole     string
 		wantAdmin    bool
 	}{
-		{name: "owner", role: types.TenantRoleOwner, user: types.User{ID: "owner", TenantID: 7, IsActive: true}, activeTenant: 7, wantStatus: http.StatusOK, wantRole: "owner", wantAdmin: true},
+		{name: "owner", role: types.TenantRoleOwner, user: types.User{ID: "owner", TenantID: 7, IsActive: true}, activeTenant: 7, wantStatus: http.StatusForbidden},
 		{name: "admin", role: types.TenantRoleAdmin, user: types.User{ID: "admin", TenantID: 7, IsActive: true}, activeTenant: 7, wantStatus: http.StatusOK, wantRole: "admin", wantAdmin: true},
-		{name: "contributor maps to knowledge administrator", role: types.TenantRoleContributor, user: types.User{ID: "contributor", TenantID: 7, IsActive: true}, activeTenant: 7, wantStatus: http.StatusOK, wantRole: "knowledge_administrator", wantAdmin: true},
+		{name: "contributor maps to knowledge administrator", role: types.TenantRoleContributor, user: types.User{ID: "contributor", TenantID: 7, IsActive: true}, activeTenant: 7, wantStatus: http.StatusForbidden},
 		{name: "viewer maps to employee", role: types.TenantRoleViewer, user: types.User{ID: "viewer", TenantID: 7, IsActive: true}, activeTenant: 7, wantStatus: http.StatusOK, wantRole: "employee", wantAdmin: false},
 		{name: "inactive user rejected", role: types.TenantRoleOwner, user: types.User{ID: "inactive", TenantID: 7}, activeTenant: 7, wantStatus: http.StatusForbidden},
 		{name: "system admin rejected", role: types.TenantRoleOwner, user: types.User{ID: "system", TenantID: 7, IsActive: true, IsSystemAdmin: true}, activeTenant: 7, wantStatus: http.StatusForbidden},

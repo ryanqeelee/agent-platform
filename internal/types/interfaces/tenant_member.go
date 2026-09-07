@@ -57,20 +57,16 @@ type TenantMemberRepository interface {
 	SoftDelete(ctx context.Context, actor types.MemberActorAuthority, userID string, tenantID uint64) error
 
 	// CreateManaged locks the tenant and resolves current actor authority
-	// before adding a non-Owner member.
+	// before adding a member.
 	CreateManaged(ctx context.Context, actor types.MemberActorAuthority, member *types.TenantMember) error
 
-	// CountActiveOwners reports how many active rows in the tenant carry
-	// the owner role. Used by service-layer invariant checks ("cannot
-	// remove the last owner").
-	CountActiveOwners(ctx context.Context, tenantID uint64) (int64, error)
+	// CountActiveAdministrators reports how many active rows in the tenant carry
+	// the admin role. Used by service-layer invariant checks ("cannot
+	// remove the last administrator").
+	CountActiveAdministrators(ctx context.Context, tenantID uint64) (int64, error)
 
 	// HasAnyMembers reports whether the tenant has at least one active
 	// membership. Used by the auth middleware to decide whether to
 	// auto-promote the first authenticating human in an API-key-only tenant.
 	HasAnyMembers(ctx context.Context, tenantID uint64) (bool, error)
-
-	// TransferOwnership atomically exchanges actor's Owner role with an active
-	// Admin target while serializing on the tenant row.
-	TransferOwnership(ctx context.Context, actorUserID, targetUserID string, tenantID uint64) error
 }

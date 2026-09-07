@@ -233,7 +233,7 @@ const router = createRouter({
         {
           path: "agents",
           name: "agentList",
-          component: () => import("../views/agent/AgentList.vue"),
+          redirect: { path: "/platform/settings", query: { section: "agents" } },
           meta: { requiresInit: true, requiresAuth: true, requiredCapability: 'agents' }
         },
         {

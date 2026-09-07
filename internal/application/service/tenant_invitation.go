@@ -151,9 +151,6 @@ func (s *tenantInvitationService) Create(
 	if !role.IsValid() {
 		return nil, ErrInvalidTenantRole
 	}
-	if err := rejectAPIKeyOwnerAssignment(ctx, role); err != nil {
-		return nil, err
-	}
 	if err := requireInviteRole(ctx, role); err != nil {
 		return nil, err
 	}
@@ -221,8 +218,8 @@ func (s *tenantInvitationService) Accept(
 	if inv.Status != types.TenantInvitationStatusPending {
 		return nil, ErrInvitationNotPending
 	}
-	if inv.Role == types.TenantRoleOwner {
-		return nil, ErrOwnerRoleReserved
+	if !inv.Role.IsValid() {
+		return nil, ErrInvalidTenantRole
 	}
 	if inv.IsExpired(s.now()) {
 		// The sweep above should have flipped it already, but a row
@@ -384,14 +381,7 @@ func (s *tenantInvitationService) Revoke(ctx context.Context, invID uint64) erro
 	if inv.Status != types.TenantInvitationStatusPending {
 		return ErrInvitationNotPending
 	}
-	// Historical pending Owner invitations are unsafe to accept but remain
-	// revocable. Only an Owner can revoke one; Admins retain their ordinary
-	// lower-role invitation authority.
-	if inv.Role == types.TenantRoleOwner {
-		if actorRole(ctx) != types.TenantRoleOwner {
-			return ErrMemberActionForbidden
-		}
-	} else if err := requireInviteRole(ctx, inv.Role); err != nil {
+	if err := requireInviteRole(ctx, inv.Role); err != nil {
 		return err
 	}
 
@@ -524,9 +514,6 @@ func (s *tenantInvitationService) CreateShareLink(
 	if !role.IsValid() {
 		return nil, "", ErrInvalidTenantRole
 	}
-	if err := rejectAPIKeyOwnerAssignment(ctx, role); err != nil {
-		return nil, "", err
-	}
 	if err := requireInviteRole(ctx, role); err != nil {
 		return nil, "", err
 	}
@@ -605,8 +592,8 @@ func (s *tenantInvitationService) AcceptByToken(
 	if err != nil {
 		return nil, err
 	}
-	if inv.Role == types.TenantRoleOwner {
-		return nil, ErrOwnerRoleReserved
+	if !inv.Role.IsValid() {
+		return nil, ErrInvalidTenantRole
 	}
 	member, err := s.repo.AcceptShareLink(ctx, inv.ID, newUserID, s.now())
 	if err != nil {

@@ -7,6 +7,7 @@ const referenceDrawer = readFileSync(
   'utf8',
 )
 const legacyReferences = readFileSync(new URL('./docInfo.vue', import.meta.url), 'utf8')
+const readingPanel = readFileSync(new URL('../../../components/ChatReadingPanel.vue', import.meta.url), 'utf8')
 const agentStream = readFileSync(new URL('./AgentStreamDisplay.vue', import.meta.url), 'utf8')
 const chatView = readFileSync(new URL('../index.vue', import.meta.url), 'utf8')
 
@@ -82,7 +83,8 @@ test('citation highlighting waits for drawer entry and only scrolls its own body
 })
 
 test('references drawer smoothly shifts the chat area while opening', () => {
-  assert.match(referenceDrawer, /\.chat-references-panel \{[\s\S]*?position: fixed;/)
+  assert.match(referenceDrawer, /<ChatReadingPanel/)
+  assert.match(readingPanel, /\.chat-references-panel \{[\s\S]*?position: fixed;/)
   assert.match(chatView, /'has-references-panel': referencesDrawerVisible/)
   assert.match(chatView, /transition: padding-right 0\.3s cubic-bezier\(0\.22, 0\.61, 0\.36, 1\)/)
   assert.match(chatView, /&\.has-references-panel:not\(\.is-embedded\)[\s\S]*?padding-right:\s*420px/)

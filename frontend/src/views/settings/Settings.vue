@@ -112,6 +112,7 @@
                   </div>
 
                   <!-- 模型配置 -->
+                  <div v-if="currentSection === 'agents'" class="section"><AgentList /></div>
                   <div v-if="currentSection === 'models'" class="section">
                     <ModelSettings />
                   </div>
@@ -230,6 +231,7 @@
 </template>
 
 <script setup lang="ts">
+import AgentList from '@/views/agent/AgentList.vue'
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { LocationQueryRaw } from 'vue-router'
@@ -376,6 +378,7 @@ const navItems = computed(() => {
     { key: 'general', icon: 'setting', label: t('general.title') },
     { key: 'ollama', icon: 'server', label: 'Ollama' },
     { key: 'weknoracloud', icon: '', label: t('settings.platformCloudService') },
+    { key: 'agents', icon: 'chat', label: t('menu.agents') },
     { key: 'models', icon: 'control-platform', label: t('settings.modelManagement') },
     { key: 'websearch', icon: 'search', label: t('settings.webSearchConfig') },
     { key: 'chathistory', icon: 'chat', label: t('chatHistorySettings.title') },
@@ -437,7 +440,7 @@ const navGroups = computed<NavGroup[]>(() => {
     {
       key: 'models_runtime',
       label: t('settings.navGroups.modelsRuntime'),
-      items: pickItems(['models', 'chathistory', 'memory-runtime', 'ollama', 'weknoracloud']),
+      items: pickItems(['agents', 'models', 'chathistory', 'memory-runtime', 'ollama', 'weknoracloud']),
     },
     {
       key: 'integrations',

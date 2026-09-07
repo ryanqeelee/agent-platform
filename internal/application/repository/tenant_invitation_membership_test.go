@@ -49,11 +49,11 @@ func TestInvitationAcceptanceRejectsExistingSuspendedMembershipAtomically(t *tes
 
 	expiresAt := time.Now().Add(time.Hour)
 	direct := &types.TenantInvitation{
-		TenantID: 42, InviteeUserID: "suspended-user", Role: types.TenantRoleContributor,
+		TenantID: 42, InviteeUserID: "suspended-user", Role: types.TenantRoleViewer,
 		Status: types.TenantInvitationStatusPending, ExpiresAt: expiresAt,
 	}
 	share := &types.TenantInvitation{
-		TenantID: 42, Token: "share-token", Role: types.TenantRoleContributor,
+		TenantID: 42, Token: "share-token", Role: types.TenantRoleViewer,
 		Status: types.TenantInvitationStatusPending, ExpiresAt: expiresAt,
 	}
 	if err := db.Create(direct).Error; err != nil {

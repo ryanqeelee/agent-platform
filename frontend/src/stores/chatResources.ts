@@ -5,6 +5,7 @@ import { listAgents, type CustomAgent } from '@/api/agent'
 import { listModels, type ModelConfig } from '@/api/model'
 import { listWebSearchProviders, type WebSearchProviderEntity } from '@/api/web-search-provider'
 import { isNamedSandboxBackend, listSandboxConfigs, type SandboxConfigRecord } from '@/api/system'
+import { useAuthStore } from '@/stores/auth'
 import { useOrganizationStore } from '@/stores/organization'
 import { getCurrentLanguage } from '@/utils/request'
 import {
@@ -197,6 +198,12 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
   }
 
   async function ensureModels(force = false): Promise<void> {
+    if (!useAuthStore().isSystemAdmin) {
+      modelsGen++
+      allModels.value = []
+      delete loadedAt.value.models
+      return
+    }
     return runOnce('models', force, async () => {
       const gen = ++modelsGen
       const models = await listModels()

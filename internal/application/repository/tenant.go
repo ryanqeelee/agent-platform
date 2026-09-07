@@ -117,7 +117,7 @@ func applyExistingActivation(
 		Take(&member).Error; err != nil {
 		return nil, enterpriseActivationConflict("initial owner membership is unavailable")
 	}
-	if member.Role != types.TenantRoleOwner {
+	if member.Role != types.TenantRoleAdmin {
 		return nil, enterpriseActivationConflict("initial owner membership is not owner")
 	}
 	expectedMemberStatus := types.TenantMemberStatusSuspended
@@ -151,7 +151,7 @@ func applyExistingActivation(
 				return current, ErrEnterpriseActivationStorageRequired
 			}
 			memberUpdate := tx.WithContext(ctx).Model(&types.TenantMember{}).
-				Where("id = ? AND role = ? AND status = ?", member.ID, types.TenantRoleOwner, types.TenantMemberStatusSuspended).
+				Where("id = ? AND role = ? AND status = ?", member.ID, types.TenantRoleAdmin, types.TenantMemberStatusSuspended).
 				Updates(map[string]any{
 					"status":     types.TenantMemberStatusActive,
 					"joined_at":  now,
@@ -293,7 +293,7 @@ func (r *tenantRepository) ApplyEnterpriseActivation(
 		member := &types.TenantMember{
 			UserID:    user.ID,
 			TenantID:  tenant.ID,
-			Role:      types.TenantRoleOwner,
+			Role:      types.TenantRoleAdmin,
 			Status:    types.TenantMemberStatusSuspended,
 			JoinedAt:  now,
 			CreatedAt: now,

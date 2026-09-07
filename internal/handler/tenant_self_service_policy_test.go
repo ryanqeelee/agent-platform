@@ -69,7 +69,7 @@ type tenantPolicyMemberService struct {
 	member           *types.TenantMember
 }
 
-func (s *tenantPolicyMemberService) EnsureOwner(context.Context, string, uint64) (*types.TenantMember, error) {
+func (s *tenantPolicyMemberService) EnsureAdministrator(context.Context, string, uint64) (*types.TenantMember, error) {
 	s.ensureOwnerCalls++
 	return nil, errors.New("catalog manager must not become tenant owner")
 }
@@ -175,7 +175,7 @@ func TestCreateTenantAllowsCrossTenantSuperuserWhenFlagEnabled(t *testing.T) {
 		t.Fatalf("CreateTenant called %d times, want 1", tenants.createCalls)
 	}
 	if members.ensureOwnerCalls != 0 {
-		t.Fatalf("EnsureOwner called %d times, want 0", members.ensureOwnerCalls)
+		t.Fatalf("EnsureAdministrator called %d times, want 0", members.ensureOwnerCalls)
 	}
 }
 

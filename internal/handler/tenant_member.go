@@ -19,12 +19,12 @@ import (
 )
 
 // TenantMemberHandler exposes /tenants/:id/members CRUD. The route layer
-// enforces RBAC (Viewer for list, Owner for any mutation) — see
+// enforces RBAC (Viewer for list, administrator for any mutation) — see
 // router.RegisterTenantRoutes — so we don't re-check role here.
 //
 // Tenant scoping: the auth middleware resolves the caller's role against
 // the *active* tenant (JWT / X-Tenant-ID switch / API-key). The URL :id
-// is independent and MUST be cross-checked: a user who is Owner of
+// is independent and MUST be cross-checked: a user who is administrator of
 // tenant A could otherwise POST /tenants/B/members and have the role
 // gate happily accept their tenant-A role for an operation that targets
 // tenant B. That cross-check now lives in
@@ -133,7 +133,7 @@ func (h *TenantMemberHandler) ListMembers(c *gin.Context) {
 	// pressed the user repo hard for no good reason. Failure is
 	// best-effort — a transient batch error degrades to "no email /
 	// username on this page" rather than dropping rows, so dangling
-	// memberships can still be cleaned up by the Owner.
+	// memberships can still be cleaned up by the administrator.
 	ids := make([]string, 0, len(members))
 	for _, m := range members {
 		ids = append(ids, m.UserID)
@@ -192,7 +192,7 @@ func (h *TenantMemberHandler) ListMembers(c *gin.Context) {
 // @Summary      直接添加空间成员（直加路径）
 // @Description
 //
-//	Owner 通过 email 直接把用户作为 active 成员添加进当前空间。
+//	administrator 通过 email 直接把用户作为 active 成员添加进当前空间。
 //
 //	这是【直加路径】，被加入的用户没有任何确认机会就出现在空间里——
 //	保留它是为了三类不需要走邀请确认的场景：
@@ -228,8 +228,8 @@ func (h *TenantMemberHandler) AddMember(c *gin.Context) {
 	// Defence in depth — service also re-validates, but rejecting early
 	// gives the client a better error message than the generic service
 	// sentinel-mapped 400.
-	if !req.Role.IsValid() || req.Role == types.TenantRoleOwner {
-		c.Error(apperrors.NewValidationError("role must be one of admin/contributor/viewer; ownership uses the transfer endpoint"))
+	if !req.Role.IsValid() {
+		c.Error(apperrors.NewValidationError("角色必须是企业管理员或员工"))
 		return
 	}
 
@@ -314,7 +314,7 @@ func writeAddMemberSuccess(c *gin.Context, user *types.User, member *types.Tenan
 
 // UpdateOperatingAnalysisAccess grants or revokes the explicit, role-
 // independent operating-analysis permission. Route and repository authority
-// both require Owner/Admin, while allowing self-service by those roles.
+// both require Admin, while allowing self-service by those roles.
 func (h *TenantMemberHandler) UpdateOperatingAnalysisAccess(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenantID, ok := parseTenantIDFromPath(c)
@@ -374,6 +374,8 @@ func (h *TenantMemberHandler) UpdateMemberStatus(c *gin.Context) {
 		switch {
 		case errors.Is(err, service.ErrMembershipNotFound):
 			c.Error(apperrors.NewNotFoundError("membership not found"))
+		case errors.Is(err, service.ErrLastAdministrator):
+			c.Error(apperrors.NewConflictError(err.Error()))
 		case errors.Is(err, service.ErrInvalidMemberStatus):
 			c.Error(apperrors.NewValidationError(err.Error()))
 		case errors.Is(err, service.ErrMemberActionForbidden), errors.Is(err, service.ErrCannotManageSelf):
@@ -387,38 +389,6 @@ func (h *TenantMemberHandler) UpdateMemberStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// TransferOwnership is intentionally separate from PUT role: it is the only
-// endpoint allowed to produce an Owner role.
-func (h *TenantMemberHandler) TransferOwnership(c *gin.Context) {
-	ctx := c.Request.Context()
-	tenantID, ok := parseTenantIDFromPath(c)
-	if !ok {
-		return
-	}
-	userID := strings.TrimSpace(c.Param("user_id"))
-	if userID == "" {
-		c.Error(apperrors.NewValidationError("user_id is required"))
-		return
-	}
-	if err := h.memberService.TransferOwnership(ctx, userID, tenantID); err != nil {
-		switch {
-		case errors.Is(err, service.ErrOwnershipTransferInvalid), errors.Is(err, service.ErrOwnershipInvariant):
-			c.Error(apperrors.NewConflictError(err.Error()))
-		default:
-			logger.Errorf(ctx, "TransferOwnership failed: target=%s tenant=%d err=%v", userID, tenantID, err)
-			c.Error(apperrors.NewInternalServerError("failed to transfer ownership").WithDetails(err.Error()))
-		}
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"success": true})
-}
-
-// addMemberAndRespond calls TenantMemberService.AddMember and writes the
-// HTTP response: 201 with a TenantMemberResponse on success, or the service
-// sentinel mapped to its HTTP status (400 / 403 / 409 / 500) on error. It
-// always writes exactly one response, so the caller MUST return right after.
-// Shared by TenantMemberHandler.AddMember and the auto-accept branch of
-// TenantInvitationHandler.CreateInvitation so the mapping never drifts.
 func addMemberAndRespond(
 	c *gin.Context,
 	ctx context.Context,
@@ -438,7 +408,7 @@ func addMemberAndRespond(
 
 // UpdateMemberRole godoc
 // @Summary      修改空间成员角色
-// @Description  Owner 修改某位成员在当前空间内的角色；不能将最后一位 Owner 降级
+// @Description  administrator 修改某位成员在当前空间内的角色；不能将最后一位 administrator 降级
 // @Tags         空间成员
 // @Accept       json
 // @Produce      json
@@ -465,8 +435,8 @@ func (h *TenantMemberHandler) UpdateMemberRole(c *gin.Context) {
 		c.Error(apperrors.NewValidationError("invalid request body").WithDetails(err.Error()))
 		return
 	}
-	if !req.Role.IsValid() || req.Role == types.TenantRoleOwner {
-		c.Error(apperrors.NewValidationError("role must be one of admin/contributor/viewer; ownership uses the transfer endpoint"))
+	if !req.Role.IsValid() {
+		c.Error(apperrors.NewValidationError("角色必须是企业管理员或员工"))
 		return
 	}
 
@@ -474,7 +444,7 @@ func (h *TenantMemberHandler) UpdateMemberRole(c *gin.Context) {
 		switch {
 		case errors.Is(err, service.ErrMembershipNotFound):
 			c.Error(apperrors.NewNotFoundError("membership not found"))
-		case errors.Is(err, service.ErrLastOwner):
+		case errors.Is(err, service.ErrLastAdministrator):
 			c.Error(apperrors.NewConflictError(err.Error()))
 		case errors.Is(err, service.ErrMemberActionForbidden), errors.Is(err, service.ErrCannotManageSelf):
 			c.Error(apperrors.NewForbiddenError(err.Error()))
@@ -495,7 +465,7 @@ func (h *TenantMemberHandler) UpdateMemberRole(c *gin.Context) {
 
 // RemoveMember godoc
 // @Summary      移除空间成员
-// @Description  Owner 将某位成员从当前空间中移除（软删除 tenant_members 行）；不能移除最后一位 Owner
+// @Description  administrator 将某位成员从当前空间中移除（软删除 tenant_members 行）；不能移除最后一位 administrator
 // @Tags         空间成员
 // @Produce      json
 // @Param        id       path  string  true  "空间 ID"
@@ -519,7 +489,7 @@ func (h *TenantMemberHandler) RemoveMember(c *gin.Context) {
 		switch {
 		case errors.Is(err, service.ErrMembershipNotFound):
 			c.Error(apperrors.NewNotFoundError("membership not found"))
-		case errors.Is(err, service.ErrLastOwner):
+		case errors.Is(err, service.ErrLastAdministrator):
 			c.Error(apperrors.NewConflictError(err.Error()))
 		case errors.Is(err, service.ErrMemberActionForbidden), errors.Is(err, service.ErrCannotManageSelf):
 			c.Error(apperrors.NewForbiddenError(err.Error()))
@@ -538,8 +508,8 @@ func (h *TenantMemberHandler) RemoveMember(c *gin.Context) {
 // @Summary      退出当前空间
 // @Description  调用方主动退出当前空间。等价于以自己的 user_id 调 RemoveMember，
 //
-//	但不需要 Owner 权限——非 Owner 也可以自助离开。最后一位 Owner 仍然不能离开
-//	（需先把其他成员提升为 Owner），由服务层 ErrLastOwner 拦截。
+//	但不需要 administrator 权限——非 administrator 也可以自助离开。最后一位 administrator 仍然不能离开
+//	（需先把其他成员提升为 administrator），由服务层 ErrLastAdministrator 拦截。
 //
 // @Tags         空间成员
 // @Produce      json
@@ -563,7 +533,7 @@ func (h *TenantMemberHandler) LeaveTenant(c *gin.Context) {
 		switch {
 		case errors.Is(err, service.ErrMembershipNotFound):
 			c.Error(apperrors.NewNotFoundError("you are not a member of this workspace"))
-		case errors.Is(err, service.ErrLastOwner):
+		case errors.Is(err, service.ErrLastAdministrator):
 			c.Error(apperrors.NewConflictError(err.Error()))
 		default:
 			logger.Errorf(ctx, "LeaveTenant failed: user=%s tenant=%d err=%v",

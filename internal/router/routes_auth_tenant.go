@@ -99,16 +99,16 @@ func RegisterTenantRoutes(
 				apiKeyPlatform(types.APIKeyCapabilitySystemTenantsRead, types.APIKeyCapabilitySystemTenantsManage),
 				g.Viewer(), handler.GetTenant)
 			g.apiKeyRoute(tenantByID, http.MethodPut, "",
-				apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage), g.Owner(), handler.UpdateTenant)
+				apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage), g.Admin(), handler.UpdateTenant)
 			g.apiKeyRoute(tenantByID, http.MethodDelete, "",
-				apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage), g.Owner(), handler.DeleteTenant)
-			tenantByID.GET("/api-keys", g.Owner(), handler.ListAPIKeys)
-			tenantByID.POST("/api-keys", g.Owner(), handler.CreateAPIKey)
-			tenantByID.PUT("/api-keys/:key_id", g.Owner(), handler.UpdateAPIKey)
-			tenantByID.DELETE("/api-keys/:key_id", g.Owner(), handler.DeleteAPIKey)
-			tenantByID.GET("/api-principal-config", g.Owner(), handler.GetAPIPrincipalConfig)
-			tenantByID.PUT("/api-principal-config", g.Owner(), handler.UpdateAPIPrincipalConfig)
-			tenantByID.POST("/api-principal-test-token", g.Owner(), handler.CreateAPIPrincipalTestToken)
+				apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage), g.Admin(), handler.DeleteTenant)
+			tenantByID.GET("/api-keys", g.Admin(), handler.ListAPIKeys)
+			tenantByID.POST("/api-keys", g.Admin(), handler.CreateAPIKey)
+			tenantByID.PUT("/api-keys/:key_id", g.Admin(), handler.UpdateAPIKey)
+			tenantByID.DELETE("/api-keys/:key_id", g.Admin(), handler.DeleteAPIKey)
+			tenantByID.GET("/api-principal-config", g.Admin(), handler.GetAPIPrincipalConfig)
+			tenantByID.PUT("/api-principal-config", g.Admin(), handler.UpdateAPIPrincipalConfig)
+			tenantByID.POST("/api-principal-test-token", g.Admin(), handler.CreateAPIPrincipalTestToken)
 
 			// Enterprise membership lifecycle: Admin+ can manage Employees
 			// and Knowledge Administrators; the service enforces every
@@ -122,7 +122,6 @@ func RegisterTenantRoutes(
 				// workspace API keys do not grant employee analysis access.
 				tenantByID.PUT("/members/:user_id/operating-analysis-access", g.Admin(), memberHandler.UpdateOperatingAnalysisAccess)
 				g.apiKeyRoute(tenantByID, http.MethodDelete, "/members/:user_id", apiKeyManageMembers(apiKeyFullAccess()), g.Admin(), memberHandler.RemoveMember)
-				tenantByID.POST("/members/:user_id/transfer-ownership", g.Owner(), memberHandler.TransferOwnership)
 				tenantByID.POST("/leave", g.Viewer(), memberHandler.LeaveTenant)
 			}
 

@@ -390,10 +390,9 @@ const persistLoginResponse = async (response: any, skipRedirect = false) => {
   // briefly when the deployment is invitation-only.
   await authStore.refreshFromAuthMe()
   await nextTick()
+  if (skipRedirect) return
   const returnTo = safeReturnTo(router, route.query.returnTo)
   router.replace(returnTo || (authStore.hasValidTenant ? DEFAULT_EMPLOYEE_WORKSPACE_PATH : '/onboarding/workspace'))
-  if (skipRedirect) return
-  router.replace(authStore.hasValidTenant ? '/platform/knowledge-bases' : '/onboarding/workspace')
 }
 
 const getBackendOIDCRedirectURI = () => `${window.location.origin}/api/v1/auth/oidc/callback`
@@ -462,7 +461,7 @@ const acceptAndEnter = async (token: string) => {
   } finally {
     loading.value = false
     await nextTick()
-    router.replace('/platform/knowledge-bases')
+    router.replace(DEFAULT_EMPLOYEE_WORKSPACE_PATH)
   }
 }
 

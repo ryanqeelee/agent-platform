@@ -1,22 +1,11 @@
 package types
 
-// CanManageMemberRole is the product-level membership lifecycle matrix.
-// TenantRole names deliberately remain the stable storage/authorization
-// values; contributor and viewer are presented as Knowledge Administrator and
-// Employee by product surfaces.
+// CanManageMemberRole is the enterprise administrator/employee matrix.
+// Self changes and the last active administrator are checked transactionally.
 func CanManageMemberRole(actor, target TenantRole) bool {
-	switch actor {
-	case TenantRoleOwner:
-		return target == TenantRoleAdmin || target == TenantRoleContributor || target == TenantRoleViewer
-	case TenantRoleAdmin:
-		return target == TenantRoleContributor || target == TenantRoleViewer
-	default:
-		return false
-	}
+	return actor == TenantRoleAdmin && target.IsValid()
 }
 
-// CanInviteMemberRole applies the same matrix before a target membership
-// exists. Neither invitations nor ordinary role writes may mint an Owner.
 func CanInviteMemberRole(actor, invited TenantRole) bool {
 	return CanManageMemberRole(actor, invited)
 }

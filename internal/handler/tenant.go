@@ -371,7 +371,7 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 			}
 			ownedCount := 0
 			for _, m := range memberships {
-				if m != nil && m.Role == types.TenantRoleOwner {
+				if m != nil && m.Role == types.TenantRoleAdmin {
 					ownedCount++
 				}
 			}
@@ -438,10 +438,10 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 	// unreachable (middleware/auth.go's orphan-recovery only fires for a
 	// user's home tenant, never for a freshly-created side workspace),
 	// yet still occupies storage_bucket / name uniqueness slots.
-	// Idempotent: EnsureOwner is a no-op when the row already exists,
+	// Idempotent: EnsureAdministrator is a no-op when the row already exists,
 	// so cross-tenant superusers create-and-own through the same path.
 	if h.memberService != nil && !catalogManager {
-		if _, err := h.memberService.EnsureOwner(ctx, caller.ID, createdTenant.ID); err != nil {
+		if _, err := h.memberService.EnsureAdministrator(ctx, caller.ID, createdTenant.ID); err != nil {
 			logger.Errorf(ctx,
 				"Failed to bootstrap owner membership for user %s tenant %d: %v — rolling back tenant",
 				caller.ID, createdTenant.ID, err)
@@ -470,7 +470,7 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 			} else {
 				ownedNow := 0
 				for _, m := range memberships {
-					if m != nil && m.Role == types.TenantRoleOwner {
+					if m != nil && m.Role == types.TenantRoleAdmin {
 						ownedNow++
 					}
 				}

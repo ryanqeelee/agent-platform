@@ -10,5 +10,5 @@ func RegisterEnterpriseAdministrationRoutes(
 	h *handler.EnterpriseAdministrationHandler,
 	g *rbacGuards,
 ) {
-	r.GET("/enterprise-administration/queue", g.Contributor(), h.GetQueue)
+	r.GET("/enterprise-administration/queue", g.Admin(), h.GetQueue)
 }

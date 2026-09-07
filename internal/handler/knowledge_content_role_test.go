@@ -28,8 +28,8 @@ func TestRequireKBContentRoleUsesCurrentRoleNotCreator(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "own contributor may maintain another users knowledge base",
-			role: types.TenantRoleContributor, tenant: 1,
+			name: "own administrator may maintain another users knowledge base",
+			role: types.TenantRoleAdmin, tenant: 1,
 			kb: &types.KnowledgeBase{ID: "own", TenantID: 1, CreatorID: "someone-else"},
 		},
 		{
@@ -43,8 +43,8 @@ func TestRequireKBContentRoleUsesCurrentRoleNotCreator(t *testing.T) {
 			kb: &types.KnowledgeBase{ID: "foreign", TenantID: 2, CreatorID: "source-user"},
 		},
 		{
-			name: "foreign shared contributor is denied",
-			role: types.TenantRoleContributor, tenant: 1,
+			name: "foreign shared employee is denied",
+			role: types.TenantRoleViewer, tenant: 1,
 			kb: &types.KnowledgeBase{ID: "foreign", TenantID: 2, CreatorID: "source-user"}, wantErr: true,
 		},
 	}

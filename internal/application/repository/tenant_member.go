@@ -12,15 +12,13 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// ErrLastOwner is returned by the atomic demote / remove repo helpers
-// when the operation would leave the tenant without an active Owner.
-// The service layer maps this to its own ErrLastOwner sentinel (same
+// ErrLastAdministrator is returned by the atomic demote / remove repo helpers
+// when the operation would leave the tenant without an active administrator.
+// The service layer maps this to its own ErrLastAdministrator sentinel (same
 // semantic; just kept separate so the repo doesn't import service).
 var (
-	ErrLastOwner                    = errors.New("repository: last active owner")
+	ErrLastAdministrator            = errors.New("repository: last active administrator")
 	ErrUserBoundToAnotherEnterprise = errors.New("repository: user is bound to another enterprise")
-	ErrOwnershipTransferInvalid     = errors.New("repository: ownership transfer precondition failed")
-	ErrOwnershipInvariant           = errors.New("repository: expected exactly one active owner")
 	ErrMemberActionForbidden        = errors.New("repository: member action forbidden")
 	ErrCannotManageSelf             = errors.New("repository: cannot manage self")
 )
@@ -188,7 +186,7 @@ func (r *tenantMemberRepository) ListPagedByTenant(
 	return members, nil
 }
 
-// lockManagedMember serializes every ownership-affecting member mutation on
+// lockManagedMember serializes every membership member mutation on
 // the tenant row, then re-reads the target before applying the actor/target
 // policy. This makes a transfer and a concurrent demote/suspend/remove one
 // ordered operation rather than two stale preflight checks.
@@ -225,7 +223,7 @@ func lockTenantAuthority(ctx context.Context, tx *gorm.DB, actor types.MemberAct
 
 func canManage(actor types.MemberActorAuthority, role, target types.TenantRole) bool {
 	if actor.ServicePrincipal {
-		return role != types.TenantRoleOwner && target != types.TenantRoleOwner
+		return target.IsValid()
 	}
 	return types.CanManageMemberRole(role, target)
 }
@@ -268,10 +266,10 @@ func (r *tenantMemberRepository) CreateManaged(ctx context.Context, actor types.
 	})
 }
 
-func activeOwnerCount(ctx context.Context, tx *gorm.DB, tenantID uint64) (int64, error) {
+func activeAdministratorCount(ctx context.Context, tx *gorm.DB, tenantID uint64) (int64, error) {
 	var count int64
 	err := tx.WithContext(ctx).Model(&types.TenantMember{}).Where(boundEnterpriseMembership).
-		Where("tenant_id = ? AND role = ? AND status = ?", tenantID, types.TenantRoleOwner, types.TenantMemberStatusActive).
+		Where("tenant_id = ? AND role = ? AND status = ?", tenantID, types.TenantRoleAdmin, types.TenantMemberStatusActive).
 		Count(&count).Error
 	return count, err
 }
@@ -282,13 +280,13 @@ func (r *tenantMemberRepository) UpdateRole(ctx context.Context, actor types.Mem
 		if err != nil {
 			return err
 		}
-		if target.Role == types.TenantRoleOwner && role != types.TenantRoleOwner && target.Status == types.TenantMemberStatusActive {
-			owners, err := activeOwnerCount(ctx, tx, tenantID)
+		if target.Role == types.TenantRoleAdmin && role != types.TenantRoleAdmin && target.Status == types.TenantMemberStatusActive {
+			administrators, err := activeAdministratorCount(ctx, tx, tenantID)
 			if err != nil {
 				return err
 			}
-			if owners <= 1 {
-				return ErrLastOwner
+			if administrators <= 1 {
+				return ErrLastAdministrator
 			}
 		}
 		res := tx.WithContext(ctx).Model(&types.TenantMember{}).Where("id = ?", target.ID).
@@ -309,6 +307,15 @@ func (r *tenantMemberRepository) UpdateStatus(ctx context.Context, actor types.M
 		if err != nil {
 			return err
 		}
+		if target.Role == types.TenantRoleAdmin && target.Status == types.TenantMemberStatusActive && status != types.TenantMemberStatusActive {
+			count, err := activeAdministratorCount(ctx, tx, tenantID)
+			if err != nil {
+				return err
+			}
+			if count <= 1 {
+				return ErrLastAdministrator
+			}
+		}
 		res := tx.WithContext(ctx).Model(&types.TenantMember{}).Where("id = ?", target.ID).
 			Updates(map[string]any{"status": status, "updated_at": time.Now()})
 		if res.Error != nil {
@@ -322,7 +329,7 @@ func (r *tenantMemberRepository) UpdateStatus(ctx context.Context, actor types.M
 }
 
 // UpdateOperatingAnalysisAccess uses its own authority matrix because the
-// permission is orthogonal to role lifecycle: Owner/Admin may change any
+// permission is orthogonal to role lifecycle: Administrators may change any
 // member, including themselves and each other.
 func (r *tenantMemberRepository) UpdateOperatingAnalysisAccess(
 	ctx context.Context,
@@ -337,7 +344,7 @@ func (r *tenantMemberRepository) UpdateOperatingAnalysisAccess(
 		if err != nil {
 			return err
 		}
-		if !actor.ServicePrincipal && role != types.TenantRoleOwner && role != types.TenantRoleAdmin {
+		if !actor.ServicePrincipal && role != types.TenantRoleAdmin {
 			return ErrMemberActionForbidden
 		}
 		var target types.TenantMember
@@ -373,13 +380,13 @@ func (r *tenantMemberRepository) SoftDelete(ctx context.Context, actor types.Mem
 		if err != nil {
 			return err
 		}
-		if target.Role == types.TenantRoleOwner && target.Status == types.TenantMemberStatusActive {
-			owners, err := activeOwnerCount(ctx, tx, tenantID)
+		if target.Role == types.TenantRoleAdmin && target.Status == types.TenantMemberStatusActive {
+			administrators, err := activeAdministratorCount(ctx, tx, tenantID)
 			if err != nil {
 				return err
 			}
-			if owners <= 1 {
-				return ErrLastOwner
+			if administrators <= 1 {
+				return ErrLastAdministrator
 			}
 		}
 		res := tx.WithContext(ctx).Where("id = ?", target.ID).Delete(&types.TenantMember{})
@@ -393,97 +400,19 @@ func (r *tenantMemberRepository) SoftDelete(ctx context.Context, actor types.Mem
 	})
 }
 
-// CountActiveOwners reports the number of active owner rows in the tenant.
-func (r *tenantMemberRepository) CountActiveOwners(ctx context.Context, tenantID uint64) (int64, error) {
+// CountActiveAdministrators reports the number of active administrator rows in the tenant.
+func (r *tenantMemberRepository) CountActiveAdministrators(ctx context.Context, tenantID uint64) (int64, error) {
 	var count int64
 	err := r.db.WithContext(ctx).
 		Model(&types.TenantMember{}).
 		Where(boundEnterpriseMembership).
 		Where("tenant_id = ? AND role = ? AND status = ?",
-			tenantID, types.TenantRoleOwner, types.TenantMemberStatusActive).
+			tenantID, types.TenantRoleAdmin, types.TenantMemberStatusActive).
 		Count(&count).Error
 	return count, err
 }
 
-// TransferOwnership serializes on the tenant row, then swaps the roles in a
-// single UPDATE. The explicit owner count makes historical corrupt state fail
-// closed instead of selecting an arbitrary Owner.
-func (r *tenantMemberRepository) TransferOwnership(
-	ctx context.Context,
-	actorUserID, targetUserID string,
-	tenantID uint64,
-) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var tenant types.Tenant
-		if err := tx.Clauses(forUpdateClause()).Select("id").Where("id = ?", tenantID).Take(&tenant).Error; err != nil {
-			return err
-		}
-
-		var owners []types.TenantMember
-		if err := tx.Clauses(forUpdateClause()).
-			Where("tenant_id = ? AND role = ? AND status = ?", tenantID, types.TenantRoleOwner, types.TenantMemberStatusActive).
-			Find(&owners).Error; err != nil {
-			return err
-		}
-		if len(owners) != 1 {
-			return ErrOwnershipInvariant
-		}
-		if owners[0].UserID != actorUserID {
-			return ErrOwnershipTransferInvalid
-		}
-		if err := lockBoundEnterpriseUser(ctx, tx, owners[0].UserID, tenantID); err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrOwnershipTransferInvalid
-			}
-			return err
-		}
-
-		var target types.TenantMember
-		if err := tx.Clauses(forUpdateClause()).
-			Where("user_id = ? AND tenant_id = ? AND role = ? AND status = ?", targetUserID, tenantID, types.TenantRoleAdmin, types.TenantMemberStatusActive).
-			Take(&target).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrOwnershipTransferInvalid
-			}
-			return err
-		}
-		if err := lockBoundEnterpriseUser(ctx, tx, target.UserID, tenantID); err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrOwnershipTransferInvalid
-			}
-			return err
-		}
-
-		// PostgreSQL's partial one-active-owner index checks every row update
-		// immediately. Demote the verified current Owner first, then promote
-		// the verified active Admin; a CASE update would transiently create two
-		// owners and fail even though the final state is valid.
-		res := tx.WithContext(ctx).Model(&types.TenantMember{}).
-			Where("id = ? AND user_id = ? AND role = ? AND status = ?", owners[0].ID, actorUserID, types.TenantRoleOwner, types.TenantMemberStatusActive).
-			Updates(map[string]any{"role": types.TenantRoleAdmin, "updated_at": time.Now()})
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected != 1 {
-			return ErrOwnershipTransferInvalid
-		}
-		res = tx.WithContext(ctx).Model(&types.TenantMember{}).
-			Where("id = ? AND user_id = ? AND role = ? AND status = ?", target.ID, targetUserID, types.TenantRoleAdmin, types.TenantMemberStatusActive).
-			Updates(map[string]any{"role": types.TenantRoleOwner, "updated_at": time.Now()})
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected != 1 {
-			return ErrOwnershipTransferInvalid
-		}
-		return nil
-	})
-}
-
-// HasAnyMembers reports whether the tenant has at least one active
-// membership row. Uses a LIMIT 1 SELECT (instead of COUNT(*)) so the query
-// short-circuits after the first match — important because this is on the
-// auth middleware's hot path for users without a cached membership.
+// HasAnyMembers reports whether the tenant has an active membership.
 func (r *tenantMemberRepository) HasAnyMembers(ctx context.Context, tenantID uint64) (bool, error) {
 	var probe struct {
 		ID uint64

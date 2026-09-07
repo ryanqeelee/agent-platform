@@ -6,7 +6,7 @@
             <button type="button" :aria-expanded="mobileMenuOpen" aria-controls="mobile-workspace-menu" @click="mobileMenuOpen = !mobileMenuOpen">{{ mobileMenuOpen ? t('menu.collapseSidebar') : t('menu.expandSidebar') }}</button>
         </header>
         <button v-if="mobileMenuOpen" class="mobile-menu-scrim" type="button" :aria-label="t('menu.collapseSidebar')" @click="mobileMenuOpen = false" />
-        <Menu id="mobile-workspace-menu" :operating-controller="operatingController"></Menu>
+        <Menu id="mobile-workspace-menu" :operating-controller="operatingController" @navigate="mobileMenuOpen = false"></Menu>
         <div v-if="isRouterAlive" v-show="!isOperatingRoute" class="platform-route-outlet">
             <RouterView />
         </div>

@@ -204,7 +204,7 @@ const effectiveKBPermission = computed<string>(() => {
 })
 
 const accessRoleLabel = computed<string>(() => {
-  if (!isViaShare.value && authStore.hasRole('owner')) return t('knowledgeBase.accessInfo.roleOwner')
+  if (!isViaShare.value && authStore.hasRole('admin')) return t('knowledgeBase.accessInfo.roleOwner')
   if (!isViaShare.value && authStore.hasRole('admin')) return t('organization.role.admin')
   const perm = effectiveKBPermission.value
   if (perm) return t(`organization.role.${perm}`)
@@ -212,7 +212,7 @@ const accessRoleLabel = computed<string>(() => {
 })
 
 const accessPermissionSummary = computed<string>(() => {
-  if (!isViaShare.value && authStore.hasRole('owner')) return t('knowledgeBase.accessInfo.permissionOwner')
+  if (!isViaShare.value && authStore.hasRole('admin')) return t('knowledgeBase.accessInfo.permissionOwner')
   if (!isViaShare.value && authStore.hasRole('admin')) return t('knowledgeBase.accessInfo.permissionAdmin')
   const perm = effectiveKBPermission.value
   if (perm === 'admin') return t('knowledgeBase.accessInfo.permissionAdmin')
@@ -223,7 +223,7 @@ const accessPermissionSummary = computed<string>(() => {
 
 type RoleTheme = 'success' | 'primary' | 'warning' | 'default'
 const roleTagTheme = computed<RoleTheme>(() => {
-  if (!isViaShare.value && authStore.hasRole('owner')) return 'success'
+  if (!isViaShare.value && authStore.hasRole('admin')) return 'success'
   if (!isViaShare.value && authStore.hasRole('admin')) return 'primary'
   const perm = effectiveKBPermission.value
   if (perm === 'admin') return 'primary'

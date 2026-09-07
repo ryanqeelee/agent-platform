@@ -51,6 +51,9 @@ func AgentView(ctx context.Context, agent *types.CustomAgent) *types.CustomAgent
 	if agent.ID == types.BuiltinEmployeeAssistantID {
 		view.Config.SkillsSelectionMode = agent.Config.SkillsSelectionMode
 	}
+	// Describe actual conversation behavior without exposing runtime bindings.
+	view.Config.MultiTurnEnabled = agent.Config.MultiTurnEnabled
+	view.Config.HistoryTurns = agent.Config.HistoryTurns
 	if types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin) {
 		applyEnterpriseScenarioConfig(&view.Config, agent.Config)
 		if view.Config.MCPSelectionMode == "all" {

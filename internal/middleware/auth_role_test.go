@@ -79,14 +79,14 @@ func (f *fakeMemberService) AddMember(
 	return m, nil
 }
 
-func (f *fakeMemberService) EnsureOwner(
+func (f *fakeMemberService) EnsureAdministrator(
 	ctx context.Context, userID string, tenantID uint64,
 ) (*types.TenantMember, error) {
 	f.ensureOwnerCalls++
 	if existing, ok := f.members[memberKey(userID, tenantID)]; ok {
 		return existing, nil
 	}
-	return f.AddMember(ctx, userID, tenantID, types.TenantRoleOwner, nil)
+	return f.AddMember(ctx, userID, tenantID, types.TenantRoleAdmin, nil)
 }
 
 func (f *fakeMemberService) GetMembership(
@@ -166,11 +166,11 @@ func cfgWithRBAC(enabled bool) *config.Config {
 
 func TestResolveTenantRole_ActiveMembershipWins(t *testing.T) {
 	svc := newFakeMemberService()
-	svc.seedActive("u1", 10, types.TenantRoleContributor)
+	svc.seedActive("u1", 10, types.TenantRoleViewer)
 
 	got, ok := resolveTenantRole(context.Background(), svc,
 		&types.User{ID: "u1", TenantID: 10}, 10, false, cfgWithRBAC(true))
-	if !ok || got != types.TenantRoleContributor {
+	if !ok || got != types.TenantRoleViewer {
 		t.Fatalf("got (%v, %v), want (contributor, true)", got, ok)
 	}
 	if len(svc.addCalls) != 0 {
@@ -180,8 +180,8 @@ func TestResolveTenantRole_ActiveMembershipWins(t *testing.T) {
 
 func TestEnterpriseManagedResolveTenantRoleAllowsContributorOnlyInHomeEnterprise(t *testing.T) {
 	svc := newFakeMemberService()
-	svc.seedActive("u1", 10, types.TenantRoleContributor)
-	if role, ok := resolveTenantRole(context.Background(), svc, &types.User{ID: "u1", TenantID: 10}, 10, false, cfgWithRBAC(true)); !ok || role != types.TenantRoleContributor {
+	svc.seedActive("u1", 10, types.TenantRoleViewer)
+	if role, ok := resolveTenantRole(context.Background(), svc, &types.User{ID: "u1", TenantID: 10}, 10, false, cfgWithRBAC(true)); !ok || role != types.TenantRoleViewer {
 		t.Fatal("contributor must remain usable in the bound enterprise")
 	}
 	svc.seedActive("u2", 11, types.TenantRoleViewer)
@@ -235,7 +235,7 @@ func TestResolveTenantRole_AutoPromoteHomeTenant(t *testing.T) {
 	user := &types.User{ID: "u1", TenantID: 7}
 
 	got, ok := resolveTenantRole(context.Background(), svc, user, 7, false, cfgWithRBAC(true))
-	if !ok || got != types.TenantRoleOwner {
+	if !ok || got != types.TenantRoleAdmin {
 		t.Fatalf("got (%v, %v), want (owner, true)", got, ok)
 	}
 	if svc.ensureOwnerCalls != 1 {
@@ -246,7 +246,7 @@ func TestResolveTenantRole_AutoPromoteHomeTenant(t *testing.T) {
 func TestResolveTenantRole_AutoPromoteSkippedIfTenantHasMembers(t *testing.T) {
 	svc := newFakeMemberService()
 	// 同一 home tenant 已经有其它成员 — 不应自动晋升新登录者。
-	svc.seedActive("other", 7, types.TenantRoleOwner)
+	svc.seedActive("other", 7, types.TenantRoleAdmin)
 	user := &types.User{ID: "u1", TenantID: 7}
 
 	got, ok := resolveTenantRole(context.Background(), svc, user, 7, false, cfgWithRBAC(true))
@@ -269,7 +269,7 @@ func TestResolveTenantRole_MissingForeignMembershipFailsClosedWhenRBACDisabled(t
 func TestResolveTenantRole_FailClosedWhenRBACEnabled(t *testing.T) {
 	svc := newFakeMemberService()
 	// 已有其它成员，自动晋升路径关闭；RBAC 启用 → 必须 403。
-	svc.seedActive("other", 8, types.TenantRoleOwner)
+	svc.seedActive("other", 8, types.TenantRoleAdmin)
 	user := &types.User{ID: "u1", TenantID: 7}
 	if _, ok := resolveTenantRole(context.Background(), svc, user, 8, false, cfgWithRBAC(true)); ok {
 		t.Fatalf("EnableRBAC=true + no membership should be rejected")
@@ -297,7 +297,7 @@ func TestResolveTenantRole_DemotedUserCannotReclaimViaOrphan(t *testing.T) {
 	svc := newFakeMemberService()
 	user := &types.User{ID: "demoted", TenantID: 5}
 	got, ok := resolveTenantRole(context.Background(), svc, user, 5, false, cfgWithRBAC(true))
-	if !ok || got != types.TenantRoleOwner {
+	if !ok || got != types.TenantRoleAdmin {
 		t.Fatalf("current policy allows orphan-tenant self-heal on home tenant, got (%v, %v)", got, ok)
 	}
 }
@@ -312,6 +312,6 @@ func TestResolveTenantRole_SuspendedMembershipCannotBootstrapOrFailOpen(t *testi
 		t.Fatal("suspended home membership must not bootstrap or fail open")
 	}
 	if svc.ensureOwnerCalls != 0 {
-		t.Fatalf("EnsureOwner called %d times for suspended membership", svc.ensureOwnerCalls)
+		t.Fatalf("EnsureAdministrator called %d times for suspended membership", svc.ensureOwnerCalls)
 	}
 }

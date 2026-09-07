@@ -235,17 +235,11 @@ func formatSkillsMetadata(skillsMetadata []*skills.SkillMetadata, shellExecEnabl
 	}
 
 	var builder strings.Builder
-	builder.WriteString("\n### Available Skills (IMPORTANT - READ CAREFULLY)\n\n")
-	builder.WriteString("**You MUST actively consider using these skills for EVERY user request.**\n\n")
-
-	builder.WriteString("#### Skill Matching Protocol (MANDATORY)\n\n")
-	builder.WriteString("Before responding to ANY user query, follow this checklist:\n\n")
-	builder.WriteString("1. **SCAN**: Read each skill's description and trigger conditions below\n")
-	builder.WriteString("2. **MATCH**: Check if the user's intent matches ANY skill's triggers (keywords, scenarios, or task types)\n")
-	builder.WriteString("3. **LOAD**: If a match is found, call `read_skill(skill_name=\"...\")` BEFORE generating your response\n")
-	builder.WriteString("4. **APPLY**: Follow the skill's instructions to provide a higher-quality, structured response\n\n")
-
-	builder.WriteString("**⚠️ CRITICAL**: Skill usage is MANDATORY when applicable. Do NOT skip skills to save time or tokens.\n\n")
+	builder.WriteString("\n### Skills\n\n")
+	builder.WriteString("Use a skill when its documented workflow helps complete the user's actual task and its required inputs are available. A keyword match alone is not a reason to load a skill.\n")
+	builder.WriteString("For questions about enterprise policies, search authorized enterprise knowledge first. Missing knowledge is not a reason to search the web or inspect the sandbox for an unprovided document.\n")
+	builder.WriteString("For uploaded-file processing, use the files listed in <sandbox_attachments> or an explicit file already produced in this conversation. If the required file is absent, ask for it; do not load file-processing skills or list /workspace/input to look for it. Tasks that create a new file do not require an input attachment.\n")
+	builder.WriteString("When a skill is appropriate, read its instructions before executing its scripts. Once enough evidence exists, answer without additional tools.\n\n")
 
 	builder.WriteString("#### Available Skills\n\n")
 	for i, skill := range skillsMetadata {

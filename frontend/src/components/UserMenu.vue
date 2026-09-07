@@ -211,7 +211,7 @@ const showTenantIdentityLine = computed(() => {
 })
 
 const canEnterEnterpriseAdministration = computed(() =>
-  !authStore.isLiteMode && authStore.hasRole('contributor'),
+  !authStore.isLiteMode && authStore.hasRole('admin'),
 )
 const enterpriseAdministrationCopy = computed(() => getEnterpriseAdministrationCopy(locale.value))
 const menuRef = ref<HTMLElement>()

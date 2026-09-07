@@ -222,7 +222,7 @@ func (s *userService) Register(ctx context.Context, req *types.RegisterRequest) 
 	// user record exists and the auth middleware's orphan-tenant recovery
 	// path will recreate the membership on next login.
 	if createdTenant != nil && s.memberService != nil {
-		if _, err := s.memberService.EnsureOwner(ctx, user.ID, createdTenant.ID); err != nil {
+		if _, err := s.memberService.EnsureAdministrator(ctx, user.ID, createdTenant.ID); err != nil {
 			logger.Errorf(ctx, "Failed to create owner membership for user %s tenant %d: %v",
 				user.ID, createdTenant.ID, err)
 			_ = s.userRepo.DeleteUser(ctx, user.ID)

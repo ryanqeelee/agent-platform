@@ -96,12 +96,8 @@ type EnterpriseSessionProjectionV1 struct {
 
 func enterpriseRoleProjection(role types.TenantRole) (string, bool) {
 	switch role {
-	case types.TenantRoleOwner:
-		return "owner", true
 	case types.TenantRoleAdmin:
 		return "admin", true
-	case types.TenantRoleContributor:
-		return "knowledge_administrator", true
 	case types.TenantRoleViewer:
 		return "employee", true
 	default:
@@ -717,7 +713,7 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 	// active in a workspace, keep the projection aligned with the route guard:
 	// Viewer cannot create another tenant and thereby self-promote to Owner.
 	canCreateTenant := canManageAllTenantMembers ||
-		((activeTenantID == 0 || types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleContributor)) &&
+		((activeTenantID == 0 || types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin)) &&
 			resolveTenantSelfServiceCreationEnabled(ctx, h.configInfo, h.systemSettingSvc))
 	autoAcceptInvitation := h.systemSettingSvc != nil &&
 		h.systemSettingSvc.GetBool(ctx, "tenant.auto_accept_invitation", "WEKNORA_TENANT_AUTO_ACCEPT_INVITATION", false)
@@ -1026,7 +1022,7 @@ func (h *AuthHandler) AutoSetup(c *gin.Context) {
 		Memberships: []types.Membership{{
 			TenantID:   user.TenantID,
 			TenantName: tenantNameOrEmpty(tenant),
-			Role:       types.TenantRoleOwner,
+			Role:       types.TenantRoleAdmin,
 		}},
 		Token:        accessToken,
 		RefreshToken: refreshToken,

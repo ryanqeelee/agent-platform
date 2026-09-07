@@ -136,13 +136,13 @@ func TestTenantCreatorAllowsTenantlessOnboarding(t *testing.T) {
 	}
 }
 
-func TestKnowledgeAdministratorReachesKnowledgeBaseCreate(t *testing.T) {
+func TestEnterpriseAdministratorReachesKnowledgeBaseCreate(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	enforce := true
 	g := &rbacGuards{cfg: &config.Config{Tenant: &config.TenantConfig{EnableRBAC: &enforce}}}
 	r := gin.New()
 	r.Use(func(c *gin.Context) {
-		ctx := context.WithValue(c.Request.Context(), types.TenantRoleContextKey, types.TenantRoleContributor)
+		ctx := context.WithValue(c.Request.Context(), types.TenantRoleContextKey, types.TenantRoleAdmin)
 		ctx = context.WithValue(ctx, types.TenantIDContextKey, uint64(1))
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()

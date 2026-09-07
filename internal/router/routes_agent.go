@@ -14,10 +14,9 @@ import (
 
 // RegisterCustomAgentRoutes registers custom agent routes.
 //
-// Agent authoring is an Admin+ capability. Knowledge Administrators use the
-// Contributor role only for knowledge content and grants; it must not confer
-// Agent or data-analysis configuration authority. Reads remain Viewer+ so
-// employees can inspect and run the assistants made available to them.
+// Agent authoring is a platform-administrator capability. Tenant membership
+// does not confer runtime configuration authority. Reads remain Viewer+ for
+// the employee assistant and existing conversations.
 func RegisterCustomAgentRoutes(r *gin.RouterGroup, agentHandler *handler.CustomAgentHandler, g *rbacGuards) {
 	agents := r.Group("/agents")
 	agentsWithAPIKey := g.apiKeyGroup(agents, apiKeyFullAccess())
@@ -32,16 +31,16 @@ func RegisterCustomAgentRoutes(r *gin.RouterGroup, agentHandler *handler.CustomA
 		agentsRead.GET("/placeholders", g.Viewer(), agentHandler.GetPlaceholders)
 		// List smart-reasoning agent type presets (rag-qa / wiki-qa / hybrid / custom) — Viewer+
 		agentsRead.GET("/type-presets", g.Viewer(), agentHandler.GetAgentTypePresets)
-		// Create custom agent — Admin+
-		agents.POST("", g.Admin(), agentHandler.CreateAgent)
+		// Create custom agent — platform administrator only
+		agents.POST("", g.SystemAdmin(), agentHandler.CreateAgent)
 		// List all agents (including built-in) — Viewer+
 		agentsRead.GET("", g.Viewer(), agentHandler.ListAgents)
 		// Get agent by ID — Viewer+
 		agentsRead.GET("/:id", g.Viewer(), agentHandler.GetAgent)
-		// Update/delete/copy agent — Admin+
-		agents.PUT("/:id", g.Admin(), agentHandler.UpdateAgent)
-		agents.DELETE("/:id", g.Admin(), agentHandler.DeleteAgent)
-		agents.POST("/:id/copy", g.Admin(), agentHandler.CopyAgent)
+		// Update/delete/copy agent — platform administrator only
+		agents.PUT("/:id", g.SystemAdmin(), agentHandler.UpdateAgent)
+		agents.DELETE("/:id", g.SystemAdmin(), agentHandler.DeleteAgent)
+		agents.POST("/:id/copy", g.SystemAdmin(), agentHandler.CopyAgent)
 	}
 	// Registered outside the group to avoid Gin route conflict with /agents/:id/shares in organization routes
 	g.apiKeyRoute(r, http.MethodGet, "/agents/:id/suggested-questions",

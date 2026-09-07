@@ -1229,7 +1229,7 @@ func hasRegisteredKnowledgeWriteAuthority(ctx context.Context) bool {
 			scope.HasCapability(types.APIKeyCapabilityManageKnowledgeBases) ||
 			scope.HasCapability(types.APIKeyCapabilityIngest)
 	}
-	return types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleContributor)
+	return types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin)
 }
 
 // isWikiWriteTool is the single policy classifier for Agent tools that mutate

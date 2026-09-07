@@ -371,17 +371,6 @@
                     </t-button>
                   </t-tooltip>
                 </t-popconfirm>
-                <t-popconfirm v-if="canTransferOwnership(row)"
-                  :content="$t('tenantMember.transfer.confirmBody', { name: row.username || row.email })"
-                  :confirm-btn="{ content: $t('tenantMember.transfer.confirm'), theme: 'danger' }"
-                  :cancel-btn="{ content: $t('common.cancel') }" placement="left"
-                  @confirm="transferRowOwnership(row)">
-                  <t-tooltip :content="$t('tenantMember.transfer.button')" placement="top">
-                    <t-button theme="warning" shape="square" variant="text" size="small" @click.stop>
-                      <template #icon><t-icon name="swap" /></template>
-                    </t-button>
-                  </t-tooltip>
-                </t-popconfirm>
               </template>
             </t-table>
           </div>
@@ -542,14 +531,12 @@ import {
   updateMemberRole,
   updateMemberStatus,
   updateMemberOperatingAnalysisAccess,
-  transferOwnership,
   type TenantMember,
   type TenantRole,
 } from '@/api/tenant/members'
 import {
   assignableMemberRoles,
   canManageMemberRole,
-  canTransferMemberOwnership,
   tenantRoleTranslationKey,
 } from '@/api/tenant/memberLifecycle'
 import {
@@ -593,7 +580,7 @@ const invitePopupVisible = ref(false)
 // invite). shareLinkResult is non-null after a successful create —
 // the popup then switches into "here's your link, copy it" mode.
 const shareLinkPopupVisible = ref(false)
-const shareLinkForm = reactive<{ role: TenantRole }>({ role: 'contributor' })
+const shareLinkForm = reactive<{ role: TenantRole }>({ role: 'viewer' })
 const creatingShareLink = ref(false)
 const shareLinkResult = ref<TenantInvitation | null>(null)
 // Two-step invite inside the popup: 'form' renders the email/role inputs;
@@ -664,7 +651,7 @@ let auditScrollObserver: IntersectionObserver | null = null
 // should be a deliberate promote step after the user accepts.
 const addForm = reactive<{ email: string; role: TenantRole }>({
   email: '',
-  role: 'contributor',
+  role: 'viewer',
 })
 
 // Role-aware gates. The server enforces every mutation; UI gates here
@@ -683,12 +670,12 @@ const canManage = computed(
 // render a tab that would just 403.
 const canViewAudit = computed(
   () =>
-    currentRole.value === 'owner' ||
+
     currentRole.value === 'admin' ||
     effectivePlatformOperator.value,
 )
-const canManageBusinessRoles = computed(() => currentRole.value === 'owner' || currentRole.value === 'admin' || effectivePlatformOperator.value)
-const canManageOperatingAnalysisAccess = computed(() => currentRole.value === 'owner' || currentRole.value === 'admin' || effectivePlatformOperator.value)
+const canManageBusinessRoles = computed(() =>  currentRole.value === 'admin' || effectivePlatformOperator.value)
+const canManageOperatingAnalysisAccess = computed(() =>  currentRole.value === 'admin' || effectivePlatformOperator.value)
 const currentUserId = computed(() => authStore.user?.id ?? '')
 
 // Use the active tenant id from the auth store; the route only allows
@@ -715,25 +702,11 @@ const roleSelectPopupProps = {
 // PR 2 enforcement; if a permission moves between roles, update both
 // sides in the same PR.
 type RolePerm = { key: string; has: boolean }
-const roleMatrixOrder: TenantRole[] = ['owner', 'admin', 'contributor', 'viewer']
+const roleMatrixOrder: TenantRole[] = ['admin', 'viewer']
 const roleMatrix: Record<TenantRole, RolePerm[]> = {
-  owner: [
-    { key: 'manageMembers', has: true },
-    { key: 'manageTenantConfig', has: true },
-    { key: 'manageInfra', has: true },
-    { key: 'createOwnKB', has: true },
-    { key: 'readAll', has: true },
-  ],
   admin: [
     { key: 'manageMembers', has: true },
-    { key: 'manageTenantConfig', has: false },
-    { key: 'manageInfra', has: true },
-    { key: 'createOwnKB', has: true },
-    { key: 'readAll', has: true },
-  ],
-  contributor: [
-    { key: 'manageMembers', has: false },
-    { key: 'manageTenantConfig', has: false },
+    { key: 'manageTenantConfig', has: true },
     { key: 'manageInfra', has: false },
     { key: 'createOwnKB', has: true },
     { key: 'readAll', has: true },
@@ -749,12 +722,8 @@ const roleMatrix: Record<TenantRole, RolePerm[]> = {
 
 function roleMatrixIcon(role: TenantRole): string {
   switch (role) {
-    case 'owner':
-      return 'user-vip-filled'
     case 'admin':
       return 'user-safety'
-    case 'contributor':
-      return 'edit'
     default:
       return 'browse'
   }
@@ -769,7 +738,7 @@ const columns = computed(() => [
     ? [{ colKey: 'operatingAnalysis', title: t('tenantMember.columns.operatingAnalysis'), width: 112 }]
     : []),
   { colKey: 'joined_at', title: t('tenantMember.columns.joinedAt'), width: 154 },
-  { colKey: 'actions', title: t('tenantMember.columns.operations'), width: 88, align: 'left' },
+  { colKey: 'actions', title: t('tenantMember.columns.operations'), width: 88, align: 'left', fixed: 'right' },
 ])
 
 function memberBusinessRoleNames(row: TenantMember): string[] {
@@ -825,14 +794,6 @@ function canManageInvitation(row: TenantInvitation): boolean {
   )
 }
 
-function canTransferOwnership(row: TenantMember): boolean {
-  return canTransferMemberOwnership(
-    currentRole.value,
-    row.role,
-    row.status,
-    row.user_id === currentUserId.value,
-  )
-}
 
 function memberPrimary(row: { username?: string; email?: string }) {
   return row.username?.trim() || row.email?.trim() || '—'
@@ -857,12 +818,8 @@ const addFormRules = {
 // stay neutral so the table doesn't become a confetti cannon.
 function roleTagTheme(role: TenantRole): 'primary' | 'warning' | 'success' | 'default' {
   switch (role) {
-    case 'owner':
-      return 'primary'
     case 'admin':
       return 'warning'
-    case 'contributor':
-      return 'success'
     default:
       return 'default'
   }
@@ -870,7 +827,7 @@ function roleTagTheme(role: TenantRole): 'primary' | 'warning' | 'success' | 'de
 
 /** 成员表/下拉与权限矩阵共用图标（crown 不在 tdesign-icons-vue-next 中）。 */
 function roleIcon(role: TenantRole | string): string {
-  if (role === 'owner' || role === 'admin' || role === 'contributor' || role === 'viewer') {
+  if (role === 'admin' || role === 'viewer') {
     return roleMatrixIcon(role as TenantRole)
   }
   return 'user'
@@ -1356,7 +1313,7 @@ onUnmounted(() => detachAuditInfiniteScroll())
 watch(invitePopupVisible, (open) => {
   if (!open) return
   addForm.email = ''
-  addForm.role = 'contributor'
+  addForm.role = 'viewer'
   addDialogStep.value = 'form'
 })
 
@@ -1364,7 +1321,7 @@ watch(invitePopupVisible, (open) => {
 // the previous result on a fresh click.
 watch(shareLinkPopupVisible, (open) => {
   if (!open) return
-  shareLinkForm.role = 'contributor'
+  shareLinkForm.role = 'viewer'
   shareLinkResult.value = null
 })
 
@@ -1552,23 +1509,6 @@ async function toggleMemberStatus(row: TenantMember) {
   }
 }
 
-async function transferRowOwnership(row: TenantMember) {
-  try {
-    const resp = await transferOwnership(activeTenantId.value, row.user_id)
-    if (resp.success) {
-		// Ownership changes the role carried by the current auth session; refresh
-		// it before reloading the roster so controls immediately reflect the
-		// caller's new Admin authority.
-      await authStore.refreshFromAuthMe()
-      await loadMembers()
-      MessagePlugin.success(t('tenantMember.transfer.success'))
-    } else {
-      MessagePlugin.error(resp.message || t('tenantMember.errors.generic'))
-    }
-  } catch (err: any) {
-    MessagePlugin.error(err?.message || t('tenantMember.errors.generic'))
-  }
-}
 
 // Re-load whenever the active tenant resolves (or changes via the
 // tenant switcher). onMounted alone would race with auth-store

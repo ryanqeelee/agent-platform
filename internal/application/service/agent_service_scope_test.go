@@ -75,14 +75,14 @@ func TestKnowledgeBaseScopesForPrompt_NilConfig(t *testing.T) {
 
 func TestRegisteredKnowledgeWriteAuthorityKeepsScopedAPIKeyWikiWrites(t *testing.T) {
 	viewerCtx := context.WithValue(context.Background(), types.TenantRoleContextKey, types.TenantRoleViewer)
-	contributorCtx := context.WithValue(context.Background(), types.TenantRoleContextKey, types.TenantRoleContributor)
+	contributorCtx := context.WithValue(context.Background(), types.TenantRoleContextKey, types.TenantRoleAdmin)
 	cases := []struct {
 		name      string
 		ctx       context.Context
 		wantWrite bool
 	}{
 		{"human viewer", viewerCtx, false},
-		{"human contributor", contributorCtx, true},
+		{"human administrator", contributorCtx, true},
 		{"retrieve-only key", types.WithTenantAPIKeyScope(viewerCtx, types.TenantAPIKeyScope{Capabilities: types.StringArray{string(types.APIKeyCapabilityRetrieve)}}), false},
 		{"full key", types.WithTenantAPIKeyScope(viewerCtx, types.TenantAPIKeyScope{FullAccess: true}), true},
 		{"manage knowledge bases key", types.WithTenantAPIKeyScope(viewerCtx, types.TenantAPIKeyScope{Capabilities: types.StringArray{string(types.APIKeyCapabilityManageKnowledgeBases)}}), true},

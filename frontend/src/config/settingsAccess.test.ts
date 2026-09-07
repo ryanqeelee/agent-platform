@@ -15,13 +15,13 @@ test('member management pages require enterprise administrators', () => {
 
 test('employee viewers cannot deep-link into management surfaces', () => {
   assert.deepEqual(EMPLOYEE_SURFACE_MIN_ROLE, {
-    enterpriseAdministration: 'contributor',
-    knowledgeBases: 'contributor',
+    enterpriseAdministration: 'admin',
+    knowledgeBases: 'admin',
     agents: 'admin',
     organizations: 'admin',
   })
-  assert.equal(employeeSurfaceMinRoleForPath('/platform/enterprise'), 'contributor')
-  assert.equal(employeeSurfaceMinRoleForPath('/platform/knowledge-bases'), 'contributor')
+  assert.equal(employeeSurfaceMinRoleForPath('/platform/enterprise'), 'admin')
+  assert.equal(employeeSurfaceMinRoleForPath('/platform/knowledge-bases'), 'admin')
   assert.equal(employeeSurfaceMinRoleForPath('/platform/knowledge-bases/kb-1'), undefined)
   assert.equal(employeeSurfaceMinRoleForPath('/platform/agents'), 'admin')
   assert.equal(employeeSurfaceMinRoleForPath('/platform/organizations'), 'admin')
@@ -44,6 +44,7 @@ test('system administration settings stay explicitly system-admin-only', () => {
   assert.deepEqual(
     [...SYSTEM_ADMIN_SETTINGS_SECTIONS],
     [
+      'agents',
       'memory-runtime',
       'diagnostics',
       'models',

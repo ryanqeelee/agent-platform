@@ -13,7 +13,7 @@ import (
 
 func TestEnterpriseManagedMemberAndInvitationPolicy(t *testing.T) {
 	memberSvc, memberRepo := newServiceWithRepo()
-	if member, err := memberSvc.AddMember(context.Background(), "contributor", 1, types.TenantRoleContributor, nil); err != nil || member.Role != types.TenantRoleContributor {
+	if member, err := memberSvc.AddMember(context.Background(), "viewer", 1, types.TenantRoleViewer, nil); err != nil || member.Role != types.TenantRoleViewer {
 		t.Fatalf("contributor must remain available: member=%v err=%v", member, err)
 	}
 	memberRepo.failCreate = apprepo.ErrUserBoundToAnotherEnterprise
@@ -25,7 +25,7 @@ func TestEnterpriseManagedMemberAndInvitationPolicy(t *testing.T) {
 	invitedRepo := invitedMemberSvc.(*tenantMemberService).repo.(*fakeTenantMemberRepo)
 	invitedRepo.failCreate = apprepo.ErrUserBoundToAnotherEnterprise
 	invRepo.rows = append(invRepo.rows, &types.TenantInvitation{
-		ID: 1, TenantID: 2, InviteeUserID: "bound", Role: types.TenantRoleContributor,
+		ID: 1, TenantID: 2, InviteeUserID: "bound", Role: types.TenantRoleViewer,
 		Status: types.TenantInvitationStatusPending, ExpiresAt: time.Now().Add(time.Hour),
 	})
 	if _, err := invSvc.Accept(context.Background(), 1, "bound"); !errors.Is(err, ErrUserBoundToAnotherEnterprise) {

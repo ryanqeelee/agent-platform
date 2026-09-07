@@ -89,9 +89,6 @@ func (r *fakeTenantMemberRepo) CreateManaged(ctx context.Context, actor types.Me
 	if err := r.validateActor(actor, m.TenantID); err != nil {
 		return err
 	}
-	if actor.ServicePrincipal && m.Role == types.TenantRoleOwner {
-		return apprepo.ErrMemberActionForbidden
-	}
 	if !actor.ServicePrincipal {
 		var role types.TenantRole
 		for _, e := range r.rows {
@@ -185,22 +182,19 @@ func (r *fakeTenantMemberRepo) UpdateRole(ctx context.Context, actor types.Membe
 			if !actor.ServicePrincipal && actor.UserID == userID {
 				return apprepo.ErrCannotManageSelf
 			}
-			if actor.ServicePrincipal && (e.Role == types.TenantRoleOwner || role == types.TenantRoleOwner) {
-				return apprepo.ErrMemberActionForbidden
-			}
 			if !actor.ServicePrincipal && !types.CanManageMemberRole(actorRoleFor(r, actor.UserID, tenantID), e.Role) {
 				return apprepo.ErrMemberActionForbidden
 			}
 			if !actor.ServicePrincipal && !types.CanManageMemberRole(actorRoleFor(r, actor.UserID, tenantID), role) {
 				return apprepo.ErrMemberActionForbidden
 			}
-			if e.Role == types.TenantRoleOwner && e.Status == types.TenantMemberStatusActive && role != types.TenantRoleOwner {
-				owners, err := r.CountActiveOwners(ctx, tenantID)
+			if e.Role == types.TenantRoleAdmin && e.Status == types.TenantMemberStatusActive && role != types.TenantRoleAdmin {
+				owners, err := r.CountActiveAdministrators(ctx, tenantID)
 				if err != nil {
 					return err
 				}
 				if owners <= 1 {
-					return apprepo.ErrLastOwner
+					return apprepo.ErrLastAdministrator
 				}
 			}
 			e.Role = role
@@ -228,9 +222,6 @@ func (r *fakeTenantMemberRepo) UpdateStatus(ctx context.Context, actor types.Mem
 			if !actor.ServicePrincipal && actor.UserID == userID {
 				return apprepo.ErrCannotManageSelf
 			}
-			if actor.ServicePrincipal && e.Role == types.TenantRoleOwner {
-				return apprepo.ErrMemberActionForbidden
-			}
 			if !actor.ServicePrincipal && !types.CanManageMemberRole(actorRoleFor(r, actor.UserID, tenantID), e.Role) {
 				return apprepo.ErrMemberActionForbidden
 			}
@@ -253,7 +244,7 @@ func (r *fakeTenantMemberRepo) UpdateOperatingAnalysisAccess(
 	}
 	if !actor.ServicePrincipal {
 		role := actorRoleFor(r, actor.UserID, tenantID)
-		if role != types.TenantRoleOwner && role != types.TenantRoleAdmin {
+		if role != types.TenantRoleAdmin {
 			return false, apprepo.ErrMemberActionForbidden
 		}
 	}
@@ -281,19 +272,16 @@ func (r *fakeTenantMemberRepo) SoftDelete(ctx context.Context, actor types.Membe
 			if !actor.ServicePrincipal && actor.UserID == userID {
 				return apprepo.ErrCannotManageSelf
 			}
-			if actor.ServicePrincipal && e.Role == types.TenantRoleOwner {
-				return apprepo.ErrMemberActionForbidden
-			}
 			if !actor.ServicePrincipal && !types.CanManageMemberRole(actorRoleFor(r, actor.UserID, tenantID), e.Role) {
 				return apprepo.ErrMemberActionForbidden
 			}
-			if e.Role == types.TenantRoleOwner && e.Status == types.TenantMemberStatusActive {
-				owners, err := r.CountActiveOwners(ctx, tenantID)
+			if e.Role == types.TenantRoleAdmin && e.Status == types.TenantMemberStatusActive {
+				owners, err := r.CountActiveAdministrators(ctx, tenantID)
 				if err != nil {
 					return err
 				}
 				if owners <= 1 {
-					return apprepo.ErrLastOwner
+					return apprepo.ErrLastAdministrator
 				}
 			}
 			e.DeletedAt.Valid = true
@@ -303,14 +291,14 @@ func (r *fakeTenantMemberRepo) SoftDelete(ctx context.Context, actor types.Membe
 	return errors.New("not found")
 }
 
-func (r *fakeTenantMemberRepo) CountActiveOwners(ctx context.Context, tenantID uint64) (int64, error) {
+func (r *fakeTenantMemberRepo) CountActiveAdministrators(ctx context.Context, tenantID uint64) (int64, error) {
 	if r.failCountOwners != nil {
 		return 0, r.failCountOwners
 	}
 	var n int64
 	for _, e := range r.rows {
 		if e.TenantID == tenantID && !e.DeletedAt.Valid &&
-			e.Role == types.TenantRoleOwner && e.Status == types.TenantMemberStatusActive {
+			e.Role == types.TenantRoleAdmin && e.Status == types.TenantMemberStatusActive {
 			n++
 		}
 	}
@@ -344,7 +332,7 @@ func (r *fakeTenantMemberRepo) DemoteOwnerAtomically(
 		if e.TenantID != tenantID || e.DeletedAt.Valid || e.Status != types.TenantMemberStatusActive {
 			continue
 		}
-		if e.Role == types.TenantRoleOwner && e.UserID != userID {
+		if e.Role == types.TenantRoleAdmin && e.UserID != userID {
 			others++
 		}
 		if e.UserID == userID {
@@ -352,7 +340,7 @@ func (r *fakeTenantMemberRepo) DemoteOwnerAtomically(
 		}
 	}
 	if others == 0 {
-		return apprepo.ErrLastOwner
+		return apprepo.ErrLastAdministrator
 	}
 	if target == nil {
 		return gormErrRecordNotFound
@@ -371,7 +359,7 @@ func (r *fakeTenantMemberRepo) RemoveOwnerAtomically(
 		if e.TenantID != tenantID || e.DeletedAt.Valid || e.Status != types.TenantMemberStatusActive {
 			continue
 		}
-		if e.Role == types.TenantRoleOwner && e.UserID != userID {
+		if e.Role == types.TenantRoleAdmin && e.UserID != userID {
 			others++
 		}
 		if e.UserID == userID {
@@ -379,50 +367,13 @@ func (r *fakeTenantMemberRepo) RemoveOwnerAtomically(
 		}
 	}
 	if others == 0 {
-		return apprepo.ErrLastOwner
+		return apprepo.ErrLastAdministrator
 	}
 	if target == nil {
 		return gormErrRecordNotFound
 	}
 	target.DeletedAt.Time = time.Now()
 	target.DeletedAt.Valid = true
-	return nil
-}
-
-func (r *fakeTenantMemberRepo) TransferOwnership(ctx context.Context, actor, target string, tenantID uint64) error {
-	var owners int
-	var targetRow *types.TenantMember
-	for _, e := range r.rows {
-		if e.TenantID != tenantID || e.DeletedAt.Valid || e.Status != types.TenantMemberStatusActive {
-			continue
-		}
-		if e.Role == types.TenantRoleOwner {
-			owners++
-			if e.UserID != actor {
-				return apprepo.ErrOwnershipTransferInvalid
-			}
-		}
-		if e.UserID == target {
-			targetRow = e
-		}
-	}
-	if owners != 1 {
-		return apprepo.ErrOwnershipInvariant
-	}
-	if targetRow == nil || targetRow.Role != types.TenantRoleAdmin {
-		return apprepo.ErrOwnershipTransferInvalid
-	}
-	for _, e := range r.rows {
-		if e.TenantID != tenantID || e.DeletedAt.Valid {
-			continue
-		}
-		if e.UserID == actor {
-			e.Role = types.TenantRoleAdmin
-		}
-		if e.UserID == target {
-			e.Role = types.TenantRoleOwner
-		}
-	}
 	return nil
 }
 
@@ -447,17 +398,17 @@ func (c *operatingAnalysisAuditCapture) Log(_ context.Context, entry *types.Audi
 func TestTenantMemberService_OperatingAnalysisAccessUsesIndependentAdminMatrix(t *testing.T) {
 	repo := newFakeRepo()
 	repo.rows = []*types.TenantMember{
-		{UserID: "owner", TenantID: 1, Role: types.TenantRoleOwner, Status: types.TenantMemberStatusActive},
+		{UserID: "owner", TenantID: 1, Role: types.TenantRoleAdmin, Status: types.TenantMemberStatusActive},
 		{UserID: "admin", TenantID: 1, Role: types.TenantRoleAdmin, Status: types.TenantMemberStatusActive},
 		{UserID: "employee", TenantID: 1, Role: types.TenantRoleViewer, Status: types.TenantMemberStatusActive},
 	}
 	audit := &operatingAnalysisAuditCapture{}
 	svc := NewTenantMemberService(repo, audit)
 
-	if err := svc.UpdateOperatingAnalysisAccess(memberActorCtx("owner", types.TenantRoleOwner), "owner", 1, true); err != nil {
+	if err := svc.UpdateOperatingAnalysisAccess(memberActorCtx("owner", types.TenantRoleAdmin), "owner", 1, true); err != nil {
 		t.Fatalf("owner self grant: %v", err)
 	}
-	if err := svc.UpdateOperatingAnalysisAccess(memberActorCtx("owner", types.TenantRoleOwner), "owner", 1, true); err != nil {
+	if err := svc.UpdateOperatingAnalysisAccess(memberActorCtx("owner", types.TenantRoleAdmin), "owner", 1, true); err != nil {
 		t.Fatalf("idempotent replay: %v", err)
 	}
 	if err := svc.UpdateOperatingAnalysisAccess(memberActorCtx("admin", types.TenantRoleAdmin), "owner", 1, false); err != nil {
@@ -487,8 +438,8 @@ func TestTenantMemberService_AddMember_APIKeyCannotAssignOwner(t *testing.T) {
 	})
 
 	_, err := svc.AddMember(ctx, "u1", 1, types.TenantRoleOwner, nil)
-	if !errors.Is(err, ErrAPIKeyCannotAssignOwner) {
-		t.Fatalf("want ErrAPIKeyCannotAssignOwner, got %v", err)
+	if !errors.Is(err, ErrInvalidTenantRole) {
+		t.Fatalf("want ErrInvalidTenantRole, got %v", err)
 	}
 	if len(repo.rows) != 0 {
 		t.Fatalf("API key owner assignment must not create a membership, got %d rows", len(repo.rows))
@@ -498,10 +449,10 @@ func TestTenantMemberService_AddMember_APIKeyCannotAssignOwner(t *testing.T) {
 func TestTenantMemberService_AddMember_RejectsDuplicate(t *testing.T) {
 	svc, _ := newServiceWithRepo()
 	ctx := context.Background()
-	if _, err := svc.AddMember(ctx, "u1", 1, types.TenantRoleContributor, nil); err != nil {
+	if _, err := svc.AddMember(ctx, "u1", 1, types.TenantRoleViewer, nil); err != nil {
 		t.Fatalf("first AddMember: %v", err)
 	}
-	_, err := svc.AddMember(ctx, "u1", 1, types.TenantRoleContributor, nil)
+	_, err := svc.AddMember(ctx, "u1", 1, types.TenantRoleViewer, nil)
 	if !errors.Is(err, ErrMembershipAlreadyExists) {
 		t.Fatalf("want ErrMembershipAlreadyExists, got %v", err)
 	}
@@ -516,39 +467,39 @@ func TestTenantMemberService_AddMember_MapsDuplicateKeyRace(t *testing.T) {
 	svc, repo := newServiceWithRepo()
 	repo.failCreate = errors.New(
 		"ERROR: duplicate key value violates unique constraint \"idx_tenant_members_user_tenant_unique\"")
-	_, err := svc.AddMember(context.Background(), "u_race", 1, types.TenantRoleContributor, nil)
+	_, err := svc.AddMember(context.Background(), "u_race", 1, types.TenantRoleViewer, nil)
 	if !errors.Is(err, ErrMembershipAlreadyExists) {
 		t.Fatalf("want ErrMembershipAlreadyExists on duplicate-key race, got %v", err)
 	}
 }
 
-func TestTenantMemberService_EnsureOwner_Idempotent(t *testing.T) {
+func TestTenantMemberService_EnsureAdministrator_Idempotent(t *testing.T) {
 	svc, repo := newServiceWithRepo()
 	ctx := context.Background()
-	first, err := svc.EnsureOwner(ctx, "u1", 1)
+	first, err := svc.EnsureAdministrator(ctx, "u1", 1)
 	if err != nil {
-		t.Fatalf("first EnsureOwner: %v", err)
+		t.Fatalf("first EnsureAdministrator: %v", err)
 	}
-	second, err := svc.EnsureOwner(ctx, "u1", 1)
+	second, err := svc.EnsureAdministrator(ctx, "u1", 1)
 	if err != nil {
-		t.Fatalf("second EnsureOwner: %v", err)
+		t.Fatalf("second EnsureAdministrator: %v", err)
 	}
 	if first.ID != second.ID {
-		t.Fatalf("EnsureOwner not idempotent: %d vs %d", first.ID, second.ID)
+		t.Fatalf("EnsureAdministrator not idempotent: %d vs %d", first.ID, second.ID)
 	}
 	if len(repo.rows) != 1 {
-		t.Fatalf("want exactly 1 row after idempotent EnsureOwner, got %d", len(repo.rows))
+		t.Fatalf("want exactly 1 row after idempotent EnsureAdministrator, got %d", len(repo.rows))
 	}
 }
 
-func TestTenantMemberService_UpdateRole_RejectsOwnerMutationOutsideTransfer(t *testing.T) {
+func TestTenantMemberService_UpdateRole_RejectsLastAdministratorDemotion(t *testing.T) {
 	svc, _ := newServiceWithRepo()
 	ctx := context.Background()
-	if _, err := svc.EnsureOwner(ctx, "owner", 1); err != nil {
+	if _, err := svc.EnsureAdministrator(ctx, "owner", 1); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	err := svc.UpdateRole(ctx, "owner", 1, types.TenantRoleAdmin)
-	if !errors.Is(err, ErrMemberActionForbidden) {
+	err := svc.UpdateRole(ctx, "owner", 1, types.TenantRoleViewer)
+	if !errors.Is(err, ErrLastAdministrator) {
 		t.Fatalf("ordinary role writes must not demote Owner, got %v", err)
 	}
 }
@@ -565,8 +516,8 @@ func TestTenantMemberService_UpdateRole_APIKeyCannotPromoteOwner(t *testing.T) {
 	})
 
 	err := svc.UpdateRole(apiKeyCtx, "u1", 1, types.TenantRoleOwner)
-	if !errors.Is(err, ErrAPIKeyCannotAssignOwner) {
-		t.Fatalf("want ErrAPIKeyCannotAssignOwner, got %v", err)
+	if !errors.Is(err, ErrInvalidTenantRole) {
+		t.Fatalf("want ErrInvalidTenantRole, got %v", err)
 	}
 	member, getErr := svc.GetMembership(humanCtx, "u1", 1)
 	if getErr != nil {
@@ -580,7 +531,7 @@ func TestTenantMemberService_UpdateRole_APIKeyCannotPromoteOwner(t *testing.T) {
 func TestTenantMemberService_AddMember_RejectsOwnerOutsideBootstrap(t *testing.T) {
 	svc, _ := newServiceWithRepo()
 	ctx := context.Background()
-	if _, err := svc.AddMember(ctx, "owner2", 1, types.TenantRoleOwner, nil); !errors.Is(err, ErrOwnerRoleReserved) {
+	if _, err := svc.AddMember(ctx, "owner2", 1, types.TenantRoleOwner, nil); !errors.Is(err, ErrInvalidTenantRole) {
 		t.Fatalf("ordinary AddMember must reject Owner, got %v", err)
 	}
 }
@@ -588,10 +539,10 @@ func TestTenantMemberService_AddMember_RejectsOwnerOutsideBootstrap(t *testing.T
 func TestTenantMemberService_UpdateRole_NoopOnSameRole(t *testing.T) {
 	svc, _ := newServiceWithRepo()
 	ctx := context.Background()
-	if _, err := svc.EnsureOwner(ctx, "owner", 1); err != nil {
+	if _, err := svc.EnsureAdministrator(ctx, "owner", 1); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if err := svc.UpdateRole(ctx, "owner", 1, types.TenantRoleOwner); !errors.Is(err, ErrOwnerRoleReserved) {
+	if err := svc.UpdateRole(ctx, "owner", 1, types.TenantRoleOwner); !errors.Is(err, ErrInvalidTenantRole) {
 		t.Fatalf("ordinary role writes must reject Owner, got %v", err)
 	}
 }
@@ -602,7 +553,7 @@ func memberActorCtx(userID string, role types.TenantRole) context.Context {
 }
 
 func platformMemberActorCtx(enabled bool) context.Context {
-	ctx := memberActorCtx("platform", types.TenantRoleAdmin)
+	ctx := memberActorCtx("platform", types.TenantRoleViewer)
 	ctx = context.WithValue(ctx, types.UserContextKey, &types.User{
 		ID:                  "platform",
 		CanAccessAllTenants: true,
@@ -615,7 +566,7 @@ func TestTenantMemberService_PlatformAuthorityRequiresFeatureGatedContext(t *tes
 	seed := func() interfaces.TenantMemberService {
 		svc, repo := newServiceWithRepo()
 		repo.rows = []*types.TenantMember{
-			{UserID: "platform", TenantID: 1, Role: types.TenantRoleAdmin, Status: types.TenantMemberStatusActive},
+			{UserID: "platform", TenantID: 1, Role: types.TenantRoleViewer, Status: types.TenantMemberStatusActive},
 			{UserID: "target-admin", TenantID: 1, Role: types.TenantRoleAdmin, Status: types.TenantMemberStatusActive},
 		}
 		return svc
@@ -633,9 +584,9 @@ func TestTenantMemberService_ActorTargetMatrixAndStatus(t *testing.T) {
 	seed := func() (interfaces.TenantMemberService, *fakeTenantMemberRepo) {
 		svc, repo := newServiceWithRepo()
 		repo.rows = []*types.TenantMember{
-			{UserID: "owner", TenantID: 1, Role: types.TenantRoleOwner, Status: types.TenantMemberStatusActive},
+			{UserID: "owner", TenantID: 1, Role: types.TenantRoleAdmin, Status: types.TenantMemberStatusActive},
 			{UserID: "admin", TenantID: 1, Role: types.TenantRoleAdmin, Status: types.TenantMemberStatusActive},
-			{UserID: "ka", TenantID: 1, Role: types.TenantRoleContributor, Status: types.TenantMemberStatusActive},
+			{UserID: "ka", TenantID: 1, Role: types.TenantRoleViewer, Status: types.TenantMemberStatusActive},
 			{UserID: "employee", TenantID: 1, Role: types.TenantRoleViewer, Status: types.TenantMemberStatusActive},
 		}
 		return svc, repo
@@ -647,11 +598,11 @@ func TestTenantMemberService_ActorTargetMatrixAndStatus(t *testing.T) {
 		role   types.TenantRole
 		want   error
 	}{
-		{"owner appoints admin", memberActorCtx("owner", types.TenantRoleOwner), "ka", types.TenantRoleAdmin, nil},
+		{"owner appoints admin", memberActorCtx("owner", types.TenantRoleAdmin), "ka", types.TenantRoleAdmin, nil},
 		{"admin cannot touch admin", memberActorCtx("admin", types.TenantRoleAdmin), "admin", types.TenantRoleViewer, ErrCannotManageSelf},
-		{"admin cannot target owner", memberActorCtx("admin", types.TenantRoleAdmin), "owner", types.TenantRoleViewer, ErrMemberActionForbidden},
-		{"knowledge administrator cannot manage employee", memberActorCtx("ka", types.TenantRoleContributor), "employee", types.TenantRoleContributor, ErrMemberActionForbidden},
-		{"ordinary role write cannot mint owner", memberActorCtx("owner", types.TenantRoleOwner), "employee", types.TenantRoleOwner, ErrOwnerRoleReserved},
+		{"admin cannot target owner", memberActorCtx("admin", types.TenantRoleAdmin), "owner", types.TenantRoleViewer, nil},
+		{"knowledge administrator cannot manage employee", memberActorCtx("ka", types.TenantRoleViewer), "employee", types.TenantRoleViewer, ErrMemberActionForbidden},
+		{"ordinary role write cannot mint owner", memberActorCtx("owner", types.TenantRoleAdmin), "employee", types.TenantRoleOwner, ErrInvalidTenantRole},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -666,7 +617,7 @@ func TestTenantMemberService_ActorTargetMatrixAndStatus(t *testing.T) {
 		})
 	}
 	svc, _ := seed()
-	if err := svc.UpdateStatus(memberActorCtx("owner", types.TenantRoleOwner), "employee", 1, types.TenantMemberStatusSuspended); err != nil {
+	if err := svc.UpdateStatus(memberActorCtx("owner", types.TenantRoleAdmin), "employee", 1, types.TenantMemberStatusSuspended); err != nil {
 		t.Fatalf("suspend employee: %v", err)
 	}
 	member, _ := svc.GetMembership(context.Background(), "employee", 1)
@@ -675,26 +626,10 @@ func TestTenantMemberService_ActorTargetMatrixAndStatus(t *testing.T) {
 	}
 }
 
-func TestTenantMemberService_TransferOwnership(t *testing.T) {
-	svc, repo := newServiceWithRepo()
-	repo.rows = []*types.TenantMember{
-		{UserID: "owner", TenantID: 1, Role: types.TenantRoleOwner, Status: types.TenantMemberStatusActive},
-		{UserID: "admin", TenantID: 1, Role: types.TenantRoleAdmin, Status: types.TenantMemberStatusActive},
-	}
-	if err := svc.TransferOwnership(memberActorCtx("owner", types.TenantRoleOwner), "admin", 1); err != nil {
-		t.Fatalf("TransferOwnership: %v", err)
-	}
-	owner, _ := svc.GetMembership(context.Background(), "owner", 1)
-	admin, _ := svc.GetMembership(context.Background(), "admin", 1)
-	if owner.Role != types.TenantRoleAdmin || admin.Role != types.TenantRoleOwner {
-		t.Fatalf("roles after transfer: old=%s new=%s", owner.Role, admin.Role)
-	}
-}
-
 func TestTenantMemberService_UpdateRole_RejectsInvalidRole(t *testing.T) {
 	svc, _ := newServiceWithRepo()
 	ctx := context.Background()
-	if _, err := svc.EnsureOwner(ctx, "owner", 1); err != nil {
+	if _, err := svc.EnsureAdministrator(ctx, "owner", 1); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	if err := svc.UpdateRole(ctx, "owner", 1, types.TenantRole("nope")); !errors.Is(err, ErrInvalidTenantRole) {
@@ -712,10 +647,10 @@ func TestTenantMemberService_UpdateRole_ReturnsNotFound(t *testing.T) {
 func TestTenantMemberService_RemoveMember_RejectsOwnerMutationOutsideTransfer(t *testing.T) {
 	svc, _ := newServiceWithRepo()
 	ctx := context.Background()
-	if _, err := svc.EnsureOwner(ctx, "owner", 1); err != nil {
+	if _, err := svc.EnsureAdministrator(ctx, "owner", 1); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if err := svc.RemoveMember(ctx, "owner", 1); !errors.Is(err, ErrMemberActionForbidden) {
+	if err := svc.RemoveMember(ctx, "owner", 1); !errors.Is(err, ErrLastAdministrator) {
 		t.Fatalf("ordinary removal must not remove Owner, got %v", err)
 	}
 }
@@ -723,10 +658,10 @@ func TestTenantMemberService_RemoveMember_RejectsOwnerMutationOutsideTransfer(t 
 func TestTenantMemberService_RemoveMember_AllowsContributorRemoval(t *testing.T) {
 	svc, _ := newServiceWithRepo()
 	ctx := context.Background()
-	if _, err := svc.EnsureOwner(ctx, "owner", 1); err != nil {
+	if _, err := svc.EnsureAdministrator(ctx, "owner", 1); err != nil {
 		t.Fatalf("seed owner: %v", err)
 	}
-	if _, err := svc.AddMember(ctx, "contrib", 1, types.TenantRoleContributor, nil); err != nil {
+	if _, err := svc.AddMember(ctx, "contrib", 1, types.TenantRoleViewer, nil); err != nil {
 		t.Fatalf("seed contributor: %v", err)
 	}
 	if err := svc.RemoveMember(ctx, "contrib", 1); err != nil {
@@ -751,10 +686,10 @@ func TestTenantRole_HasPermission(t *testing.T) {
 		required types.TenantRole
 		want     bool
 	}{
-		{types.TenantRoleOwner, types.TenantRoleAdmin, true},
+		{types.TenantRoleOwner, types.TenantRoleAdmin, false},
 		{types.TenantRoleAdmin, types.TenantRoleOwner, false},
-		{types.TenantRoleContributor, types.TenantRoleViewer, true},
-		{types.TenantRoleViewer, types.TenantRoleContributor, false},
+		{types.TenantRoleViewer, types.TenantRoleViewer, true},
+		{types.TenantRoleViewer, types.TenantRoleAdmin, false},
 		{types.TenantRole("bogus"), types.TenantRoleViewer, false},
 	}
 	for _, c := range cases {

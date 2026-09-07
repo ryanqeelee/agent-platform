@@ -83,7 +83,7 @@ func (h *KnowledgeHandler) requireKBContentRole(c *gin.Context, kb *types.Knowle
 	if callerTenantID == 0 {
 		return errors.NewUnauthorizedError("Unauthorized")
 	}
-	required := types.TenantRoleContributor
+	required := types.TenantRoleAdmin
 	if kb.TenantID != callerTenantID {
 		required = types.TenantRoleAdmin
 	}

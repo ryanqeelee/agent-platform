@@ -20,10 +20,10 @@ func TestInvitationProjectionUsesTargetRoleMatrix(t *testing.T) {
 		return context.WithValue(ctx, types.CrossTenantAccessContextKey, platform)
 	}
 
-	if got := h.projectInvitationForActor(actorContext(types.TenantRoleAdmin, false), inv, nil); got.InviteURL != "" {
+	if got := h.projectInvitationForActor(actorContext(types.TenantRoleViewer, false), inv, nil); got.InviteURL != "" {
 		t.Fatalf("Admin received an Admin invitation link: %q", got.InviteURL)
 	}
-	if got := h.projectInvitationForActor(actorContext(types.TenantRoleOwner, false), inv, nil); got.InviteURL == "" {
+	if got := h.projectInvitationForActor(actorContext(types.TenantRoleAdmin, false), inv, nil); got.InviteURL == "" {
 		t.Fatal("Owner could not retrieve an Admin invitation link")
 	}
 	if got := h.projectInvitationForActor(actorContext(types.TenantRoleAdmin, true), inv, nil); got.InviteURL == "" {

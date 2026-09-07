@@ -16,33 +16,24 @@ import (
 type TenantRole string
 
 const (
-	// TenantRoleOwner has full control over the tenant, including tenant
-	// deletion, ownership transfer, and managing tenant API keys.
-	TenantRoleOwner TenantRole = "owner"
-	// TenantRoleAdmin manages members and enterprise resources, but cannot
-	// delete the tenant, change Owners, or configure platform infrastructure.
+	// TenantRoleAdmin manages enterprise members and knowledge; platform infrastructure remains separate.
 	TenantRoleAdmin TenantRole = "admin"
-	// TenantRoleContributor is presented as Knowledge Administrator. It can
-	// create knowledge bases and maintain their content and access grants, but
-	// does not create Agents or gain member, license, device, analysis, model,
-	// vector-store, or storage administration.
-	TenantRoleContributor TenantRole = "contributor"
-	// TenantRoleViewer is presented as Employee and consumes only resources
-	// allowed by the current knowledge-access policy.
+	// TenantRoleViewer consumes knowledge allowed by business-role grants.
 	TenantRoleViewer TenantRole = "viewer"
+	// Retired storage values. They are invalid at runtime and migrated to admin/viewer.
+	TenantRoleOwner       TenantRole = "owner"
+	TenantRoleContributor TenantRole = "contributor"
 )
 
 // tenantRoleLevel maps each role to a numeric level used for hierarchy
 // comparisons. Higher means more privileged. Levels are spaced by 10 so
 // new roles can be inserted between existing ones if needed.
 var tenantRoleLevel = map[TenantRole]int{
-	TenantRoleOwner:       40,
-	TenantRoleAdmin:       30,
-	TenantRoleContributor: 20,
-	TenantRoleViewer:      10,
+	TenantRoleAdmin:  30,
+	TenantRoleViewer: 10,
 }
 
-// IsValid reports whether r is one of the four defined tenant roles.
+// IsValid reports whether r is one of the two active tenant roles.
 func (r TenantRole) IsValid() bool {
 	_, ok := tenantRoleLevel[r]
 	return ok
@@ -57,7 +48,7 @@ func (r TenantRole) Level() int {
 // HasPermission reports whether r is at least as privileged as required.
 // Used by RequireRole-style middleware to gate endpoints.
 func (r TenantRole) HasPermission(required TenantRole) bool {
-	return r.Level() >= required.Level()
+	return r.IsValid() && required.IsValid() && r.Level() >= required.Level()
 }
 
 // TenantMemberStatus enumerates the lifecycle states of a membership row.
@@ -99,7 +90,7 @@ type TenantMember struct {
 	// TenantID references tenants.id.
 	TenantID uint64 `json:"tenant_id" gorm:"not null;index"`
 	// Role held by the user inside this tenant.
-	Role TenantRole `json:"role" gorm:"type:varchar(20);not null;default:'contributor'"`
+	Role TenantRole `json:"role" gorm:"type:varchar(20);not null;default:'viewer'"`
 	// Status controls whether this membership is honoured by the auth
 	// middleware; see TenantMemberStatus constants.
 	Status TenantMemberStatus `json:"status" gorm:"type:varchar(20);not null;default:'active'"`

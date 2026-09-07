@@ -13,10 +13,10 @@ export type IntegrationTab = 'im' | 'embed' | 'api' | 'chrome' | 'claw'
 export const INTEGRATION_TABS: IntegrationTab[] = []
 
 /** Aligns with Settings.vue SECTION_MIN_ROLE.api and router.go g.Owner() on /api-principal-config. */
-export type IntegrationTabRole = 'viewer' | 'contributor' | 'admin' | 'owner'
+export type IntegrationTabRole = 'viewer' | 'admin'
 
 export const INTEGRATION_TAB_MIN_ROLE: Partial<Record<IntegrationTab, IntegrationTabRole>> = {
-  api: 'owner',
+  api: 'admin',
 }
 
 export const INTEGRATION_TAB_CAPABILITY: Partial<Record<IntegrationTab, DeploymentCapabilityKey>> = {

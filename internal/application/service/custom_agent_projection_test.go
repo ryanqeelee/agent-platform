@@ -15,6 +15,8 @@ func TestAgentViewHidesPlatformBindingsFromWorkspace(t *testing.T) {
 		Temperature:                   0.7,
 		MaxCompletionTokens:           4096,
 		MaxIterations:                 8,
+		MultiTurnEnabled:              true,
+		HistoryTurns:                  10,
 		AllowedTools:                  []string{"wiki_search"},
 		MCPSelectionMode:              "selected",
 		MCPServices:                   []string{"mcp-secret"},
@@ -42,6 +44,8 @@ func TestAgentViewHidesPlatformBindingsFromWorkspace(t *testing.T) {
 	assert.Zero(t, view.Config.Temperature)
 	assert.Zero(t, view.Config.MaxCompletionTokens)
 	assert.Zero(t, view.Config.MaxIterations)
+	assert.True(t, view.Config.MultiTurnEnabled)
+	assert.Equal(t, 10, view.Config.HistoryTurns)
 	assert.Empty(t, view.Config.AllowedTools)
 	assert.Empty(t, view.Config.MCPSelectionMode)
 	assert.Empty(t, view.Config.MCPServices)

@@ -128,7 +128,7 @@ func TestCreateInvitation_AutoAcceptEnabled_AddsMemberDirectly(t *testing.T) {
 	}
 	r := newAutoAcceptTestRouter(h)
 
-	w := postAutoAcceptInvitation(t, r, `{"email":"bob@x.com","role":"contributor"}`)
+	w := postAutoAcceptInvitation(t, r, `{"email":"bob@x.com","role":"viewer"}`)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -235,7 +235,7 @@ func TestCreateInvitation_AutoAccept_UnknownEmailReturns404(t *testing.T) {
 
 func TestCreateInvitation_AutoAccept_OwnerRoleRequiresTransferEndpoint(t *testing.T) {
 	users := &autoAcceptUserSvc{user: &types.User{ID: "u-bob", Email: "bob@x.com"}}
-	members := &autoAcceptMemberSvc{addErr: service.ErrAPIKeyCannotAssignOwner}
+	members := &autoAcceptMemberSvc{addErr: service.ErrInvalidTenantRole}
 	invites := &autoAcceptInvitationSvc{}
 	h := &TenantInvitationHandler{
 		invitationService: invites,
@@ -284,7 +284,7 @@ func TestCreateInvitation_AutoAccept_AdoptsTenantlessInviteeHomeTenant(t *testin
 	}
 	r := newAutoAcceptTestRouter(h)
 
-	w := postAutoAcceptInvitation(t, r, `{"email":"bob@x.com","role":"contributor"}`)
+	w := postAutoAcceptInvitation(t, r, `{"email":"bob@x.com","role":"viewer"}`)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}

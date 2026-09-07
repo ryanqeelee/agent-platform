@@ -307,8 +307,8 @@ func TestInvitationService_Create_APIKeyCannotInviteOwner(t *testing.T) {
 	})
 
 	_, err := svc.Create(ctx, 1, "u-bob", types.TenantRoleOwner, nil, "")
-	if !errors.Is(err, ErrAPIKeyCannotAssignOwner) {
-		t.Fatalf("want ErrAPIKeyCannotAssignOwner, got %v", err)
+	if !errors.Is(err, ErrInvalidTenantRole) {
+		t.Fatalf("want ErrInvalidTenantRole, got %v", err)
 	}
 	if len(repo.rows) != 0 {
 		t.Fatalf("API key owner invitation must not be persisted, got %d rows", len(repo.rows))
@@ -318,10 +318,10 @@ func TestInvitationService_Create_APIKeyCannotInviteOwner(t *testing.T) {
 func TestInvitationService_Create_RejectsAlreadyActiveMember(t *testing.T) {
 	svc, _, memberSvc := newInvitationSvc()
 	ctx := context.Background()
-	if _, err := memberSvc.AddMember(ctx, "u-bob", 1, types.TenantRoleContributor, nil); err != nil {
+	if _, err := memberSvc.AddMember(ctx, "u-bob", 1, types.TenantRoleViewer, nil); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	_, err := svc.Create(ctx, 1, "u-bob", types.TenantRoleContributor, nil, "")
+	_, err := svc.Create(ctx, 1, "u-bob", types.TenantRoleViewer, nil, "")
 	if !errors.Is(err, ErrAlreadyMember) {
 		t.Fatalf("want ErrAlreadyMember, got %v", err)
 	}
@@ -330,7 +330,7 @@ func TestInvitationService_Create_RejectsAlreadyActiveMember(t *testing.T) {
 func TestInvitationService_Create_RejectsSuspendedMember(t *testing.T) {
 	svc, repo, memberSvc := newInvitationSvc()
 	ctx := context.Background()
-	if _, err := memberSvc.AddMember(ctx, "u-bob", 1, types.TenantRoleContributor, nil); err != nil {
+	if _, err := memberSvc.AddMember(ctx, "u-bob", 1, types.TenantRoleViewer, nil); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	if err := memberSvc.UpdateStatus(ctx, "u-bob", 1, types.TenantMemberStatusSuspended); err != nil {
@@ -348,10 +348,10 @@ func TestInvitationService_Create_RejectsSuspendedMember(t *testing.T) {
 func TestInvitationService_Create_DedupsPending(t *testing.T) {
 	svc, _, _ := newInvitationSvc()
 	ctx := context.Background()
-	if _, err := svc.Create(ctx, 1, "u-bob", types.TenantRoleContributor, nil, ""); err != nil {
+	if _, err := svc.Create(ctx, 1, "u-bob", types.TenantRoleViewer, nil, ""); err != nil {
 		t.Fatalf("first invite: %v", err)
 	}
-	_, err := svc.Create(ctx, 1, "u-bob", types.TenantRoleContributor, nil, "")
+	_, err := svc.Create(ctx, 1, "u-bob", types.TenantRoleViewer, nil, "")
 	if !errors.Is(err, ErrPendingInvitationExists) {
 		t.Fatalf("want ErrPendingInvitationExists, got %v", err)
 	}
@@ -369,30 +369,20 @@ func TestInvitationService_Accept_OnlyByInvitee(t *testing.T) {
 	}
 }
 
-func TestInvitationService_LegacyOwnerInvitationsFailClosedButOwnerCanRevoke(t *testing.T) {
+func TestInvitationService_RetiredOwnerInvitationsCannotBeAccepted(t *testing.T) {
 	svc, repo, _ := newInvitationSvc()
 	expires := time.Now().Add(time.Hour)
 	repo.rows = []*types.TenantInvitation{
 		{ID: 41, TenantID: 1, InviteeUserID: "direct", Role: types.TenantRoleOwner, Status: types.TenantInvitationStatusPending, ExpiresAt: expires},
 		{ID: 42, TenantID: 1, Token: "legacy-owner-link", Role: types.TenantRoleOwner, Status: types.TenantInvitationStatusPending, ExpiresAt: expires},
 	}
-	if _, err := svc.Accept(context.Background(), 41, "direct"); !errors.Is(err, ErrOwnerRoleReserved) {
+	if _, err := svc.Accept(context.Background(), 41, "direct"); !errors.Is(err, ErrInvalidTenantRole) {
 		t.Fatalf("direct legacy owner accept = %v, want owner reserved", err)
 	}
-	if _, err := svc.AcceptByToken(context.Background(), "legacy-owner-link", "joined"); !errors.Is(err, ErrOwnerRoleReserved) {
+	if _, err := svc.AcceptByToken(context.Background(), "legacy-owner-link", "joined"); !errors.Is(err, ErrInvalidTenantRole) {
 		t.Fatalf("share legacy owner accept = %v, want owner reserved", err)
 	}
-	adminCtx := memberActorCtx("admin", types.TenantRoleAdmin)
-	if err := svc.Revoke(adminCtx, 41); !errors.Is(err, ErrMemberActionForbidden) {
-		t.Fatalf("admin legacy owner revoke = %v, want forbidden", err)
-	}
-	ownerCtx := memberActorCtx("owner", types.TenantRoleOwner)
-	if err := svc.Revoke(ownerCtx, 41); err != nil {
-		t.Fatalf("owner direct legacy revoke: %v", err)
-	}
-	if err := svc.Revoke(ownerCtx, 42); err != nil {
-		t.Fatalf("owner link legacy revoke: %v", err)
-	}
+
 }
 
 func TestInvitationService_Accept_HappyPath_CreatesMembership(t *testing.T) {
@@ -424,7 +414,7 @@ func TestInvitationService_Accept_HappyPath_CreatesMembership(t *testing.T) {
 func TestInvitationService_Accept_IdempotentWhenAlreadyActiveMember(t *testing.T) {
 	svc, invRepo, memberSvc := newInvitationSvc()
 	ctx := context.Background()
-	inv, err := svc.Create(ctx, 1, "u-bob", types.TenantRoleContributor, nil, "")
+	inv, err := svc.Create(ctx, 1, "u-bob", types.TenantRoleViewer, nil, "")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -447,7 +437,7 @@ func TestInvitationService_Accept_IdempotentWhenAlreadyActiveMember(t *testing.T
 func TestInvitationService_AcceptRejectsSuspendedMembershipWithoutConsumingInvitation(t *testing.T) {
 	svc, invRepo, memberSvc := newInvitationSvc()
 	ctx := context.Background()
-	inv, err := svc.Create(ctx, 1, "u-bob", types.TenantRoleContributor, nil, "")
+	inv, err := svc.Create(ctx, 1, "u-bob", types.TenantRoleViewer, nil, "")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -473,7 +463,7 @@ func TestInvitationService_AcceptShareLinkRejectsExistingSuspendedMembership(t *
 	if err != nil {
 		t.Fatalf("create share link: %v", err)
 	}
-	if _, err := memberSvc.AddMember(ctx, "u-bob", 1, types.TenantRoleContributor, nil); err != nil {
+	if _, err := memberSvc.AddMember(ctx, "u-bob", 1, types.TenantRoleViewer, nil); err != nil {
 		t.Fatalf("seed member: %v", err)
 	}
 	if err := memberSvc.UpdateStatus(ctx, "u-bob", 1, types.TenantMemberStatusSuspended); err != nil {
@@ -523,7 +513,7 @@ func TestInvitationService_Revoke_MarksRevoked(t *testing.T) {
 	}
 	// Revoked rows can be re-invited via a fresh Create — the
 	// partial unique index only guards PENDING.
-	if _, err := svc.Create(ctx, 1, "u-bob", types.TenantRoleContributor, nil, ""); err != nil {
+	if _, err := svc.Create(ctx, 1, "u-bob", types.TenantRoleViewer, nil, ""); err != nil {
 		t.Fatalf("re-invite after revoke must succeed, got %v", err)
 	}
 }
@@ -592,7 +582,7 @@ func TestInvitationService_CountPending(t *testing.T) {
 func TestInvitationService_CreateShareLink_PersistsToken(t *testing.T) {
 	svc, repo, _ := newInvitationSvc()
 	inv, plain, err := svc.CreateShareLink(
-		context.Background(), 1, types.TenantRoleContributor, nil, "")
+		context.Background(), 1, types.TenantRoleViewer, nil, "")
 	if err != nil {
 		t.Fatalf("create-share-link: %v", err)
 	}
@@ -631,8 +621,8 @@ func TestInvitationService_CreateShareLink_APIKeyCannotAssignOwner(t *testing.T)
 	})
 
 	_, _, err := svc.CreateShareLink(ctx, 1, types.TenantRoleOwner, nil, "")
-	if !errors.Is(err, ErrAPIKeyCannotAssignOwner) {
-		t.Fatalf("want ErrAPIKeyCannotAssignOwner, got %v", err)
+	if !errors.Is(err, ErrInvalidTenantRole) {
+		t.Fatalf("want ErrInvalidTenantRole, got %v", err)
 	}
 	if len(repo.rows) != 0 {
 		t.Fatalf("API key owner invite link must not be persisted, got %d rows", len(repo.rows))

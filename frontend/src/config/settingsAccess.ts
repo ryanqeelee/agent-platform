@@ -1,4 +1,4 @@
-export type SettingsRoleKey = 'viewer' | 'contributor' | 'admin' | 'owner'
+export type SettingsRoleKey = 'viewer' | 'admin'
 
 /**
  * Workspace-scoped settings access policy.
@@ -37,8 +37,8 @@ export const SETTINGS_SECTION_MIN_ROLE: Record<string, SettingsRoleKey> = {
  * not govern the APIs: server route guards are authoritative.
  */
 export const EMPLOYEE_SURFACE_MIN_ROLE = {
-  enterpriseAdministration: 'contributor',
-  knowledgeBases: 'contributor',
+  enterpriseAdministration: 'admin',
+  knowledgeBases: 'admin',
   agents: 'admin',
   organizations: 'admin',
 } as const satisfies Record<string, SettingsRoleKey>
@@ -54,6 +54,7 @@ export const employeeSurfaceMinRoleForPath = (path: string): SettingsRoleKey | u
 }
 
 export const SYSTEM_ADMIN_SETTINGS_SECTIONS = new Set([
+  'agents',
   'memory-runtime',
   'diagnostics',
   'models',

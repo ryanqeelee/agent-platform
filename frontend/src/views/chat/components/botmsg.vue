@@ -49,7 +49,7 @@
                     <t-icon name="copy" />
                 </t-button>
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge"
-                    :title="$t('agent.addToKnowledgeBase')" v-if="!operating">
+                    :title="$t('agent.addToKnowledgeBase')" v-if="!operating && authStore.hasRole('admin')">
                     <t-icon name="bookmark-add" />
                 </t-button>
                 <!-- Skill artifact download: only shown when this reply's
@@ -124,6 +124,7 @@ import {
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useUIStore } from '@/stores/ui';
+import { useAuthStore } from '@/stores/auth';
 import {
     buildManualMarkdown,
     formatManualTitle,
@@ -144,6 +145,8 @@ import { useChatCitationPopover } from '@/composables/useChatCitationPopover';
 import { useTypewriter } from '@/composables/useTypewriter';
 import { vStableHtml } from '@/directives/stableHtml';
 import { SKILL_ICON } from '@/types/mention';
+
+const authStore = useAuthStore();
 
 ensureMermaidInitialized();
 

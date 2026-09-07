@@ -145,7 +145,7 @@ func (t *LiveKnowledgeAccessTool) hasLiveKnowledgeWriteAuthority(ctx context.Con
 	if !ok {
 		return false
 	}
-	return role.HasPermission(types.TenantRoleContributor)
+	return role.HasPermission(types.TenantRoleAdmin)
 }
 
 func effectiveSearchTargetTagIDs(target *types.SearchTarget) []string {

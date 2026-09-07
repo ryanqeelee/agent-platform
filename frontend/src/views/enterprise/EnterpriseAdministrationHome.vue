@@ -12,6 +12,7 @@
     </header>
 
     <nav class="enterprise-settings" :aria-label="copy.eyebrow">
+      <button type="button" @click="router.push('/platform/knowledge-bases')">{{ t('menu.knowledgeBase') }}</button>
       <button v-for="entry in managementEntries" :key="entry.section" type="button"
         @click="openSettings(entry.section)">{{ entry.label }}</button>
     </nav>
@@ -19,7 +20,7 @@
     <section v-if="queue" class="summary-grid" aria-label="Enterprise summary">
       <article class="summary-card">
         <span>{{ copy.serviceLevel }}</span>
-        <strong>{{ queue.summary.service_level || copy.unknown }}</strong>
+        <strong>{{ queue.summary.service_level && queue.summary.service_level !== 'unknown' ? queue.summary.service_level : copy.unknown }}</strong>
       </article>
       <article class="summary-card">
         <span>{{ copy.serviceStatus }}</span>

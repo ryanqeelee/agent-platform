@@ -64,8 +64,8 @@ func TestRunMigrations_SQLiteDiscoversLegacyOwnerInvitationRevocation(t *testing
 	if status != "revoked" {
 		t.Fatalf("legacy Owner invitation status = %q, want revoked", status)
 	}
-	if _, err := db.Exec(`INSERT INTO tenant_members(user_id, tenant_id, role, status) VALUES ('owner-a', 1, 'owner', 'active'), ('owner-b', 1, 'owner', 'active')`); err == nil {
-		t.Fatal("sqlite incremental owner index accepted a second active owner")
+	if _, err := db.Exec(`INSERT INTO tenant_members(user_id, tenant_id, role, status) VALUES ('admin-a', 1, 'admin', 'active'), ('admin-b', 1, 'admin', 'active')`); err != nil {
+		t.Fatal("two-role migration should allow multiple administrators")
 	}
 	if _, err := db.Exec(`INSERT INTO tenant_members(user_id, tenant_id, role, status) VALUES ('employee-a', 1, 'viewer', 'active')`); err != nil {
 		t.Fatal(err)
@@ -85,9 +85,6 @@ func TestRunMigrations_SQLiteEnterpriseActivationReceiptUpDown(t *testing.T) {
 	t.Chdir(root)
 	path := filepath.Join(t.TempDir(), "activation.db")
 
-	if err := RunMigrationsWithOptions("sqlite3://"+path, MigrationOptions{SQLiteDBPath: path}); err != nil {
-		t.Fatal(err)
-	}
 	db, err := sql.Open("sqlite3", path)
 	if err != nil {
 		t.Fatal(err)
@@ -101,6 +98,9 @@ func TestRunMigrations_SQLiteEnterpriseActivationReceiptUpDown(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer m.Close()
+	if err := m.Migrate(7); err != nil {
+		t.Fatal(err)
+	}
 
 	assertReceiptUnique := func() {
 		t.Helper()

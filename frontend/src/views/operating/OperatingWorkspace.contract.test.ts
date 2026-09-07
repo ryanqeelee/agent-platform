@@ -12,7 +12,7 @@ const router = readFileSync(fileURLToPath(new URL('../../router/index.ts', impor
 test('the platform shell keeps one native operating host after the first authorized visit', () => {
   assert.match(platform, /<OperatingWorkspace[\s\S]*?v-if="operatingWorkspaceMounted"[\s\S]*?v-show="isOperatingRoute"/)
   assert.match(platform, /if \(isOperating\) operatingWorkspaceMounted\.value = true/)
-  assert.match(platform, /<Menu id="mobile-workspace-menu" :operating-controller="operatingController"><\/Menu>[\s\S]*?<OperatingWorkspace/)
+  assert.match(platform, /<Menu id="mobile-workspace-menu" :operating-controller="operatingController"[^>]*><\/Menu>[\s\S]*?<OperatingWorkspace/)
   assert.doesNotMatch(workspace, /<iframe|postMessage|contentWindow|buildEmbeddedOperatingPath/)
   assert.match(workspace, /<InputField :operating="operatingComposer"/)
   assert.match(workspace, /<AgentStreamDisplay[\s\S]*?process-only[\s\S]*?:operating-status="message\.status"/)

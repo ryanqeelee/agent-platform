@@ -8,7 +8,7 @@ import (
 
 // TenantMemberService is the business-logic layer over TenantMemberRepository.
 // It enforces tenant-RBAC invariants such as "every tenant with members must
-// keep at least one active Owner". HTTP handlers and other services call this
+// keep at least one active administrator". HTTP handlers and other services call this
 // interface rather than the repository directly so the invariants cannot be
 // silently bypassed.
 type TenantMemberService interface {
@@ -16,12 +16,12 @@ type TenantMemberService interface {
 	// (user, tenant) already has an active membership.
 	AddMember(ctx context.Context, userID string, tenantID uint64, role types.TenantRole, invitedBy *string) (*types.TenantMember, error)
 
-	// EnsureOwner is an idempotent helper used by the registration flow:
+	// EnsureAdministrator is an idempotent helper used by the registration flow:
 	// if the user already has an active membership in the tenant, return
-	// it; otherwise create one with role=owner. This is the common path
+	// it; otherwise create one with role=admin. This is the common path
 	// for self-service registration where the registrant becomes the
-	// Owner of the tenant their account just created.
-	EnsureOwner(ctx context.Context, userID string, tenantID uint64) (*types.TenantMember, error)
+	// administrator of the tenant their account just created.
+	EnsureAdministrator(ctx context.Context, userID string, tenantID uint64) (*types.TenantMember, error)
 
 	// GetMembership returns the non-deleted (user, tenant) membership,
 	// including suspended rows, or (nil, nil) if no such row exists.
@@ -41,11 +41,11 @@ type TenantMemberService interface {
 	// member. The auth middleware uses this to recover orphan tenants
 	// (e.g. API-key-only tenants that never had a human member): the
 	// first human authenticating into such a tenant is auto-promoted
-	// to Owner.
+	// to administrator.
 	HasAnyMembers(ctx context.Context, tenantID uint64) (bool, error)
 
 	// UpdateRole changes the role of an existing membership while
-	// enforcing the "cannot demote the last active Owner" invariant.
+	// enforcing the "cannot demote the last active administrator" invariant.
 	UpdateRole(ctx context.Context, userID string, tenantID uint64, newRole types.TenantRole) error
 
 	// UpdateStatus suspends or restores a member while retaining their role.
@@ -55,11 +55,8 @@ type TenantMemberService interface {
 	// operating-analysis permission for one member.
 	UpdateOperatingAnalysisAccess(ctx context.Context, userID string, tenantID uint64, enabled bool) error
 
-	// TransferOwnership is the sole ordinary product path that changes Owner.
-	TransferOwnership(ctx context.Context, targetUserID string, tenantID uint64) error
-
 	// RemoveMember soft-deletes the membership while enforcing the
-	// "cannot remove the last active Owner" invariant.
+	// "cannot remove the last active administrator" invariant.
 	RemoveMember(ctx context.Context, userID string, tenantID uint64) error
 
 	// LeaveTenant is the self-service removal path and is intentionally kept

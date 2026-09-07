@@ -8,12 +8,11 @@
         <div class="header-title" style="--wails-draggable: drag">
           <div class="title-row" style="--wails-draggable: drag">
             <h2 style="--wails-draggable: drag">{{ $t('knowledgeBase.title') }}</h2>
-            <t-tooltip v-if="authStore.hasRole('contributor')" :content="$t('knowledgeList.create')" placement="bottom">
-              <t-button variant="text" theme="default" size="small" class="header-action-btn"
+              <t-button v-if="authStore.hasRole('admin')" theme="primary" size="small"
                 data-guide="kb-list-create" style="--wails-draggable: no-drag" @click="handleCreateKnowledgeBase">
                 <template #icon><t-icon name="folder-add" size="16px" /></template>
+                {{ $t('knowledgeList.create') }}
               </t-button>
-            </t-tooltip>
           </div>
           <p class="header-subtitle" style="--wails-draggable: drag">{{ $t('knowledgeList.subtitle') }}</p>
         </div>
@@ -30,7 +29,7 @@
         <!-- 未初始化知识库提示 -->
         <div v-if="hasUninitializedKbs" class="warning-banner">
           <t-icon name="info-circle" size="16px" />
-          <span>{{ $t('knowledgeList.uninitializedBanner') }}</span>
+          <span>{{ $t(authStore.isSystemAdmin ? 'knowledgeList.uninitializedBanner' : 'knowledgeList.uninitializedEnterpriseBanner') }}</span>
         </div>
 
         <!-- 上传进度提示 -->
@@ -635,7 +634,7 @@
           <img class="empty-img" src="@/assets/img/upload.svg" alt="">
           <span class="empty-txt">{{ $t('knowledgeList.empty.title') }}</span>
           <span class="empty-desc">{{ $t('knowledgeList.empty.description') }}</span>
-          <t-button v-if="authStore.hasRole('contributor')" class="kb-create-btn empty-state-btn"
+          <t-button v-if="authStore.hasRole('admin')" class="kb-create-btn empty-state-btn"
             data-guide="kb-list-create" @click="handleCreateKnowledgeBase">
             <template #icon><t-icon name="folder-add" /></template>
             {{ $t('knowledgeList.create') }}
@@ -663,7 +662,7 @@
           <img class="empty-img" src="@/assets/img/upload.svg" alt="">
           <span class="empty-txt">{{ $t('knowledgeList.empty.title') }}</span>
           <span class="empty-desc">{{ $t('knowledgeList.empty.description') }}</span>
-          <t-button v-if="authStore.hasRole('contributor')" class="kb-create-btn empty-state-btn"
+          <t-button v-if="authStore.hasRole('admin')" class="kb-create-btn empty-state-btn"
             data-guide="kb-list-create" @click="handleCreateKnowledgeBase">
             <template #icon><t-icon name="folder-add" /></template>
             {{ $t('knowledgeList.create') }}
@@ -821,7 +820,7 @@ const { t } = useI18n()
 // stored value (not "workspace") for back-compat with any external link
 // that might point at the old query — its display label is rebranded
 // via ListSpaceSidebar's workspaceLabel computed.
-const defaultScope: 'all' | 'mine' = authStore.hasRole('contributor') ? 'mine' : 'all'
+const defaultScope: 'all' | 'mine' = authStore.hasRole('admin') ? 'mine' : 'all'
 const { scope: spaceSelection, creator: creatorFilter } = useListUrlState({
   defaultScope,
   defaultCreator: 'all',
@@ -1690,7 +1689,7 @@ const goSettings = (id: string) => {
 
 // 创建知识库
 const handleCreateKnowledgeBase = () => {
-  if (!authStore.hasRole('contributor')) return
+  if (!authStore.hasRole('admin')) return
   markContextualGuideDone('kbList')
   uiStore.openCreateKB('document')
 }

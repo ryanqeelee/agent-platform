@@ -45,7 +45,7 @@ func TestRequireRole_AllowsAtMin(t *testing.T) {
 }
 
 func TestRequireRole_AllowsAboveMin(t *testing.T) {
-	w := rbacTestHarness(types.TenantRoleOwner, "u1", RequireRole(types.TenantRoleAdmin, cfgRBAC(true)))
+	w := rbacTestHarness(types.TenantRoleAdmin, "u1", RequireRole(types.TenantRoleAdmin, cfgRBAC(true)))
 	if w.Code != http.StatusOK {
 		t.Fatalf("Owner should clear Admin gate, got %d", w.Code)
 	}

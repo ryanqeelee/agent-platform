@@ -16,7 +16,7 @@ import (
 
 // isDuplicateMembership recognises the unique-constraint violation that
 // the tenant_members partial unique index throws when two concurrent
-// AddMember / EnsureOwner calls race past the in-service Get() check.
+// AddMember / EnsureAdministrator calls race past the in-service Get() check.
 // We map this to ErrMembershipAlreadyExists so handlers can return 409
 // instead of an opaque 500; the underlying DB still rejects the second
 // insert, so this is purely about error-translation, not weakening any
@@ -54,7 +54,7 @@ var (
 	ErrUserBoundToAnotherEnterprise = errors.New("user already belongs to another enterprise")
 
 	// ErrInvalidTenantRole is returned when the caller passes a role
-	// value that is not one of the four defined TenantRole constants.
+	// value that is not one of the two active tenant roles.
 	ErrInvalidTenantRole = errors.New("invalid tenant role")
 
 	// ErrAPIKeyCannotAssignOwner is returned when an API-key principal
@@ -65,19 +65,16 @@ var (
 	// the tenant.
 	ErrAPIKeyCannotAssignOwner = errors.New("API keys cannot assign the owner role")
 
-	// ErrLastOwner is returned when an operation would leave the tenant
-	// without an active Owner. Demoting the last Owner or removing them
-	// is forbidden; an explicit ownership transfer must happen first.
-	ErrLastOwner = errors.New("cannot demote or remove the last active owner of the tenant")
+	// ErrLastAdministrator is returned when an operation would leave the tenant
+	// without an active administrator. Another administrator must remain active.
+	ErrLastAdministrator = errors.New("企业至少需要一名有效管理员")
 
 	// ErrMemberActionForbidden means the actor/target pair is outside the
 	// enterprise membership lifecycle matrix.
-	ErrMemberActionForbidden    = errors.New("you cannot manage this member")
-	ErrCannotManageSelf         = errors.New("you cannot change your own membership")
-	ErrOwnerRoleReserved        = errors.New("owner can only change through ownership transfer")
-	ErrInvalidMemberStatus      = errors.New("status must be active or suspended")
-	ErrOwnershipTransferInvalid = errors.New("ownership transfer requires the current owner and an active admin target")
-	ErrOwnershipInvariant       = errors.New("tenant must have exactly one active owner before ownership transfer")
+	ErrMemberActionForbidden = errors.New("you cannot manage this member")
+	ErrCannotManageSelf      = errors.New("you cannot change your own membership")
+	ErrOwnerRoleReserved     = errors.New("owner can only change through ownership transfer")
+	ErrInvalidMemberStatus   = errors.New("status must be active or suspended")
 )
 
 const (
@@ -119,7 +116,7 @@ func (s *tenantMemberService) emitAudit(ctx context.Context, entry *types.AuditL
 
 // auditActorRole picks up the caller's role at write-time. Empty if
 // auth middleware didn't set it (e.g. service-internal flows like
-// EnsureOwner during register, where there is no "caller").
+// EnsureAdministrator during register, where there is no "caller").
 func auditActorRole(ctx context.Context) string {
 	return string(types.TenantRoleFromContext(ctx))
 }
@@ -129,21 +126,6 @@ func auditActorRole(ctx context.Context) string {
 func auditActor(ctx context.Context) string {
 	uid, _ := types.UserIDFromContext(ctx)
 	return uid
-}
-
-// rejectAPIKeyOwnerAssignment is the service-layer boundary shared by
-// direct membership writes and both invitation creation paths. Route RBAC
-// intentionally defers API-key authorization to APIKeyGate, so checking the
-// authenticated principal in the service is required to preserve the
-// manage_members "no ownership transfer" contract across every caller.
-func rejectAPIKeyOwnerAssignment(ctx context.Context, role types.TenantRole) error {
-	if role != types.TenantRoleOwner {
-		return nil
-	}
-	if _, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
-		return ErrAPIKeyCannotAssignOwner
-	}
-	return nil
 }
 
 func actorRole(ctx context.Context) types.TenantRole {
@@ -162,7 +144,7 @@ func managedActor(ctx context.Context) types.MemberActorAuthority {
 	if id == "" {
 		// Explicit service-internal callers (invitation acceptance and startup
 		// repair) have no request principal; they retain only the machine
-		// non-Owner matrix, never human Owner authority.
+		// membership policy, including last-administrator protection.
 		return types.MemberActorAuthority{ServicePrincipal: true}
 	}
 	return types.MemberActorAuthority{UserID: id}
@@ -170,8 +152,8 @@ func managedActor(ctx context.Context) types.MemberActorAuthority {
 
 func mapMemberMutationError(err error) error {
 	switch {
-	case errors.Is(err, apprepo.ErrLastOwner):
-		return ErrLastOwner
+	case errors.Is(err, apprepo.ErrLastAdministrator):
+		return ErrLastAdministrator
 	case errors.Is(err, apprepo.ErrCannotManageSelf):
 		return ErrCannotManageSelf
 	case errors.Is(err, apprepo.ErrMemberActionForbidden):
@@ -184,8 +166,8 @@ func mapMemberMutationError(err error) error {
 }
 
 func requireInviteRole(ctx context.Context, role types.TenantRole) error {
-	if role == types.TenantRoleOwner {
-		return ErrOwnerRoleReserved
+	if !role.IsValid() {
+		return ErrInvalidTenantRole
 	}
 	if managedActor(ctx).ServicePrincipal {
 		return nil
@@ -212,9 +194,6 @@ func (s *tenantMemberService) AddMember(
 	if !role.IsValid() {
 		return nil, ErrInvalidTenantRole
 	}
-	if err := rejectAPIKeyOwnerAssignment(ctx, role); err != nil {
-		return nil, err
-	}
 	if err := requireInviteRole(ctx, role); err != nil {
 		return nil, err
 	}
@@ -237,7 +216,7 @@ func (s *tenantMemberService) AddMember(
 		if errors.Is(err, apprepo.ErrUserBoundToAnotherEnterprise) {
 			return nil, ErrUserBoundToAnotherEnterprise
 		}
-		// TOCTOU race: a concurrent AddMember / EnsureOwner slipped past
+		// TOCTOU race: a concurrent AddMember / EnsureAdministrator slipped past
 		// the Get above. The DB's partial unique index on
 		// (user_id, tenant_id) WHERE deleted_at IS NULL caught it; map
 		// to the same sentinel the in-service check would have returned
@@ -259,11 +238,11 @@ func (s *tenantMemberService) AddMember(
 	return member, nil
 }
 
-// EnsureOwner is idempotent: if the user already has an active membership
+// EnsureAdministrator is idempotent: if the user already has an active membership
 // in the tenant it is returned unchanged; otherwise a new owner row is
 // created. Used by Register/OIDC paths so re-running Register on an
 // existing user (e.g. after a partial failure) does not double-insert.
-func (s *tenantMemberService) EnsureOwner(
+func (s *tenantMemberService) EnsureAdministrator(
 	ctx context.Context,
 	userID string,
 	tenantID uint64,
@@ -278,7 +257,7 @@ func (s *tenantMemberService) EnsureOwner(
 	member := &types.TenantMember{
 		UserID:   userID,
 		TenantID: tenantID,
-		Role:     types.TenantRoleOwner,
+		Role:     types.TenantRoleAdmin,
 		Status:   types.TenantMemberStatusActive,
 		JoinedAt: time.Now(),
 	}
@@ -290,12 +269,12 @@ func (s *tenantMemberService) EnsureOwner(
 		// (two simultaneous registrations of the same user, or the
 		// orphan-tenant self-heal path firing on parallel JWTs), the
 		// partial unique index rejects the second insert. Re-read and
-		// return the winning row so EnsureOwner stays observably
+		// return the winning row so EnsureAdministrator stays observably
 		// idempotent.
 		if isDuplicateMembership(err) {
 			if winner, getErr := s.repo.Get(ctx, userID, tenantID); getErr == nil && winner != nil {
 				logger.Infof(ctx,
-					"EnsureOwner lost race for user=%s tenant=%d, returning winning row (role=%s)",
+					"EnsureAdministrator lost race for user=%s tenant=%d, returning winning row (role=%s)",
 					userID, tenantID, winner.Role)
 				return winner, nil
 			}
@@ -361,8 +340,7 @@ func (s *tenantMemberService) HasAnyMembers(ctx context.Context, tenantID uint64
 	return s.repo.HasAnyMembers(ctx, tenantID)
 }
 
-// UpdateRole is the ordinary member-role path. Owner is deliberately excluded:
-// ownership changes only through TransferOwnership.
+// UpdateRole changes an enterprise role under the repository membership policy.
 func (s *tenantMemberService) UpdateRole(
 	ctx context.Context,
 	userID string,
@@ -371,12 +349,6 @@ func (s *tenantMemberService) UpdateRole(
 ) error {
 	if !newRole.IsValid() {
 		return ErrInvalidTenantRole
-	}
-	if err := rejectAPIKeyOwnerAssignment(ctx, newRole); err != nil {
-		return err
-	}
-	if newRole == types.TenantRoleOwner {
-		return ErrOwnerRoleReserved
 	}
 	current, err := s.repo.Get(ctx, userID, tenantID)
 	if err != nil {
@@ -394,7 +366,7 @@ func (s *tenantMemberService) UpdateRole(
 }
 
 // emitRoleChangeAudit packs the old/new role into Details so the
-// audit-log UI can render "promoted Alice from contributor to admin"
+// audit-log UI can render "promoted Alice from viewer to admin"
 // without a separate column per role transition.
 func (s *tenantMemberService) emitRoleChangeAudit(
 	ctx context.Context,
@@ -418,9 +390,8 @@ func (s *tenantMemberService) emitRoleChangeAudit(
 	})
 }
 
-// RemoveMember is the administrative soft-delete path. Repository authority
-// checks keep Owner outside this path; ownership changes only through the
-// explicit transfer operation.
+// RemoveMember is the administrative soft-delete path. Repository checks
+// preserve at least one active administrator.
 //
 // The audit row distinguishes "voluntary leave" (caller == target,
 // driven by POST /leave) from "kicked" (caller != target, driven by
@@ -443,7 +414,7 @@ func (s *tenantMemberService) RemoveMember(ctx context.Context, userID string, t
 }
 
 // LeaveTenant is the only self-removal path. It deliberately skips the
-// administrator target matrix but preserves the last-owner invariant.
+// administrator target matrix but preserves the last-administrator invariant.
 func (s *tenantMemberService) LeaveTenant(ctx context.Context, userID string, tenantID uint64) error {
 	current, err := s.repo.Get(ctx, userID, tenantID)
 	if err != nil {
@@ -514,33 +485,6 @@ func (s *tenantMemberService) UpdateOperatingAnalysisAccess(
 	return nil
 }
 
-func (s *tenantMemberService) TransferOwnership(ctx context.Context, targetUserID string, tenantID uint64) error {
-	actorID := auditActor(ctx)
-	if actorID == "" || actorID == targetUserID || actorRole(ctx) != types.TenantRoleOwner {
-		return ErrOwnershipTransferInvalid
-	}
-	err := s.repo.TransferOwnership(ctx, actorID, targetUserID, tenantID)
-	switch {
-	case errors.Is(err, apprepo.ErrOwnershipInvariant):
-		return ErrOwnershipInvariant
-	case errors.Is(err, apprepo.ErrOwnershipTransferInvalid), errors.Is(err, gorm.ErrRecordNotFound):
-		return ErrOwnershipTransferInvalid
-	case err != nil:
-		return err
-	}
-	details, _ := json.Marshal(map[string]string{"previous_owner": actorID, "new_owner": targetUserID})
-	s.emitAudit(ctx, &types.AuditLog{
-		TenantID: tenantID, ActorUserID: actorID, ActorRole: string(types.TenantRoleOwner),
-		Action: types.AuditActionOwnershipTransferred, TargetType: "tenant_member", TargetUserID: targetUserID,
-		Outcome: types.AuditOutcomeSuccess, Details: types.JSON(details),
-	})
-	return nil
-}
-
-// emitRemovalAudit picks AuditActionMemberLeft when the caller is
-// removing themselves, AuditActionMemberRemoved otherwise. Caller
-// detection uses the user-id from the request context — the same
-// source the LeaveTenant handler uses to derive its `userID` arg.
 func (s *tenantMemberService) emitRemovalAudit(
 	ctx context.Context,
 	tenantID uint64,

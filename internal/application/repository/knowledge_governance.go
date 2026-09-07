@@ -222,7 +222,7 @@ func (s *knowledgeGovernanceService) CanAccessKnowledgeBase(ctx context.Context,
 	if member.Status != types.TenantMemberStatusActive {
 		return false, nil
 	}
-	if member.Role.HasPermission(types.TenantRoleContributor) {
+	if member.Role.HasPermission(types.TenantRoleAdmin) {
 		return true, nil
 	}
 	var grants int64

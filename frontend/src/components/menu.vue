@@ -89,9 +89,7 @@
                         :class="['menu_item', { 'menu_item--disabled': item.disabled }, item.childrenPath && item.childrenPath == currentpath ? 'menu_item_c_active' : isMenuItemActive(item.path) ? 'menu_item_active' : '']">
                         <div class="menu_item-box">
                             <div class="menu_icon">
-                                <img class="icon"
-                                    :src="getImgSrc(menuIconFor(item.icon))"
-                                    alt="">
+                                <t-icon :name="navigationIcon(item.icon)" class="navigation-icon" aria-hidden="true" />
                             </div>
                             <template v-if="!uiStore.sidebarCollapsed">
                                 <span class="menu_title" :title="item.title">{{ item.title }}</span>
@@ -507,22 +505,6 @@ const isMenuItemActive = (itemPath: string): boolean => {
         default:
             return itemPath === currentpath.value;
     }
-};
-
-// 统一的图标激活状态判断
-const getIconActiveState = (itemPath: string) => {
-    const currentRoute = route.name;
-
-    return {
-        isKbActive: itemPath === 'knowledge-bases' && (
-            currentRoute === 'knowledgeBaseList' ||
-            currentRoute === 'knowledgeBaseDetail' ||
-            currentRoute === 'knowledgeBaseSettings'
-        ),
-        isCreatChatActive: itemPath === 'creatChat' && (currentRoute === 'kbCreatChat' || currentRoute === 'globalCreatChat'),
-        isSettingsActive: itemPath === 'settings' && currentRoute === 'settings',
-        isChatActive: itemPath === 'chat' && currentRoute === 'chat'
-    };
 };
 
 // 分离上下两部分菜单（使用 visibleMenuArr 以便 lite 模式过滤 logout）
@@ -1175,66 +1157,18 @@ watch([() => route.name, () => route.params], (newvalue, oldvalue) => {
         void syncActiveBucketFromChat(newChatId);
     }
 
-    // 路由变化时更新图标状态和知识库信息（不涉及对话列表）
-    getIcon(nameStr);
-
     // 如果切换了知识库，更新知识库名称但不重新加载对话列表
     if (newvalue[1].kbId !== oldvalue?.[1]?.kbId) {
         loadCurrentKbInfo((newvalue[1] as any)?.kbId as string);
     }
 });
-let knowledgeIcon = ref('zhishiku-green.svg');
-let assistantIcon = ref('assistant.svg');
-let analysisIcon = ref('analysis.svg');
-let logoutIcon = ref('logout.svg');
-let settingIcon = ref('setting.svg');
-let agentIcon = ref('agent.svg');
-let organizationIcon = ref('organization.svg');
 let pathPrefix = ref(route.name)
-const menuIconFor = (icon: string) => {
-    const icons: Record<string, string> = {
-        zhishiku: knowledgeIcon.value,
-        assistant: assistantIcon.value,
-        analysis: analysisIcon.value,
-        brief: 'brief.svg',
-        agent: agentIcon.value,
-        organization: organizationIcon.value,
-        logout: logoutIcon.value,
-        setting: settingIcon.value,
-    };
-    return icons[icon] || assistantIcon.value;
-}
+const navigationIcon = (icon: string): string => ({
+    assistant: 'chat', brief: 'file', analysis: 'chart-bar',
+    zhishiku: 'folder', agent: 'tools', organization: 'usergroup',
+}[icon] || 'chat');
 
-const getIcon = (path: string) => {
-    // 根据当前路由状态更新所有图标
-    const kbActiveState = getIconActiveState('knowledge-bases');
-    const creatChatActiveState = getIconActiveState('creatChat');
-    const settingsActiveState = getIconActiveState('settings');
-    const agentsActiveState = route.name === 'agentList';
-    const organizationsActiveState = route.name === 'organizationList';
-
-    // 知识库图标：只在知识库页面显示绿色
-    knowledgeIcon.value = kbActiveState.isKbActive ? 'zhishiku-green.svg' : 'zhishiku.svg';
-
-    // 智能体图标：只在智能体页面显示绿色
-    agentIcon.value = agentsActiveState ? 'agent-green.svg' : 'agent.svg';
-
-    // 组织图标：只在组织页面显示绿色
-    organizationIcon.value = organizationsActiveState ? 'organization-green.svg' : 'organization.svg';
-
-    // 员工助理覆盖新建与既有对话；经营分析保留独立的趋势图标。
-    assistantIcon.value = creatChatActiveState.isCreatChatActive || route.name === 'chat'
-        ? 'assistant-green.svg'
-        : 'assistant.svg';
-    analysisIcon.value = route.name === 'operatingAnalysis' ? 'analysis-green.svg' : 'analysis.svg';
-
-    // 设置图标：只在设置页面显示绿色
-    settingIcon.value = settingsActiveState.isSettingsActive ? 'setting-green.svg' : 'setting.svg';
-
-    // 退出图标：始终显示默认
-    logoutIcon.value = 'logout.svg';
-}
-getIcon(typeof route.name === 'string' ? route.name as string : (route.name ? String(route.name) : ''))
+const emit = defineEmits<{ navigate: [] }>();
 const handleMenuClick = async (path: string) => {
     if ((path === 'operating-analysis' || path === 'operating-brief') && operatingAnalysisAvailability.value?.availability.state !== 'enabled') {
         const nextAction = operatingAnalysisAvailability.value?.availability.nextAction;
@@ -1243,6 +1177,7 @@ const handleMenuClick = async (path: string) => {
             : 'menu.operatingAnalysisUnavailable'));
         return;
     }
+    emit('navigate');
     if (path === 'knowledge-bases') {
         // 知识库菜单项：如果在知识库内部，跳转到当前知识库文件页；否则跳转到知识库列表
         const kbId = await getCurrentKbId()
@@ -1315,7 +1250,6 @@ const gotopage = async (path: string) => {
             router.push(`/platform/${path}`);
         }
     }
-    getIcon(path)
 }
 
 const getImgSrc = (url: string) => {
@@ -1656,8 +1590,13 @@ button.menu_item:focus-visible { outline:2px solid var(--td-brand-color); outlin
         display: flex;
         flex: 0 0 var(--sidebar-icon-size);
         width: var(--sidebar-icon-size);
+        height: var(--sidebar-icon-size);
+        align-items: center;
+        justify-content: center;
         margin-right: var(--sidebar-icon-gap);
         color: var(--td-text-color-secondary);
+
+        .navigation-icon { font-size: var(--sidebar-icon-size); }
 
         .icon {
             width: 18px;

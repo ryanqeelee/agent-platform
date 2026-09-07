@@ -135,11 +135,8 @@ func TestEnterpriseAdministrationQueueFiltersAdminAndKnowledgeRoles(t *testing.T
 	require.Equal(t, int64(100), adminQueue.Summary.StorageUsageByte)
 
 	platform.projection = enterprisePlatformProjection()
-	knowledgeQueue, err := svc.Resolve(enterpriseAdministrationContext(types.TenantRoleContributor))
-	require.NoError(t, err)
-	require.Equal(t, "knowledge_administrator", platform.facts.Role)
-	require.Len(t, knowledgeQueue.Items, 1)
-	require.Equal(t, "knowledge_processing_failed", knowledgeQueue.Items[0].Code)
+	_, err = svc.Resolve(enterpriseAdministrationContext(types.TenantRoleContributor))
+	require.Error(t, err)
 }
 
 func TestEnterpriseAdministrationQueueRejectsEmployee(t *testing.T) {

@@ -48,7 +48,7 @@
                       <p class="section-desc">{{ $t('knowledgeEditor.basic.description') }}</p>
                     </div>
                     <div class="section-body">
-                      <div v-if="editorMode === 'edit' && activeKbId" class="form-item">
+                      <div v-if="authStore.isSystemAdmin && editorMode === 'edit' && activeKbId" class="form-item">
                         <label class="form-label">{{ $t('knowledgeEditor.basic.kbId') }}</label>
                         <p class="form-tip">{{ isPostCreateSession ? $t('knowledgeEditor.postCreateHint.followUpDesc') : $t('knowledgeEditor.basic.kbIdDesc') }}</p>
                         <div class="kb-id-field">
@@ -76,7 +76,7 @@
                       </div>
 
                       <!-- 索引策略 (紧跟类型选择) -->
-                      <div v-if="!isFAQ" class="form-item">
+                      <div v-if="authStore.isSystemAdmin && !isFAQ" class="form-item">
                         <label class="form-label required">{{ $t('knowledgeEditor.indexing.title') }}</label>
                         <p class="form-tip">{{ $t('knowledgeEditor.indexing.description') }}</p>
                         <div class="indexing-checks" :class="{ 'is-locked': isIndexingLocked }"
@@ -117,7 +117,7 @@
                       </div>
 
                       <!-- Wiki 提取粒度 (仅当 Wiki 启用时显示) -->
-                      <div v-if="!isFAQ && formData.indexingStrategy.wikiEnabled" class="form-item">
+                      <div v-if="authStore.isSystemAdmin && !isFAQ && formData.indexingStrategy.wikiEnabled" class="form-item">
                         <label class="form-label">{{ $t('knowledgeEditor.wiki.extractionGranularityLabel') }}</label>
                         <p class="form-tip">{{ $t('knowledgeEditor.wiki.extractionGranularityTip') }}</p>
                         <t-radio-group
@@ -138,7 +138,7 @@
                         <p class="form-tip granularity-hint">{{ granularityHint }}</p>
                       </div>
 
-                      <div v-if="!isFAQ && formData.indexingStrategy.wikiEnabled" class="form-item">
+                      <div v-if="authStore.isSystemAdmin && !isFAQ && formData.indexingStrategy.wikiEnabled" class="form-item">
                         <label class="form-label">{{ $t('knowledgeEditor.wiki.contentInstructionsLabel') }}</label>
                         <p class="form-tip">{{ $t('knowledgeEditor.wiki.contentInstructionsTip') }}</p>
                         <t-textarea
@@ -149,7 +149,7 @@
                         />
                       </div>
 
-                      <div v-if="!isFAQ && formData.indexingStrategy.wikiEnabled" class="form-item">
+                      <div v-if="authStore.isSystemAdmin && !isFAQ && formData.indexingStrategy.wikiEnabled" class="form-item">
                         <label class="form-label">{{ $t('knowledgeEditor.wiki.extractionInstructionsLabel') }}</label>
                         <p class="form-tip">{{ $t('knowledgeEditor.wiki.extractionInstructionsTip') }}</p>
                         <t-textarea
@@ -212,7 +212,7 @@
                 </div>
 
                 <!-- FAQ 配置 -->
-                <div v-if="isFAQ && formData" v-show="currentSection === 'faq'" class="section">
+                <div v-if="authStore.isSystemAdmin && isFAQ && formData" v-show="currentSection === 'faq'" class="section">
                   <div class="section-content">
                     <div class="section-header">
                       <h3 class="section-title">{{ $t('knowledgeEditor.faq.title') }}</h3>
@@ -266,7 +266,7 @@
                 </div>
 
                 <!-- 分块设置 -->
-                <div v-if="!isFAQ" v-show="currentSection === 'chunking'" class="section">
+                <div v-if="authStore.isSystemAdmin && !isFAQ" v-show="currentSection === 'chunking'" class="section">
                   <KBChunkingSettings
                     v-if="formData"
                     :config="formData.chunkingConfig"
@@ -425,8 +425,16 @@
                 </div>
 
                 <!-- 共享设置（仅编辑模式） -->
-                <div v-if="editorMode === 'edit' && activeKbId && currentSection === 'share'" class="section">
+                <div v-if="authStore.isSystemAdmin && editorMode === 'edit' && activeKbId && currentSection === 'share'" class="section">
                   <KBShareSettings :kb-id="activeKbId" :can-share="canShareKB" />
+                </div>
+
+                <div v-if="activeKbId && canShareKB && currentSection === 'access'" class="section">
+                  <div class="section-header">
+                    <h3 class="section-title">{{ $t('knowledgeAccess.title') }}</h3>
+                    <p class="section-desc">{{ $t('knowledgeAccess.description') }}</p>
+                  </div>
+                  <t-button theme="primary" @click="showAccessScope = true">{{ $t('knowledgeAccess.title') }}</t-button>
                 </div>
 
                 <!-- 活动记录（仅编辑模式，KB 所属租户内 Owner/Admin） -->
@@ -461,7 +469,9 @@
     </Transition>
   </Teleport>
 
-  <KbCreateContextualGuide :when="visible && editorMode === 'create'" :is-faq="isFAQ"
+  <KnowledgeAccessScopeDialog v-if="activeKbId && canShareKB" v-model:visible="showAccessScope" :kb-id="activeKbId" attach="body" :z-index="1200" />
+
+  <KbCreateContextualGuide :when="authStore.isSystemAdmin && visible && editorMode === 'create'" :is-faq="isFAQ"
     :needs-embedding="kbCreateNeedsEmbedding" />
 </template>
 
@@ -480,6 +490,7 @@ import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
 import KBModelConfig from './settings/KBModelConfig.vue'
+import KnowledgeAccessScopeDialog from './components/KnowledgeAccessScopeDialog.vue'
 import KBParserSettings from './settings/KBParserSettings.vue'
 import KBStorageSettings from './settings/KBStorageSettings.vue'
 import KBChunkingSettings from './settings/KBChunkingSettings.vue'
@@ -514,6 +525,7 @@ const emit = defineEmits<{
 
 /** 首次保存创建成功后留在弹窗内，继续配置共享等设置 */
 const savedKbId = ref<string | null>(null)
+const showAccessScope = ref(false)
 const editorMode = computed(() => (savedKbId.value ? 'edit' : props.mode))
 const activeKbId = computed(() => savedKbId.value ?? props.kbId)
 const isPostCreateSession = computed(() => !!savedKbId.value)
@@ -598,7 +610,9 @@ const navItems = computed(() => {
     )
   }
   if (formData.value?.type === 'faq') {
-    items.push({ key: 'faq', icon: 'help-circle', label: t('knowledgeEditor.sidebar.faq') })
+    if (authStore.isSystemAdmin) {
+      items.push({ key: 'faq', icon: 'help-circle', label: t('knowledgeEditor.sidebar.faq') })
+    }
   } else {
     if (authStore.isSystemAdmin) {
       items.push(
@@ -610,15 +624,18 @@ const navItems = computed(() => {
         { key: 'advanced', icon: 'setting', label: t('knowledgeEditor.sidebar.advanced') },
       )
     }
-    items.push({ key: 'chunking', icon: 'file-copy', label: t('knowledgeEditor.sidebar.chunking') })
+    if (authStore.isSystemAdmin) {
+      items.push({ key: 'chunking', icon: 'file-copy', label: t('knowledgeEditor.sidebar.chunking') })
+    }
     if (editorMode.value === 'edit' && activeKbId.value) {
       items.push({ key: 'datasource', icon: 'cloud-download', label: t('knowledgeEditor.sidebar.datasource'), badge: dsCount.value || undefined })
     }
   }
-  if (editorMode.value === 'edit' && activeKbId.value && !authStore.isLiteMode) {
+  if (authStore.isSystemAdmin && editorMode.value === 'edit' && activeKbId.value && !authStore.isLiteMode) {
     items.push({ key: 'share', icon: 'share', label: t('knowledgeEditor.sidebar.share') })
   }
   if (canViewActivity.value) {
+    items.push({ key: 'access', icon: 'usergroup', label: t('knowledgeAccess.title') })
     items.push({ key: 'activity', icon: 'history', label: t('knowledgeEditor.sidebar.activity') })
   }
   return items
@@ -653,7 +670,7 @@ const navGroups = computed(() => {
     {
       key: 'management',
       label: t('knowledgeEditor.navGroups.management'),
-      items: pickItems(['activity']),
+      items: pickItems(['access', 'activity']),
     },
   ].filter((group) => group.items.length > 0)
 })
@@ -830,7 +847,7 @@ const loadKBData = async (
     const [kbInfo, filesResult, currentConfig] = await Promise.all([
       getKnowledgeBaseById(kbId),
 	  listKnowledgeFiles(kbId, { page: 1, page_size: 1 }),
-	  getCurrentConfigByKB(kbId),
+	  authStore.isSystemAdmin ? getCurrentConfigByKB(kbId) : Promise.resolve({} as Partial<KBModelConfigRequest>),
     ])
 
     if (!isCurrentKBLoad(generation, kbId)) return
@@ -840,7 +857,7 @@ const loadKBData = async (
     }
 
     const kb = kbInfo.data
-	const splitting = currentConfig.documentSplitting || {}
+	const splitting: Partial<KBModelConfigRequest['documentSplitting']> = currentConfig.documentSplitting || {}
     hasFiles.value = (filesResult as any)?.total > 0
     kbTenantId.value = Number((kb as any).tenant_id || 0)
 
@@ -1182,6 +1199,9 @@ const validateForm = (): boolean => {
 // 构建提交数据
 const buildSubmitData = () => {
   if (!formData.value) return null
+  if (!authStore.isSystemAdmin) {
+    return { name: formData.value.name, description: formData.value.description, type: formData.value.type }
+  }
 
   const data: any = {
     name: formData.value.name,
@@ -1370,6 +1390,14 @@ const doSubmit = async () => {
         throw new Error(t('knowledgeEditor.messages.missingId'))
       }
 
+      if (!authStore.isSystemAdmin) {
+        await updateKnowledgeBase(kbId, { name: data.name, description: data.description })
+        MessagePlugin.success(t('knowledgeEditor.messages.updateSuccess'))
+        emit('success', kbId)
+        handleClose()
+        return
+      }
+
       // 1. 更新基本信息（名称、描述）和 FAQ/Wiki 配置
       const updateConfig: any = {}
       if (formData.value.type === 'faq' && formData.value.faqConfig) {
@@ -1551,8 +1579,6 @@ watch(() => props.visible, async (newVal) => {
     if (authStore.isSystemAdmin) {
       await Promise.all([loadAllModels(), loadTenantDefaultStorageProvider()])
     }
-    // 加载模型列表与空间默认存储引擎（创建 KB 时即使用，不依赖是否打开「存储引擎」Tab）
-    await Promise.all([loadAllModels(), loadTenantDefaultStorageProvider()])
 
     if (generation !== kbEditorLoadGeneration || !props.visible) return
     
@@ -1569,7 +1595,6 @@ watch(() => props.visible, async (newVal) => {
       if (authStore.isSystemAdmin) {
         applyDefaultModelsIfEmpty()
       }
-      applyDefaultModelsIfEmpty()
       loading.value = false
     }
   } else {

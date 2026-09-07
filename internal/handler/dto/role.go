@@ -33,7 +33,7 @@ func apiKeyCanManageIntegrationSecrets(ctx context.Context) bool {
 
 // RoleCanViewTenantAPIKey is true for Owner+ only.
 func RoleCanViewTenantAPIKey(role types.TenantRole) bool {
-	return role.HasPermission(types.TenantRoleOwner)
+	return role.HasPermission(types.TenantRoleAdmin)
 }
 
 // CanViewTenantAPIKey is true for Owner+ only.

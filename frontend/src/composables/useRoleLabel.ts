@@ -24,9 +24,7 @@ export function useRoleLabel() {
     return label === key ? role : label
   }
   const ROLE_ICONS: Record<string, string> = {
-    owner: 'secured',
     admin: 'user-circle',
-    contributor: 'edit',
     viewer: 'browse',
   }
   const roleIcon = (role: string | null | undefined): string =>

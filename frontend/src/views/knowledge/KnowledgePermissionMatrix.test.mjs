@@ -10,8 +10,8 @@ const editorModalPath = new URL('./KnowledgeBaseEditorModal.vue', import.meta.ur
 
 test('knowledge list lifecycle is Admin+ while creation is Knowledge Administrator+', async () => {
   const source = await readFile(listPath, 'utf8')
-  assert.match(source, /v-if="authStore\.hasRole\('contributor'\)"[^>]*@click="handleCreateKnowledgeBase"/s)
-  assert.match(source, /const handleCreateKnowledgeBase = \(\) => \{\s*if \(!authStore\.hasRole\('contributor'\)\) return/s)
+  assert.match(source, /v-if="authStore\.hasRole\('admin'\)"[^>]*@click="handleCreateKnowledgeBase"/s)
+  assert.match(source, /const handleCreateKnowledgeBase = \(\) => \{\s*if \(!authStore\.hasRole\('admin'\)\) return/s)
   assert.match(source, /uiStore\.openCreateKB\('document'\)/)
   assert.doesNotMatch(source, /openCreateKB\('document', initialSection\)/)
   assert.match(source, /function canManageKBCard\(kb: KB\): boolean \{\s*return authStore\.hasRole\('admin'\) && \(kb as any\)\.isMine !== false && \(kb as any\)\.permission == null/s)
@@ -25,7 +25,7 @@ test('FAQ permission predicates contain no creator authority and preserve shared
   const source = await readFile(faqPath, 'utf8')
   assert.doesNotMatch(source, /const isOwner = computed/)
   assert.match(source, /if \(isViaShare\.value\) return authStore\.hasRole\('admin'\) && orgStore\.canEditKB\(props\.kbId, false\)/)
-  assert.match(source, /return authStore\.hasRole\('contributor'\)/)
+  assert.match(source, /return authStore\.hasRole\('admin'\)/)
   assert.match(source, /if \(isViaShare\.value\) return authStore\.hasRole\('admin'\) && orgStore\.canManageKB\(props\.kbId, false\)/)
   assert.match(source, /return authStore\.hasRole\('admin'\)/)
   assert.match(source, /const handleOpenKBSettings = \(\) => \{\s*if \(!canManage\.value\) return/s)

@@ -955,7 +955,7 @@ const isViaShare = computed(() => !!currentSharedKb.value)
 // Viewer never gain a new cross-tenant write path here).
 const canEdit = computed(() => {
   if (isViaShare.value) return authStore.hasRole('admin') && orgStore.canEditKB(props.kbId, false)
-  return authStore.hasRole('contributor')
+  return authStore.hasRole('admin')
 })
 
 // KB settings and share management are Admin+ lifecycle actions. Shared

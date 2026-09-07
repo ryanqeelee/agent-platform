@@ -63,11 +63,7 @@ func (r *tenantInvitationRepository) Create(
 		if err != nil {
 			return err
 		}
-		if inv.Role == types.TenantRoleOwner {
-			if actor.ServicePrincipal || role != types.TenantRoleOwner {
-				return ErrMemberActionForbidden
-			}
-		} else if !canManage(actor, role, inv.Role) {
+		if !canManage(actor, role, inv.Role) {
 			return ErrMemberActionForbidden
 		}
 		if inv.InviteeUserID != "" {
@@ -277,11 +273,7 @@ func (r *tenantInvitationRepository) MarkStatusIfPending(
 		if err != nil {
 			return err
 		}
-		if inv.Role == types.TenantRoleOwner {
-			if actor.ServicePrincipal || role != types.TenantRoleOwner {
-				return ErrMemberActionForbidden
-			}
-		} else if !canManage(actor, role, inv.Role) {
+		if !canManage(actor, role, inv.Role) {
 			return ErrMemberActionForbidden
 		}
 		res := tx.WithContext(ctx).Model(&types.TenantInvitation{}).
@@ -338,7 +330,7 @@ func (r *tenantInvitationRepository) acceptWithMembership(
 		// Old deployments may have persisted Owner invitations before the
 		// lifecycle restriction existed. Reject at the locked persistence
 		// boundary too, so a stale service read can never mint an Owner.
-		if inv.Role == types.TenantRoleOwner {
+		if !inv.Role.IsValid() {
 			return ErrInvitationOwnerRole
 		}
 		if inv.IsExpired(at) {

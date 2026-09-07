@@ -346,7 +346,7 @@ func resolveKBAccessOnce(
 	// Knowledge Administrators may maintain every existing KB in their own
 	// enterprise, but never gain a new cross-enterprise write path through a
 	// share. Admin+ retains the established shared-editor behaviour.
-	if requiredPermission == types.OrgRoleEditor && callerTenantRole == types.TenantRoleContributor {
+	if requiredPermission == types.OrgRoleEditor && callerTenantRole == types.TenantRoleAdmin {
 		return nil, errKBAccessForbidden
 	}
 	if kbShareService != nil {

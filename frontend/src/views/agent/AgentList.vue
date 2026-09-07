@@ -1,15 +1,12 @@
 <template>
   <div class="agent-list-container">
-    <ListSpaceSidebar v-if="!authStore.isLiteMode" v-model="spaceSelection" :count-all="allAgentsCount"
-      :count-mine="agents.length" :count-by-org="effectiveSharedCountByOrg" :count-favorites="agentFavoritesCount"
-      :count-recents="agentRecentsCount" />
     <div class="agent-list-content">
       <div class="header" style="--wails-draggable: drag">
         <div class="header-title" style="--wails-draggable: drag">
           <div class="title-row" style="--wails-draggable: drag">
             <h2 style="--wails-draggable: drag">{{ $t('agent.title') }}</h2>
-            <t-tooltip v-if="authStore.hasRole('contributor')" :content="$t('agent.createAgent')" placement="bottom">
-              <t-button variant="text" theme="default" size="small" class="header-action-btn"
+            <t-tooltip v-if="authStore.isSystemAdmin" :content="$t('agent.createAgent')" placement="bottom">
+              <t-button theme="primary" size="small" :aria-label="$t('agent.createAgent')"
                 data-guide="agent-list-create" style="--wails-draggable: no-drag" @click="handleCreateAgent">
                 <template #icon>
                   <span class="btn-icon-wrapper">
@@ -30,6 +27,7 @@
                     </svg>
                   </span>
                 </template>
+                {{ $t('agent.createAgent') }}
               </t-button>
             </t-tooltip>
           </div>
@@ -37,6 +35,7 @@
         </div>
       </div>
       <div class="agent-list-main">
+        <t-alert v-if="loadError" theme="error" :message="loadError" />
         <!-- creator filter removed; see KnowledgeBaseList for rationale.
              Card-level creator display + URL-state field are retained. -->
 
@@ -195,7 +194,7 @@
                   <span class="card-title" :title="agent.name">{{ agent.name }}</span>
                 </div>
                 <t-popup
-                  v-if="agent.isMine && (canManageAgent(agent) || authStore.hasRole('contributor') || authStore.hasRole('admin'))"
+                  v-if="agent.isMine && (authStore.isSystemAdmin)"
                   :visible="openMoreAgentId === agent.id" trigger="hover" overlayClassName="card-more-popup"
                   destroy-on-close placement="bottom-right" @visible-change="onVisibleChange"
                   @update:visible="(v: boolean) => { if (!v) openMoreAgentId = null }">
@@ -207,10 +206,10 @@
                     <div class="popup-menu">
                       <div v-if="canManageAgent(agent)" class="popup-menu-item" @click="handleEdit(agent)"><t-icon
                           class="menu-icon" name="edit" /><span>{{ $t('common.edit') }}</span></div>
-                      <div v-if="authStore.hasRole('contributor')" class="popup-menu-item" @click="handleCopy(agent)">
+                      <div v-if="authStore.isSystemAdmin" class="popup-menu-item" @click="handleCopy(agent)">
                         <t-icon class="menu-icon" name="file-copy" /><span>{{ $t('common.copy') }}</span>
                       </div>
-                      <div v-if="authStore.hasRole('admin')" class="popup-menu-item"
+                      <div v-if="authStore.isSystemAdmin" class="popup-menu-item"
                         @click="handleToggleDisabled(agent)">
                         <t-icon class="menu-icon" name="poweroff" />
                         <span>{{ agent.disabled_by_me ? $t('agent.enable') : $t('agent.disable') }}</span>
@@ -221,7 +220,7 @@
                     </div>
                   </template>
                 </t-popup>
-                <t-popup v-else-if="!agent.isMine && authStore.hasRole('admin')"
+                <t-popup v-else-if="!agent.isMine && authStore.isSystemAdmin"
                   :visible="openMoreAgentId === 'shared-' + agent.share_id" trigger="hover"
                   overlayClassName="card-more-popup" destroy-on-close placement="bottom-right"
                   @update:visible="(v: boolean) => { if (!v) openMoreAgentId = null }">
@@ -396,7 +395,7 @@
                   <AgentAvatar v-else :name="agent.name" size="small" />
                   <span class="card-title" :title="agent.name">{{ agent.name }}</span>
                 </div>
-                <t-popup v-if="canManageAgent(agent) || authStore.hasRole('contributor') || authStore.hasRole('admin')"
+                <t-popup v-if="authStore.isSystemAdmin"
                   :visible="openMoreAgentId === agent.id" trigger="hover" overlayClassName="card-more-popup"
                   destroy-on-close placement="bottom-right" @visible-change="onVisibleChange"
                   @update:visible="(v: boolean) => { if (!v) openMoreAgentId = null }">
@@ -410,11 +409,11 @@
                         <t-icon class="menu-icon" name="edit" />
                         <span>{{ $t('common.edit') }}</span>
                       </div>
-                      <div v-if="authStore.hasRole('contributor')" class="popup-menu-item" @click="handleCopy(agent)">
+                      <div v-if="authStore.isSystemAdmin" class="popup-menu-item" @click="handleCopy(agent)">
                         <t-icon class="menu-icon" name="file-copy" />
                         <span>{{ $t('common.copy') }}</span>
                       </div>
-                      <div v-if="authStore.hasRole('admin')" class="popup-menu-item"
+                      <div v-if="authStore.isSystemAdmin" class="popup-menu-item"
                         @click="handleToggleDisabled(agent)">
                         <t-icon class="menu-icon" name="poweroff" />
                         <span>{{ agent.disabled_by_me ? $t('agent.enable') : $t('agent.disable') }}</span>
@@ -569,7 +568,7 @@
                   <AgentAvatar v-else :name="shared.agent?.name" size="small" />
                   <span class="card-title" :title="shared.agent?.name">{{ shared.agent?.name }}</span>
                 </div>
-                <t-popup v-if="!shared.is_mine && authStore.hasRole('admin')"
+                <t-popup v-if="!shared.is_mine && authStore.isSystemAdmin"
                   :visible="openMoreAgentId === 'shared-tab-' + shared.share_id" trigger="hover"
                   overlayClassName="card-more-popup" destroy-on-close placement="bottom-right"
                   @update:visible="(v: boolean) => { if (!v) openMoreAgentId = null }">
@@ -637,11 +636,11 @@
         </div>
 
         <!-- 空状态：全部（保留创建 CTA） -->
-        <div v-if="spaceSelection === 'all' && filteredAgents.length === 0 && !loading" class="empty-state">
+        <div v-if="spaceSelection === 'all' && filteredAgents.length === 0 && !loading && !loadError" class="empty-state">
           <img class="empty-img" src="@/assets/img/upload.svg" alt="">
           <span class="empty-txt">{{ $t('agent.empty.title') }}</span>
           <span class="empty-desc">{{ $t('agent.empty.description') }}</span>
-          <t-button v-if="authStore.hasRole('contributor')" class="agent-create-btn empty-state-btn"
+          <t-button v-if="authStore.isSystemAdmin" class="agent-create-btn empty-state-btn"
             data-guide="agent-list-create" @click="handleCreateAgent">
             <template #icon>
               <span class="btn-icon-wrapper">
@@ -667,22 +666,22 @@
         </div>
 
         <!-- 空状态：收藏 / 最近 — 不放创建按钮，参见 KnowledgeBaseList 的同处理由 -->
-        <div v-if="spaceSelection === 'favorites' && filteredAgents.length === 0 && !loading" class="empty-state">
+        <div v-if="spaceSelection === 'favorites' && filteredAgents.length === 0 && !loading && !loadError" class="empty-state">
           <t-icon name="star" size="48px" class="empty-icon" />
           <span class="empty-txt">{{ $t('agent.empty.favoritesTitle') }}</span>
           <span class="empty-desc">{{ $t('agent.empty.favoritesDescription') }}</span>
         </div>
-        <div v-if="spaceSelection === 'recents' && filteredAgents.length === 0 && !loading" class="empty-state">
+        <div v-if="spaceSelection === 'recents' && filteredAgents.length === 0 && !loading && !loadError" class="empty-state">
           <t-icon name="history" size="48px" class="empty-icon" />
           <span class="empty-txt">{{ $t('agent.empty.recentsTitle') }}</span>
           <span class="empty-desc">{{ $t('agent.empty.recentsDescription') }}</span>
         </div>
         <!-- 空状态：我的 -->
-        <div v-if="spaceSelection === 'mine' && agents.length === 0 && !loading" class="empty-state">
+        <div v-if="spaceSelection === 'mine' && agents.length === 0 && !loading && !loadError" class="empty-state">
           <img class="empty-img" src="@/assets/img/upload.svg" alt="">
           <span class="empty-txt">{{ $t('agent.empty.title') }}</span>
           <span class="empty-desc">{{ $t('agent.empty.description') }}</span>
-          <t-button v-if="authStore.hasRole('contributor')" class="agent-create-btn empty-state-btn"
+          <t-button v-if="authStore.isSystemAdmin" class="agent-create-btn empty-state-btn"
             @click="handleCreateAgent">
             <template #icon>
               <span class="btn-icon-wrapper">
@@ -824,7 +823,6 @@ import { focusAgentEditorSection, markContextualGuideDone } from '@/config/conte
 import { useTenantModelReadiness } from '@/composables/useTenantModelReadiness'
 import { useUIStore } from '@/stores/ui'
 import AgentAvatar from '@/components/AgentAvatar.vue'
-import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
 import ResourceOriginBadge from '@/components/ResourceOriginBadge.vue'
 import { shouldShowResourceOriginBadge } from '@/utils/card-list-badge'
 import { useAuthStore } from '@/stores/auth'
@@ -858,7 +856,7 @@ type DisplayAgent = (AgentWithUI & { isMine: true }) | (CustomAgent & { isMine: 
 // State synced to `?scope=` so links are shareable. The "mine" value is
 // retained for back-compat with existing links; its display label is
 // rebranded to the active tenant name inside ListSpaceSidebar.
-const defaultScope: 'all' | 'mine' = authStore.hasRole('contributor') ? 'mine' : 'all'
+const defaultScope: 'all' | 'mine' = authStore.isSystemAdmin ? 'mine' : 'all'
 const { scope: spaceSelection, creator: creatorFilter } = useListUrlState({
   defaultScope,
   defaultCreator: 'all',
@@ -1046,6 +1044,7 @@ const sortedSpaceAgentsList = computed(() => {
   })
 })
 const loading = ref(false)
+const loadError = ref('')
 const deleteVisible = ref(false)
 const deletingAgent = ref<AgentWithUI | null>(null)
 const sharedDetailVisible = ref(false)
@@ -1078,8 +1077,8 @@ const editorInitialHighlightField = ref<string>('')
 const openMoreAgentId = ref<string | null>(null)
 
 const showAgentListEmpty = computed(() => {
-  if (loading.value) return false
-  if (!authStore.hasRole('contributor')) return false
+  if (loading.value || loadError.value) return false
+  if (!authStore.isSystemAdmin) return false
   if (spaceSelection.value === 'all' && filteredAgents.value.length === 0) return true
   if (spaceSelection.value === 'mine' && agents.value.length === 0) return true
   return false
@@ -1105,11 +1104,14 @@ const applyAgentListData = (res: { data: CustomAgent[]; disabled_own_agent_ids: 
 
 const fetchList = (force = false) => {
   loading.value = true
+  loadError.value = ''
   return Promise.all([
     chatResources.fetchAgentsForList({ creator: creatorFilter.value }, force).then(applyAgentListData),
     orgStore.fetchOrganizations({ force }),
     orgStore.fetchSharedAgents({ force }),
-  ]).finally(() => { loading.value = false }).then(() => {
+  ]).catch((error: Error) => {
+    loadError.value = error.message
+  }).finally(() => { loading.value = false }).then(() => {
     void checkAndOpenEditModal()
     // 各空间智能体数量已由 GET /organizations 的 resource_counts 带回，存于 orgStore.resourceCounts
     const counts = orgStore.resourceCounts?.agents?.by_organization
@@ -1297,18 +1299,9 @@ const handleEdit = (agent: AgentWithUI) => {
   editorVisible.value = true
 }
 
-// canManageAgent mirrors the server-side OwnedAgentOrAdmin guard
-// (PR 5 #1303): the agent's creator may always edit / delete; otherwise
-// Admin+ is required. Built-in agents have created_by="" → only Admin+
-// matches, which lines up with the "Admin can mutate tenant-owned
-// agents" rule. The server still enforces the same matrix on every
-// mutation; this gate just hides buttons the user has no authority
-// to use.
+// Authoring belongs to platform operations; the employee definition is managed in release configuration.
 function canManageAgent(agent: AgentWithUI): boolean {
-  const userId = authStore.user?.id || ''
-  const creatorId = (agent as any).created_by || ''
-  if (creatorId && userId && creatorId === userId) return true
-  return authStore.hasRole('admin')
+  return authStore.isSystemAdmin && agent.id !== 'builtin-employee-assistant'
 }
 
 // isMyAgent 仅用于卡片来源徽章在「我创建」与「同空间其他成员创建」之间切换。
@@ -1360,7 +1353,7 @@ const showShareGroupHeaders = computed(() => true)
 // admin / owner 对整个空间都有编辑权限，"仅查看"反而误导，统一改成
 // "本空间 · 其他成员"——按所有权而非权限来标注。
 const tenantSectionLabelKey = computed(() =>
-  authStore.hasRole('admin')
+  authStore.isSystemAdmin
     ? 'agent.sections.tenantOthers'
     : 'agent.sections.tenantReadonly'
 )
@@ -1368,7 +1361,7 @@ const tenantSectionLabelKey = computed(() =>
 // 与 KB 列表 .tenantSectionIconName 同理：admin/owner 看到"其他成员"配
 // usergroup（多人）；contributor/viewer 看到"仅查看"配 browse（眼睛）。
 const tenantSectionIconName = computed(() =>
-  authStore.hasRole('admin') ? 'usergroup' : 'browse'
+  authStore.isSystemAdmin ? 'usergroup' : 'browse'
 )
 
 // 分组折叠：ephemeral，只在当前会话生效。和 KnowledgeBaseList 共用同一套
@@ -1583,7 +1576,7 @@ defineExpose({
   flex-direction: column;
   min-width: 0;
   // 右侧不留 padding，让滚动条贴到内容区最右缘；内边距改到 header / main 内部
-  padding: 20px 0 0 28px;
+  padding: 0;
 }
 
 .agent-list-main {
@@ -1592,7 +1585,7 @@ defineExpose({
   overflow-y: auto;
   overflow-x: hidden;
   // 同 KB 列表：顶部去掉 padding，让 sticky 分组标题贴到容器最顶。
-  padding: 0 28px 8px 0;
+  padding: 0 0 8px;
   scrollbar-width: auto;
   scrollbar-color: auto;
 }

@@ -249,7 +249,7 @@ func TestTenantMember_ListMembers_HappyPath(t *testing.T) {
 			}
 			return []*types.TenantMember{
 				{UserID: "u-owner", TenantID: 1, Role: types.TenantRoleOwner, Status: types.TenantMemberStatusActive, JoinedAt: now},
-				{UserID: "u-c", TenantID: 1, Role: types.TenantRoleContributor, Status: types.TenantMemberStatusActive, JoinedAt: now},
+				{UserID: "u-c", TenantID: 1, Role: types.TenantRoleViewer, Status: types.TenantMemberStatusActive, JoinedAt: now},
 			}, nil
 		},
 	}
@@ -308,7 +308,7 @@ func TestTenantMember_ListMembersLoadsBusinessRolesForAdminOnly(t *testing.T) {
 		wantRoles bool
 	}{
 		{name: "admin", role: types.TenantRoleAdmin, wantCalls: 1, wantRoles: true},
-		{name: "contributor", role: types.TenantRoleContributor, wantCalls: 0, wantRoles: false},
+		{name: "viewer", role: types.TenantRoleViewer, wantCalls: 0, wantRoles: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			before := calls
@@ -394,7 +394,7 @@ func TestTenantMember_AddMember_HappyPath(t *testing.T) {
 	}
 	h := newTestMemberHandler(ms, us)
 
-	body := map[string]any{"email": "bob@x.com", "role": "contributor"}
+	body := map[string]any{"email": "bob@x.com", "role": "viewer"}
 	w := doJSON(t, memberTestRouter(h), http.MethodPost, "/tenants/1/members", body, caller)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d body=%s", w.Code, w.Body.String())
@@ -432,7 +432,7 @@ func TestTenantMember_AddMember_DuplicateMaps409(t *testing.T) {
 	}
 	h := newTestMemberHandler(ms, us)
 
-	body := map[string]any{"email": "bob@x.com", "role": "contributor"}
+	body := map[string]any{"email": "bob@x.com", "role": "viewer"}
 	w := doJSON(t, memberTestRouter(h), http.MethodPost, "/tenants/1/members", body, "u-owner")
 	if w.Code != http.StatusConflict {
 		t.Fatalf("duplicate must surface as 409, got %d", w.Code)
@@ -482,11 +482,11 @@ func TestTenantMember_UpdateRole_HappyPath(t *testing.T) {
 
 func TestTenantMember_UpdateRole_LastOwnerMaps409(t *testing.T) {
 	// Service-layer invariant: the last Owner cannot be demoted. Mapping
-	// ErrLastOwner to 409 lets the UI render the message inline rather
+	// ErrLastAdministrator to 409 lets the UI render the message inline rather
 	// than as a generic failure.
 	ms := &stubMemberService{
 		updateRole: func(_ context.Context, _ string, _ uint64, _ types.TenantRole) error {
-			return service.ErrLastOwner
+			return service.ErrLastAdministrator
 		},
 	}
 	h := newTestMemberHandler(ms, &stubMemberUserService{})
@@ -535,7 +535,7 @@ func TestTenantMember_RemoveMember_HappyPath(t *testing.T) {
 func TestTenantMember_RemoveMember_LastOwnerMaps409(t *testing.T) {
 	ms := &stubMemberService{
 		remove: func(_ context.Context, _ string, _ uint64) error {
-			return service.ErrLastOwner
+			return service.ErrLastAdministrator
 		},
 	}
 	h := newTestMemberHandler(ms, &stubMemberUserService{})
@@ -575,7 +575,7 @@ func TestTenantMember_LeaveTenant_LastOwnerMaps409(t *testing.T) {
 	// ownership before they can leave.
 	ms := &stubMemberService{
 		remove: func(_ context.Context, _ string, _ uint64) error {
-			return service.ErrLastOwner
+			return service.ErrLastAdministrator
 		},
 	}
 	h := newTestMemberHandler(ms, &stubMemberUserService{})
@@ -653,7 +653,7 @@ func TestTenantMember_RejectsCrossTenantURL_Add(t *testing.T) {
 		},
 	}
 	h := newTestMemberHandler(ms, us)
-	body := map[string]any{"email": "bob@x.com", "role": "contributor"}
+	body := map[string]any{"email": "bob@x.com", "role": "viewer"}
 	w := doJSONWithCtx(t, memberTestRouter(h), http.MethodPost, "/tenants/5/members", body,
 		memberCtxOpts{callerID: "u1", tenantID: 1})
 	if w.Code != http.StatusForbidden {
@@ -825,7 +825,7 @@ func TestTenantMember_AddMember_SyntheticCallerLeavesInvitedByNull(t *testing.T)
 	ms := &stubMemberService{
 		add: func(_ context.Context, _ string, _ uint64, _ types.TenantRole, invitedBy *string) (*types.TenantMember, error) {
 			captured.invited = invitedBy
-			return &types.TenantMember{UserID: "u-bob", TenantID: 1, Role: types.TenantRoleContributor, Status: types.TenantMemberStatusActive, JoinedAt: time.Now()}, nil
+			return &types.TenantMember{UserID: "u-bob", TenantID: 1, Role: types.TenantRoleViewer, Status: types.TenantMemberStatusActive, JoinedAt: time.Now()}, nil
 		},
 	}
 	us := &stubMemberUserService{
@@ -834,7 +834,7 @@ func TestTenantMember_AddMember_SyntheticCallerLeavesInvitedByNull(t *testing.T)
 		},
 	}
 	h := newTestMemberHandler(ms, us)
-	body := map[string]any{"email": "bob@x.com", "role": "contributor"}
+	body := map[string]any{"email": "bob@x.com", "role": "viewer"}
 	w := doJSON(t, memberTestRouter(h), http.MethodPost, "/tenants/1/members", body, "system-1")
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d body=%s", w.Code, w.Body.String())

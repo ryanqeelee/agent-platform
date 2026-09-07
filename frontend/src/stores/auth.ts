@@ -178,11 +178,9 @@ export const useAuthStore = defineStore('auth', () => {
   // hasRole() for security decisions; the server is the source of truth.
   const ROLE_LEVEL: Record<string, number> = {
     viewer: 10,
-    contributor: 20,
     admin: 30,
-    owner: 40,
   }
-  const hasRole = (min: 'viewer' | 'contributor' | 'admin' | 'owner'): boolean => {
+  const hasRole = (min: 'viewer' | 'admin'): boolean => {
     return (ROLE_LEVEL[currentTenantRole.value] ?? 0) >= ROLE_LEVEL[min]
   }
 

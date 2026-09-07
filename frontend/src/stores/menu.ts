@@ -29,11 +29,8 @@ export const useMenuStore = defineStore('menuStore', () => {
       childrenPath: 'chat',
       children: createMenuChildren()
     },
-    { title: '', titleKey: 'menu.knowledgeBase', icon: 'zhishiku', path: 'knowledge-bases' },
     { title: '', titleKey: 'menu.operatingBrief', icon: 'brief', path: 'operating-brief' },
     { title: '', titleKey: 'menu.operatingAnalysis', icon: 'analysis', path: 'operating-analysis' },
-    { title: '', titleKey: 'menu.agents', icon: 'agent', path: 'agents', requiredCapability: 'agents' },
-    { title: '', titleKey: 'menu.organizations', icon: 'organization', path: 'organizations', requiredCapability: 'organizations' },
     { title: '', titleKey: 'menu.settings', icon: 'setting', path: 'settings' },
     { title: '', titleKey: 'menu.logout', icon: 'logout', path: 'logout' }
   ])
@@ -78,7 +75,7 @@ export const useMenuStore = defineStore('menuStore', () => {
       if (item.path === 'organizations' && !authStore.hasRole('admin')) {
         return false
       }
-      if ((item.path === 'knowledge-bases' || item.path === 'agents') && !authStore.hasRole('contributor')) {
+      if ((item.path === 'knowledge-bases' || item.path === 'agents') && !authStore.hasRole('admin')) {
         return false
       }
       if (item.requiredCapability && !deploymentCapabilities.isSupported(item.requiredCapability)) {

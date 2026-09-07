@@ -294,6 +294,11 @@ func (h *CustomAgentHandler) ListAgents(c *gin.Context) {
 
 	views := make([]*types.CustomAgent, 0, len(agents))
 	for _, agent := range agents {
+		// General-purpose presets are platform configuration, not employee choices.
+		// Keep GetAgent available for existing session replay.
+		if !types.IsSystemAdminFromContext(ctx) && agent.ID != types.BuiltinEmployeeAssistantID {
+			continue
+		}
 		views = append(views, service.AgentView(ctx, agent))
 	}
 	c.JSON(http.StatusOK, gin.H{

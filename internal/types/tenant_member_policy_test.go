@@ -3,27 +3,18 @@ package types
 import "testing"
 
 func TestMemberLifecycleRoleMatrix(t *testing.T) {
-	cases := []struct {
-		name          string
-		actor, target TenantRole
-		want          bool
-	}{
-		{"owner appoints admin", TenantRoleOwner, TenantRoleAdmin, true},
-		{"owner manages knowledge administrator", TenantRoleOwner, TenantRoleContributor, true},
-		{"owner manages employee", TenantRoleOwner, TenantRoleViewer, true},
-		{"owner never normal-path manages owner", TenantRoleOwner, TenantRoleOwner, false},
-		{"admin manages knowledge administrator", TenantRoleAdmin, TenantRoleContributor, true},
-		{"admin manages employee", TenantRoleAdmin, TenantRoleViewer, true},
-		{"admin cannot manage admin", TenantRoleAdmin, TenantRoleAdmin, false},
-		{"admin cannot manage owner", TenantRoleAdmin, TenantRoleOwner, false},
-		{"knowledge administrator cannot manage employee", TenantRoleContributor, TenantRoleViewer, false},
-		{"employee cannot manage knowledge administrator", TenantRoleViewer, TenantRoleContributor, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := CanManageMemberRole(tc.actor, tc.target); got != tc.want {
-				t.Fatalf("CanManageMemberRole(%q, %q) = %v, want %v", tc.actor, tc.target, got, tc.want)
+	roles := []TenantRole{TenantRoleAdmin, TenantRoleViewer, TenantRoleOwner, TenantRoleContributor, "unknown"}
+	for _, actor := range roles {
+		for _, target := range roles {
+			want := actor == TenantRoleAdmin && (target == TenantRoleAdmin || target == TenantRoleViewer)
+			if CanManageMemberRole(actor, target) != want || CanInviteMemberRole(actor, target) != want {
+				t.Errorf("actor=%s target=%s want=%v", actor, target, want)
 			}
-		})
+		}
+	}
+	for _, retired := range []TenantRole{TenantRoleOwner, TenantRoleContributor, "unknown"} {
+		if retired.IsValid() || retired.HasPermission(TenantRoleViewer) || TenantRoleAdmin.HasPermission(retired) {
+			t.Fatalf("retired role accepted: %s", retired)
+		}
 	}
 }

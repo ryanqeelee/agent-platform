@@ -103,12 +103,8 @@ const acting = ref<number | null>(null)
 
 function roleTagTheme(role: TenantRole): 'primary' | 'warning' | 'success' | 'default' {
   switch (role) {
-    case 'owner':
-      return 'primary'
     case 'admin':
       return 'warning'
-    case 'contributor':
-      return 'success'
     default:
       return 'default'
   }

@@ -73,16 +73,8 @@ func (g *rbacGuards) Viewer() gin.HandlerFunc {
 	return middleware.RequireRole(types.TenantRoleViewer, g.cfg)
 }
 
-func (g *rbacGuards) Contributor() gin.HandlerFunc {
-	return middleware.RequireRole(types.TenantRoleContributor, g.cfg)
-}
-
 func (g *rbacGuards) Admin() gin.HandlerFunc {
 	return middleware.RequireRole(types.TenantRoleAdmin, g.cfg)
-}
-
-func (g *rbacGuards) Owner() gin.HandlerFunc {
-	return middleware.RequireRole(types.TenantRoleOwner, g.cfg)
 }
 
 // TenantCreator permits tenantless onboarding while requiring Contributor+
@@ -91,7 +83,7 @@ func (g *rbacGuards) Owner() gin.HandlerFunc {
 // self-promoting into an Owner by creating another tenant without breaking
 // invitation-first tenantless admission.
 func (g *rbacGuards) TenantCreator() gin.HandlerFunc {
-	contributor := g.Contributor()
+	contributor := g.Admin()
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
 		if _, apiKey := types.TenantAPIKeyScopeFromContext(ctx); apiKey {

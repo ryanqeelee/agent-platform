@@ -2,7 +2,7 @@ import { get, post, put, del } from '@/utils/request'
 
 // TenantRole mirrors internal/types/tenant_member.go's four-role enum.
 // Keep the string values aligned with the Go constants.
-export type TenantRole = 'owner' | 'admin' | 'contributor' | 'viewer'
+export type TenantRole = 'admin' | 'viewer'
 
 export type TenantMemberStatus = 'active' | 'invited' | 'suspended'
 
@@ -152,13 +152,7 @@ export async function updateMemberOperatingAnalysisAccess(
   )) as unknown as SimpleResponse
 }
 
-/** Explicit Owner-only ownership transfer; ordinary role updates cannot mint Owner. */
-export async function transferOwnership(
-  tenantId: number,
-  userId: string,
-): Promise<SimpleResponse> {
-  return (await post(`/api/v1/tenants/${tenantId}/members/${userId}/transfer-ownership`)) as unknown as SimpleResponse
-}
+
 
 /**
  * Remove a member from the tenant.

@@ -149,10 +149,10 @@ func (h *TenantInvitationHandler) projectInvitationWithLink(
 func canManageInvitationRole(ctx context.Context, role types.TenantRole) bool {
 	if scope, ok := types.TenantAPIKeyScopeFromContext(ctx); ok &&
 		(scope.FullAccess || scope.HasCapability(types.APIKeyCapabilityManageMembers)) {
-		return role != types.TenantRoleOwner
+		return role.IsValid()
 	}
 	if types.HasCrossTenantAccessFromContext(ctx) {
-		return role != types.TenantRoleOwner
+		return role.IsValid()
 	}
 	return types.CanManageMemberRole(types.TenantRoleFromContext(ctx), role)
 }
@@ -291,8 +291,8 @@ func (h *TenantInvitationHandler) CreateInvitation(c *gin.Context) {
 		c.Error(apperrors.NewValidationError("invalid request body").WithDetails(err.Error()))
 		return
 	}
-	if !req.Role.IsValid() || req.Role == types.TenantRoleOwner {
-		c.Error(apperrors.NewValidationError("role must be one of admin/contributor/viewer; ownership uses the transfer endpoint"))
+	if !req.Role.IsValid() {
+		c.Error(apperrors.NewValidationError("角色必须是企业管理员或员工"))
 		return
 	}
 

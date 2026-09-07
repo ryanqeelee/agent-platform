@@ -333,7 +333,7 @@ export interface EnterpriseSessionProjectionV1 {
   schema: 'EnterpriseSessionProjectionV1'
   actorId: string
   tenantId: number
-  role: 'owner' | 'admin' | 'knowledge_administrator' | 'employee'
+  role: 'admin' | 'employee'
   surfaces: {
     employeeWorkspace: true
     enterpriseAdministration: boolean

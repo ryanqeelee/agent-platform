@@ -260,7 +260,7 @@ const isViaShare = computed(() => !!currentSharedKb.value);
 // source creator identity is never authority.
 const canEdit = computed(() => {
   if (isViaShare.value) return authStore.hasRole('admin') && orgStore.canEditKB(kbId.value, false);
-  if (authStore.hasRole('contributor')) return true;
+  if (authStore.hasRole('admin')) return true;
   return orgStore.canEditKB(kbId.value, false);
 });
 
@@ -275,7 +275,7 @@ const canManage = computed(() => {
 // Knowledge administrators maintain existing content and access scope without
 // entering the infrastructure-heavy KB editor. Tenant Admin/Owner keep their
 // existing settings surface; contributors get only this focused dialog.
-const canManageKnowledgeAccess = computed(() => !isViaShare.value && authStore.hasRole('contributor'));
+const canManageKnowledgeAccess = computed(() => !isViaShare.value && authStore.hasRole('admin'));
 const showKnowledgeAccessScope = ref(false);
 
 // The activity feed exposes owner-side actor and configuration summaries.
@@ -285,9 +285,9 @@ const showKnowledgeAccessScope = ref(false);
 const canMutateKnowledge = computed(() => {
   if (!canEdit.value) return false;
   if (isViaShare.value) return authStore.hasRole('admin');
-  if (authStore.hasRole('contributor')) return true;
   if (authStore.hasRole('admin')) return true;
-  return authStore.hasRole('contributor');
+  if (authStore.hasRole('admin')) return true;
+  return authStore.hasRole('admin');
 });
 
 // Effective permission: from direct org share list or from GET /knowledge-bases/:id (e.g. agent-visible KB)
@@ -298,7 +298,7 @@ const effectiveKBPermission = computed(() => orgStore.getKBPermission(kbId.value
 // Viewer can never download; for cross-tenant KBs the effective share
 // permission must additionally be Editor or Admin.
 const canDownloadKnowledge = computed(() => {
-  if (!authStore.hasRole('contributor')) return false;
+  if (!authStore.hasRole('admin')) return false;
   const permission = effectiveKBPermission.value;
   return !permission || permission === 'owner' || permission === 'admin' || permission === 'editor';
 });

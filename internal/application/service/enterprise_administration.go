@@ -65,12 +65,8 @@ func NewEnterpriseAdministrationService(
 
 func enterpriseAdministrationRole(role types.TenantRole) string {
 	switch role {
-	case types.TenantRoleOwner:
-		return "owner"
 	case types.TenantRoleAdmin:
 		return "admin"
-	case types.TenantRoleContributor:
-		return "knowledge_administrator"
 	default:
 		return ""
 	}
@@ -116,7 +112,7 @@ func (s *enterpriseAdministrationService) Resolve(ctx context.Context) (*types.E
 	}
 
 	items := append([]types.EnterpriseAdministrationItem(nil), platform.Items...)
-	if role == "owner" || role == "admin" {
+	if role == "admin" {
 		invitations, listErr := s.invitations.ListByTenant(ctx, tenantID, false)
 		if listErr != nil {
 			return nil, listErr
@@ -144,7 +140,7 @@ func (s *enterpriseAdministrationService) Resolve(ctx context.Context) (*types.E
 		})
 	}
 
-	if role == "owner" || role == "admin" {
+	if role == "admin" {
 		riskCount, riskErr := s.recentHighRiskCount(ctx, tenantID)
 		if riskErr != nil {
 			return nil, riskErr
@@ -175,7 +171,7 @@ func (s *enterpriseAdministrationService) Resolve(ctx context.Context) (*types.E
 
 func unavailableEnterpriseAdministrationPlatform(role string) *types.EnterpriseAdministrationPlatformProjection {
 	items := []types.EnterpriseAdministrationItem{}
-	if role == "owner" || role == "admin" {
+	if role == "admin" {
 		items = append(items, types.EnterpriseAdministrationItem{
 			Code: "license_or_capability_attention", Priority: "critical", Count: 1, Target: "service_health",
 		})

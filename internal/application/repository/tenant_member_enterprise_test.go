@@ -140,10 +140,10 @@ func TestEnterpriseManagedTenantBindingConcurrent(t *testing.T) {
 	if any, err := repo.HasAnyMembers(context.Background(), foreign); err != nil || any {
 		t.Fatalf("historical foreign membership counted as active: any=%v err=%v", any, err)
 	}
-	if owners, err := repo.CountActiveOwners(context.Background(), foreign); err != nil || owners != 0 {
+	if owners, err := repo.CountActiveAdministrators(context.Background(), foreign); err != nil || owners != 0 {
 		t.Fatalf("historical foreign owner affected owner count: owners=%d err=%v", owners, err)
 	}
-	if err := db.Exec(`INSERT INTO tenant_invitations(id, tenant_id, invitee_user_id, role, status, expires_at) VALUES (2, ?, 'u1', 'contributor', 'pending', CURRENT_TIMESTAMP + INTERVAL '1 hour')`, foreign).Error; err != nil {
+	if err := db.Exec(`INSERT INTO tenant_invitations(id, tenant_id, invitee_user_id, role, status, expires_at) VALUES (2, ?, 'u1', 'viewer', 'pending', CURRENT_TIMESTAMP + INTERVAL '1 hour')`, foreign).Error; err != nil {
 		t.Fatal(err)
 	}
 	invRepo := &tenantInvitationRepository{db: db}
@@ -268,7 +268,7 @@ func TestEnterpriseManagedTenantBindingConcurrent(t *testing.T) {
 	}
 }
 
-func TestTenantMemberRepository_TransferOwnershipPostgres(t *testing.T) {
+func TestTenantMemberRepository_AdministratorLifecyclePostgres(t *testing.T) {
 	dsn := os.Getenv("WEKNORA_TEST_POSTGRES_DSN")
 	if dsn == "" {
 		t.Skip("WEKNORA_TEST_POSTGRES_DSN is not set")
@@ -306,12 +306,10 @@ func TestTenantMemberRepository_TransferOwnershipPostgres(t *testing.T) {
             id bigserial PRIMARY KEY, user_id varchar(36) NOT NULL, tenant_id bigint NOT NULL,
             role varchar(20) NOT NULL, status varchar(20) NOT NULL, updated_at timestamptz, deleted_at timestamptz
         )`,
-		`CREATE UNIQUE INDEX one_active_owner ON tenant_members(tenant_id)
-            WHERE role = 'owner' AND status = 'active' AND deleted_at IS NULL`,
 		`INSERT INTO tenants(id) VALUES (1)`,
 		`INSERT INTO users(id, tenant_id) VALUES ('owner', 1), ('admin-a', 1), ('admin-b', 1), ('employee', 1)`,
 		`INSERT INTO tenant_members(user_id, tenant_id, role, status) VALUES
-            ('owner', 1, 'owner', 'active'), ('admin-a', 1, 'admin', 'active'),
+            ('owner', 1, 'admin', 'active'), ('admin-a', 1, 'admin', 'active'),
             ('admin-b', 1, 'admin', 'active'), ('employee', 1, 'viewer', 'active')`,
 	} {
 		if err := db.Exec(statement).Error; err != nil {
@@ -373,117 +371,55 @@ func TestTenantMemberRepository_TransferOwnershipPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := db.Exec(`UPDATE users SET tenant_id = 2 WHERE id = 'admin-b'`).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := repo.TransferOwnership(context.Background(), "owner", "admin-b", 1); !errors.Is(err, ErrOwnershipTransferInvalid) {
-		t.Fatalf("foreign transfer target error = %v, want invalid transfer", err)
-	}
-	if err := db.Exec(`UPDATE users SET tenant_id = 1 WHERE id = 'admin-b'`).Error; err != nil {
-		t.Fatal(err)
-	}
-
-	if err := repo.TransferOwnership(context.Background(), "owner", "admin-a", 1); err != nil {
-		t.Fatalf("normal transfer: %v", err)
-	}
-	var roles []struct{ UserID, Role string }
-	if err := db.Raw(`SELECT user_id, role FROM tenant_members ORDER BY user_id`).Scan(&roles).Error; err != nil {
-		t.Fatal(err)
-	}
-	got := map[string]string{}
-	for _, row := range roles {
-		got[row.UserID] = row.Role
-	}
-	if got["owner"] != "admin" || got["admin-a"] != "owner" {
-		t.Fatalf("normal transfer roles: %#v", got)
-	}
-
-	// A transfer and an Owner's stale attempt to suspend its Admin target must
-	// serialize on the tenant row. Whichever operation wins, the final state
-	// retains exactly one active Owner; after transfer the stale actor may not
-	// suspend the newly promoted Owner.
-	if err := db.Exec(`DELETE FROM tenant_members WHERE tenant_id = 1`).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Exec(`INSERT INTO tenant_members(user_id, tenant_id, role, status) VALUES
-        ('owner', 1, 'owner', 'active'), ('admin-a', 1, 'admin', 'active')`).Error; err != nil {
-		t.Fatal(err)
-	}
-	startSuspend := make(chan struct{})
-	var mutationWG sync.WaitGroup
-	mutationWG.Add(2)
-	go func() {
-		defer mutationWG.Done()
-		<-startSuspend
-		_ = repo.TransferOwnership(context.Background(), "owner", "admin-a", 1)
-	}()
-	go func() {
-		defer mutationWG.Done()
-		<-startSuspend
-		_ = repo.UpdateStatus(context.Background(), types.MemberActorAuthority{UserID: "owner"}, "admin-a", 1, types.TenantMemberStatusSuspended)
-	}()
-	close(startSuspend)
-	mutationWG.Wait()
-	var activeOwners int
-	if err := db.Raw(`SELECT count(*) FROM tenant_members WHERE tenant_id = 1 AND role = 'owner' AND status = 'active' AND deleted_at IS NULL`).Scan(&activeOwners).Error; err != nil {
-		t.Fatal(err)
-	}
-	if activeOwners != 1 {
-		t.Fatalf("transfer vs suspend active owners=%d, want 1", activeOwners)
-	}
-
-	// The old owner can no longer transfer; competing requests serialized by
-	// the tenant row therefore yield exactly one successful transfer.
-	if err := db.Exec(`DELETE FROM tenant_members WHERE tenant_id = 1`).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Exec(`INSERT INTO tenant_members(user_id, tenant_id, role, status) VALUES
-        ('owner', 1, 'owner', 'active'), ('admin-a', 1, 'admin', 'active'),
-		('admin-b', 1, 'admin', 'active'), ('employee', 1, 'viewer', 'active')`).Error; err != nil {
-		t.Fatal(err)
-	}
-	start := make(chan struct{})
-	results := make(chan error, 2)
-	var wg sync.WaitGroup
-	for _, target := range []string{"admin-a", "admin-b"} {
-		wg.Add(1)
-		go func(target string) {
-			defer wg.Done()
-			<-start
-			results <- repo.TransferOwnership(context.Background(), "owner", target, 1)
-		}(target)
-	}
-	close(start)
-	wg.Wait()
-	close(results)
-	successes := 0
-	for err := range results {
-		if err == nil {
-			successes++
-		}
-	}
-	if successes != 1 {
-		t.Fatalf("concurrent transfers succeeded %d times, want 1", successes)
-	}
-
-	if err := db.Exec(`DELETE FROM tenant_members WHERE tenant_id = 1`).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Exec(`INSERT INTO tenant_members(user_id, tenant_id, role, status) VALUES
-		('owner', 1, 'owner', 'active'), ('employee', 1, 'viewer', 'active')`).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := repo.TransferOwnership(context.Background(), "owner", "employee", 1); !errors.Is(err, ErrOwnershipTransferInvalid) {
-		t.Fatalf("non-admin target: %v", err)
-	}
-	var ownerCount int
-	if err := db.Raw(`SELECT count(*) FROM tenant_members WHERE tenant_id = 1 AND role = 'owner' AND status = 'active' AND deleted_at IS NULL`).Scan(&ownerCount).Error; err != nil {
-		t.Fatal(err)
-	}
-	if ownerCount != 1 {
-		t.Fatalf("failed transfer must leave one owner, got %d", ownerCount)
-	}
-	if err := db.Exec(`INSERT INTO tenant_members(user_id, tenant_id, role, status) VALUES ('second-owner', 1, 'owner', 'active')`).Error; err == nil {
-		t.Fatal("partial unique index accepted a second active owner")
+	// Two concurrent machine-authorized removals must retain one administrator.
+	for _, mutation := range []string{"demote", "suspend", "remove"} {
+		t.Run(mutation, func(t *testing.T) {
+			if err := db.Exec(`DELETE FROM tenant_members`).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Exec(`INSERT INTO tenant_members(user_id,tenant_id,role,status) VALUES
+    ('admin-a',1,'admin','active'),('admin-b',1,'admin','active')`).Error; err != nil {
+				t.Fatal(err)
+			}
+			start := make(chan struct{})
+			results := make(chan error, 2)
+			var wg sync.WaitGroup
+			for _, id := range []string{"admin-a", "admin-b"} {
+				wg.Add(1)
+				go func(id string) {
+					defer wg.Done()
+					<-start
+					actor := types.MemberActorAuthority{ServicePrincipal: true}
+					switch mutation {
+					case "demote":
+						results <- repo.UpdateRole(context.Background(), actor, id, 1, types.TenantRoleViewer)
+					case "suspend":
+						results <- repo.UpdateStatus(context.Background(), actor, id, 1, types.TenantMemberStatusSuspended)
+					case "remove":
+						results <- repo.SoftDelete(context.Background(), actor, id, 1)
+					}
+				}(id)
+			}
+			close(start)
+			wg.Wait()
+			close(results)
+			succeeded, prevented := 0, 0
+			for err := range results {
+				if err == nil {
+					succeeded++
+				} else if errors.Is(err, ErrLastAdministrator) {
+					prevented++
+				} else {
+					t.Fatal(err)
+				}
+			}
+			if succeeded != 1 || prevented != 1 {
+				t.Fatalf("success=%d prevented=%d", succeeded, prevented)
+			}
+			count, err := repo.CountActiveAdministrators(context.Background(), 1)
+			if err != nil || count != 1 {
+				t.Fatalf("active administrators=%d err=%v", count, err)
+			}
+		})
 	}
 }

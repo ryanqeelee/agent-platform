@@ -527,7 +527,7 @@ func attachAPIKeyAuthContext(
 	apiKeyTenantRoleContext := types.TenantRoleViewer
 	fullAccess := key != nil && key.FullAccess && !key.IsPlatform()
 	if fullAccess {
-		apiKeyTenantRoleContext = types.TenantRoleOwner
+		apiKeyTenantRoleContext = types.TenantRoleAdmin
 	}
 	session := authSession{
 		User:      user,
@@ -716,18 +716,18 @@ func principalTenantIDFromClaims(claims jwt.MapClaims) uint64 {
 //  1. Active TenantMember row → return that role.
 //  2. Cross-tenant superuser switch (X-Tenant-ID with CanAccessAllTenants=true)
 //     → grant Admin in the target tenant. Org admins are intentionally not
-//     promoted to Owner; tenant deletion / API-key rotation should always
-//     stay with a real Owner inside the target tenant. Cross-tenant access
+//     promoted to administrator; tenant deletion / API-key rotation should always
+//     stay with a real administrator inside the target tenant. Cross-tenant access
 //     is also never allowed to trigger the orphan-tenant auto-promotion
-//     below — a superuser only visits, never claims ownership.
+//     below — a superuser only visits, never claims membership.
 //  3. No membership but the tenant currently has zero active members AND
 //     the caller is authenticating into their own home tenant (i.e.
 //     targetTenantID == user.TenantID and this is not a cross-tenant
 //     switch). This is the API-key-only orphan-tenant self-heal path:
-//     the registrant becomes Owner of the tenant their own user record
+//     the registrant becomes administrator of the tenant their own user record
 //     points to. Any other path (cross-tenant switch, JWT minted for a
 //     foreign tenant, etc.) is intentionally excluded to avoid silent
-//     ownership grabs.
+//     membership grabs.
 //  4. Otherwise → return ok=false. Caller decides:
 //     - When EnableRBAC=true (or cfg unavailable): treat as 403.
 //     - When EnableRBAC=false: fail open with Admin so existing deployments
@@ -757,11 +757,11 @@ func resolveTenantRole(
 		logger.Infof(ctx,
 			"[auth] resolveTenantRole step1 hit: user=%s tenant=%d row_role=%s row_status=%s",
 			user.ID, targetTenantID, member.Role, member.Status)
-		return member.Role, true
+		return member.Role, member.Role.IsValid()
 	}
 	// A suspended row is evidence of an explicit access revocation, not an
 	// orphan. Check it before HasAnyMembers: a suspended-only tenant must not
-	// self-heal into an Owner, even while compatibility fail-open is enabled.
+	// self-heal into an administrator, even while compatibility fail-open is enabled.
 	if err == nil && member != nil && member.Status == types.TenantMemberStatusSuspended {
 		logger.Warnf(ctx, "[auth] suspended membership rejected: user=%s tenant=%d", user.ID, targetTenantID)
 		return "", false
@@ -793,19 +793,19 @@ func resolveTenantRole(
 	}
 
 	// 3. 孤儿空间自愈：仅当用户登录的是自己的 home tenant、且该空间尚无任何活跃成员时
-	//    允许自动晋升为 Owner。跨空间 switch / JWT 指向他人空间的场景一律不进入此分支，
-	//    防止越权获得他人空间的 Owner 权限。
+	//    允许自动晋升为 administrator。跨空间 switch / JWT 指向他人空间的场景一律不进入此分支，
+	//    防止越权获得他人空间的 administrator 权限。
 	isHomeTenant := !crossTenantSwitch && targetTenantID == user.TenantID
 	if isHomeTenant {
 		hasAny, anyErr := memberService.HasAnyMembers(ctx, targetTenantID)
 		if anyErr == nil && !hasAny {
-			if ensured, e := memberService.EnsureOwner(ctx, user.ID, targetTenantID); e == nil && ensured != nil &&
-				ensured.Status == types.TenantMemberStatusActive && ensured.Role == types.TenantRoleOwner {
+			if ensured, e := memberService.EnsureAdministrator(ctx, user.ID, targetTenantID); e == nil && ensured != nil &&
+				ensured.Status == types.TenantMemberStatusActive && ensured.Role == types.TenantRoleAdmin {
 				logger.Infof(ctx,
-					"[audit] Auto-promoted user %s to Owner of orphan tenant %d (home_tenant=true)",
+					"[audit] Auto-promoted user %s to administrator of orphan tenant %d (home_tenant=true)",
 					user.ID, targetTenantID,
 				)
-				return types.TenantRoleOwner, true
+				return types.TenantRoleAdmin, true
 			} else {
 				logger.Warnf(ctx, "Failed to auto-promote user %s in tenant %d: %v",
 					user.ID, targetTenantID, e)

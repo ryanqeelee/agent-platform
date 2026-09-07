@@ -6,10 +6,15 @@
             <button type="button" :aria-expanded="mobileMenuOpen" aria-controls="mobile-workspace-menu" @click="mobileMenuOpen = !mobileMenuOpen">{{ mobileMenuOpen ? t('menu.collapseSidebar') : t('menu.expandSidebar') }}</button>
         </header>
         <button v-if="mobileMenuOpen" class="mobile-menu-scrim" type="button" :aria-label="t('menu.collapseSidebar')" @click="mobileMenuOpen = false" />
-        <Menu id="mobile-workspace-menu"></Menu>
-        <div v-if="isRouterAlive" class="platform-route-outlet">
+        <Menu id="mobile-workspace-menu" :operating-controller="operatingController"></Menu>
+        <div v-if="isRouterAlive" v-show="!isOperatingRoute" class="platform-route-outlet">
             <RouterView />
         </div>
+        <OperatingWorkspace
+            v-if="operatingWorkspaceMounted"
+            v-show="isOperatingRoute"
+            @controller-change="handleOperatingControllerChange"
+        />
         <div class="upload-mask" v-show="ismask">
             <UploadMask></UploadMask>
         </div>
@@ -26,7 +31,7 @@
 </template>
 <script setup lang="ts">
 import Menu from '@/components/menu.vue'
-import { ref, onMounted, onUnmounted, nextTick, provide, watch } from 'vue';
+import { computed, ref, shallowRef, onMounted, onUnmounted, nextTick, provide, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router'
 import UploadMask from '@/components/upload-mask.vue'
 import Settings from '@/views/settings/Settings.vue'
@@ -39,9 +44,21 @@ import { getKnowledgeBaseById } from '@/api/knowledge-base/index'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { collectDroppedFiles } from './collectDroppedFiles'
+import OperatingWorkspace from '@/views/operating/OperatingWorkspace.vue'
+import { isOperatingRoutePath } from '@/views/operating/operatingHost'
+import type { OperatingController } from '@/views/operating/operatingClient'
 
 const mobileMenuOpen = ref(false);
 const route = useRoute();
+const isOperatingRoute = computed(() => isOperatingRoutePath(route.path));
+const operatingWorkspaceMounted = ref(isOperatingRoute.value);
+const operatingController = shallowRef<OperatingController | null>(null);
+const handleOperatingControllerChange = (controller: OperatingController | null) => {
+    operatingController.value = controller;
+};
+watch(isOperatingRoute, (isOperating) => {
+    if (isOperating) operatingWorkspaceMounted.value = true;
+});
 watch(() => route.fullPath, () => { mobileMenuOpen.value = false; });
 const router = useRouter();
 const commandPaletteStore = useCommandPaletteStore();
@@ -167,7 +184,7 @@ const handleGlobalDrop = async (event: DragEvent) => {
         return;
     }
 
-    if (isChatDropRoute()) {
+    if (isChatDropRoute() || isOperatingRoute.value) {
         event.stopPropagation();
         window.dispatchEvent(new CustomEvent('weknora:chat-file-drop', {
             detail: { files: droppedFiles }

@@ -1,30 +1,14 @@
 <template>
-  <Teleport to="body" :disabled="!useOverlay">
-    <Transition name="references-panel" @after-enter="handlePanelAfterEnter">
-      <aside
-        v-if="visible"
-        class="chat-references-panel"
-        :class="{ 'is-overlay': useOverlay, 'is-embedded': embeddedMode }"
-        role="complementary"
-        :aria-label="panelTitle"
-      >
-        <header class="chat-references-panel__header">
-          <div class="chat-references-panel__heading">
-            <h3 class="chat-references-panel__title">
-              {{ panelTitle }}<span v-if="totalCount" class="chat-references-panel__count"> · {{ totalCount }}</span>
-            </h3>
-          </div>
-          <button
-            type="button"
-            class="chat-references-panel__close"
-            :aria-label="t('common.close')"
-            @click="close"
-          >
-            <t-icon name="close" size="20px" />
-          </button>
-        </header>
-
-        <div ref="listElement" class="chat-references-panel__body">
+  <ChatReadingPanel
+    :visible="visible"
+    :title="panelTitle"
+    :count="totalCount"
+    :close-label="t('common.close')"
+    :embedded-mode="embeddedMode"
+    :overlay-breakpoint="overlayBreakpoint"
+    @close="close"
+    @after-enter="handlePanelAfterEnter"
+  >
           <div v-if="sections.length === 0" class="chat-references-panel__empty">
             {{ t('chat.referencesDrawerEmpty') }}
           </div>
@@ -120,24 +104,14 @@
               </component>
             </article>
           </section>
-        </div>
-      </aside>
-    </Transition>
-  </Teleport>
-
-  <Transition name="references-backdrop">
-    <div
-      v-if="visible && useOverlay"
-      class="chat-references-panel__backdrop"
-      @click="close"
-    />
-  </Transition>
+  </ChatReadingPanel>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
+import ChatReadingPanel from '@/components/ChatReadingPanel.vue'
 import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer'
 import {
   buildReferenceSections,
@@ -164,12 +138,6 @@ const panelEntered = ref(false)
 const visible = computed(() => drawer?.visible.value ?? false)
 const references = computed(() => drawer?.references.value ?? [])
 const highlight = computed(() => drawer?.highlight.value ?? null)
-
-const useOverlay = computed(() => {
-  if (props.embeddedMode) return true
-  if (typeof window === 'undefined') return false
-  return window.innerWidth < (props.overlayBreakpoint ?? 960)
-})
 
 const sections = computed(() => buildReferenceSections(references.value))
 const totalCount = computed(() => sections.value.reduce((sum, section) => sum + section.items.length, 0))
@@ -301,7 +269,8 @@ async function scrollToHighlight() {
   }
 }
 
-function handlePanelAfterEnter() {
+function handlePanelAfterEnter(body: HTMLElement) {
+  listElement.value = body
   panelEntered.value = true
   void scrollToHighlight()
 }
@@ -327,90 +296,6 @@ watch(visible, (open) => {
 </script>
 
 <style scoped lang="less">
-.chat-references-panel__backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.28);
-  z-index: 1200;
-}
-
-.chat-references-panel {
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: min(420px, 100vw);
-  z-index: 1201;
-  display: flex;
-  flex-direction: column;
-  background: var(--td-bg-color-container);
-  border-left: 1px solid var(--td-component-stroke);
-  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.06);
-
-  &.is-overlay {
-    box-shadow: -12px 0 32px rgba(0, 0, 0, 0.12);
-  }
-}
-
-.chat-references-panel__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 16px 16px 12px;
-  border-bottom: 1px solid var(--td-component-stroke);
-}
-
-.chat-references-panel__heading {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.chat-references-panel__title {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--td-text-color-secondary);
-  line-height: 1.4;
-}
-
-.chat-references-panel__count {
-  color: var(--td-text-color-placeholder);
-  font-weight: 500;
-}
-
-.chat-references-panel__close {
-  border: 0;
-  background: var(--td-bg-color-secondarycontainer);
-  color: var(--td-text-color-secondary);
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  transition: background 0.15s ease, color 0.15s ease;
-
-  :deep(.t-icon) {
-    font-size: 20px;
-  }
-
-  &:hover {
-    background: color-mix(in srgb, var(--td-text-color-primary) 8%, var(--td-bg-color-secondarycontainer));
-    color: var(--td-text-color-primary);
-  }
-}
-
-.chat-references-panel__body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 4px 12px 24px;
-}
-
 .chat-references-panel__empty {
   padding: 24px 8px;
   text-align: center;
@@ -571,34 +456,4 @@ watch(visible, (open) => {
   overflow-y: auto;
 }
 
-.references-panel-enter-active {
-  transition:
-    transform 0.24s cubic-bezier(0.22, 0.61, 0.36, 1),
-    opacity 0.24s cubic-bezier(0.22, 0.61, 0.36, 1);
-}
-
-.references-panel-leave-active {
-  transition:
-    transform 0.3s cubic-bezier(0.22, 0.61, 0.36, 1),
-    opacity 0.3s cubic-bezier(0.22, 0.61, 0.36, 1);
-}
-
-.references-panel-enter-from,
-.references-panel-leave-to {
-  transform: translateX(100%);
-  opacity: 0.6;
-}
-
-.references-backdrop-enter-active {
-  transition: opacity 0.24s ease;
-}
-
-.references-backdrop-leave-active {
-  transition: opacity 0.3s ease;
-}
-
-.references-backdrop-enter-from,
-.references-backdrop-leave-to {
-  opacity: 0;
-}
 </style>

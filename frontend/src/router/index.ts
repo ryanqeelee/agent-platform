@@ -16,6 +16,10 @@ import type { DeploymentCapabilityKey } from '@/config/deploymentCapabilities'
 import { MessagePlugin } from 'tdesign-vue-next'
 import i18n from '@/i18n'
 import { normalizeSettingsSection } from '@/config/settingsRoute'
+import {
+  normalizedOperatingRoute,
+  operatingRouteIsCanonical,
+} from '@/views/operating/operatingHost'
 
 /** Lite /桌面 WebView 硬刷新时可能只打开 `/`，用 session 记住上次页面以便恢复 */
 const LITE_LAST_PATH_KEY = 'weknora_lite_last_path'
@@ -171,6 +175,9 @@ const router = createRouter({
           component: { render: () => null },
           meta: { requiresInit: true, requiresAuth: true },
           beforeEnter: async (to) => {
+            if (!operatingRouteIsCanonical(to.path, to.query)) {
+              return { ...normalizedOperatingRoute(to.path, to.query), replace: true }
+            }
             try {
               const handoffRef = sessionStorage.getItem(OPERATING_ANALYSIS_HANDOFF_REF_KEY)
               let response
@@ -200,9 +207,7 @@ const router = createRouter({
               }
               localStorage.setItem('retail_ai_app_auth_token', response.access_token)
               document.cookie = `retail_ai_app_auth_token=${response.access_token}; Path=/app; Max-Age=900; SameSite=Lax`
-              const surface = !handoffPrompt && to.path === '/platform/operating-brief' ? 'brief' : 'analysis'
-              window.location.assign(handoffPrompt ? '/app/?data_surface=analysis&data_workspace=data' : `/app/?data_surface=${surface}`)
-              return false
+              return true
             } catch {
               return '/platform/creatChat'
             }

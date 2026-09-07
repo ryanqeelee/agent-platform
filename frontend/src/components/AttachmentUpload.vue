@@ -11,9 +11,7 @@ import {
   uploadTemporaryAttachment,
   type TemporaryAttachmentStatus,
 } from '@/api/chat/temporary-attachments';
-
-const { t } = useI18n();
-const authStore = useAuthStore();
+import type { OperatingComposer } from './operatingComposer';
 
 export interface AttachmentFile {
   file: File;
@@ -35,7 +33,11 @@ const props = defineProps<{
   sessionId?: string;
   agentId?: string;
   agentSourceTenantId?: string;
+  operating?: OperatingComposer;
 }>();
+
+const { t } = useI18n();
+const authStore = props.operating ? null : useAuthStore();
 
 const emit = defineEmits<{
   (e: 'update:files', files: AttachmentFile[]): void;
@@ -62,7 +64,7 @@ const supportedTypes = ref([
 ]);
 
 onMounted(async () => {
-  if (!authStore.isSystemAdmin) return;
+  if (props.operating || !authStore?.isSystemAdmin) return;
   try {
     const response = await getParserEngines();
     const discovered = (response.data || [])
@@ -79,9 +81,19 @@ onMounted(async () => {
 const maxFiles = computed(() => props.maxFiles || 5);
 const maxSizeMB = computed(() => props.maxSize || MAX_FILE_SIZE_MB);
 const maxSize = computed(() => maxSizeMB.value * 1024 * 1024); // Convert MB to bytes
+const acceptedTypes = computed(() => (
+  props.operating ? ['.csv', '.xlsx'] : supportedTypes.value
+));
+const renderedAttachments = computed(() => {
+  if (!props.operating) return attachments.value;
+  return props.operating.attachments.map(attachment => ({
+    ...attachment,
+    status: attachment.status === 'error' ? 'failed' as const : attachment.status,
+  }));
+});
 
 const triggerFileSelect = () => {
-  if (props.disabled) return;
+  if (props.disabled || (props.operating && !props.operating.uploadAvailable)) return;
   fileInputRef.value?.click();
 };
 
@@ -95,6 +107,19 @@ const handleFileSelect = async (event: Event) => {
 
 const addFiles = async (files: File[]) => {
   if (props.disabled) return;
+  if (props.operating) {
+    const acceptedFiles = files.filter(file => {
+      const ext = '.' + file.name.split('.').pop()?.toLowerCase();
+      return acceptedTypes.value.includes(ext);
+    });
+    if (acceptedFiles.length !== files.length) {
+      MessagePlugin.warning('经营分析目前支持 CSV 和 XLSX 数据文件');
+    }
+    if (props.operating.uploadAvailable && acceptedFiles.length > 0) {
+      props.operating.upload(acceptedFiles);
+    }
+    return;
+  }
   
   for (const file of files) {
     // Check max files limit
@@ -199,6 +224,10 @@ const clearPoll = (id: string) => {
 };
 
 const removeAttachment = (id: string) => {
+  if (props.operating) {
+    props.operating.remove(id);
+    return;
+  }
   const index = attachments.value.findIndex(a => a.id === id);
   if (index !== -1) {
     const attachment = attachments.value[index];
@@ -234,7 +263,7 @@ const getFileIcon = (fileName: string): string => {
   return 'file';
 };
 
-const statusLabel = (attachment: AttachmentFile): string => {
+const statusLabel = (attachment: { status: string; progress?: number; error?: string }): string => {
   if (attachment.status === 'uploading') return t('chat.attachmentUploading', { progress: attachment.progress || 0 });
   if (attachment.status === 'uploaded' || attachment.status === 'processing') return t('chat.attachmentParsing');
   if (attachment.status === 'ready') return t('chat.attachmentReady');
@@ -253,6 +282,7 @@ defineExpose({
   triggerFileSelect,
   addFiles,
   clear: () => {
+    if (props.operating) return;
     pollTimers.forEach(timer => clearTimeout(timer));
     pollTimers.clear();
     attachments.value = [];
@@ -267,16 +297,16 @@ defineExpose({
     <input
       ref="fileInputRef"
       type="file"
-      :accept="supportedTypes.join(',')"
+      :accept="acceptedTypes.join(',')"
       multiple
       style="display: none"
       @change="handleFileSelect"
     />
     
     <!-- Attachment list -->
-    <div v-if="attachments.length > 0" class="attachment-preview-bar">
+    <div v-if="renderedAttachments.length > 0" class="attachment-preview-bar">
       <div
-        v-for="attachment in attachments"
+        v-for="attachment in renderedAttachments"
         :key="attachment.id"
         class="attachment-preview-item"
       >
@@ -303,7 +333,7 @@ defineExpose({
     </div>
     
     <!-- Upload button (shown in control bar) -->
-    <slot name="trigger" :trigger="triggerFileSelect" :count="attachments.length" />
+    <slot name="trigger" :trigger="triggerFileSelect" :count="renderedAttachments.length" />
   </div>
 </template>
 

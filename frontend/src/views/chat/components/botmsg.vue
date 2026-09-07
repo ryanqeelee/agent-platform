@@ -49,7 +49,7 @@
                     <t-icon name="copy" />
                 </t-button>
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge"
-                    :title="$t('agent.addToKnowledgeBase')">
+                    :title="$t('agent.addToKnowledgeBase')" v-if="!operating">
                     <t-icon name="bookmark-add" />
                 </t-button>
                 <!-- Skill artifact download: only shown when this reply's
@@ -171,6 +171,7 @@ let reviewUrl = ref('')
 let reviewImg = ref(false)
 let isImgLoading = ref(false);
 const props = defineProps({
+    operating: { type: Boolean, default: false },
     // 必填项
     content: {
         type: String,
@@ -203,7 +204,7 @@ const props = defineProps({
     }
 });
 
-const showRequestInfo = computed(() => !!(props.session?.request_id || props.session?.id));
+const showRequestInfo = computed(() => !props.operating && !!(props.session?.request_id || props.session?.id));
 
 // -----------------------------------------------------------------------------
 // Skill artifact download (drawer)
@@ -408,8 +409,8 @@ watch(renderedHTML, () => {
 // 渲染 Mermaid 图表的函数
 onUpdated(() => {
     nextTick(async () => {
-        await hydrateProtectedFileImages(parentMd.value);
-        await hydrateArtifactImages(parentMd.value, artifactRefContext.value);
+        if (!props.operating) await hydrateProtectedFileImages(parentMd.value);
+        if (!props.operating) await hydrateArtifactImages(parentMd.value, artifactRefContext.value);
         refreshMarkdownEnhancements(parentMd.value);
         if (props.session?.is_completed) {
             await renderMermaidInContainer(parentMd.value);
@@ -424,8 +425,8 @@ onMounted(async () => {
             parentMd.value.addEventListener('click', handleMarkdownImageClick, true);
         }
         rebindCitations();
-        await hydrateProtectedFileImages(parentMd.value);
-        await hydrateArtifactImages(parentMd.value, artifactRefContext.value);
+        if (!props.operating) await hydrateProtectedFileImages(parentMd.value);
+        if (!props.operating) await hydrateArtifactImages(parentMd.value, artifactRefContext.value);
         await enhanceMarkdownContainer(parentMd.value);
     });
 });

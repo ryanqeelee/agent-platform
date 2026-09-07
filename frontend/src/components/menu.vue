@@ -105,8 +105,62 @@
                 </t-tooltip>
             </div>
 
+            <div
+                v-if="!uiStore.sidebarCollapsed && isOperatingRoute"
+                class="submenu operating-session-list"
+                data-session-source="operating-controller"
+            >
+                <div class="timeline_header session-list-row session-list-row--flat operating-session-list__heading">
+                    <span class="session-list-row__body">
+                        <span class="timeline_header-label">历史分析</span>
+                    </span>
+                    <t-loading v-if="operatingSessionsLoading" size="small" />
+                </div>
+                <template v-if="operatingSessionsLoading && operatingSidebar.sessions.length === 0">
+                    <div v-for="n in 4" :key="'operating-skel-' + n" class="submenu_item_p session-chat-row">
+                        <div class="session-list-row session-list-row--flat">
+                            <t-skeleton animation="gradient" class="session-list-row__body"
+                                :row-col="[{ width: '100%', height: '14px' }]" />
+                        </div>
+                    </div>
+                </template>
+                <div v-else class="session-filtered-list">
+                    <div v-if="operatingSidebar.sessions.length === 0" class="submenu_empty">暂无历史分析</div>
+                    <template v-else>
+                        <template v-for="group in operatingGroupedSessions" :key="group.key">
+                            <div class="timeline_header session-list-row session-list-row--flat">
+                                <span class="session-list-row__body">
+                                    <span class="timeline_header-label">{{ group.label }}</span>
+                                </span>
+                            </div>
+                            <div
+                                v-for="session in group.items"
+                                :key="session.id"
+                                class="submenu_item_p session-chat-row"
+                                :class="{ 'session-chat-row--active': session.path === operatingSidebar.activePath }"
+                            >
+                                <div class="session-list-row session-list-row--flat">
+                                    <div class="session-list-row__body">
+                                        <SessionSidebarRow
+                                            :item="session"
+                                            :batch-mode="false"
+                                            :active-path="operatingSidebar.activePath"
+                                            :selected-ids="[]"
+                                            :menu-options="operatingSessionMenuOptions"
+                                            @navigate="openOperatingSession(session.id)"
+                                            @menu-click="handleOperatingSessionMenuClick($event, session.id)"
+                                            @rename-submit="renameOperatingSession(session.id, $event.title)"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                    </template>
+                </div>
+            </div>
+
             <!-- 历史会话：按来源筛选后统一按日期分组展示 -->
-            <div class="submenu" v-if="!uiStore.sidebarCollapsed">
+            <div class="submenu" v-else-if="!uiStore.sidebarCollapsed">
                 <!-- Stable, always-mounted source filter: reserving its row here
                      (instead of embedding it in the first date group, which
                      appears/disappears while a bucket loads) prevents the
@@ -203,7 +257,7 @@
 
 <script setup lang="ts">
 import { storeToRefs } from 'pinia';
-import { onMounted, onUnmounted, watch, computed, ref, h, nextTick } from 'vue';
+import { onMounted, onUnmounted, watch, computed, ref, shallowRef, h, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { getSessionsList, batchDelSessions, deleteAllSessions, getSession } from "@/api/chat/index";
 import { useChatResourcesStore } from '@/stores/chatResources';
@@ -262,6 +316,9 @@ import TenantSelector from '@/components/TenantSelector.vue';
 import { useI18n } from 'vue-i18n';
 import { getSystemInfo } from '@/api/system';
 import { getOperatingAnalysisAvailability, prefetchOperatingBrief, type OperatingAnalysisAvailabilityV1 } from '@/api/operatingAnalysis';
+import type { OperatingController, OperatingSnapshot } from '@/views/operating/operatingClient';
+import { operatingSessionLocation, projectOperatingSidebar } from '@/views/operating/operatingSidebar';
+import { operatingRouteLocationFromRuntime } from '@/views/operating/operatingHost';
 
 const chatResources = useChatResourcesStore();
 // Platform logos reused from IMChannelsOverviewPanel — keeps the session list
@@ -289,6 +346,10 @@ const PLATFORM_LOGO: Record<string, string> = {
 };
 
 const platformLogo = (p: string): string => (p ? PLATFORM_LOGO[p] || '' : '');
+
+const props = defineProps<{
+    operatingController?: OperatingController | null;
+}>();
 
 const { t } = useI18n();
 const usemenuStore = useMenuStore();
@@ -348,6 +409,23 @@ const { menuArr, visibleMenuArr } = storeToRefs(usemenuStore);
 let activeSubmenu = ref<string>('');
 const isLiteEdition = ref(false);
 const operatingAnalysisAvailability = ref<OperatingAnalysisAvailabilityV1 | null>(null);
+const operatingSnapshot = shallowRef<OperatingSnapshot | null>(null);
+
+watch(() => props.operatingController, (nextController, _previousController, onCleanup) => {
+    if (!nextController) {
+        operatingSnapshot.value = null;
+        return;
+    }
+
+    const publishOperatingSnapshot = () => {
+        if (props.operatingController === nextController) {
+            operatingSnapshot.value = nextController.getSnapshot();
+        }
+    };
+    publishOperatingSnapshot();
+    const unsubscribe = nextController.subscribe(publishOperatingSnapshot);
+    onCleanup(unsubscribe);
+}, { immediate: true });
 
 // 批量管理状态
 const batchMode = ref(false)
@@ -400,6 +478,10 @@ const isInAgentList = computed<boolean>(() => route.name === 'agentList');
 
 // 是否在组织列表页面
 const isInOrganizationList = computed<boolean>(() => route.name === 'organizationList');
+
+const isOperatingRoute = computed<boolean>(() =>
+    route.path === '/platform/operating-brief' || route.path === '/platform/operating-analysis'
+);
 
 // 统一的菜单项激活状态判断
 const isMenuItemActive = (itemPath: string): boolean => {
@@ -508,6 +590,49 @@ const filteredGroupedSessions = computed(() => {
         (session) => classifyDateBucket(session.updated_at || session.created_at),
     );
 });
+
+const operatingSidebar = computed(() => projectOperatingSidebar(operatingSnapshot.value));
+const operatingSessionsLoading = computed(() =>
+    operatingSnapshot.value === null || operatingSnapshot.value.sessionsLoading,
+);
+const operatingGroupedSessions = computed(() => groupSessionsByDate(
+    operatingSidebar.value.sessions,
+    dateBucketLabels.value,
+    (session) => classifyDateBucket(session.updated_at),
+));
+const operatingSessionMenuOptions = [
+    { content: '重命名', value: 'rename' },
+    { content: '删除', value: 'delete', theme: 'error' as const },
+];
+
+const openOperatingSession = async (id: string): Promise<void> => {
+    try {
+        const current = props.operatingController?.getSnapshot().location;
+        if (!current) return;
+        const target = operatingRouteLocationFromRuntime(operatingSessionLocation(current, id));
+        // Vue owns navigation; its route subscription hydrates a different session once.
+        if (target) await router.push(target);
+    } catch {
+        MessagePlugin.error('历史分析打开失败，请重试。');
+    }
+};
+
+const renameOperatingSession = async (id: string, title: string): Promise<void> => {
+    try {
+        await props.operatingController?.renameSession(id, title);
+    } catch {
+        MessagePlugin.error('重命名失败，请重试。');
+    }
+};
+
+const handleOperatingSessionMenuClick = async (event: { value: string }, id: string): Promise<void> => {
+    if (event.value !== 'delete') return;
+    try {
+        await props.operatingController?.deleteSession(id);
+    } catch {
+        MessagePlugin.error('删除失败，请重试。');
+    }
+};
 
 const refreshSessionListScrollability = async () => {
     await nextTick();
@@ -1178,6 +1303,14 @@ const gotopage = async (path: string) => {
                 // 如果不在知识库内，进入对话创建页
                 router.push(`/platform/creatChat`)
             }
+        } else if (path === 'operating-brief' || path === 'operating-analysis') {
+            const surface = path === 'operating-brief' ? 'brief' : 'analysis';
+            router.push({
+                path: `/platform/${path}`,
+                query: isOperatingRoute.value
+                    ? { ...route.query, data_surface: surface }
+                    : { data_surface: surface },
+            });
         } else {
             router.push(`/platform/${path}`);
         }

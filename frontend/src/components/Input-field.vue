@@ -34,6 +34,21 @@ import {
 } from '@/utils/tool-capabilities';
 import { useAuthStore } from '@/stores/auth';
 import { SKILL_ICON, type MentionItem, type MentionItemType, type MentionRequestItem } from '@/types/mention';
+import {
+  canSendOperatingDraft,
+  sendOperatingDraft,
+  type OperatingComposer,
+} from './operatingComposer';
+
+const props = withDefaults(defineProps<{
+  isReplying?: boolean;
+  sessionId?: string;
+  assistantMessageId?: string;
+  embeddedMode?: boolean;
+  operating?: OperatingComposer;
+}>(), {
+  embeddedMode: false,
+});
 
 const route = useRoute();
 const router = useRouter();
@@ -49,7 +64,35 @@ const {
 } = storeToRefs(chatResources);
 const { t } = useI18n();
 
-let query = ref("");
+const query = ref("");
+const composerDraft = computed({
+  get: () => props.operating?.draft ?? query.value,
+  set: (text: string) => {
+    if (props.operating) {
+      props.operating.setDraft(text);
+      return;
+    }
+    query.value = text;
+  },
+});
+const composerReplying = computed(() => (
+  props.operating
+    ? (props.operating.running || props.operating.cancelling)
+    : !!props.isReplying
+));
+const composerDisabled = computed(() => props.operating?.disabled ?? false);
+const composerUploadDisabled = computed(() => (
+  !!props.operating
+  && (props.operating.disabled || !props.operating.uploadAvailable)
+));
+const composerAttachmentCount = computed(() => (
+  props.operating?.attachments.length ?? uploadedAttachments.value.length
+));
+const canSendCurrentDraft = computed(() => (
+  props.operating
+    ? canSendOperatingDraft(props.operating, composerDraft.value)
+    : composerDraft.value.trim().length > 0
+));
 const showKbSelector = ref(false);
 
 // Image upload state
@@ -73,6 +116,12 @@ const isImageFile = (file: File) => {
 const handleDroppedFiles = (files: File[]) => {
   if (!files.length) return;
 
+  if (props.operating) {
+    if (composerUploadDisabled.value) return;
+    void attachmentUploadRef.value?.addFiles(files);
+    return;
+  }
+
   const imageFiles = files.filter(isImageFile);
   const attachmentFiles = files.filter(file => !isImageFile(file));
 
@@ -90,6 +139,8 @@ const handleDroppedFiles = (files: File[]) => {
 };
 
 const handleChatFileDrop = (event: Event) => {
+  if (props.operating && route.path !== '/platform/operating-analysis') return;
+  if (!props.operating && route.path.startsWith('/platform/operating-')) return;
   const customEvent = event as CustomEvent<{ files?: File[] }>;
   const files = customEvent.detail?.files;
   if (!files || files.length === 0) return;
@@ -177,6 +228,7 @@ const agentKBSelectionMode = computed(() => {
 // explicit user selections while allowing the configured KB scope to initialize.
 // 知识库：用新智能体配置的列表替换当前选中，使已选与可@列表一致（含共享智能体）
 watch([selectedAgentId, agentKnowledgeBases, agentKBSelectionMode], ([newAgentId, newAgentKbs, newKbMode], [oldAgentId]) => {
+  if (props.operating) return;
   if (settingsStore._isApplyingSessionState) return;
   if (newAgentId !== oldAgentId && oldAgentId !== undefined) {
     if (newKbMode === 'none') {
@@ -278,6 +330,7 @@ const isSkillAllowedByAgent = (skillName: string) => {
 
 // 切换智能体时清理不允许的 MCP / Skill @mention
 watch([selectedAgentId, agentMCPSelectionMode, agentSkillsSelectionMode], ([newAgentId], [oldAgentId]) => {
+  if (props.operating) return;
   if (settingsStore._isApplyingSessionState) return;
   if (newAgentId === oldAgentId || oldAgentId === undefined) return;
 
@@ -388,25 +441,6 @@ const mentionAllowedKbIds = ref<Set<string> | null>(null);
 const mentionLoading = ref(false);
 const mentionOffset = ref(0);
 const MENTION_PAGE_SIZE = 20;
-
-const props = defineProps({
-  isReplying: {
-    type: Boolean,
-    required: false
-  },
-  sessionId: {
-    type: String,
-    required: false
-  },
-  assistantMessageId: {
-    type: String,
-    required: false
-  },
-  embeddedMode: {
-    type: Boolean,
-    default: false
-  }
-});
 
 const isWebSearchEnabled = computed(() => settingsStore.isWebSearchEnabled);
 const selectedKbIds = computed(() => settingsStore.settings.selectedKnowledgeBases || []);
@@ -589,9 +623,13 @@ const inputPlaceholder = computed(() => {
     return t('input.placeholder');
   }
 });
+const composerPlaceholder = computed(() => (
+  props.operating ? '询问经营问题，或上传数据文件进行分析' : inputPlaceholder.value
+));
 
 // 加载知识库列表（自己的 + 共享的，用于 @ 提及等）
 const loadKnowledgeBases = async (force = false) => {
+  if (props.operating) return;
   try {
     await chatResources.ensureKnowledgeBases(force);
     const validKbs = knowledgeBases.value;
@@ -614,6 +652,7 @@ const loadKnowledgeBases = async (force = false) => {
 };
 
 const loadFiles = async () => {
+  if (props.operating) return;
   const ids = selectedFileIds.value;
   if (ids.length === 0) return;
 
@@ -659,6 +698,7 @@ const loadFiles = async () => {
 };
 
 watch(selectedFileIds, () => {
+  if (props.operating) return;
   loadFiles();
 }, { immediate: true });
 
@@ -675,6 +715,7 @@ const isWebSearchConfigured = computed(() =>
 
 // 加载服务端统一员工助理投影，供能力与就绪检查使用。
 const loadAgents = async (force = false) => {
+  if (props.operating) return;
   try {
     await chatResources.ensureAgents(force);
   } catch (error) {
@@ -718,6 +759,7 @@ const writeLastChatModelID = (id: string) => {
 // into the dropdown, but those fields were removed: per-user last pick
 // belongs in localStorage, agent-level model belongs on the agent.
 const initChatModelSelection = () => {
+  if (props.operating) return;
   const lastPick = readLastChatModelID();
   const currentSelectedModel = settingsStore.conversationModels.selectedChatModelId;
   const initialSelection = lastPick || currentSelectedModel || '';
@@ -733,6 +775,7 @@ const initChatModelSelection = () => {
 };
 
 const loadChatModels = async (force = false) => {
+  if (props.operating) return;
   if (modelsLoading.value) return;
   modelsLoading.value = true;
   try {
@@ -768,6 +811,7 @@ const ensureModelSelection = () => {
 watch(
   [selectedAgentId, agentModelId],
   ([, newModelId]) => {
+    if (props.operating) return;
     if (!newModelId || newModelId.trim() === '') return;
 
     const lastPick = readLastChatModelID();
@@ -1236,6 +1280,7 @@ const getTextareaEl = () => {
 };
 
 const onInput = (val: string | InputEvent) => {
+  if (props.operating) return;
   // 如果正在输入法组合中，不处理搜索逻辑，等待 compositionend
   if (isComposing.value) return;
 
@@ -1346,6 +1391,7 @@ const onCompositionStart = () => {
 
 const onCompositionEnd = (e: CompositionEvent) => {
   isComposing.value = false;
+  if (props.operating) return;
   // 手动触发 onInput 逻辑
   // 注意：在 compositionend 时，v-model 可能还没更新，或者已经更新但我们需要用最新值
   // TDesign textarea 可能需要 nextTick
@@ -1515,6 +1561,10 @@ let resizeHandler: (() => void) | null = null;
 let scrollHandler: (() => void) | null = null;
 
 onMounted(() => {
+  if (props.operating) {
+    window.addEventListener(CHAT_FILE_DROP_EVENT, handleChatFileDrop as EventListener);
+    return;
+  }
   // Embed 渠道由宿主注入 agent/KB，勿拉取需 JWT 的平台资源
   if (props.embeddedMode) return;
 
@@ -1590,18 +1640,21 @@ onUnmounted(() => {
 
 // 监听路由变化
 watch(() => route.params.kbId, (newKbId) => {
+  if (props.operating) return;
   if (newKbId && typeof newKbId === 'string' && !selectedKbIds.value.includes(newKbId)) {
     settingsStore.addKnowledgeBase(newKbId);
   }
 });
 
 watch(() => route.path, (path, prev) => {
+  if (props.operating) return;
   if (prev === '/platform/settings' && path !== '/platform/settings') {
     loadChatModels(true);
   }
 });
 
 watch([selectedKbIds, selectedFileIds], ([kbIds, fileIds]) => {
+  if (props.operating) return;
   if (!kbIds.length && !fileIds.length) {
     closeModelSelector();
   }
@@ -1613,6 +1666,10 @@ const emit = defineEmits<{
 }>();
 
 const createSession = async (val: string) => {
+  if (props.operating) {
+    sendOperatingDraft(props.operating, val);
+    return;
+  }
   if (!val.trim()) {
     MessagePlugin.info(t('input.messages.enterContent'));
     return;
@@ -1711,6 +1768,14 @@ const clearPendingUploads = () => {
 }
 
 const onKeydown = (val: string, event: { e: { preventDefault(): unknown; keyCode: number; shiftKey: any; ctrlKey: any; }; }) => {
+  if (props.operating) {
+    if (event.e.keyCode === 13 && !event.e.shiftKey && !isComposing.value) {
+      event.e.preventDefault();
+      void createSession(val);
+    }
+    return;
+  }
+
   if (showMention.value) {
     if (event.e.keyCode === 38) { // Up
       event.e.preventDefault();
@@ -1760,6 +1825,7 @@ const onKeydown = (val: string, event: { e: { preventDefault(): unknown; keyCode
 }
 
 const onPaste = (e: ClipboardEvent) => {
+  if (props.operating) return;
   const items = e.clipboardData?.items;
   if (!items) return;
   const imageFiles: File[] = [];
@@ -1813,6 +1879,13 @@ const removeKb = (kbId: string) => {
 }
 
 const handleStop = async () => {
+  if (props.operating) {
+    if (props.operating.running && !props.operating.cancelling) {
+      props.operating.stop();
+    }
+    return;
+  }
+
   if (!props.sessionId) {
     MessagePlugin.warning(t('input.messages.sessionMissing'));
     return;
@@ -1839,6 +1912,10 @@ const handleStop = async () => {
 }
 
 onBeforeRouteUpdate((to, from, next) => {
+  if (props.operating) {
+    next();
+    return;
+  }
   clearvalue()
   clearPendingUploads()
   next()
@@ -1858,14 +1935,14 @@ defineExpose({
 
 </script>
 <template>
-  <div class="answers-input" :class="{ 'is-embedded': embeddedMode }" @drop="onDrop" @dragover="onDragOver">
+  <div class="answers-input" :class="{ 'is-embedded': embeddedMode || Boolean(operating) }" @drop="onDrop" @dragover="onDragOver">
     <!-- Hidden file input for image upload -->
-    <input ref="imageInputRef" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple
+    <input v-if="!operating" ref="imageInputRef" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple
       style="display:none" @change="handleImageSelect" />
     <!-- 富文本输入框容器 -->
     <div class="rich-input-container" data-guide="chat-input">
       <!-- 图片预览区域 -->
-      <div v-if="uploadedImages.length > 0" class="image-preview-bar">
+      <div v-if="!operating && uploadedImages.length > 0" class="image-preview-bar">
         <div v-for="(img, idx) in uploadedImages" :key="idx" class="image-preview-item">
           <img :src="img.preview" class="image-preview-thumb" />
           <span class="image-preview-remove" @click="removeImage(idx)">×</span>
@@ -1875,10 +1952,11 @@ defineExpose({
       <!-- 附件列表区域 (由 AttachmentUpload 组件渲染) -->
       <AttachmentUpload ref="attachmentUploadRef" :max-files="5"
         :session-id="sessionId" :agent-id="selectedAgentId"
+        :operating="operating" :disabled="composerUploadDisabled"
         @update:files="uploadedAttachments = $event" />
 
       <!-- 选中的知识库和文件标签（显示在输入框内顶部） -->
-      <div v-if="allSelectedItems.length > 0" class="selected-tags-inline">
+      <div v-if="!operating && allSelectedItems.length > 0" class="selected-tags-inline">
         <span v-for="item in allSelectedItems" :key="`${item.type}:${item.id}`" class="mention-chip" :class="[
           getMentionChipClass(item),
           { 'mention-chip--agent': item.isAgentConfigured }
@@ -1900,14 +1978,35 @@ defineExpose({
       </div>
 
       <!-- 实际输入框 -->
-      <t-textarea ref="textareaRef" v-model="query" :placeholder="inputPlaceholder" name="description" :autosize="true"
+      <t-textarea ref="textareaRef" v-model="composerDraft" :placeholder="composerPlaceholder" name="description" :autosize="true"
+        :disabled="composerDisabled"
         @keydown="onKeydown" @input="onInput" @compositionstart="onCompositionStart" @compositionend="onCompositionEnd"
         @paste="onPaste" />
 
       <!-- 控制栏（放在 rich-input-container 内，相对输入框边框定位） -->
       <div class="control-bar" :class="{ 'is-embedded': embeddedMode }">
         <!-- 左侧控制按钮 -->
-        <div class="control-left" v-if="!embeddedMode">
+        <div v-if="operating" class="control-left">
+          <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
+            <template #content>
+              <span>{{ composerAttachmentCount > 0 ? $t('chat.attachmentWithCount', {
+                count: composerAttachmentCount
+              }) : '上传数据文件（CSV、XLSX）' }}</span>
+            </template>
+            <button type="button" aria-label="上传数据附件" :disabled="composerUploadDisabled" class="control-btn attachment-upload-btn" :class="{
+              'active': composerAttachmentCount > 0,
+              'disabled': composerUploadDisabled
+            }" @click.stop="attachmentUploadRef?.triggerFileSelect()">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                stroke-linecap="round" stroke-linejoin="round" class="control-icon">
+                <path
+                  d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+              </svg>
+              <span v-if="composerAttachmentCount > 0" class="attachment-count">{{ composerAttachmentCount }}</span>
+            </button>
+          </t-tooltip>
+        </div>
+        <div class="control-left" v-else-if="!embeddedMode">
           <!-- 员工联网权限：服务端投影能力与就绪状态，前端只保留本轮许可开关。 -->
           <t-tooltip v-if="showWebSearchButton" placement="top" theme="light"
             :popupProps="{ overlayClassName: 'input-field-tooltip' }">
@@ -2059,8 +2158,9 @@ defineExpose({
         <!-- 右侧控制按钮组 -->
         <div class="control-right">
           <!-- 停止按钮（仅在回复中时显示） -->
-          <t-tooltip v-if="isReplying" :content="$t('input.stopGeneration')" placement="top">
-            <button type="button" @click="handleStop" class="control-btn stop-btn" :aria-label="$t('input.stopGeneration')">
+          <t-tooltip v-if="composerReplying" :content="$t('input.stopGeneration')" placement="top">
+            <button type="button" @click="handleStop" class="control-btn stop-btn" :aria-label="$t('input.stopGeneration')"
+              :disabled="operating ? operating.cancelling : composerDisabled">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                 <rect x="5" y="5" width="6" height="6" rx="1" />
               </svg>
@@ -2068,8 +2168,8 @@ defineExpose({
           </t-tooltip>
 
           <!-- 发送按钮 -->
-          <button type="button" v-if="!isReplying" @click="createSession(query)" class="control-btn send-btn" data-guide="chat-send"
-            :aria-label="$t('input.send')" :disabled="!query.trim()" :class="{ 'disabled': !query.trim() }">
+          <button type="button" v-if="!composerReplying" @click="createSession(composerDraft)" class="control-btn send-btn" data-guide="chat-send"
+            :aria-label="$t('input.send')" :disabled="!canSendCurrentDraft" :class="{ 'disabled': !canSendCurrentDraft }">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6" /></svg>
           </button>
         </div>

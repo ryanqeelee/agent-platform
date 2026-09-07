@@ -19,7 +19,7 @@
       <!-- Tree children (intermediate steps) -->
       <div v-if="showIntermediateSteps" class="tree-children">
         <ChatMemoryStep
-          v-if="hasMemory"
+          v-if="!processOnly && hasMemory"
           :memories="memoryItems"
           :expanded="memoryExpanded"
           :forgetting-id="memoryForgettingId"
@@ -135,10 +135,10 @@
                 <div class="action-card" :class="{
                   'action-pending': event.pending,
                   'action-error': event.success === false,
-                  'reference-trigger': canOpenToolReferences(event)
+                  'reference-trigger': canOpenToolReferences(event) || canOpenOperatingResult(event)
                 }"
-                  :role="canOpenToolReferences(event) ? 'button' : undefined"
-                  :tabindex="canOpenToolReferences(event) ? 0 : undefined"
+                  :role="canOpenToolReferences(event) || canOpenOperatingResult(event) ? 'button' : undefined"
+                  :tabindex="canOpenToolReferences(event) || canOpenOperatingResult(event) ? 0 : undefined"
                   @click="handleActionCardClick(event)"
                   @keydown.enter="handleActionCardClick(event)"
                   @keydown.space.prevent="handleActionCardClick(event)"
@@ -236,7 +236,7 @@
               <div class="action-header no-results">
                 <div class="action-title">
                   <t-icon class="action-title-icon" name="check-circle" />
-                  <span class="action-name">{{ t('common.finish') }}</span>
+                  <span class="action-name">{{ processOnly && operatingStatus === 'cancelled' ? '已停止' : processOnly && (operatingStatus === 'failed' || operatingStatus === 'incomplete') ? '分析未完成' : t('common.finish') }}</span>
                 </div>
               </div>
             </div>
@@ -423,10 +423,10 @@
               <div class="action-card" :class="{
                 'action-pending': event.pending,
                 'action-error': event.success === false,
-                'reference-trigger': canOpenToolReferences(event)
+                'reference-trigger': canOpenToolReferences(event) || canOpenOperatingResult(event)
               }"
-                :role="canOpenToolReferences(event) ? 'button' : undefined"
-                :tabindex="canOpenToolReferences(event) ? 0 : undefined"
+                :role="canOpenToolReferences(event) || canOpenOperatingResult(event) ? 'button' : undefined"
+                :tabindex="canOpenToolReferences(event) || canOpenOperatingResult(event) ? 0 : undefined"
                 @click="handleActionCardClick(event)"
                 @keydown.enter="handleActionCardClick(event)"
                 @keydown.space.prevent="handleActionCardClick(event)"
@@ -540,13 +540,13 @@
     </div>
   </div>
   <!-- 引用 hover 浮层（与历史消息共用同一组件） -->
-  <ChatCitationFloat :float="citationFloat" :on-enter="cancelCitationClose" :on-leave="scheduleCitationClose" />
+  <ChatCitationFloat v-if="!processOnly" :float="citationFloat" :on-enter="cancelCitationClose" :on-leave="scheduleCitationClose" />
 
   <!-- Image Preview -->
-  <picturePreview :reviewImg="imagePreviewVisible" :reviewUrl="imagePreviewUrl" @closePreImg="closeImagePreview" />
+  <picturePreview v-if="!processOnly" :reviewImg="imagePreviewVisible" :reviewUrl="imagePreviewUrl" @closePreImg="closeImagePreview" />
 
   <!-- Wiki Page Detail Drawer -->
-  <t-drawer v-model:visible="wikiDrawerVisible" :header="wikiDrawerPage?.title || ''" size="480px" :footer="false"
+  <t-drawer v-if="!processOnly" v-model:visible="wikiDrawerVisible" :header="wikiDrawerPage?.title || ''" size="480px" :footer="false"
     placement="right" attach="body" :show-overlay="true" :close-btn="true" :close-on-overlay-click="true"
     class="wiki-graph-drawer">
     <template v-if="wikiDrawerPage">
@@ -577,7 +577,7 @@
     </template>
   </t-drawer>
   <ChatArtifactsDrawer
-    v-if="hasArtifacts && sessionIdForArtifacts && messageIdForArtifacts"
+    v-if="!processOnly && hasArtifacts && sessionIdForArtifacts && messageIdForArtifacts"
     v-model:visible="showArtifactDrawer"
     :session-id="sessionIdForArtifacts"
     :message-id="messageIdForArtifacts"
@@ -663,6 +663,10 @@ import {
 import { attachMarkdownEnhancementListeners, refreshMarkdownEnhancements } from '@/utils/markdownEnhancements';
 import { useTypewriter } from '@/composables/useTypewriter';
 import { vStableHtml } from '@/directives/stableHtml';
+import {
+  isOperatingTerminalStatus,
+  type OperatingStatus,
+} from '@/components/operatingComposer';
 
 const getToolIconName = getAgentToolIconName;
 
@@ -850,6 +854,7 @@ const wikiDrawerContent = computed(() => {
 });
 
 watch(wikiDrawerContent, async () => {
+  if (props.processOnly) return;
   await nextTick();
   if (wikiDrawerBodyRef.value) {
     await hydrateProtectedFileImages(wikiDrawerBodyRef.value, protectedFileAccess.value);
@@ -934,10 +939,15 @@ const props = defineProps<{
   embedVisitorId?: string;
   ragMode?: boolean;
   followUpLoading?: boolean;
+  processOnly?: boolean;
+  operatingStatus?: OperatingStatus;
+  operatingDurationMs?: number | null;
+  operatingMessageId?: string;
 }>();
 
 const emit = defineEmits<{
   (event: 'render-complete-change', ready: boolean): void;
+  (event: 'operating-result', messageId: string, queryId: string): void;
 }>();
 
 const embedAuthProps = computed(() => ({
@@ -950,7 +960,7 @@ const embedAuthProps = computed(() => ({
 }));
 
 const showRequestInfo = computed(
-  () => !props.embeddedMode && !!(props.session?.request_id || props.session?.id),
+  () => !props.processOnly && !props.embeddedMode && !!(props.session?.request_id || props.session?.id),
 );
 
 const {
@@ -970,6 +980,7 @@ const resolveAssistantMessageId = (session?: SessionData) =>
 // users use the persisted assistant message as the authorization anchor, which
 // also covers resources owned by a shared agent's source workspace.
 const protectedFileAccess = computed<ProtectedFileAccessContext | undefined>(() => {
+  if (props.processOnly) return undefined;
   if (props.embeddedMode && props.embedChannelId && props.embedToken) {
     return { mode: 'embed', channelId: props.embedChannelId, token: props.embedToken };
   }
@@ -991,6 +1002,7 @@ watch(
     return '';
   },
   (scopeKey, previousScopeKey) => {
+    if (props.processOnly) return;
     if (!scopeKey || scopeKey === previousScopeKey) return;
     clearProtectedFileFailureCache();
     nextTick(async () => {
@@ -1047,7 +1059,7 @@ const {
   rebind: rebindCitations,
   cancelClose: cancelCitationClose,
   scheduleClose: scheduleCitationClose,
-} = useChatCitationPopover(rootElement, {
+} = useChatCitationPopover(props.processOnly ? ref<HTMLElement | null>(null) : rootElement, {
   getKnowledgeReferences: () => props.session?.knowledge_references,
   embedChannelId: () => (props.embeddedMode ? props.embedChannelId : undefined),
   embedToken: () => (props.embeddedMode ? props.embedToken : undefined),
@@ -1399,7 +1411,9 @@ function getToolReferenceItems(event: any): KnowledgeReferenceLike[] {
   return [];
 }
 
-const canOpenToolReferences = (event: any): boolean => getToolReferenceItems(event).length > 0;
+const canOpenToolReferences = (event: any): boolean => (
+  !props.processOnly && getToolReferenceItems(event).length > 0
+);
 
 const openToolReferences = (event: any): boolean => {
   const refs = getToolReferenceItems(event);
@@ -1415,8 +1429,27 @@ const openToolReferences = (event: any): boolean => {
 
 configureMarkedForChatMarkdown();
 
+// Operating analysis supplies only sanitized public process events. Keep this
+// boundary explicit so answer, approval, OAuth, reference and completion events
+// cannot activate employee-chat behavior if a host accidentally forwards them.
+const OPERATING_PROCESS_EVENT_TYPES = new Set([
+  'thinking',
+  'tool_call',
+  'plan_task_change',
+  'context_compacted',
+]);
+
 // Event stream
-const eventStream = computed(() => props.session?.agentEventStream || []);
+const eventStream = computed(() => {
+  const stream = props.session?.agentEventStream || [];
+  if (!props.processOnly) return stream;
+  const terminal = isOperatingTerminalStatus(props.operatingStatus);
+  return stream
+    .filter((event: any) => event && OPERATING_PROCESS_EVENT_TYPES.has(event.type))
+    .map((event: any) => (
+      terminal && event.pending ? { ...event, pending: false } : event
+    ));
+});
 
 // Expanded events tracking (for tool calls and thinking events)
 const expandedEvents = ref<Set<string>>(new Set());
@@ -1427,6 +1460,7 @@ const activeThinkingIds = ref<Set<string>>(new Set());
 const activeThinkingVersion = ref(0);
 
 const isThinkingActive = (eventId: string): boolean => {
+  if (props.processOnly && isOperatingTerminalStatus(props.operatingStatus)) return false;
   // Reference version to create reactive dependency
   void activeThinkingVersion.value;
   return activeThinkingIds.value.has(eventId);
@@ -1469,7 +1503,9 @@ watch(eventStream, (stream) => {
   activeThinkingVersion.value++;
 
   nextTick(async () => {
-    await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
+    if (!props.processOnly) {
+      await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
+    }
     await enhanceMarkdownContainer(rootElement.value);
     // Auto-scroll thinking detail content to bottom during streaming
     if (newActiveIds.size > 0 && rootElement.value) {
@@ -1503,6 +1539,7 @@ const showIntermediateSteps = ref(false);
 // count as "answer started", otherwise the answer-only view would stick after
 // the preamble was retracted.
 const hasAnswerStarted = computed(() => {
+  if (props.processOnly) return false;
   const stream = eventStream.value;
   if (!stream || !Array.isArray(stream)) return false;
   return stream.some((e: any) => e.type === 'answer' && !e.superseded && e.content && e.content.trim());
@@ -1515,27 +1552,39 @@ const hasAnswerStarted = computed(() => {
 // shrink back to the capped height (which would look like a jump). Once the
 // model starts producing answer-style text, give it full height to breathe.
 const answerEverStarted = computed(() => {
+  if (props.processOnly) return false;
   const stream = eventStream.value;
   if (!stream || !Array.isArray(stream)) return false;
   return stream.some((e: any) => e.type === 'answer' && e.content && e.content.trim());
 });
 
-const agentDurationMs = ref<number>(0);
+const employeeAgentDurationMs = ref<number>(0);
 watch(eventStream, (stream) => {
+  if (props.processOnly) return;
   if (!stream || !Array.isArray(stream)) return;
 
   // Check for agent_complete event with authoritative duration from backend
-  if (agentDurationMs.value === 0) {
+  if (employeeAgentDurationMs.value === 0) {
     const completeEvent = stream.find((e: any) => e.type === 'agent_complete' && e.total_duration_ms);
     if (completeEvent) {
-      agentDurationMs.value = completeEvent.total_duration_ms;
+      employeeAgentDurationMs.value = completeEvent.total_duration_ms;
     }
   }
 }, { deep: true, immediate: true });
 
+const agentDurationMs = computed(() => (
+  props.processOnly
+    ? (props.operatingDurationMs ?? 0)
+    : employeeAgentDurationMs.value
+));
+
 
 // Check if conversation is done (based on answer event with done=true or stop event)
 const isConversationDone = computed(() => {
+  if (props.processOnly) {
+    return isOperatingTerminalStatus(props.operatingStatus);
+  }
+
   const stream = eventStream.value;
   if (!stream || stream.length === 0) {
     console.log('[Collapse] No stream or empty stream');
@@ -1640,10 +1689,13 @@ watch(activeAnswerMarkdown, () => {
 // yet. Hydrating too early would find nothing and leave a permanent placeholder
 // (until a manual reload). Waiting for full reveal guarantees the image exists.
 const answerFullyRendered = computed(
-  () => isConversationDone.value && typedAnswer.value.length >= activeAnswerMarkdown.value.length,
+  () => !props.processOnly
+    && isConversationDone.value
+    && typedAnswer.value.length >= activeAnswerMarkdown.value.length,
 );
 watch(answerFullyRendered, (ready) => {
   emit('render-complete-change', ready);
+  if (props.processOnly) return;
   if (!ready) return;
   // Clear before this reactive update renders, so a source that returned 404
   // mid-stream gets one real final-attempt <img> node instead of remaining
@@ -1680,6 +1732,7 @@ const hasPendingStreamingActivity = computed(() => {
 // shimmer, and once answer text starts the stream itself is enough feedback.
 const showAgentActivityIndicator = computed(() => {
   if (isConversationDone.value) return false;
+  if (props.processOnly && props.operatingStatus !== 'running') return false;
   if (props.ragMode || hasAnswerStarted.value) return false;
   return !hasPendingStreamingActivity.value;
 });
@@ -1703,6 +1756,7 @@ const lastStreamingTimelineEventIndex = computed(() => {
 // Whether a completed answer with content is rendered (its toolbar hosts the
 // request-info button inline, so the standalone toolbar should not duplicate it)
 const hasDoneAnswerContent = computed(() => {
+  if (props.processOnly) return false;
   const stream = eventStream.value;
   if (!stream || stream.length === 0) return false;
   return stream.some(
@@ -1712,6 +1766,7 @@ const hasDoneAnswerContent = computed(() => {
 
 // Find the final content to display (last thinking or answer)
 const finalContent = computed(() => {
+  if (props.processOnly) return null;
   const stream = eventStream.value;
   if (!stream || stream.length === 0) {
     return null;
@@ -1831,7 +1886,7 @@ const shouldShowCollapsedSteps = computed(() => {
 // showing it here as well would leave two rows saying the same thing. In
 // quick-answer mode the pipeline component owns the timeline and its memory row.
 const showMemoryRow = computed(
-  () => !props.ragMode && hasMemory.value && !shouldShowCollapsedSteps.value,
+  () => !props.processOnly && !props.ragMode && hasMemory.value && !shouldShowCollapsedSteps.value,
 );
 
 // Memory leads the timeline, so it is only the last node while nothing has
@@ -2067,6 +2122,10 @@ const displayEvents = computed(() => {
     return result.filter((e: any) => e.type === 'answer');
   }
 
+  if (props.processOnly) {
+    return isConversationDone.value ? [] : result;
+  }
+
   // Keep the active reasoning event inline with tool activity. It uses the same
   // compact timeline card and is auto-collapsed when a tool or answer follows.
   if (!isConversationDone.value) {
@@ -2133,7 +2192,7 @@ const getEventKey = (event: any, index: number): string => {
 const toggleIntermediateSteps = () => {
   showIntermediateSteps.value = !showIntermediateSteps.value;
   nextTick(async () => {
-    if (rootElement.value) {
+    if (!props.processOnly && rootElement.value) {
       await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
     }
   });
@@ -2152,12 +2211,26 @@ const handleActionHeaderClick = (event: any) => {
     openToolReferences(event);
     return;
   }
+  if (props.processOnly && event?.tool_name === 'database_query'
+    && event?.tool_data?.result_available === true
+    && props.operatingMessageId && event?.tool_call_id) {
+    emit(
+      'operating-result',
+      props.operatingMessageId,
+      String(event.tool_call_id).replace(/^operating-query-/, ''),
+    );
+    return;
+  }
   if (hasExpandableResults(event) && event.tool_call_id) {
     toggleEvent(event.tool_call_id);
   }
 };
 
 const handleActionCardClick = (event: any) => {
+  if (canOpenOperatingResult(event)) {
+    handleActionHeaderClick(event);
+    return;
+  }
   if (!canOpenToolReferences(event)) return;
   openToolReferences(event);
 };
@@ -2180,8 +2253,14 @@ const isReferenceDrawerTool = (toolName?: string | null): boolean =>
   toolName === 'wiki_read_page' ||
   toolName === 'wiki_read_source_doc';
 
+const canOpenOperatingResult = (event: any): boolean => props.processOnly === true
+  && event?.tool_name === 'database_query'
+  && event?.tool_data?.result_available === true;
+
 const hasExpandableResults = (event: any): boolean => {
   if (isReferenceDrawerTool(event?.tool_name)) return false;
+  if (props.processOnly && event?.tool_name === 'database_query') return canOpenOperatingResult(event);
+  if (props.processOnly && event?.tool_name === 'data_analysis') return false;
   return hasResults(event);
 };
 
@@ -2464,6 +2543,7 @@ const onRootKeydown = (e: KeyboardEvent) => {
 };
 
 onMounted(() => {
+  if (props.processOnly) return;
   nextTick(async () => {
     const root = rootElement.value;
     if (!root) return;
@@ -2489,6 +2569,7 @@ onBeforeUnmount(() => {
 });
 
 onUpdated(() => {
+  if (props.processOnly) return;
   nextTick(async () => {
     rebindCitations();
     // Hydrate protected-file images (e.g. local:// exports) as soon as the
@@ -2794,6 +2875,7 @@ const getAttachmentParsingSummary = (event: any): string => {
 
 // Get tool title - prefer summary over description, add query for search tools
 const getToolTitle = (event: any): string => {
+  if (props.processOnly && (event.tool_name === 'database_query' || event.tool_name === 'data_analysis')) return getToolDescription(event);
   if (event.pending) {
     if (event.tool_name === 'image_analysis') {
       return t('agentStream.toolStatus.imageAnalyzing');
@@ -2955,6 +3037,14 @@ const skillScriptCommandLabel = (event: any): string => {
 
 // Tool description
 const getToolDescription = (event: any): string => {
+  if (props.processOnly && event.tool_name === 'database_query') {
+    const intent = event.tool_data?.intent || '核对经营数据';
+    const rows = event.tool_data?.row_count;
+    return `${intent}${event.pending ? '…' : typeof rows === 'number' ? ` · ${rows} 行结果` : ''}`;
+  }
+  if (props.processOnly && event.tool_name === 'data_analysis') {
+    return event.pending ? '计算与核验…' : event.success ? '计算与核验完成' : '计算未完成';
+  }
   if (event.pending) {
     if (event.tool_name === 'image_analysis') {
       return t('agentStream.toolStatus.imageAnalyzing');

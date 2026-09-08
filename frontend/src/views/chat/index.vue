@@ -861,10 +861,10 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     // chat always executes the unified employee assistant.
     const agentEnabled = props.embeddedMode
         ? (props.agentId && props.agentId !== 'builtin-quick-answer')
-        : true;
+        : useSettingsStoreInstance.assistantMode === 'deep';
 
     // Get web search status from settings store
-    const webSearchEnabled = !props.embeddedMode && employeeWebSearchEnabled(
+    const webSearchEnabled = !props.embeddedMode && useSettingsStoreInstance.assistantMode === 'deep' && employeeWebSearchEnabled(
         useSettingsStoreInstance.isWebSearchEnabled,
         useChatResourcesStore().agents.find(agent => agent.id === BUILTIN_EMPLOYEE_ASSISTANT_ID),
     );
@@ -905,6 +905,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         knowledge_base_ids: kbIds,
         knowledge_ids: knowledgeIds,
         agent_enabled: agentEnabled,
+        assistant_mode: props.embeddedMode ? undefined : useSettingsStoreInstance.assistantMode,
         agent_id: selectedAgentId,
         web_search_enabled: webSearchEnabled,
         summary_model_id: modelId,

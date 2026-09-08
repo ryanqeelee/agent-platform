@@ -70,8 +70,8 @@ type qaRequestContext struct {
 	// Snapshot of the request fields needed to persist the input-bar state
 	// for session restoration. Kept verbatim from the request so we record
 	// what the user had selected on the UI (not server-side resolutions).
-	reqAgentEnabled bool
-	reqAgentID      string
+	reqAgentID    string
+	assistantMode string
 }
 
 // buildQARequest converts the qaRequestContext into a types.QARequest for service invocation.
@@ -183,6 +183,20 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	}
 	if request.AgentSourceTenantID != 0 && customAgent == nil {
 		return nil, nil, errors.NewNotFoundError("Shared agent not found")
+	}
+
+	customAgent, assistantMode, modeErr := resolveEmployeeMode(customAgent, request.AssistantMode)
+	if modeErr != nil {
+		return nil, nil, errors.NewBadRequestError(modeErr.Error())
+	}
+	if assistantMode == assistantModeQuick && (len(request.MCPServiceIDs) > 0 || len(request.SkillNames) > 0 || len(mentionedIDsByType(request.MentionedItems, "mcp")) > 0 || len(mentionedIDsByType(request.MentionedItems, "skill")) > 0) {
+		return nil, nil, errors.NewBadRequestError("使用技能或外部工具需要选择深入处理")
+	}
+
+	// Quick lookup is confined to authorized enterprise/session sources. The legacy
+	// RAG web stage sends every retrieval query to search when enabled.
+	if assistantMode == assistantModeQuick {
+		request.WebSearchEnabled = false
 	}
 
 	// Merge @mentioned items into knowledge_base_ids and knowledge_ids.
@@ -410,8 +424,8 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		attachmentIDs:         attachmentIDs,
 		attachmentMetas:       attachmentMetas,
 		suggestionAttribution: request.SuggestionAttribution,
-		reqAgentEnabled:       request.AgentEnabled,
 		reqAgentID:            request.AgentID,
+		assistantMode:         assistantMode,
 		resourceRewriter:      resourceRewriter,
 	}
 
@@ -885,6 +899,11 @@ func (h *Handler) KnowledgeQA(c *gin.Context) {
 		return
 	}
 
+	// An explicit employee mode has the same meaning on both QA endpoints.
+	if reqCtx.assistantMode == assistantModeDeep {
+		h.executeQA(reqCtx, qaModeAgent, !request.DisableTitle)
+		return
+	}
 	// Execute normal mode QA, generate title unless disabled
 	h.executeQA(reqCtx, qaModeNormal, !request.DisableTitle)
 }
@@ -1493,10 +1512,8 @@ func (h *Handler) persistLastRequestState(parentCtx context.Context, reqCtx *qaR
 	// handler returns.
 	ctx := logger.CloneContext(context.WithoutCancel(parentCtx))
 
-	agentEnabled := reqCtx.reqAgentEnabled
-	// Mirror the resolution rule used in AgentQA: a resolved custom agent's
-	// agent_mode wins over the request flag. For KnowledgeQA the request
-	// itself carries agent_enabled=false, so this collapses correctly.
+	agentEnabled := mode == qaModeAgent
+	// Persist the actual execution path, not the legacy request hint.
 	if mode == qaModeAgent && reqCtx.customAgent != nil {
 		agentEnabled = reqCtx.customAgent.IsAgentMode()
 	}
@@ -1504,6 +1521,7 @@ func (h *Handler) persistLastRequestState(parentCtx context.Context, reqCtx *qaR
 	state := &types.SessionLastRequestState{
 		AgentID:          reqCtx.reqAgentID,
 		AgentEnabled:     agentEnabled,
+		AssistantMode:    reqCtx.assistantMode,
 		KnowledgeBaseIDs: reqCtx.knowledgeBaseIDs,
 		KnowledgeIDs:     reqCtx.knowledgeIDs,
 		TagIDs:           reqCtx.tagIDs,

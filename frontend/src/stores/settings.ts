@@ -109,6 +109,7 @@ const defaultSettings: Settings = {
 
 export const useSettingsStore = defineStore("settings", {
   state: () => ({
+    assistantMode: 'quick' as 'quick' | 'deep',
     // 从本地存储加载设置，如果没有则使用默认设置
     settings: loadAndReconcileSettings(defaultSettings),
     // 进入会话时拍下"全局默认"的快照；离开会话时还原。非持久化字段：
@@ -458,6 +459,7 @@ export const useSettingsStore = defineStore("settings", {
 
     // 还原默认（如果有快照），用于离开会话或跨会话切换时。
     restoreDefaultsIfSnapshotted() {
+      this.assistantMode = 'quick';
       if (!this._defaultsSnapshot) return;
       this.settings = this._defaultsSnapshot;
       enforceEmployeeAssistantSelection(this.settings);
@@ -470,6 +472,7 @@ export const useSettingsStore = defineStore("settings", {
     // 只触碰本次记录的字段，**不**清空 store 中其它无关字段（如模型列表）。
     // 任何字段缺失则保留 store 现值，做"尽力恢复"。
     applyLastRequestState(state: SessionLastRequestStatePayload | null | undefined) {
+      this.assistantMode = state?.assistant_mode === 'deep' ? 'deep' : 'quick';
       if (!state) return;
       this._isApplyingSessionState = true;
       try {
@@ -536,6 +539,7 @@ export const useSettingsStore = defineStore("settings", {
 // 后端 sessions.last_request_state JSON 形状（与 SessionLastRequestState 对齐）。
 // 字段全部可选——历史会话或新建会话首发前的请求没有这条记录。
 export interface SessionLastRequestStatePayload {
+  assistant_mode?: 'quick' | 'deep';
   agent_id?: string;
   agent_enabled?: boolean;
   knowledge_base_ids?: string[];

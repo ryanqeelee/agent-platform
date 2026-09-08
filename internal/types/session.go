@@ -280,6 +280,7 @@ func (c *SummaryConfig) Scan(value interface{}) error {
 // to the frontend by GetSession so the chat input can restore the same Agent,
 // knowledge scope and tools without exposing platform model bindings.
 type SessionLastRequestState struct {
+	AssistantMode    string         `json:"assistant_mode,omitempty"`
 	AgentID          string         `json:"agent_id,omitempty"`
 	AgentEnabled     bool           `json:"agent_enabled"`
 	KnowledgeBaseIDs []string       `json:"knowledge_base_ids,omitempty"`

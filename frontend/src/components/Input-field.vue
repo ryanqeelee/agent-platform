@@ -378,6 +378,7 @@ const kbToScopeCaps = (kb: any): Partial<ScopeCapabilities> => {
 // 当前智能体的 agent_mode（quick-answer / smart-reasoning），用于把
 // "RAG-only 模式不能 @ wiki-only 知识库"这种隐式约束带进 KB 过滤。
 const agentMode = computed(() => {
+  if (!props.embeddedMode && !props.operating) return settingsStore.assistantMode === 'quick' ? 'quick-answer' : 'smart-reasoning';
   if (!hasAgentConfig.value) return '';
   return currentAgentConfig.value?.agent_mode || '';
 });
@@ -1677,6 +1678,11 @@ const createSession = async (val: string) => {
   if (props.isReplying) {
     return MessagePlugin.error(t('input.messages.replying'));
   }
+  if (!props.embeddedMode && settingsStore.assistantMode === 'quick' &&
+      allSelectedItems.value.some(item => item.type === 'mcp' || item.type === 'skill')) {
+    MessagePlugin.info('使用技能或外部工具，请先选择深入处理；已选资料会保留。');
+    return;
+  }
   // Only block while the file is still uploading (no document ID yet). Once
   // uploaded, sending is allowed even if parsing is still in progress: the
   // backend shows a "parsing attachment" step on the timeline and waits.
@@ -2007,8 +2013,13 @@ defineExpose({
           </t-tooltip>
         </div>
         <div class="control-left" v-else-if="!embeddedMode">
+          <select v-model="settingsStore.assistantMode" class="assistant-mode-select" aria-label="回答方式"
+            :disabled="isReplying" :title="settingsStore.assistantMode === 'quick' ? '快速查找事实、规章和资料，给出有依据的答案' : '按任务需要进行多步检索、分析和文件处理'">
+            <option value="quick">快速查询</option>
+            <option value="deep">深入处理</option>
+          </select>
           <!-- 员工联网权限：服务端投影能力与就绪状态，前端只保留本轮许可开关。 -->
-          <t-tooltip v-if="showWebSearchButton" placement="top" theme="light"
+          <t-tooltip v-if="showWebSearchButton && settingsStore.assistantMode === 'deep'" placement="top" theme="light"
             :popupProps="{ overlayClassName: 'input-field-tooltip' }">
             <template #content>
               <span v-if="!isWebSearchReadinessKnown">{{ $t('input.webSearch.loading') }}</span>
@@ -3226,4 +3237,20 @@ button.send-btn:disabled { cursor:not-allowed; opacity:.45; }
     text-decoration: underline;
   }
 }
+</style>
+
+<style scoped>
+.assistant-mode-select {
+  max-width: 128px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--td-component-border, #dcdcdc);
+  border-radius: 8px;
+  color: var(--td-text-color-primary, #333);
+  background: var(--td-bg-color-container, #fff);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+}
+.assistant-mode-select:focus-visible { outline: 2px solid var(--td-brand-color, #07a36b); }
 </style>

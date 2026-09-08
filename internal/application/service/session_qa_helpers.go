@@ -241,6 +241,11 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 	// Override summary config fields
 	if customAgent.Config.SystemPrompt != "" {
 		cm.SummaryConfig.Prompt = customAgent.Config.SystemPrompt
+		if customAgent.ID == types.BuiltinEmployeeAssistantID && !customAgent.IsAgentMode() {
+			// The quick profile retains the employee contract even when the RAG
+			// intent stage selects a generic no-retrieval prompt.
+			cm.SystemPromptOverride = customAgent.Config.SystemPrompt
+		}
 		logger.Infof(ctx, "Using custom agent's system_prompt")
 	}
 	if customAgent.Config.ContextTemplate != "" {

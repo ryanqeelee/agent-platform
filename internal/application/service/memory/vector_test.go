@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
@@ -51,6 +52,62 @@ func TestARewordedMemoryIsStillFound(t *testing.T) {
 	require.NotEmpty(t, recall.Items,
 		"lexical matching cannot find this; that is the entire point of embedding")
 	require.Equal(t, "回答直接给结论", recall.Items[0].Content)
+}
+
+func TestDeletingMemoryAlsoDeletesItsEmbedding(t *testing.T) {
+	svc, tenantRepo, _ := newVectorHarness(t)
+	ctx := enabledCtx(t, tenantRepo, 1, "alice")
+	scope := scopeFor(t, ctx)
+
+	item, err := svc.Remember(ctx, types.MemoryItem{
+		Kind: types.MemoryKindFact, Topic: "数据库", Content: "生产库用 PostgreSQL 17",
+	})
+	require.NoError(t, err)
+	vectors, err := svc.repo.ItemEmbeddings(ctx, scope, []string{item.ID}, "embed-1")
+	require.NoError(t, err)
+	require.NotEmpty(t, vectors)
+
+	require.NoError(t, svc.DeleteItem(ctx, item.ID))
+	vectors, err = svc.repo.ItemEmbeddings(ctx, scope, []string{item.ID}, "embed-1")
+	require.NoError(t, err)
+	require.Empty(t, vectors, "a late vector must not survive the item it represented")
+}
+
+func TestEditingMemoryDropsItsOldEmbeddingBeforeBestEffortReembedding(t *testing.T) {
+	for _, route := range []string{"manager", "command"} {
+		t.Run(route, func(t *testing.T) {
+			svc, tenantRepo, models := newVectorHarness(t)
+			ctx := enabledCtx(t, tenantRepo, 1, "alice")
+			scope := scopeFor(t, ctx)
+			item, err := svc.Remember(ctx, types.MemoryItem{
+				Kind: types.MemoryKindFact, Topic: "数据库", Content: "生产库用 PostgreSQL 17",
+			})
+			require.NoError(t, err)
+			vectors, err := svc.repo.ItemEmbeddings(ctx, scope, []string{item.ID}, "embed-1")
+			require.NoError(t, err)
+			require.NotEmpty(t, vectors)
+
+			models.embedder.fail = true
+			switch route {
+			case "manager":
+				_, err = svc.UpdateItem(ctx, item.ID, "生产库用 PostgreSQL 18", 3)
+			case "command":
+				snapshot, snapshotErr := svc.Snapshot(ctx, types.MemoryConsumerEmployee)
+				require.NoError(t, snapshotErr)
+				_, err = svc.ApplyCommand(ctx, commandForSnapshot("edit-memory", snapshot,
+					types.PersonalMemoryChange{
+						Op: types.MemoryChangeUpdate, ID: item.ID, Content: "生产库用 PostgreSQL 18",
+					},
+				))
+			}
+			require.NoError(t, err)
+
+			vectors, err = svc.repo.ItemEmbeddings(ctx, scope, []string{item.ID}, "embed-1")
+			require.NoError(t, err)
+			require.Empty(t, vectors,
+				"failed re-embedding must not leave the vector for the previous content active")
+		})
+	}
 }
 
 // An interest is promoted from a subject label, so its topic and content hold
@@ -377,4 +434,79 @@ func TestRecallIgnoresVectorsFromAnotherModel(t *testing.T) {
 
 	require.Empty(t, svc.Recall(ctx, "别铺垫那么多").Items,
 		"a vector from a different model must not be scored against this query")
+}
+
+func TestCommandReplayDoesNotRepeatEmbeddingEffects(t *testing.T) {
+	svc, tenants, models := newVectorHarness(t)
+	ctx := enabledCtx(t, tenants, 1, "alice")
+	snapshot, err := svc.Snapshot(ctx, "employee")
+	require.NoError(t, err)
+	command := commandForSnapshot("embedding-replay", snapshot, types.PersonalMemoryChange{Op: types.MemoryChangeCreate, Kind: types.MemoryKindPreference, Content: "prefer concise answers"})
+	first, err := svc.ApplyCommand(ctx, command)
+	require.NoError(t, err)
+	require.Equal(t, "applied", first.Status)
+	calls := models.embedder.calls
+	require.Positive(t, calls)
+	var before types.MemoryItemEmbedding
+	require.NoError(t, tenants.db.Where("item_id = ?", first.ItemIDs[0]).First(&before).Error)
+	replay, err := svc.ApplyCommand(ctx, command)
+	require.NoError(t, err)
+	require.Equal(t, first, replay)
+	require.Equal(t, calls, models.embedder.calls)
+	var after types.MemoryItemEmbedding
+	require.NoError(t, tenants.db.Where("item_id = ?", first.ItemIDs[0]).First(&after).Error)
+	require.Equal(t, before.UpdatedAt, after.UpdatedAt)
+}
+
+func TestLateEmbeddingCannotCrossPolicyGeneration(t *testing.T) {
+	for _, path := range []string{"write", "backfill"} {
+		for _, change := range []string{"personal-reopen", "workspace-reopen", "model-change"} {
+			t.Run(path+"/"+change, func(t *testing.T) {
+				svc, tenants, models := newVectorHarness(t)
+				ctx := enabledCtx(t, tenants, 1, "alice")
+				scope := scopeFor(t, ctx)
+				models.embedder.fail = true
+				item, err := svc.Remember(ctx, types.MemoryItem{Kind: types.MemoryKindPreference, Content: "prefer concise answers"})
+				require.NoError(t, err)
+				models.embedder.fail = false
+				models.embedder.onEmbed = func() {
+					models.embedder.onEmbed = nil
+					if change == "personal-reopen" {
+						require.NoError(t, svc.SetEnabled(ctx, false))
+						require.NoError(t, svc.SetEnabled(ctx, true))
+						return
+					}
+					cfgRepo := repository.NewTenantMemoryConfigRepository(tenants.db)
+					cfg := *tenants.configs[1]
+					if change == "model-change" {
+						cfg.EmbeddingModelID = "embed-2"
+						_, err = cfgRepo.Update(ctx, 1, &cfg)
+						require.NoError(t, err)
+						svc.storeItemEmbedding(ctx, scope, &cfg, item)
+					} else {
+						cfg.Enabled = false
+						_, err = cfgRepo.Update(ctx, 1, &cfg)
+						require.NoError(t, err)
+						cfg.Enabled = true
+						_, err = cfgRepo.Update(ctx, 1, &cfg)
+						require.NoError(t, err)
+					}
+				}
+				cfg := svc.workspaceConfig(ctx, 1)
+				if path == "write" {
+					svc.storeItemEmbedding(ctx, scope, cfg, item)
+				} else {
+					require.Zero(t, svc.backfillEmbeddings(ctx, scope, cfg))
+				}
+				vectors, err := svc.repo.ItemEmbeddings(ctx, scope, []string{item.ID}, "embed-1")
+				require.NoError(t, err)
+				require.Empty(t, vectors)
+				if change == "model-change" {
+					newVectors, err := svc.repo.ItemEmbeddings(ctx, scope, []string{item.ID}, "embed-2")
+					require.NoError(t, err)
+					require.Len(t, newVectors, 1, "late old-model write must not overwrite the new vector")
+				}
+			})
+		}
+	}
 }

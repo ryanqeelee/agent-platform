@@ -19,6 +19,7 @@ type turnMemoryProbe struct {
 	scope     interfaces.MemoryScope
 	allowed   bool
 	extracted bool
+	modelID   string
 }
 type memoryTestStreamManager struct{ terminalStreamManager }
 
@@ -31,8 +32,23 @@ func (p *turnMemoryProbe) Remember(ctx context.Context, item types.MemoryItem) (
 	p.allowed = types.MemoryAllowedForAgent(ctx)
 	return &item, err
 }
-func (p *turnMemoryProbe) ScheduleExtraction(ctx context.Context, _, _, _ string) {
+func (p *turnMemoryProbe) Snapshot(ctx context.Context, consumer string) (*types.PersonalMemorySnapshot, error) {
+	p.allowed = types.MemoryAllowedForAgent(ctx)
+	if !p.allowed {
+		return &types.PersonalMemorySnapshot{Status: "disabled"}, nil
+	}
+	return &types.PersonalMemorySnapshot{
+		Status: "available", Consumer: consumer,
+		Policy: types.PersonalMemoryPolicy{WorkspaceEnabled: true, UserEnabled: true, WriteMode: types.MemoryWriteAuto},
+	}, nil
+}
+func (p *turnMemoryProbe) SubmitExpression(ctx context.Context, expression *types.PersonalMemoryExpression) (*types.PersonalMemoryExpressionReceipt, error) {
 	p.extracted = types.MemoryAllowedForAgent(ctx)
+	return &types.PersonalMemoryExpressionReceipt{Status: types.MemoryExpressionAccepted}, nil
+}
+func (p *turnMemoryProbe) SubmitExpressionWithModel(ctx context.Context, expression *types.PersonalMemoryExpression, modelID string) (*types.PersonalMemoryExpressionReceipt, error) {
+	p.modelID = modelID
+	return p.SubmitExpression(ctx, expression)
 }
 
 func TestEmployeeTurnMemoryPreservesCallerAndPreference(t *testing.T) {
@@ -51,16 +67,27 @@ func TestEmployeeTurnMemoryPreservesCallerAndPreference(t *testing.T) {
 				off := false
 				builtin.Config.MemoryEnabled = &off
 			}
-			stream := h.setupSSEStream(&qaRequestContext{
+			reqCtx := &qaRequestContext{
 				ctx: ctx, c: c, sessionID: "memory-session", session: &types.Session{ID: "memory-session", TenantID: 10004},
 				customAgent:      builtin,
 				assistantMessage: &types.Message{ID: "reply", SessionID: "memory-session"},
-			}, false)
+			}
+			reqCtx.ctx = h.captureTurnMemoryInput(
+				reqCtx.ctx, reqCtx.session, reqCtx.customAgent, "请记住：测试代号青鹭7392", "user-message", "chat-model",
+			)
+			stream := h.setupSSEStream(reqCtx, false)
 			defer stream.cancel()
 			h.recordTurnMemory(context.WithoutCancel(stream.asyncCtx), stream.assistantMessage, "请记住：测试代号青鹭7392", "user-message")
-			require.Equal(t, interfaces.MemoryScope{TenantID: 10004, SubjectID: "web_user:memory-test"}, probe.scope)
+			if disabled {
+				require.Equal(t, interfaces.MemoryScope{}, probe.scope)
+			} else {
+				require.Equal(t, interfaces.MemoryScope{TenantID: 10004, SubjectID: "web_user:memory-test"}, probe.scope)
+			}
 			require.Equal(t, !disabled, probe.allowed)
 			require.Equal(t, !disabled, probe.extracted)
+			if !disabled {
+				require.Equal(t, "chat-model", probe.modelID)
+			}
 		})
 	}
 }

@@ -31,12 +31,17 @@ func newMemoryHarness(t *testing.T) (*Service, *gorm.DB, *stubTenantRepo) {
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
+	require.NoError(t, db.Exec(`CREATE TABLE tenants (
+		id INTEGER PRIMARY KEY, memory_config TEXT, memory_generation INTEGER NOT NULL DEFAULT 0, updated_at DATETIME,
+		deleted_at DATETIME
+	)`).Error)
 	require.NoError(t, db.AutoMigrate(&types.MemorySubject{}, &types.MemoryItem{}, &types.MemoryTombstone{},
 		&types.MemoryTopicStat{}, &types.MemoryDocAffinity{},
-		&types.MemoryItemEmbedding{}))
+		&types.MemoryItemEmbedding{}, &types.MemoryCommandReceipt{}, &types.MemoryExpression{}))
 
 	tenantRepo := &stubTenantRepo{
 		configs: map[uint64]*types.MemoryConfig{},
+		db:      db,
 	}
 	svc := &Service{
 		repo:       repository.NewMemoryRepository(db),

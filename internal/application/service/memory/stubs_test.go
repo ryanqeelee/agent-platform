@@ -14,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/hibiken/asynq"
+	"gorm.io/gorm"
 )
 
 // stubTenantRepo serves workspace memory configuration. It embeds the
@@ -25,12 +26,19 @@ type stubTenantRepo struct {
 
 	mu      sync.RWMutex
 	configs map[uint64]*types.MemoryConfig
+	db      *gorm.DB
 }
 
 func (s *stubTenantRepo) set(tenantID uint64, cfg *types.MemoryConfig) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.configs[tenantID] = cfg
+	if s.db != nil {
+		_ = s.db.Exec(
+			`INSERT INTO tenants(id, memory_config, memory_generation) VALUES (?, ?, 0)
+			 ON CONFLICT(id) DO UPDATE SET memory_config=excluded.memory_config`, tenantID, cfg,
+		).Error
+	}
 }
 
 func (s *stubTenantRepo) GetTenantByID(_ context.Context, id uint64) (*types.Tenant, error) {
@@ -59,6 +67,32 @@ func (s *stubMessageRepo) set(sessionID string, messages []*types.Message) {
 		s.bySession = map[string][]*types.Message{}
 	}
 	s.bySession[sessionID] = messages
+}
+
+func (s *stubMessageRepo) GetMessage(
+	_ context.Context, sessionID, messageID string,
+) (*types.Message, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	source := s.bySession[sessionID]
+	if source == nil {
+		source = s.messages
+	}
+	for _, message := range source {
+		if message != nil && message.ID == messageID && message.SessionID == sessionID {
+			copy := *message
+			return &copy, nil
+		}
+	}
+	for index := len(source) - 1; index >= 0; index-- {
+		if source[index] != nil && source[index].Role == "user" {
+			copy := *source[index]
+			copy.ID = messageID
+			copy.SessionID = sessionID
+			return &copy, nil
+		}
+	}
+	return nil, gorm.ErrRecordNotFound
 }
 
 func (s *stubMessageRepo) GetMessagesBySessionBeforeTime(
@@ -323,6 +357,7 @@ func (s *stubEnqueuer) pop() *asynq.Task {
 // stubEmbedder returns a deterministic vector per phrase, so a test can state
 // which statements are semantically close without needing a real model.
 type stubEmbedder struct {
+	onEmbed func()
 	vectors map[string][]float32
 	fail    bool
 	delay   time.Duration
@@ -333,6 +368,9 @@ type stubEmbedder struct {
 func (e *stubEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
 	e.calls++
 	e.texts = append(e.texts, text)
+	if e.onEmbed != nil {
+		e.onEmbed()
+	}
 	if e.delay > 0 {
 		select {
 		case <-time.After(e.delay):

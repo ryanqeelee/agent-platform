@@ -4759,6 +4759,13 @@ export default {
     enableLabel: '为我启用长期记忆',
     enableDescription: '关闭后助手不再读取或新增你的记忆，已有记忆会保留，重新开启即可继续使用。',
     agentDisabledHint: '单个智能体也可以单独关闭长期记忆。被关闭的智能体在对话中既不会读取你的记忆，也不会新增记忆；换用其他智能体不受影响。',
+    scopeLabel: '适用范围',
+    scopes: { shared: '所有助手', employee: '员工助手', analysis: '经营分析' },
+    scopeHints: {
+      shared: '员工助手和经营分析都可读取（经营分析当前只读取偏好）',
+      employee: '仅用于员工助手',
+      analysis: '仅用于经营分析'
+    },
     usage: {
       title: '记忆何时会被使用',
       iconHint: '查看哪些记忆会在对话里被使用',

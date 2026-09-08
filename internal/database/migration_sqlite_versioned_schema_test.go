@@ -19,21 +19,25 @@ var versionedSQLiteTables = []string{
 	"system_settings",
 	"knowledge_processing_spans",
 	"knowledge_tag_relations",
+	"memory_command_receipts",
+	"memory_expressions",
 }
 
 // versionedSQLiteColumns maps each existing table to the columns that the
 // versioned migrations add and the SQLite baseline was missing.
 var versionedSQLiteColumns = map[string][]string{
-	"tenants":            {"api_principal_config"},           // 000064
-	"users":              {"is_system_admin"},                // 000053
-	"knowledges":         {"pending_subtasks_count"},         // 000056
-	"messages":           {"attachments", "usage"},           // 000034, 000085
-	"tenant_invitations": {"token", "accepted_count"},        // 000054
-	"embed_channels":     {"allow_memory"},                   // 000060
-	"mcp_oauth_tokens":   {"principal_type", "principal_id"}, // 000064
+	"tenants":            {"api_principal_config", "memory_generation"}, // 000064, 000101
+	"users":              {"is_system_admin"},                           // 000053
+	"knowledges":         {"pending_subtasks_count"},                    // 000056
+	"messages":           {"attachments", "usage"},                      // 000034, 000085
+	"tenant_invitations": {"token", "accepted_count"},                   // 000054
+	"embed_channels":     {"allow_memory"},                              // 000060
+	"mcp_oauth_tokens":   {"principal_type", "principal_id"},            // 000064
+	"memory_subjects":    {"generation", "revision"},                    // 000101
+	"memory_items":       {"scope"},                                     // 000101
 }
 
-const expectedSQLiteMigrationVersion = 12
+const expectedSQLiteMigrationVersion = 22
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
@@ -71,7 +75,7 @@ func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 func TestSQLiteMigrationsUpgradeV4PreservesData(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
 
-	// Build a legacy v4 migration root (000000_init .. 000004_memory) so we
+	// Build a legacy v4 migration root (000000_init .. 000004 access roles) so we
 	// can prove the new migrations upgrade an existing Lite database without
 	// replaying the baseline.
 	legacyRoot := copySQLiteMigrationsV4(t, repoRoot)
@@ -251,8 +255,8 @@ func copySQLiteMigrationsV4(t *testing.T, repoRoot string) string {
 		"000000_init.up.sql",
 		"000001_remove_wiki_log.up.sql",
 		"000002_knowledge_folder_path.up.sql",
-		"000003_knowledge_base_auto_tag_config.up.sql",
-		"000004_memory.up.sql",
+		"000003_revoke_legacy_owner_invitations.up.sql",
+		"000004_knowledge_access_roles.up.sql",
 	}
 	for _, name := range legacy {
 		data, err := os.ReadFile(filepath.Join(srcDir, name))

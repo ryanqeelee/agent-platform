@@ -11,6 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/google/uuid"
 )
 
 const (
@@ -87,6 +88,96 @@ func (s *Service) ConsolidateNow(ctx context.Context) (*types.MemoryConsolidatio
 	return s.reviewStore(ctx, scope, cfg, modelID, true), nil
 }
 
+func (s *Service) currentAuthorityVersion(
+	ctx context.Context, scope interfaces.MemoryScope,
+) (*types.MemoryPolicyVersion, error) {
+	var version *types.MemoryPolicyVersion
+	receipt, err := s.repo.WithAuthority(ctx, scope, interfaces.MemoryAuthorityRequest{
+		RequireEnabled: true,
+	}, func(_ context.Context, _ interfaces.MemoryRepository, state interfaces.MemoryAuthorityState) (*interfaces.MemoryAuthorityMutation, error) {
+		version = &types.MemoryPolicyVersion{
+			WorkspaceGeneration: state.WorkspaceGeneration,
+			SubjectGeneration:   state.SubjectGeneration,
+			Revision:            state.Revision,
+		}
+		return &interfaces.MemoryAuthorityMutation{}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := receiptFailure(receipt); err != nil {
+		return nil, err
+	}
+	return version, nil
+}
+
+func updateAuthorityVersion(version *types.MemoryPolicyVersion, receipt *types.PersonalMemoryReceipt) {
+	if version == nil || receipt == nil || receipt.Status == types.MemoryReceiptRejected {
+		return
+	}
+	version.WorkspaceGeneration = receipt.WorkspaceGeneration
+	version.SubjectGeneration = receipt.SubjectGeneration
+	version.Revision = receipt.Revision
+}
+
+func (s *Service) markConsolidation(
+	ctx context.Context, scope interfaces.MemoryScope, version *types.MemoryPolicyVersion, forced bool,
+) error {
+	receipt, err := s.repo.WithAuthority(ctx, scope, interfaces.MemoryAuthorityRequest{
+		Expected: version, RequireEnabled: true,
+	}, func(ctx context.Context, repo interfaces.MemoryRepository, _ interfaces.MemoryAuthorityState) (*interfaces.MemoryAuthorityMutation, error) {
+		if forced {
+			if err := repo.MarkForcedConsolidated(ctx, scope); err != nil {
+				return nil, err
+			}
+		} else if err := repo.MarkConsolidated(ctx, scope); err != nil {
+			return nil, err
+		}
+		return &interfaces.MemoryAuthorityMutation{Mutated: true}, nil
+	})
+	if err != nil {
+		return err
+	}
+	if err := receiptFailure(receipt); err != nil {
+		return err
+	}
+	updateAuthorityVersion(version, receipt)
+	return nil
+}
+
+func (s *Service) expireOverdue(
+	ctx context.Context, scope interfaces.MemoryScope, version *types.MemoryPolicyVersion,
+) (int64, error) {
+	var archived int64
+	receipt, err := s.repo.WithAuthority(ctx, scope, interfaces.MemoryAuthorityRequest{
+		Expected: version, RequireEnabled: true,
+	}, func(ctx context.Context, repo interfaces.MemoryRepository, _ interfaces.MemoryAuthorityState) (*interfaces.MemoryAuthorityMutation, error) {
+		var err error
+		archived, err = repo.ExpireOverdue(ctx, scope)
+		if err != nil {
+			return nil, err
+		}
+		if archived > 0 {
+			txService := *s
+			txService.repo = repo
+			if err := txService.rebuildBlockAtomic(ctx, scope); err != nil {
+				return nil, err
+			}
+		}
+		return &interfaces.MemoryAuthorityMutation{
+			Mutated: archived > 0, BumpRevision: archived > 0,
+		}, nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	if err := receiptFailure(receipt); err != nil {
+		return 0, err
+	}
+	updateAuthorityVersion(version, receipt)
+	return archived, nil
+}
+
 func (s *Service) reviewStore(
 	ctx context.Context,
 	scope interfaces.MemoryScope,
@@ -119,15 +210,22 @@ func (s *Service) reviewStore(
 		}
 		return result
 	}
+	version, err := s.currentAuthorityVersion(ctx, scope)
+	if err != nil {
+		logger.Warnf(ctx, "memory: load authority state for consolidation failed: %v", err)
+		return result
+	}
 	if force {
-		if err := s.repo.MarkForcedConsolidated(ctx, scope); err != nil {
+		if err := s.markConsolidation(ctx, scope, version, true); err != nil {
 			logger.Warnf(ctx, "memory: mark forced consolidation failed: %v", err)
+			return result
 		}
 	}
 
 	// Expiry first: an expired task should not be a merge candidate.
-	if archived, err := s.repo.ExpireOverdue(ctx, scope); err != nil {
+	if archived, err := s.expireOverdue(ctx, scope, version); err != nil {
 		logger.Warnf(ctx, "memory: expire overdue failed: %v", err)
+		return result
 	} else {
 		result.Expired = int(archived)
 		if archived > 0 {
@@ -150,10 +248,10 @@ func (s *Service) reviewStore(
 	}
 
 	result.Reviewed = len(items)
-	result.Demoted = s.demoteStaleTasks(ctx, scope, items)
+	result.Demoted = s.demoteStaleTasksVersioned(ctx, scope, items, version)
 	if force || len(items) >= consolidateMinItems {
 		result.Merged, result.Candidates, result.Skipped =
-			s.mergeRedundant(ctx, scope, cfg, modelID, items, force)
+			s.mergeRedundant(ctx, scope, cfg, modelID, items, force, version)
 	} else {
 		result.Skipped = types.MemoryConsolidationSkipTooFewItems
 	}
@@ -163,11 +261,8 @@ func (s *Service) reviewStore(
 	// instead of stalling one maintenance pass.
 	s.backfillEmbeddings(ctx, scope, cfg)
 
-	if err := s.repo.MarkConsolidated(ctx, scope); err != nil {
+	if err := s.markConsolidation(ctx, scope, version, false); err != nil {
 		logger.Warnf(ctx, "memory: mark consolidated failed: %v", err)
-	}
-	if result.Merged > 0 || result.Demoted > 0 || result.Expired > 0 {
-		s.rebuildBlock(ctx, scope)
 	}
 	// A review that does nothing is the common case, and until it says why it
 	// is indistinguishable from one that is broken.
@@ -190,8 +285,22 @@ func (s *Service) reviewStore(
 func (s *Service) demoteStaleTasks(
 	ctx context.Context, scope interfaces.MemoryScope, items []*types.MemoryItem,
 ) int {
+	version, err := s.currentAuthorityVersion(ctx, scope)
+	if err != nil {
+		logger.Warnf(ctx, "memory: load authority state for stale tasks failed: %v", err)
+		return 0
+	}
+	return s.demoteStaleTasksVersioned(ctx, scope, items, version)
+}
+
+func (s *Service) demoteStaleTasksVersioned(
+	ctx context.Context,
+	scope interfaces.MemoryScope,
+	items []*types.MemoryItem,
+	version *types.MemoryPolicyVersion,
+) int {
 	cutoff := time.Now().Add(-staleTaskAge)
-	demoted := 0
+	ids := make([]string, 0)
 	for _, item := range items {
 		if item == nil || item.Kind != types.MemoryKindTask || item.Importance <= 1 {
 			continue
@@ -203,13 +312,47 @@ func (s *Service) demoteStaleTasks(
 		if last.After(cutoff) {
 			continue
 		}
-		err := s.repo.UpdateItemContent(ctx, scope, item.ID, item.Content, item.NormalizedKey, 1)
-		if err != nil {
-			logger.Warnf(ctx, "memory: demote stale task failed: %v", err)
-			continue
-		}
-		demoted++
+		ids = append(ids, item.ID)
 	}
+	if len(ids) == 0 {
+		return 0
+	}
+	demoted := 0
+	receipt, err := s.repo.WithAuthority(ctx, scope, interfaces.MemoryAuthorityRequest{
+		Expected: version, RequireEnabled: true,
+	}, func(ctx context.Context, repo interfaces.MemoryRepository, _ interfaces.MemoryAuthorityState) (*interfaces.MemoryAuthorityMutation, error) {
+		for _, id := range ids {
+			item, loadErr := repo.GetItem(ctx, scope, id)
+			if loadErr != nil {
+				return nil, loadErr
+			}
+			if item == nil || item.Status != types.MemoryStatusActive || item.Kind != types.MemoryKindTask || item.Importance <= 1 {
+				continue
+			}
+			if err := repo.UpdateItemContent(ctx, scope, item.ID, item.Content, item.NormalizedKey, 1); err != nil {
+				return nil, err
+			}
+			demoted++
+		}
+		if demoted > 0 {
+			txService := *s
+			txService.repo = repo
+			if err := txService.rebuildBlockAtomic(ctx, scope); err != nil {
+				return nil, err
+			}
+		}
+		return &interfaces.MemoryAuthorityMutation{
+			Mutated: demoted > 0, BumpRevision: demoted > 0, ItemIDs: ids,
+		}, nil
+	})
+	if err != nil {
+		logger.Warnf(ctx, "memory: demote stale tasks failed: %v", err)
+		return 0
+	}
+	if err := receiptFailure(receipt); err != nil {
+		return 0
+	}
+	updateAuthorityVersion(version, receipt)
 	return demoted
 }
 
@@ -225,6 +368,7 @@ func (s *Service) mergeRedundant(
 	modelID string,
 	items []*types.MemoryItem,
 	force bool,
+	version *types.MemoryPolicyVersion,
 ) (merged int, candidates int, skipped string) {
 	minOverlap, minCosine := consolidateMinOverlap, consolidateMinCosine
 	maxClusters := consolidateMaxClusters
@@ -258,31 +402,71 @@ func (s *Service) mergeRedundant(
 			continue
 		}
 		primary := cluster[0]
-		replacement, err := s.write(ctx, scope, cfg, types.MemoryItem{
-			Kind:            primary.Kind,
-			Topic:           primary.Topic,
-			Content:         statement,
-			Importance:      primary.Importance,
-			Origin:          primary.Origin,
-			SourceSessionID: primary.SourceSessionID,
-			SourceMessageID: primary.SourceMessageID,
-		})
-		if err != nil || replacement == nil {
-			if err != nil {
-				logger.Warnf(ctx, "memory: consolidation write failed: %v", err)
+		var replacement *types.MemoryItem
+		receipt, err := s.repo.WithAuthority(ctx, scope, interfaces.MemoryAuthorityRequest{
+			Expected: version, RequireEnabled: true, RequireAuto: !force,
+		}, func(ctx context.Context, repo interfaces.MemoryRepository, state interfaces.MemoryAuthorityState) (*interfaces.MemoryAuthorityMutation, error) {
+			// Revision equality protects the model decision. Re-read the rows in
+			// the locked transaction as well so a missing/non-active candidate is
+			// never silently treated as the reviewed cluster.
+			for _, candidate := range cluster {
+				current, loadErr := repo.GetItem(ctx, scope, candidate.ID)
+				if loadErr != nil {
+					return nil, loadErr
+				}
+				if current == nil || current.Status != types.MemoryStatusActive {
+					return &interfaces.MemoryAuthorityMutation{ReasonCode: types.MemoryReasonRevisionConflict}, nil
+				}
 			}
+			txService := *s
+			txService.repo = repo
+			txService.deferEmbeddings = true
+			replacementID := uuid.NewString()
+			var writeErr error
+			replacement, writeErr = txService.write(ctx, scope, state.Config, types.MemoryItem{
+				ID: replacementID, Scope: primary.Scope, Kind: primary.Kind,
+				Topic: primary.Topic, Content: statement, Importance: primary.Importance,
+				Origin: primary.Origin, SourceSessionID: primary.SourceSessionID,
+				SourceMessageID: primary.SourceMessageID,
+			})
+			if writeErr != nil {
+				return nil, writeErr
+			}
+			if replacement == nil {
+				return &interfaces.MemoryAuthorityMutation{}, nil
+			}
+			for _, item := range cluster {
+				if item.ID == replacement.ID {
+					continue
+				}
+				if err := repo.SupersedeItem(ctx, scope, item.ID, replacement.ID); err != nil {
+					return nil, err
+				}
+			}
+			if err := txService.enforceCapacityAtomic(ctx, scope, state.Config); err != nil {
+				return nil, err
+			}
+			if err := txService.rebuildBlockAtomic(ctx, scope); err != nil {
+				return nil, err
+			}
+			ids := make([]string, 0, len(cluster)+1)
+			ids = append(ids, replacement.ID)
+			for _, item := range cluster {
+				ids = append(ids, item.ID)
+			}
+			return &interfaces.MemoryAuthorityMutation{Mutated: true, BumpRevision: true, ItemIDs: ids}, nil
+		})
+		if err != nil {
+			logger.Warnf(ctx, "memory: consolidation mutation failed: %v", err)
 			continue
 		}
-		// Supersede rather than delete: the old wording keeps its dates, so the
-		// memory manager can still explain what this statement used to be and
-		// when it changed.
-		for _, item := range cluster {
-			if item.ID == replacement.ID {
-				continue
-			}
-			if err := s.repo.SupersedeItem(ctx, scope, item.ID, replacement.ID); err != nil {
-				logger.Warnf(ctx, "memory: supersede during consolidation failed: %v", err)
-			}
+		if err := receiptFailure(receipt); err != nil {
+			logger.Infof(ctx, "memory: consolidation stopped because memory policy changed")
+			return merged, candidates, ""
+		}
+		updateAuthorityVersion(version, receipt)
+		if replacement != nil && replacement.Status == types.MemoryStatusActive {
+			s.storeItemEmbedding(ctx, scope, s.workspaceConfig(ctx, scope.TenantID), replacement)
 		}
 		merged++
 	}
@@ -385,7 +569,7 @@ func clusterBy(
 		}
 		group := []*types.MemoryItem{item}
 		for _, other := range items[i+1:] {
-			if other == nil || taken[other.ID] || other.Kind != item.Kind {
+			if other == nil || taken[other.ID] || other.Kind != item.Kind || other.Scope != item.Scope {
 				continue
 			}
 			if !same(item, other) {

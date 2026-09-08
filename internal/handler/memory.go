@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -13,6 +15,21 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
+
+func decodeStrictMemoryJSON(c *gin.Context, target interface{}) error {
+	decoder := json.NewDecoder(io.LimitReader(c.Request.Body, 128<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return errors.New("request must contain one JSON object")
+		}
+		return err
+	}
+	return nil
+}
 
 // MemoryHandler exposes the caller's own long-term memory.
 //
@@ -46,6 +63,56 @@ func (h *MemoryHandler) GetSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": settings})
 }
 
+func (h *MemoryHandler) GetSnapshot(c *gin.Context) {
+	snapshot, err := h.memoryService.Snapshot(c.Request.Context(), c.Query("consumer"))
+	if err != nil {
+		h.fail(c, err, "Failed to load memory snapshot")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": snapshot})
+}
+
+func (h *MemoryHandler) ApplyCommand(c *gin.Context) {
+	var command types.PersonalMemoryCommand
+	if err := decodeStrictMemoryJSON(c, &command); err != nil {
+		c.Error(apperrors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		return
+	}
+	receipt, err := h.memoryService.ApplyCommand(c.Request.Context(), &command)
+	if err != nil {
+		h.fail(c, err, "Failed to apply memory command")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": receipt})
+}
+
+func (h *MemoryHandler) GetCommandReceipt(c *gin.Context) {
+	receipt, err := h.memoryService.GetCommandReceipt(c.Request.Context(), c.Param("operation_id"))
+	if err != nil {
+		h.fail(c, err, "Failed to load memory command receipt")
+		return
+	}
+	if receipt == nil {
+		c.Error(apperrors.NewNotFoundError("memory command not found"))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": receipt})
+}
+
+func (h *MemoryHandler) SubmitExpression(c *gin.Context) {
+	var expression types.PersonalMemoryExpression
+	if err := decodeStrictMemoryJSON(c, &expression); err != nil {
+		c.Error(apperrors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		return
+	}
+	receipt, err := h.memoryService.SubmitExpression(c.Request.Context(), &expression)
+	if err != nil {
+		h.fail(c, err, "Failed to submit memory expression")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": receipt})
+}
+
 type updateMemorySettingsRequest struct {
 	Enabled *bool `json:"enabled"`
 }
@@ -63,7 +130,7 @@ type updateMemorySettingsRequest struct {
 func (h *MemoryHandler) UpdateSettings(c *gin.Context) {
 	ctx := c.Request.Context()
 	var req updateMemorySettingsRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := decodeStrictMemoryJSON(c, &req); err != nil {
 		c.Error(apperrors.NewValidationError("Invalid request data").WithDetails(err.Error()))
 		return
 	}
@@ -244,6 +311,7 @@ func (h *MemoryHandler) DeleteDocument(c *gin.Context) {
 }
 
 type createMemoryItemRequest struct {
+	Scope      string `json:"scope"`
 	Kind       string `json:"kind"`
 	Content    string `json:"content"`
 	Importance int    `json:"importance"`
@@ -262,11 +330,18 @@ type createMemoryItemRequest struct {
 func (h *MemoryHandler) CreateItem(c *gin.Context) {
 	ctx := c.Request.Context()
 	var req createMemoryItemRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := decodeStrictMemoryJSON(c, &req); err != nil {
 		c.Error(apperrors.NewValidationError("Invalid request data").WithDetails(err.Error()))
 		return
 	}
-	item, err := h.memoryService.CreateItem(ctx, req.Kind, req.Content, req.Importance)
+	if req.Scope == "" {
+		req.Scope = types.MemoryScopeShared
+	}
+	if !types.IsValidMemoryScope(req.Scope) {
+		c.Error(apperrors.NewBadRequestError("unsupported memory scope"))
+		return
+	}
+	item, err := h.memoryService.CreateItemWithScope(ctx, req.Scope, req.Kind, req.Content, req.Importance)
 	if err != nil {
 		h.fail(c, err, "Failed to create memory")
 		return
@@ -275,6 +350,7 @@ func (h *MemoryHandler) CreateItem(c *gin.Context) {
 }
 
 type updateMemoryItemRequest struct {
+	Scope      string `json:"scope"`
 	Content    string `json:"content"`
 	Importance int    `json:"importance"`
 }
@@ -293,11 +369,15 @@ type updateMemoryItemRequest struct {
 func (h *MemoryHandler) UpdateItem(c *gin.Context) {
 	ctx := c.Request.Context()
 	var req updateMemoryItemRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := decodeStrictMemoryJSON(c, &req); err != nil {
 		c.Error(apperrors.NewValidationError("Invalid request data").WithDetails(err.Error()))
 		return
 	}
-	item, err := h.memoryService.UpdateItem(ctx, c.Param("id"), req.Content, req.Importance)
+	if req.Scope != "" && !types.IsValidMemoryScope(req.Scope) {
+		c.Error(apperrors.NewBadRequestError("unsupported memory scope"))
+		return
+	}
+	item, err := h.memoryService.UpdateItemWithScope(ctx, c.Param("id"), req.Scope, req.Content, req.Importance)
 	if err != nil {
 		h.fail(c, err, "Failed to update memory")
 		return
@@ -448,6 +528,10 @@ func (h *MemoryHandler) Consolidate(c *gin.Context) {
 // belonging to someone else produce the same 404 on purpose.
 func (h *MemoryHandler) fail(c *gin.Context, err error, message string) {
 	switch {
+	case errors.Is(err, interfaces.ErrMemoryOperationConflict):
+		c.Error(apperrors.NewConflictError("operation id already belongs to a different request"))
+	case errors.Is(err, memory.ErrInvalidMemoryContract):
+		c.Error(apperrors.NewBadRequestError(err.Error()))
 	case errors.Is(err, memory.ErrNoMemoryScope):
 		c.Error(apperrors.NewUnauthorizedError("no principal in request"))
 	case errors.Is(err, memory.ErrItemNotFound):

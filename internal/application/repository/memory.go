@@ -209,6 +209,9 @@ func (r *memoryRepository) CreateItem(ctx context.Context, item *types.MemoryIte
 	if item.Status == "" {
 		item.Status = types.MemoryStatusActive
 	}
+	if item.Scope == "" {
+		item.Scope = types.MemoryScopeEmployee
+	}
 	return r.db.WithContext(ctx).Create(item).Error
 }
 
@@ -242,8 +245,34 @@ func (r *memoryRepository) ListActiveByKinds(
 	var items []*types.MemoryItem
 	query := notExpired(r.scoped(ctx, scope).
 		Where("status = ?", types.MemoryStatusActive).
+		Where("scope IN ?", []string{types.MemoryScopeShared, types.MemoryScopeEmployee}).
 		Where("kind IN ?", kinds)).
 		Order("importance DESC, valid_from DESC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if err := query.Find(&items).Error; err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (r *memoryRepository) ListApplicableItems(
+	ctx context.Context, scope interfaces.MemoryScope, consumer string, kinds []string, limit int,
+) ([]*types.MemoryItem, error) {
+	if len(kinds) == 0 {
+		return nil, nil
+	}
+	applicableScopes := []string{types.MemoryScopeShared, types.MemoryScopeEmployee}
+	if consumer == types.MemoryConsumerAnalysis {
+		applicableScopes = []string{types.MemoryScopeShared, types.MemoryScopeAnalysis}
+	}
+	var items []*types.MemoryItem
+	query := notExpired(r.scoped(ctx, scope).
+		Where("status = ?", types.MemoryStatusActive).
+		Where("scope IN ?", applicableScopes).
+		Where("kind IN ?", kinds)).
+		Order("importance DESC, valid_from DESC, id DESC")
 	if limit > 0 {
 		query = query.Limit(limit)
 	}
@@ -265,6 +294,7 @@ func (r *memoryRepository) ListActiveResident(
 	var items []*types.MemoryItem
 	query := notExpired(r.scoped(ctx, scope).
 		Where("status = ?", types.MemoryStatusActive).
+		Where("scope IN ?", []string{types.MemoryScopeShared, types.MemoryScopeEmployee}).
 		Where("kind IN ? OR origin = ?",
 			types.ResidentMemoryKinds,
 			types.MemoryOriginExplicit)).
@@ -313,7 +343,25 @@ func (r *memoryRepository) ListLive(
 	var items []*types.MemoryItem
 	query := notExpired(r.scoped(ctx, scope).
 		Where("status IN ?", []string{types.MemoryStatusActive, types.MemoryStatusPending}).
+		Where("scope IN ?", []string{types.MemoryScopeShared, types.MemoryScopeEmployee}).
 		Where("kind = ?", kind)).
+		Order("importance DESC, valid_from DESC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if err := query.Find(&items).Error; err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (r *memoryRepository) ListLiveInScope(
+	ctx context.Context, scope interfaces.MemoryScope, itemScope, kind string, limit int,
+) ([]*types.MemoryItem, error) {
+	var items []*types.MemoryItem
+	query := notExpired(r.scoped(ctx, scope).
+		Where("status IN ?", []string{types.MemoryStatusActive, types.MemoryStatusPending}).
+		Where("scope = ? AND kind = ?", itemScope, kind)).
 		Order("importance DESC, valid_from DESC")
 	if limit > 0 {
 		query = query.Limit(limit)
@@ -348,6 +396,26 @@ func (r *memoryRepository) FindActiveByKey(
 	return &item, nil
 }
 
+func (r *memoryRepository) FindActiveByKeyInScope(
+	ctx context.Context, scope interfaces.MemoryScope, itemScope, normalizedKey string,
+) (*types.MemoryItem, error) {
+	if normalizedKey == "" {
+		return nil, nil
+	}
+	var item types.MemoryItem
+	err := r.scoped(ctx, scope).
+		Where("scope = ? AND status IN ? AND normalized_key = ?", itemScope,
+			[]string{types.MemoryStatusActive, types.MemoryStatusPending}, normalizedKey).
+		Order("valid_from DESC").First(&item).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &item, nil
+}
+
 func (r *memoryRepository) UpdateItemContent(
 	ctx context.Context, scope interfaces.MemoryScope, id, content, normalizedKey string, importance int,
 ) error {
@@ -360,6 +428,20 @@ func (r *memoryRepository) UpdateItemContent(
 			"importance":     importance,
 			"origin":         types.MemoryOriginManual,
 			"updated_at":     time.Now(),
+		}).Error
+}
+
+func (r *memoryRepository) UpdateItem(
+	ctx context.Context, scope interfaces.MemoryScope, item *types.MemoryItem,
+) error {
+	if item == nil || item.ID == "" {
+		return nil
+	}
+	return r.scoped(ctx, scope).Model(&types.MemoryItem{}).Where("id = ?", item.ID).
+		Updates(map[string]interface{}{
+			"scope": item.Scope, "kind": item.Kind, "topic": item.Topic,
+			"content": item.Content, "normalized_key": item.NormalizedKey,
+			"importance": item.Importance, "origin": item.Origin, "updated_at": time.Now(),
 		}).Error
 }
 
@@ -381,12 +463,18 @@ func (r *memoryRepository) SupersedeItem(
 func (r *memoryRepository) DeleteItem(
 	ctx context.Context, scope interfaces.MemoryScope, id string,
 ) error {
+	if err := r.DeleteItemEmbedding(ctx, scope, id); err != nil {
+		return err
+	}
 	return r.scoped(ctx, scope).Where("id = ?", id).Delete(&types.MemoryItem{}).Error
 }
 
 func (r *memoryRepository) DeleteAll(
 	ctx context.Context, scope interfaces.MemoryScope,
 ) (int64, error) {
+	if err := r.scoped(ctx, scope).Delete(&types.MemoryItemEmbedding{}).Error; err != nil {
+		return 0, err
+	}
 	result := r.scoped(ctx, scope).Delete(&types.MemoryItem{})
 	return result.RowsAffected, result.Error
 }

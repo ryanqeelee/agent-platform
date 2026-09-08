@@ -95,6 +95,13 @@
                   <span class="add-kind-hint">{{ kindHint(draftKind) }}</span>
                 </label>
                 <label class="add-field">
+                  <span class="add-label">{{ t('memorySettings.scopeLabel') }}</span>
+                  <t-select v-model="draftScope" size="small">
+                    <t-option v-for="scope in scopes" :key="scope" :value="scope" :label="scopeLabel(scope)" />
+                  </t-select>
+                  <span class="add-kind-hint">{{ scopeHint(draftScope) }}</span>
+                </label>
+                <label class="add-field">
                   <span class="add-label">{{ t('memorySettings.addContentLabel') }}</span>
                   <t-textarea
                     v-model="draftContent"
@@ -260,6 +267,9 @@
           <li v-for="item in items" :key="item.id" class="memory-item">
             <div class="memory-main">
               <div v-if="editingId === item.id" class="memory-edit">
+                <t-select v-model="editingScope" size="small">
+                  <t-option v-for="scope in scopes" :key="scope" :value="scope" :label="scopeLabel(scope)" />
+                </t-select>
                 <t-textarea
                   v-model="editingContent"
                   :autosize="{ minRows: 2, maxRows: 6 }"
@@ -278,6 +288,7 @@
                 {{ item.content }}
               </p>
               <div class="memory-meta">
+                <span :title="scopeHint(item.scope)">{{ scopeLabel(item.scope) }}</span>
                 <span :title="kindHint(item.kind)">{{ kindLabel(item.kind) }}</span>
                 <span
                   v-if="item.topic && item.topic !== item.content"
@@ -386,6 +397,7 @@ import {
   type MemoryKind,
   type MemorySettings,
   type MemoryStatus,
+  type MemoryScope,
   type MemoryTopic,
 } from '@/api/memory'
 
@@ -409,13 +421,16 @@ const page = ref(1)
 const pageSize = 20
 
 const draftKind = ref<MemoryKind>('fact')
+const draftScope = ref<MemoryScope>('shared')
 const draftContent = ref('')
 const addVisible = ref(false)
 const editingId = ref('')
 const editingContent = ref('')
 const editingImportance = ref(3)
+const editingScope = ref<MemoryScope>('shared')
 
 const kinds: MemoryKind[] = ['profile', 'preference', 'fact', 'task', 'interest']
+const scopes: MemoryScope[] = ['shared', 'employee', 'analysis']
 const usageRowKeys = ['alwaysOn', 'situational', 'interest', 'tracking', 'documents', 'pending', 'inactive'] as const
 
 const statuses: MemoryStatus[] = ['active', 'pending', 'superseded', 'archived']
@@ -516,6 +531,8 @@ const kindLabel = (kind: MemoryKind) => t(`memorySettings.kinds.${kind}`)
 const kindHint = (kind: MemoryKind) => t(`memorySettings.kindHints.${kind}`)
 
 const originLabel = (origin: MemoryItem['origin']) => t(`memorySettings.origins.${origin}`)
+const scopeLabel = (scope: MemoryScope) => t(`memorySettings.scopes.${scope}`)
+const scopeHint = (scope: MemoryScope) => t(`memorySettings.scopeHints.${scope}`)
 
 const formatTime = (value: string) => {
   if (!value) return ''
@@ -745,7 +762,7 @@ const handleCreate = async () => {
   const content = draftContent.value.trim()
   if (!content) return
   try {
-    await createMemoryItem({ kind: draftKind.value, content })
+    await createMemoryItem({ scope: draftScope.value, kind: draftKind.value, content })
     draftContent.value = ''
     addVisible.value = false
     tab.value = 'active'
@@ -761,13 +778,14 @@ const startEdit = (item: MemoryItem) => {
   editingId.value = item.id
   editingContent.value = item.content
   editingImportance.value = item.importance
+  editingScope.value = item.scope
 }
 
 const handleSaveEdit = async (item: MemoryItem) => {
   const content = editingContent.value.trim()
   if (!content) return
   try {
-    await updateMemoryItem(item.id, { content, importance: editingImportance.value })
+    await updateMemoryItem(item.id, { scope: editingScope.value, content, importance: editingImportance.value })
     editingId.value = ''
     await Promise.all([loadItems(), loadCounts()])
     MessagePlugin.success(t('memorySettings.toasts.updated'))

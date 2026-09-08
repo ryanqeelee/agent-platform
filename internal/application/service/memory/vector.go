@@ -94,20 +94,84 @@ func (s *Service) storeItemEmbedding(
 	if !ok {
 		return
 	}
+	policy := s.captureEmbeddingPolicy(ctx, scope, modelID)
+	if policy == nil {
+		return
+	}
 	text := embeddableText(item, s.embedAliases(ctx, scope, item))
 	vector := s.embedText(ctx, modelID, text, embedWriteTimeout)
 	if len(vector) == 0 {
 		return
 	}
-	err := s.repo.UpsertItemEmbedding(ctx, scope, &types.MemoryItemEmbedding{
+	if !s.persistItemEmbedding(ctx, scope, item, policy, &types.MemoryItemEmbedding{
 		ItemID:  item.ID,
 		ModelID: modelID,
 		Dims:    len(vector),
 		Vector:  types.EncodeEmbedding(vector),
+	}) {
+		return
+	}
+}
+
+// captureEmbeddingPolicy binds model work to the current policy before I/O.
+func (s *Service) captureEmbeddingPolicy(ctx context.Context, scope interfaces.MemoryScope, modelID string) *types.MemoryPolicyVersion {
+	var policy *types.MemoryPolicyVersion
+	receipt, err := s.repo.WithAuthority(ctx, scope, interfaces.MemoryAuthorityRequest{RequireEnabled: true},
+		func(_ context.Context, _ interfaces.MemoryRepository, state interfaces.MemoryAuthorityState) (*interfaces.MemoryAuthorityMutation, error) {
+			if state.Config != nil && state.Config.VectorRecallEnabled() && state.Config.EmbeddingModelID == modelID {
+				policy = &types.MemoryPolicyVersion{WorkspaceGeneration: state.WorkspaceGeneration, SubjectGeneration: state.SubjectGeneration, Revision: state.Revision}
+			}
+			return &interfaces.MemoryAuthorityMutation{}, nil
+		})
+	if err != nil || receiptFailure(receipt) != nil {
+		return nil
+	}
+	return policy
+}
+
+// persistItemEmbedding rechecks the item under the subject lock after model
+// I/O. A delete or edit that wins the race therefore cannot be followed by an
+// orphaned or stale vector for the old row contents.
+func (s *Service) persistItemEmbedding(
+	ctx context.Context,
+	scope interfaces.MemoryScope,
+	expected *types.MemoryItem,
+	policy *types.MemoryPolicyVersion,
+	embedding *types.MemoryItemEmbedding,
+) bool {
+	if expected == nil || embedding == nil || policy == nil {
+		return false
+	}
+	persisted := false
+	receipt, err := s.repo.WithAuthority(ctx, scope, interfaces.MemoryAuthorityRequest{
+		RequireEnabled: true,
+	}, func(ctx context.Context, repo interfaces.MemoryRepository, state interfaces.MemoryAuthorityState) (*interfaces.MemoryAuthorityMutation, error) {
+		if state.WorkspaceGeneration != policy.WorkspaceGeneration || state.SubjectGeneration != policy.SubjectGeneration ||
+			state.Config == nil || !state.Config.VectorRecallEnabled() || state.Config.EmbeddingModelID != embedding.ModelID {
+			return &interfaces.MemoryAuthorityMutation{}, nil
+		}
+		current, err := repo.GetItem(ctx, scope, expected.ID)
+		if err != nil {
+			return nil, err
+		}
+		if current == nil || current.Status != expected.Status || current.Scope != expected.Scope ||
+			current.Kind != expected.Kind || current.Topic != expected.Topic || current.Content != expected.Content {
+			return &interfaces.MemoryAuthorityMutation{}, nil
+		}
+		if err := repo.UpsertItemEmbedding(ctx, scope, embedding); err != nil {
+			return nil, err
+		}
+		persisted = true
+		return &interfaces.MemoryAuthorityMutation{}, nil
 	})
 	if err != nil {
 		logger.Warnf(ctx, "memory: store embedding failed: %v", err)
+		return false
 	}
+	if err := receiptFailure(receipt); err != nil {
+		return false
+	}
+	return persisted
 }
 
 // embeddableText is what gets embedded for a memory.
@@ -289,6 +353,10 @@ func (s *Service) backfillEmbeddings(
 		logger.Warnf(ctx, "memory: find items missing embeddings failed: %v", err)
 		return 0
 	}
+	policy := s.captureEmbeddingPolicy(ctx, scope, modelID)
+	if policy == nil {
+		return 0
+	}
 	filled := 0
 	for _, item := range items {
 		text := embeddableText(item, s.embedAliases(ctx, scope, item))
@@ -297,14 +365,12 @@ func (s *Service) backfillEmbeddings(
 			// The model just failed; the rest of this batch will fail too.
 			break
 		}
-		err := s.repo.UpsertItemEmbedding(ctx, scope, &types.MemoryItemEmbedding{
+		if !s.persistItemEmbedding(ctx, scope, item, policy, &types.MemoryItemEmbedding{
 			ItemID:  item.ID,
 			ModelID: modelID,
 			Dims:    len(vector),
 			Vector:  types.EncodeEmbedding(vector),
-		})
-		if err != nil {
-			logger.Warnf(ctx, "memory: backfill embedding failed: %v", err)
+		}) {
 			continue
 		}
 		filled++

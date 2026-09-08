@@ -111,9 +111,9 @@ func TestTurnsDuringARunAreNotLost(t *testing.T) {
 	require.Contains(t, seen, "第二句")
 }
 
-// TestMessagesBeyondOneRunsCapAreFollowedUp covers a subject who said more in
-// one window than a single run is allowed to read.
-func TestMessagesBeyondOneRunsCapAreFollowedUp(t *testing.T) {
+// TestLegacySchedulerAcceptsOnlyItsExactMessage ensures the compatibility
+// adapter cannot turn one trigger into a history backfill.
+func TestLegacySchedulerAcceptsOnlyItsExactMessage(t *testing.T) {
 	svc, tenantRepo, messages, models, enqueuer := newExtractionHarness(t)
 	ctx := enabledCtx(t, tenantRepo, 1, "alice")
 	tenantRepo.set(1, &types.MemoryConfig{
@@ -129,13 +129,14 @@ func TestMessagesBeyondOneRunsCapAreFollowedUp(t *testing.T) {
 			userMessage("session-1", fmt.Sprintf("消息%d号", i), base.Add(time.Duration(i)*time.Second)))
 	}
 	messages.set("session-1", transcript)
-	svc.ScheduleExtraction(ctx, "session-1", "message-last", "model-1")
+	lastID := fmt.Sprintf("消息%d号", total-1)
+	svc.ScheduleExtraction(ctx, "session-1", lastID, "model-1")
 
 	runs := drainExtractions(t, svc, enqueuer)
-	require.Greater(t, runs, 1, "a backlog larger than one run must produce follow-up runs")
+	require.Equal(t, 1, runs)
 
 	seen := models.seenTranscripts()
-	require.Contains(t, seen, "消息0号", "the oldest unread message must not be skipped")
+	require.NotContains(t, seen, "消息0号", "the adapter must not reopen session history")
 	require.Contains(t, seen, fmt.Sprintf("消息%d号", total-1))
 }
 
@@ -186,15 +187,14 @@ func TestAlreadyReadMessagesAreNotReread(t *testing.T) {
 	drainExtractions(t, svc, enqueuer)
 
 	require.Equal(t, 2, models.calls)
-	// The earlier message may appear as read-only context, but it must not be
-	// inside the block the model extracts from, or it would be re-derived into
-	// a memory on every run.
+	// Accepted expressions are the entire source envelope. Earlier history is
+	// not reopened, even as context, because doing so would backfill turns from
+	// a disabled interval.
 	transcript := transcriptBlock(models.lastPrompt)
 	require.Contains(t, transcript, "新的一句")
 	require.NotContains(t, transcript, "旧的一句",
 		"a message already behind the watermark must not be extracted from twice")
-	require.Contains(t, models.lastPrompt, "context only",
-		"the earlier turn should still be visible as context")
+	require.NotContains(t, models.lastPrompt, "旧的一句")
 }
 
 // TestFailedRunLeavesMessagesUnread: a model error must not consume the
@@ -225,11 +225,14 @@ func TestFailedRunLeavesMessagesUnread(t *testing.T) {
 // TestScheduleUsesTheConfiguredDelay pins that the timers are configuration,
 // not constants.
 func TestScheduleUsesTheConfiguredDelay(t *testing.T) {
-	svc, tenantRepo, _, _, enqueuer := newExtractionHarness(t)
+	svc, tenantRepo, messages, _, enqueuer := newExtractionHarness(t)
 	ctx := enabledCtx(t, tenantRepo, 1, "alice")
 	tenantRepo.set(1, &types.MemoryConfig{
 		Enabled: true, WriteMode: types.MemoryWriteAuto, ExtractDelaySeconds: 7,
 	})
+	messages.set("session-1", []*types.Message{{
+		ID: "message-1", SessionID: "session-1", Role: "user", Content: "exact input",
+	}})
 
 	svc.ScheduleExtraction(ctx, "session-1", "message-1", "model-1")
 	require.Len(t, enqueuer.options, 1)

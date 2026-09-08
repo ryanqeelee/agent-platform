@@ -206,8 +206,8 @@ func TestProvenancePointsAtTheRightMessage(t *testing.T) {
 	models.response = `{"memories":[{"action":"add","target":null,"kind":"profile",` +
 		`"topic":"职业","content":"在做医疗影像","source":1}]}`
 
-	svc.ScheduleExtraction(ctx, "session-a", "trigger-msg", "model-1")
-	svc.ScheduleExtraction(ctx, "session-b", "trigger-msg", "model-1")
+	svc.ScheduleExtraction(ctx, "session-a", "msg-a1", "model-1")
+	svc.ScheduleExtraction(ctx, "session-b", "msg-b1", "model-1")
 	drainExtractions(t, svc, enqueuer)
 
 	items, _, err := svc.ListItems(ctx, types.MemoryStatusActive, 10, 0)
@@ -239,9 +239,9 @@ func TestOutOfRangeSourceFallsBackInsideTheSegment(t *testing.T) {
 // Prior context
 // ---------------------------------------------------------------------------
 
-// TestPriorContextResolvesAReferringStatement: a run sees only what is new, so
-// without a lead-in a turn like "就用前面那个吧" has nothing to resolve against.
-func TestPriorContextResolvesAReferringStatement(t *testing.T) {
+// TestAcceptedExpressionDoesNotReopenPriorContext pins the privacy boundary:
+// only the accepted user expression reaches extraction, never earlier history.
+func TestAcceptedExpressionDoesNotReopenPriorContext(t *testing.T) {
 	svc, tenantRepo, messages, models, enqueuer := newExtractionHarness(t)
 	ctx := enabledCtx(t, tenantRepo, 1, "alice")
 	tenantRepo.set(1, &types.MemoryConfig{
@@ -272,10 +272,9 @@ func TestPriorContextResolvesAReferringStatement(t *testing.T) {
 	svc.ScheduleExtraction(ctx, "session-1", "m2", "model-1")
 	drainExtractions(t, svc, enqueuer)
 
-	require.Contains(t, models.lastPrompt, "我在评估",
-		"a referring statement needs the turn it refers to")
-	require.NotContains(t, transcriptBlock(models.lastPrompt), "我在评估",
-		"context must not be extracted from a second time")
+	require.Contains(t, models.lastPrompt, "就用前面那个吧")
+	require.NotContains(t, models.lastPrompt, "我在评估",
+		"the worker must not scan prior history around an accepted expression")
 }
 
 // ---------------------------------------------------------------------------
@@ -284,7 +283,7 @@ func TestPriorContextResolvesAReferringStatement(t *testing.T) {
 
 // TestLongSilenceStartsANewSegment keeps one call from having to make sense of
 // two unrelated situations at once.
-func TestLongSilenceStartsANewSegment(t *testing.T) {
+func TestExactAcceptedExpressionDoesNotPullEarlierSegments(t *testing.T) {
 	svc, tenantRepo, messages, models, enqueuer := newExtractionHarness(t)
 	ctx := enabledCtx(t, tenantRepo, 1, "alice")
 	tenantRepo.set(1, &types.MemoryConfig{
@@ -303,9 +302,9 @@ func TestLongSilenceStartsANewSegment(t *testing.T) {
 	svc.ScheduleExtraction(ctx, "session-1", "m2", "model-1")
 	drainExtractions(t, svc, enqueuer)
 
-	require.Equal(t, 2, models.calls, "a six-hour gap must split the run into two calls")
+	require.Equal(t, 1, models.calls)
 	seen := models.seenTranscripts()
-	require.Contains(t, seen, "上午聊的事")
+	require.NotContains(t, seen, "上午聊的事")
 	require.Contains(t, seen, "晚上聊的事")
 }
 
@@ -339,9 +338,9 @@ func TestSeparateSessionsAreSeparateSegments(t *testing.T) {
 	}
 }
 
-// TestSegmentCapStillCoversEverything: capping the calls one run makes must
-// delay work, never lose it.
-func TestSegmentCapStillCoversEverything(t *testing.T) {
+// TestOneLegacyTriggerCannotBackfillManySegments keeps the old scheduler from
+// reopening a session regardless of its size or time gaps.
+func TestOneLegacyTriggerCannotBackfillManySegments(t *testing.T) {
 	svc, tenantRepo, messages, models, enqueuer := newExtractionHarness(t)
 	ctx := enabledCtx(t, tenantRepo, 1, "alice")
 	tenantRepo.set(1, &types.MemoryConfig{
@@ -351,7 +350,7 @@ func TestSegmentCapStillCoversEverything(t *testing.T) {
 
 	base := time.Now().Add(-100 * time.Hour)
 	var transcript []*types.Message
-	for i := 0; i < extractMaxSegmentsPerRun*2+1; i++ {
+	for i := 0; i < 7; i++ {
 		transcript = append(transcript, &types.Message{
 			ID: fmt.Sprintf("m%d", i), SessionID: "session-1", Role: "user",
 			Content:   fmt.Sprintf("第%d段的话", i),
@@ -363,9 +362,9 @@ func TestSegmentCapStillCoversEverything(t *testing.T) {
 	drainExtractions(t, svc, enqueuer)
 
 	seen := models.seenTranscripts()
-	for i := 0; i < extractMaxSegmentsPerRun*2+1; i++ {
-		require.Contains(t, seen, fmt.Sprintf("第%d段的话", i),
-			"segment %d was never read", i)
+	require.Contains(t, seen, "第0段的话")
+	for i := 1; i < 7; i++ {
+		require.NotContains(t, seen, fmt.Sprintf("第%d段的话", i))
 	}
 }
 

@@ -77,6 +77,10 @@ var contextCloneAcrossDetach = map[ContextKey]bool{
 	// Dropping this key would let an agent that cannot read memory keep
 	// writing to it.
 	MemoryDisabledContextKey: true,
+	// The policy version captured when a user expression entered the turn must
+	// survive the async detach so answer-derived signals cannot commit after a
+	// policy change or clear.
+	memoryPolicyVersionContextKey: true,
 
 	// Marks model calls as coming from an asynq worker so the per-model chat
 	// concurrency governor throttles them, leaving interactive chat latency

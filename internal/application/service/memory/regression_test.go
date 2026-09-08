@@ -108,7 +108,7 @@ func TestCrossSessionMemoryScenarios(t *testing.T) {
 			},
 			extracted: []map[string]any{
 				{"action": "add", "kind": "task", "topic": "在做的重构", "content": "在重构订单服务的支付流程"},
-				{"action": "delete", "kind": "task", "topic": "在做的重构", "content": "支付流程重构已完成"},
+				{"action": "delete", "target": 0, "kind": "task", "topic": "在做的重构", "content": "支付流程重构已完成"},
 			},
 			laterQuery: "订单服务现在还有什么在做的",
 			wantAbsent: []string{"在重构订单服务的支付流程"},
@@ -140,6 +140,12 @@ func TestCrossSessionMemoryScenarios(t *testing.T) {
 				body, err := json.Marshal(map[string]any{"memories": decisions})
 				require.NoError(t, err)
 				models.response = string(body)
+				svc.ScheduleExtraction(
+					enabledCtx(t, tenantRepo, 1, "alice"),
+					"session-"+string(rune('a'+i)),
+					"message-"+string(rune('a'+i)),
+					"conversation-model",
+				)
 
 				require.NoError(t, svc.Handle(context.Background(), extractTask(t, types.MemoryExtractPayload{
 					TenantID:    1,

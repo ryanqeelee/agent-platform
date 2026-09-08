@@ -1026,6 +1026,13 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 		return
 	}
 	reqCtx.assistantMessage = assistantMessagePtr
+	// Accept the exact user expression under the policy that exists at input
+	// time. Carry that captured version through the turn for later answer-source
+	// signals; completion must never rescan or retroactively admit this input.
+	reqCtx.ctx = h.captureTurnMemoryInput(
+		reqCtx.ctx, reqCtx.session, reqCtx.customAgent, reqCtx.query, reqCtx.userMessageID,
+		assistantMessagePtr.ModelID,
+	)
 
 	if mode == qaModeNormal {
 		logger.Infof(ctx, "Using knowledge bases: %v", reqCtx.knowledgeBaseIDs)
@@ -1572,39 +1579,82 @@ func (h *Handler) completeAssistantMessage(
 	}
 }
 
-// recordTurnMemory runs the long-term memory write path for a finished turn.
-//
-// This is the single place a conversation can produce memory, and it sits at
-// the point where both the RAG and the Agent path converge, so neither mode
-// can silently miss it. A stopped conversation arrives with an empty query and
-// is skipped by the caller.
+func (h *Handler) captureTurnMemoryInput(
+	ctx context.Context,
+	session *types.Session,
+	agent *types.CustomAgent,
+	userQuery, userMessageID, chatModelID string,
+) context.Context {
+	if h.memoryService == nil || session == nil || strings.TrimSpace(userMessageID) == "" {
+		return ctx
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, session.TenantID)
+	if agent != nil {
+		ctx = types.ApplyAgentMemoryPreference(ctx, agent.Config.MemoryEnabled)
+	}
+	if !types.MemoryAllowedForAgent(ctx) {
+		return ctx
+	}
+	snapshot, err := h.memoryService.Snapshot(ctx, types.MemoryConsumerEmployee)
+	if err != nil || snapshot == nil || snapshot.Status != "available" {
+		if err != nil {
+			logger.Warnf(ctx, "memory: capture input policy failed: %v", err)
+		}
+		return ctx
+	}
+	expected := types.MemoryPolicyVersion{
+		WorkspaceGeneration: snapshot.Policy.WorkspaceGeneration,
+		SubjectGeneration:   snapshot.Policy.SubjectGeneration,
+		Revision:            snapshot.Revision,
+	}
+	ctx = types.WithMemoryPolicyVersion(ctx, expected)
+	if statement, ok := types.DetectExplicitMemory(userQuery); ok {
+		if _, err := h.memoryService.Remember(ctx, types.MemoryItem{
+			Scope: types.MemoryScopeEmployee, Kind: types.MemoryKindFact,
+			Content: statement, Importance: 4, Origin: types.MemoryOriginExplicit,
+			SourceSessionID: session.ID, SourceMessageID: userMessageID,
+		}); err != nil {
+			logger.Warnf(ctx, "memory: explicit remember failed for message %s: %v", userMessageID, err)
+		}
+	}
+	if _, err := h.memoryService.SubmitExpressionWithModel(ctx, &types.PersonalMemoryExpression{
+		Schema: types.PersonalMemoryExpressionSchema, ExpressionID: userMessageID,
+		Runtime: types.MemoryConsumerEmployee, SessionID: session.ID, MessageID: userMessageID,
+		Text: userQuery,
+		ExpectedPolicy: &types.PersonalMemoryExpressionExpectedPolicy{
+			WorkspaceGeneration: expected.WorkspaceGeneration,
+			SubjectGeneration:   expected.SubjectGeneration,
+		},
+	}, chatModelID); err != nil {
+		logger.Warnf(ctx, "memory: expression submission failed for message %s: %v", userMessageID, err)
+	}
+	return ctx
+}
+
+// recordTurnMemory records signals that only exist after an answer completes.
+// The user expression itself was already accepted at input time.
 func (h *Handler) recordTurnMemory(
 	ctx context.Context, assistantMessage *types.Message, userQuery, userMessageID string,
 ) {
 	if h.memoryService == nil {
 		return
 	}
-	// An explicit "remember ..." directive is stored verbatim and immediately,
-	// with no model in the loop. This is what makes the default explicit_only
-	// mode useful rather than merely safe.
-	if statement, ok := types.DetectExplicitMemory(userQuery); ok {
-		if _, err := h.memoryService.Remember(ctx, types.MemoryItem{
-			Kind:            types.MemoryKindFact,
-			Content:         statement,
-			Importance:      4,
-			Origin:          types.MemoryOriginExplicit,
-			SourceSessionID: assistantMessage.SessionID,
-			// Attribute to the user's own message, not the answer. Background
-			// distillation reads that same message, so the two paths must
-			// agree on provenance or a memory deleted from one can be
-			// re-derived by the other.
-			SourceMessageID: userMessageID,
-		}); err != nil {
-			logger.Warnf(ctx, "memory: explicit remember failed for message %s: %v", assistantMessage.ID, err)
-		}
+	expected, ok := types.MemoryPolicyVersionFromContext(ctx)
+	if !ok {
+		return
 	}
+	// Explicit memory at input may have advanced revision. Refresh only the
+	// revision while preserving the original generations; a disable/clear in
+	// the meantime changes a generation and causes this derived signal to drop.
+	snapshot, err := h.memoryService.Snapshot(ctx, types.MemoryConsumerEmployee)
+	if err != nil || snapshot == nil || snapshot.Status != "available" ||
+		snapshot.Policy.WorkspaceGeneration != expected.WorkspaceGeneration ||
+		snapshot.Policy.SubjectGeneration != expected.SubjectGeneration {
+		return
+	}
+	expected.Revision = snapshot.Revision
+	ctx = types.WithMemoryPolicyVersion(ctx, *expected)
 	h.recordAnswerSources(ctx, assistantMessage)
-	h.memoryService.ScheduleExtraction(ctx, assistantMessage.SessionID, assistantMessage.ID, assistantMessage.ModelID)
 }
 
 // recordAnswerSources notes which documents this answer drew on, so the

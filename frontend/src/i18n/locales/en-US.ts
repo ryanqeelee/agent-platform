@@ -1857,6 +1857,13 @@ export default {
     enableLabel: 'Use long-term memory for me',
     enableDescription: 'When off, the assistant neither reads nor adds your memories. Existing ones are kept and resume when you turn it back on.',
     agentDisabledHint: 'An individual agent can also turn long-term memory off for itself. In a conversation with such an agent your memories are neither read nor added to; other agents are unaffected.',
+    scopeLabel: 'Applies to',
+    scopes: { shared: 'All assistants', employee: 'Employee assistant', analysis: 'Operating analysis' },
+    scopeHints: {
+      shared: 'Available to employee assistance and operating analysis (analysis currently reads preferences only)',
+      employee: 'Used only by the employee assistant',
+      analysis: 'Used only by operating analysis'
+    },
     usage: {
       title: 'When memories are used',
       iconHint: 'See which memories are used in conversation',

@@ -92,6 +92,7 @@ type RouterParams struct {
 	AICapabilityPlanHandler      *handler.AICapabilityPlanHandler
 	WikiPageHandler              *handler.WikiPageHandler
 	MemoryHandler                *handler.MemoryHandler
+	TenantMemoryConfigHandler    *handler.TenantMemoryConfigHandler
 }
 
 // NewRouter 创建新的路由
@@ -233,6 +234,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 
 		RegisterAuthRoutes(v1, params.AuthHandler, rbacGuards)
 		RegisterTenantRoutes(v1, params.TenantHandler, params.TenantMemberHandler, params.TenantInvitationHandler, params.AuditLogHandler, rbacGuards)
+		RegisterTenantMemoryConfigRoutes(v1, params.TenantMemoryConfigHandler, rbacGuards)
 		RegisterCapabilityPlanRoutes(v1, params.AICapabilityPlanHandler, rbacGuards)
 		RegisterKnowledgeGovernanceRoutes(v1, params.KnowledgeGovernanceHandler, rbacGuards)
 		RegisterMyInvitationRoutes(v1, params.TenantInvitationHandler)

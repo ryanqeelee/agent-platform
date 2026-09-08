@@ -4757,6 +4757,13 @@ export default {
     enableLabel: '내 장기 기억 사용',
     enableDescription: '끄면 어시스턴트가 기억을 읽거나 추가하지 않습니다. 기존 기억은 유지되며 다시 켜면 계속 사용됩니다.',
     agentDisabledHint: '개별 에이전트도 장기 기억을 따로 끌 수 있습니다. 꺼 둔 에이전트와의 대화에서는 기억을 읽지도 추가하지도 않으며, 다른 에이전트는 영향을 받지 않습니다.',
+    scopeLabel: '적용 범위',
+    scopes: { shared: '모든 어시스턴트', employee: '직원 어시스턴트', analysis: '운영 분석' },
+    scopeHints: {
+      shared: '직원 지원 및 운영 분석에서 사용됩니다(분석은 현재 선호만 읽음)',
+      employee: '직원 어시스턴트에서만 사용됩니다',
+      analysis: '운영 분석에서만 사용됩니다'
+    },
     usage: {
       title: '기억이 사용되는 시점',
       iconHint: '어떤 기억이 대화에 쓰이는지 보기',

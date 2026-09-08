@@ -219,6 +219,15 @@ func TestMemoriesOfDifferentKindsAreNeverMerged(t *testing.T) {
 		"what someone is doing and what is true of their system are different claims")
 }
 
+func TestMemoriesOfDifferentScopesAreNeverMerged(t *testing.T) {
+	items := []*types.MemoryItem{
+		{ID: "a", Scope: types.MemoryScopeShared, Kind: types.MemoryKindPreference, Topic: "回答风格", Content: "回答直接给结论不要铺垫"},
+		{ID: "b", Scope: types.MemoryScopeEmployee, Kind: types.MemoryKindPreference, Topic: "回答风格", Content: "回答直接给结论不要铺垫"},
+	}
+	require.Empty(t, clusterSimilar(items),
+		"identical statements in different scopes are independently owned records")
+}
+
 func scopeFor(t *testing.T, ctx context.Context) interfaces.MemoryScope {
 	t.Helper()
 	scope, err := ResolveScope(ctx)

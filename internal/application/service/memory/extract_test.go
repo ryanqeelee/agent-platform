@@ -35,6 +35,40 @@ func extractTask(t *testing.T, payload types.MemoryExtractPayload) *asynq.Task {
 	return asynq.NewTask(types.TypeMemoryExtract, body)
 }
 
+func acceptTestExpression(
+	t *testing.T, svc *Service, tenantRepo *stubTenantRepo,
+	tenantID uint64, sessionID, messageID, modelID string,
+) {
+	t.Helper()
+	ctx := context.WithValue(t.Context(), types.TenantIDContextKey, tenantID)
+	ctx = types.WithPrincipal(ctx, types.Principal{Type: types.PrincipalWebUser, ID: "alice"})
+	snapshot, err := svc.Snapshot(ctx, types.MemoryConsumerEmployee)
+	require.NoError(t, err)
+	message, err := svc.messageRepo.GetMessage(ctx, sessionID, messageID)
+	if err != nil {
+		stub := svc.messageRepo.(*stubMessageRepo)
+		stub.mu.Lock()
+		for index := len(stub.messages) - 1; index >= 0; index-- {
+			if stub.messages[index] != nil && stub.messages[index].Role == "user" {
+				message = stub.messages[index]
+				break
+			}
+		}
+		stub.mu.Unlock()
+	}
+	require.NotNil(t, message)
+	_, err = svc.submitExpression(ctx, &types.PersonalMemoryExpression{
+		Schema: types.PersonalMemoryExpressionSchema, ExpressionID: messageID,
+		Runtime: types.MemoryConsumerEmployee, SessionID: sessionID, MessageID: messageID,
+		Text: message.Content,
+		ExpectedPolicy: &types.PersonalMemoryExpressionExpectedPolicy{
+			WorkspaceGeneration: snapshot.Policy.WorkspaceGeneration,
+			SubjectGeneration:   snapshot.Policy.SubjectGeneration,
+		},
+	}, modelID, message.CreatedAt)
+	require.NoError(t, err)
+}
+
 // TestExtractionRebuildsScopeFromPayload is the regression this whole payload
 // shape exists for. Both asynq and the Lite executor hand the handler a bare
 // context, so the task must reconstruct the workspace and subject itself. A
@@ -47,13 +81,14 @@ func TestExtractionRebuildsScopeFromPayload(t *testing.T) {
 	}
 	models.response = `{"memories":[{"action":"add","kind":"fact","topic":"生产数据库",
 		"content":"生产库是 PostgreSQL 17","importance":4,"source":1}]}`
+	acceptTestExpression(t, svc, tenantRepo, 7, "session-1", "msg-db", "model-from-the-conversation")
 
 	// Deliberately a bare context: nothing about the original request survives.
 	err := svc.Handle(context.Background(), extractTask(t, types.MemoryExtractPayload{
 		TenantID:    7,
 		SubjectID:   "web_user:alice",
 		SessionID:   "session-1",
-		MessageID:   "message-1",
+		MessageID:   "msg-db",
 		ChatModelID: "model-from-the-conversation",
 	}))
 	require.NoError(t, err)
@@ -82,6 +117,7 @@ func TestExtractionFallsBackToTheConversationModel(t *testing.T) {
 	})
 	messages.messages = []*types.Message{{Role: "user", Content: "我只用中文交流"}}
 	models.response = `{"memories":[{"action":"add","kind":"preference","topic":"语言","content":"只用中文交流"}]}`
+	acceptTestExpression(t, svc, tenantRepo, 7, "s", "m", "conversation-model")
 
 	require.NoError(t, svc.Handle(context.Background(), extractTask(t, types.MemoryExtractPayload{
 		TenantID: 7, SubjectID: "web_user:alice", SessionID: "s", MessageID: "m",
@@ -101,6 +137,7 @@ func TestExtractionPrefersTheConfiguredModel(t *testing.T) {
 	})
 	messages.messages = []*types.Message{{Role: "user", Content: "随便说点什么"}}
 	models.response = `{"memories":[]}`
+	acceptTestExpression(t, svc, tenantRepo, 7, "s", "m", "expensive-conversation-model")
 
 	require.NoError(t, svc.Handle(context.Background(), extractTask(t, types.MemoryExtractPayload{
 		TenantID: 7, SubjectID: "web_user:alice", SessionID: "s", MessageID: "m",
@@ -120,6 +157,7 @@ func TestExtractionReadsOnlyUserMessages(t *testing.T) {
 		{Role: "user", Content: "帮我看看这个函数"},
 	}
 	models.response = `{"memories":[]}`
+	acceptTestExpression(t, svc, tenantRepo, 7, "s", "m", "m1")
 
 	require.NoError(t, svc.Handle(context.Background(), extractTask(t, types.MemoryExtractPayload{
 		TenantID: 7, SubjectID: "web_user:alice", SessionID: "s", MessageID: "m", ChatModelID: "m1",
@@ -146,9 +184,10 @@ func TestExtractionAppliesUpdateAndDeleteDecisions(t *testing.T) {
 
 	messages.messages = []*types.Message{{Role: "user", Content: "我们迁到 PostgreSQL 了，登录改造也上线了"}}
 	models.response = `{"memories":[
-		{"action":"update","kind":"fact","topic":"在用的数据库","content":"用的是 PostgreSQL"},
-		{"action":"delete","kind":"task","topic":"在做的事","content":"登录改造已完成"}
+		{"action":"update","target":1,"kind":"fact","topic":"在用的数据库","content":"用的是 PostgreSQL"},
+		{"action":"delete","target":0,"kind":"task","topic":"在做的事","content":"登录改造已完成"}
 	]}`
+	acceptTestExpression(t, svc, tenantRepo, 7, "s", "m", "m1")
 
 	require.NoError(t, svc.Handle(context.Background(), extractTask(t, types.MemoryExtractPayload{
 		TenantID: 7, SubjectID: "web_user:alice", SessionID: "s", MessageID: "m", ChatModelID: "m1",
@@ -164,11 +203,11 @@ func TestExtractionAppliesUpdateAndDeleteDecisions(t *testing.T) {
 	require.NotContains(t, contents, "用的是 MySQL")
 	require.NotContains(t, contents, "在做登录改造", "a finished task must stop being recalled")
 
-	// The finished task is superseded rather than deleted, so the manager can
-	// still show that it was completed.
+	// The corrected database wording supersedes the old one. The explicit
+	// delete is physical and protected by a tombstone.
 	_, superseded, err := svc.ListItems(writeCtx, types.MemoryStatusSuperseded, 10, 0)
 	require.NoError(t, err)
-	require.Equal(t, int64(2), superseded)
+	require.Equal(t, int64(1), superseded)
 }
 
 func TestExtractionToleratesUnparsableModelOutput(t *testing.T) {
@@ -176,6 +215,7 @@ func TestExtractionToleratesUnparsableModelOutput(t *testing.T) {
 	tenantRepo.set(7, &types.MemoryConfig{Enabled: true, WriteMode: types.MemoryWriteAuto})
 	messages.messages = []*types.Message{{Role: "user", Content: "随便说点什么"}}
 	models.response = "抱歉，我不太明白你的意思。"
+	acceptTestExpression(t, svc, tenantRepo, 7, "s", "m", "m1")
 
 	// Garbage is the model's fault, not a transient failure, so returning an
 	// error would just re-run the same prompt until the retry budget is gone.
@@ -220,8 +260,11 @@ func TestExtractionDroppedWhenPayloadHasNoScope(t *testing.T) {
 }
 
 func TestScheduleExtractionEnqueuesOnTheMemoryQueue(t *testing.T) {
-	svc, tenantRepo, _, _, enqueuer := newExtractionHarness(t)
+	svc, tenantRepo, messages, _, enqueuer := newExtractionHarness(t)
 	ctx := enabledCtx(t, tenantRepo, 7, "alice")
+	messages.set("session-1", []*types.Message{{
+		ID: "message-1", SessionID: "session-1", Role: "user", Content: "exact input",
+	}})
 
 	svc.ScheduleExtraction(ctx, "session-1", "message-1", "chat-model")
 	require.Len(t, enqueuer.tasks, 1)
@@ -249,8 +292,12 @@ func TestScheduleExtractionSkippedInExplicitOnlyMode(t *testing.T) {
 }
 
 func TestScheduleExtractionDebouncesPerSubject(t *testing.T) {
-	svc, tenantRepo, _, _, enqueuer := newExtractionHarness(t)
+	svc, tenantRepo, messages, _, enqueuer := newExtractionHarness(t)
 	ctx := enabledCtx(t, tenantRepo, 7, "alice")
+	messages.set("session-1", []*types.Message{
+		{ID: "message-1", SessionID: "session-1", Role: "user", Content: "first"},
+		{ID: "message-2", SessionID: "session-1", Role: "user", Content: "second"},
+	})
 
 	// Scheduling claims the interval, so a long conversation cannot turn into
 	// one model call per message.
@@ -277,6 +324,7 @@ func TestExtractionCapsItemsPerRun(t *testing.T) {
 	body, err := json.Marshal(map[string]any{"memories": decisions})
 	require.NoError(t, err)
 	models.response = string(body)
+	acceptTestExpression(t, svc, tenantRepo, 7, "s", "m", "m1")
 
 	require.NoError(t, svc.Handle(context.Background(), extractTask(t, types.MemoryExtractPayload{
 		TenantID: 7, SubjectID: "web_user:alice", SessionID: "s", MessageID: "m", ChatModelID: "m1",

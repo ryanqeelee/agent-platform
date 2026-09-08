@@ -198,20 +198,23 @@ type MemorySubject struct {
 	// Enabled is the per-user opt out. The workspace switch lives on
 	// Tenant.MemoryConfig and takes precedence over it.
 	Enabled bool `json:"enabled" gorm:"not null;default:true"`
+	// Generation invalidates delayed writers after a personal policy change,
+	// delete, clear, or rejection. Revision versions item projections.
+	Generation int64 `json:"generation" gorm:"not null;default:0"`
+	Revision   int64 `json:"revision" gorm:"not null;default:0"`
 	// BlockText is the rendered profile/preference block. It is recomputed on
 	// write so the read path never has to assemble or rank anything.
 	BlockText       string     `json:"block_text"        gorm:"column:block_text"`
 	BlockUpdatedAt  *time.Time `json:"block_updated_at"  gorm:"column:block_updated_at"`
 	ItemCount       int        `json:"item_count"        gorm:"column:item_count;not null;default:0"`
 	LastExtractedAt *time.Time `json:"last_extracted_at" gorm:"column:last_extracted_at"`
-	// ExtractCursor is the watermark: everything this subject said up to and
-	// including this instant has already been considered for distillation.
-	// Distillation walks forward from here, which is what makes "no message is
-	// skipped" a property of the data rather than of timing.
+	// ExtractCursor is retained for migration compatibility with the former
+	// session-scanning extractor. New extraction input comes only from accepted
+	// expression rows.
 	ExtractCursor *time.Time `json:"extract_cursor" gorm:"column:extract_cursor"`
-	// PendingSessions are the sessions with turns past the cursor. A turn that
-	// arrives while a task is already in flight is recorded here instead of
-	// being dropped, so it is picked up by the run that is already coming.
+	// PendingSessions is the existing bounded debounce marker. It never
+	// authorizes reading session history; pending expression rows are the source
+	// of truth for the worker.
 	PendingSessions MemoryPendingSessions `json:"pending_sessions" gorm:"column:pending_sessions;type:jsonb"`
 	// ExtractScheduledAt marks a distillation task as in flight, so concurrent
 	// turns enqueue one task rather than one per turn.
@@ -230,8 +233,8 @@ type MemorySubject struct {
 	UpdatedAt            time.Time  `json:"updated_at"`
 }
 
-// MemoryPendingSessions is the persisted queue of sessions awaiting
-// distillation for one subject.
+// MemoryPendingSessions is the persisted bounded debounce marker for a
+// subject's accepted expressions.
 type MemoryPendingSessions []string
 
 // MaxMemoryPendingSessions bounds the queue. A subject chatting in more
@@ -294,6 +297,7 @@ type MemoryItem struct {
 	ID        string `json:"id"         gorm:"primaryKey;type:varchar(36)"`
 	TenantID  uint64 `json:"tenant_id"  gorm:"column:tenant_id;not null"`
 	SubjectID string `json:"subject_id" gorm:"column:subject_id;type:varchar(512);not null"`
+	Scope     string `json:"scope" gorm:"type:varchar(16);not null;default:'employee'"`
 	Kind      string `json:"kind"       gorm:"type:varchar(32);not null"`
 	Content   string `json:"content"    gorm:"not null"`
 	// Topic is the readable subject the statement is about, as the extraction
@@ -310,8 +314,8 @@ type MemoryItem struct {
 	Importance      int        `json:"importance"         gorm:"not null;default:3"`
 	Origin          string     `json:"origin"             gorm:"type:varchar(16);not null;default:'extracted'"`
 	Status          string     `json:"status"             gorm:"type:varchar(16);not null;default:'active'"`
-	SourceSessionID string     `json:"source_session_id"  gorm:"column:source_session_id;type:varchar(36)"`
-	SourceMessageID string     `json:"source_message_id"  gorm:"column:source_message_id;type:varchar(36)"`
+	SourceSessionID string     `json:"source_session_id"  gorm:"column:source_session_id;type:varchar(128)"`
+	SourceMessageID string     `json:"source_message_id"  gorm:"column:source_message_id;type:varchar(128)"`
 	ValidFrom       time.Time  `json:"valid_from" gorm:"column:valid_from;not null"`
 	InvalidAt       *time.Time `json:"invalid_at" gorm:"column:invalid_at"`
 	// ExpiresAt is when the statement stops being worth recalling, used for
@@ -832,7 +836,7 @@ type MemoryTombstone struct {
 	// differently and slips through. Remembering the message is content-free
 	// and closes that path exactly, while anything the user says afterwards
 	// comes from a later message and is still allowed through.
-	SourceMessageID string    `json:"source_message_id" gorm:"column:source_message_id;type:varchar(36);index"`
+	SourceMessageID string    `json:"source_message_id" gorm:"column:source_message_id;type:varchar(128);index"`
 	CreatedAt       time.Time `json:"created_at"`
 }
 
@@ -989,7 +993,10 @@ type MemorySettings struct {
 	// ItemCount is how many active memories the caller currently has.
 	ItemCount int `json:"item_count"`
 	// MaxItems is the capacity cap after which the lowest ranked are archived.
-	MaxItems int `json:"max_items"`
+	MaxItems            int   `json:"max_items"`
+	WorkspaceGeneration int64 `json:"workspace_generation"`
+	SubjectGeneration   int64 `json:"subject_generation"`
+	Revision            int64 `json:"revision"`
 }
 
 // Why a review changed nothing. A review that merges nothing is the normal

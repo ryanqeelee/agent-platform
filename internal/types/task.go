@@ -266,15 +266,19 @@ type MemoryExtractPayload struct {
 	TenantID  uint64 `json:"tenant_id"`
 	SubjectID string `json:"subject_id"`
 	SessionID string `json:"session_id"`
-	// MessageID is the assistant message that closed the triggering turn. It
-	// bounds the extraction window and is stored as the source of any item
-	// produced, so every memory can be traced back to a real message.
+	// MessageID identifies the exact accepted user expression that triggered
+	// this task. Source text is loaded from memory_expressions, never by scanning
+	// the session around this ID.
 	MessageID string `json:"message_id"`
 	// ChatModelID is the model the conversation itself used. The extraction
 	// task falls back to it when MemoryConfig.ExtractModelID is blank, which
 	// is what the settings UI promises.
 	ChatModelID string `json:"chat_model_id,omitempty"`
 	Language    string `json:"language,omitempty"`
+	// Generations identify the accepted-expression interval this task may
+	// process. The worker still re-checks each stored expression before commit.
+	WorkspaceGeneration int64 `json:"workspace_generation,omitempty"`
+	SubjectGeneration   int64 `json:"subject_generation,omitempty"`
 }
 
 // ExtractChunkPayload represents the extract chunk task payload

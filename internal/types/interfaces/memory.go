@@ -2,11 +2,43 @@ package interfaces
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/hibiken/asynq"
 )
+
+var ErrMemoryOperationConflict = errors.New("memory: operation id reused with different body")
+
+type MemoryAuthorityState struct {
+	Config              *types.MemoryConfig
+	WorkspaceGeneration int64
+	SubjectGeneration   int64
+	Revision            int64
+	UserEnabled         bool
+}
+
+type MemoryAuthorityRequest struct {
+	Expected        *types.MemoryPolicyVersion
+	RequireEnabled  bool
+	RequireAuto     bool
+	BumpGeneration  bool
+	OperationID     string
+	CommandHash     string
+	PreRejectReason string
+}
+
+type MemoryAuthorityMutation struct {
+	Mutated      bool
+	BumpRevision bool
+	ItemIDs      []string
+	ReasonCode   string
+}
+
+type MemoryAuthorityCallback func(
+	ctx context.Context, repo MemoryRepository, state MemoryAuthorityState,
+) (*MemoryAuthorityMutation, error)
 
 // MemoryScope is the resolved (workspace, principal) pair a memory operation
 // runs under. It is always derived from the request context so no caller can
@@ -25,6 +57,20 @@ func (s MemoryScope) Valid() bool {
 // worker cannot accidentally operate on whatever the ambient context happens
 // to hold.
 type MemoryRepository interface {
+	// WithAuthority is the transaction boundary for every semantic memory
+	// mutation. It locks tenant then subject, re-reads policy/version state,
+	// executes the callback on the same transaction, updates versions, and
+	// optionally stores a content-free idempotency receipt.
+	WithAuthority(
+		ctx context.Context, scope MemoryScope, request MemoryAuthorityRequest,
+		callback MemoryAuthorityCallback,
+	) (*types.PersonalMemoryReceipt, error)
+	GetCommandReceipt(ctx context.Context, scope MemoryScope, operationID string) (*types.MemoryCommandReceipt, error)
+	AcceptExpression(
+		ctx context.Context, scope MemoryScope, expression *types.MemoryExpression,
+	) (*types.PersonalMemoryExpressionReceipt, error)
+	ListPendingExpressions(ctx context.Context, scope MemoryScope, limit int) ([]*types.MemoryExpression, error)
+	MarkExpressionsProcessed(ctx context.Context, scope MemoryScope, expressionIDs []string, reason string) error
 	// GetSubject returns the memory space, or (nil, nil) when it does not exist.
 	GetSubject(ctx context.Context, scope MemoryScope) (*types.MemorySubject, error)
 	// EnsureSubject returns the memory space, creating it on first use.
@@ -57,6 +103,7 @@ type MemoryRepository interface {
 	GetItem(ctx context.Context, scope MemoryScope, id string) (*types.MemoryItem, error)
 	// ListActiveByKinds returns active items of the given kinds, newest first.
 	ListActiveByKinds(ctx context.Context, scope MemoryScope, kinds []string, limit int) ([]*types.MemoryItem, error)
+	ListApplicableItems(ctx context.Context, scope MemoryScope, consumer string, kinds []string, limit int) ([]*types.MemoryItem, error)
 	// ListActiveResident returns the items that belong in the always-injected
 	// block: stable traits, plus anything the user explicitly asked to keep.
 	ListActiveResident(ctx context.Context, scope MemoryScope, limit int) ([]*types.MemoryItem, error)
@@ -64,8 +111,10 @@ type MemoryRepository interface {
 	ListItems(ctx context.Context, scope MemoryScope, status string, limit, offset int) ([]*types.MemoryItem, int64, error)
 	// FindActiveByKey returns the active item occupying a topic key, if any.
 	FindActiveByKey(ctx context.Context, scope MemoryScope, normalizedKey string) (*types.MemoryItem, error)
+	FindActiveByKeyInScope(ctx context.Context, scope MemoryScope, itemScope, normalizedKey string) (*types.MemoryItem, error)
 	// UpdateItemContent rewrites an item edited in the memory manager.
 	UpdateItemContent(ctx context.Context, scope MemoryScope, id, content, normalizedKey string, importance int) error
+	UpdateItem(ctx context.Context, scope MemoryScope, item *types.MemoryItem) error
 	// SupersedeItem marks an outdated item as replaced by another one.
 	SupersedeItem(ctx context.Context, scope MemoryScope, id, supersededBy string) error
 	// DeleteItem physically removes one item. Forgetting means forgetting.
@@ -116,6 +165,7 @@ type MemoryRepository interface {
 	// ListLive returns items of one kind that the user can see: in use plus
 	// proposed and awaiting a decision.
 	ListLive(ctx context.Context, scope MemoryScope, kind string, limit int) ([]*types.MemoryItem, error)
+	ListLiveInScope(ctx context.Context, scope MemoryScope, itemScope, kind string, limit int) ([]*types.MemoryItem, error)
 	// SetItemStatus moves an item between statuses, used to confirm or reject
 	// something the system inferred.
 	SetItemStatus(ctx context.Context, scope MemoryScope, id, status string) error
@@ -228,6 +278,14 @@ func (c RetrievalContext) Empty() bool {
 
 // MemoryService is the read/write API for long-term memory.
 type MemoryService interface {
+	Snapshot(ctx context.Context, consumer string) (*types.PersonalMemorySnapshot, error)
+	ApplyCommand(ctx context.Context, command *types.PersonalMemoryCommand) (*types.PersonalMemoryReceipt, error)
+	GetCommandReceipt(ctx context.Context, operationID string) (*types.PersonalMemoryReceipt, error)
+	SubmitExpression(ctx context.Context, expression *types.PersonalMemoryExpression) (*types.PersonalMemoryExpressionReceipt, error)
+	// SubmitExpressionWithModel is the employee input adapter. The public wire
+	// remains PersonalMemoryExpression; this preserves the already-resolved chat
+	// model for the existing extraction-model fallback.
+	SubmitExpressionWithModel(ctx context.Context, expression *types.PersonalMemoryExpression, chatModelID string) (*types.PersonalMemoryExpressionReceipt, error)
 	// Recall assembles the memory to inject for one turn. It performs no LLM
 	// calls and returns an empty recall (never an error) whenever memory is
 	// disabled at any level, so callers can use it unconditionally.
@@ -288,6 +346,7 @@ type MemoryService interface {
 	FamiliarKnowledgeIDs(ctx context.Context) []string
 	// CreateItem adds a memory typed by the user in the memory manager.
 	CreateItem(ctx context.Context, kind, content string, importance int) (*types.MemoryItem, error)
+	CreateItemWithScope(ctx context.Context, scope, kind, content string, importance int) (*types.MemoryItem, error)
 	// ConfirmItem accepts a memory the system inferred, so it starts being used.
 	ConfirmItem(ctx context.Context, id string) (*types.MemoryItem, error)
 	// RejectItem declines an inference and remembers the refusal, so the same
@@ -295,6 +354,7 @@ type MemoryService interface {
 	RejectItem(ctx context.Context, id string) error
 	// UpdateItem edits one item's content and importance.
 	UpdateItem(ctx context.Context, id, content string, importance int) (*types.MemoryItem, error)
+	UpdateItemWithScope(ctx context.Context, id, itemScope, content string, importance int) (*types.MemoryItem, error)
 	// DeleteItem forgets one item.
 	DeleteItem(ctx context.Context, id string) error
 	// Clear forgets everything in the caller's memory space.

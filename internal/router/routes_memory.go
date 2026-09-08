@@ -20,6 +20,10 @@ func RegisterMemoryRoutes(r *gin.RouterGroup, memoryHandler *handler.MemoryHandl
 	}
 	memoryGroup := g.apiKeyGroup(r.Group("/memory", g.Viewer()), apiKeyFullAccess())
 	{
+		memoryGroup.GET("/snapshot", memoryHandler.GetSnapshot)
+		memoryGroup.POST("/commands", memoryHandler.ApplyCommand)
+		memoryGroup.GET("/commands/:operation_id", memoryHandler.GetCommandReceipt)
+		memoryGroup.POST("/expressions", memoryHandler.SubmitExpression)
 		memoryGroup.GET("/settings", memoryHandler.GetSettings)
 		memoryGroup.PUT("/settings", memoryHandler.UpdateSettings)
 		memoryGroup.GET("/items", memoryHandler.ListItems)

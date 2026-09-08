@@ -17,17 +17,21 @@ import (
 
 // MemorySettings is the merged workspace + personal memory switch.
 type MemorySettings struct {
-	WorkspaceEnabled bool   `json:"workspace_enabled"`
-	UserEnabled      bool   `json:"user_enabled"`
-	Effective        bool   `json:"effective"`
-	WriteMode        string `json:"write_mode"`
-	ItemCount        int    `json:"item_count"`
-	MaxItems         int    `json:"max_items"`
+	WorkspaceEnabled    bool   `json:"workspace_enabled"`
+	UserEnabled         bool   `json:"user_enabled"`
+	Effective           bool   `json:"effective"`
+	WriteMode           string `json:"write_mode"`
+	ItemCount           int    `json:"item_count"`
+	MaxItems            int    `json:"max_items"`
+	WorkspaceGeneration int64  `json:"workspace_generation"`
+	SubjectGeneration   int64  `json:"subject_generation"`
+	Revision            int64  `json:"revision"`
 }
 
 // MemoryItem is one long-term memory row as returned by the API.
 type MemoryItem struct {
 	ID              string     `json:"id"`
+	Scope           string     `json:"scope"`
 	Kind            string     `json:"kind"`
 	Content         string     `json:"content"`
 	Topic           string     `json:"topic,omitempty"`
@@ -180,7 +184,13 @@ func (c *Client) ListMemoryItems(ctx context.Context, status string, limit, offs
 // CreateMemoryItem manually adds a long-term memory. kind is one of
 // profile / preference / fact / task / interest.
 func (c *Client) CreateMemoryItem(ctx context.Context, kind, content string, importance int) (*MemoryItem, error) {
+	return c.CreateMemoryItemWithScope(ctx, "shared", kind, content, importance)
+}
+
+// CreateMemoryItemWithScope creates a memory for shared, employee, or analysis use.
+func (c *Client) CreateMemoryItemWithScope(ctx context.Context, scope, kind, content string, importance int) (*MemoryItem, error) {
 	body := map[string]interface{}{
+		"scope":      scope,
 		"kind":       kind,
 		"content":    content,
 		"importance": importance,
@@ -190,6 +200,155 @@ func (c *Client) CreateMemoryItem(ctx context.Context, kind, content string, imp
 		return nil, err
 	}
 	var out memoryItemResponse
+	if err := parseResponse(resp, &out); err != nil {
+		return nil, err
+	}
+	return out.Data, nil
+}
+
+// PersonalMemorySnapshot is the bounded active projection consumed by a runtime.
+type PersonalMemorySnapshot struct {
+	Schema   string `json:"schema"`
+	Status   string `json:"status"`
+	Consumer string `json:"consumer"`
+	Policy   struct {
+		WorkspaceEnabled    bool   `json:"workspace_enabled"`
+		UserEnabled         bool   `json:"user_enabled"`
+		WriteMode           string `json:"write_mode"`
+		WorkspaceGeneration int64  `json:"workspace_generation"`
+		SubjectGeneration   int64  `json:"subject_generation"`
+	} `json:"policy"`
+	Revision int64         `json:"revision"`
+	Items    []*MemoryItem `json:"items"`
+}
+
+type PersonalMemoryExpected struct {
+	WorkspaceGeneration int64 `json:"workspace_generation"`
+	SubjectGeneration   int64 `json:"subject_generation"`
+	Revision            int64 `json:"revision"`
+}
+
+type PersonalMemoryCommandSource struct {
+	Runtime   string `json:"runtime"`
+	Mode      string `json:"mode"`
+	SessionID string `json:"session_id"`
+	MessageID string `json:"message_id"`
+}
+
+type PersonalMemoryChange struct {
+	Op         string `json:"op"`
+	ID         string `json:"id,omitempty"`
+	Scope      string `json:"scope,omitempty"`
+	Kind       string `json:"kind,omitempty"`
+	Topic      string `json:"topic,omitempty"`
+	Content    string `json:"content,omitempty"`
+	Importance *int   `json:"importance,omitempty"`
+}
+
+type PersonalMemoryCommand struct {
+	Schema      string                      `json:"schema"`
+	OperationID string                      `json:"operation_id"`
+	Source      PersonalMemoryCommandSource `json:"source"`
+	Expected    PersonalMemoryExpected      `json:"expected"`
+	Changes     []PersonalMemoryChange      `json:"changes"`
+}
+
+type PersonalMemoryReceipt struct {
+	Schema              string     `json:"schema"`
+	OperationID         string     `json:"operation_id"`
+	Status              string     `json:"status"`
+	ReasonCode          *string    `json:"reason_code"`
+	Revision            int64      `json:"revision"`
+	WorkspaceGeneration int64      `json:"workspace_generation"`
+	SubjectGeneration   int64      `json:"subject_generation"`
+	ItemIDs             []string   `json:"item_ids"`
+	CommittedAt         *time.Time `json:"committed_at"`
+}
+
+type PersonalMemoryExpression struct {
+	Schema         string `json:"schema"`
+	ExpressionID   string `json:"expression_id"`
+	Runtime        string `json:"runtime"`
+	SessionID      string `json:"session_id"`
+	MessageID      string `json:"message_id"`
+	Text           string `json:"text"`
+	ExpectedPolicy struct {
+		WorkspaceGeneration int64 `json:"workspace_generation"`
+		SubjectGeneration   int64 `json:"subject_generation"`
+	} `json:"expected_policy"`
+}
+
+type PersonalMemoryExpressionReceipt struct {
+	Schema       string  `json:"schema"`
+	ExpressionID string  `json:"expression_id"`
+	Status       string  `json:"status"`
+	ReasonCode   *string `json:"reason_code"`
+}
+
+type personalMemorySnapshotResponse struct {
+	Success bool                    `json:"success"`
+	Data    *PersonalMemorySnapshot `json:"data"`
+}
+
+type personalMemoryReceiptResponse struct {
+	Success bool                   `json:"success"`
+	Data    *PersonalMemoryReceipt `json:"data"`
+}
+
+type personalMemoryExpressionReceiptResponse struct {
+	Success bool                             `json:"success"`
+	Data    *PersonalMemoryExpressionReceipt `json:"data"`
+}
+
+func (c *Client) GetPersonalMemorySnapshot(ctx context.Context, consumer string) (*PersonalMemorySnapshot, error) {
+	query := url.Values{}
+	if consumer != "" {
+		query.Set("consumer", consumer)
+	}
+	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/memory/snapshot", nil, query)
+	if err != nil {
+		return nil, err
+	}
+	var out personalMemorySnapshotResponse
+	if err := parseResponse(resp, &out); err != nil {
+		return nil, err
+	}
+	return out.Data, nil
+}
+
+func (c *Client) ApplyPersonalMemoryCommand(ctx context.Context, command *PersonalMemoryCommand) (*PersonalMemoryReceipt, error) {
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/memory/commands", command, nil)
+	if err != nil {
+		return nil, err
+	}
+	var out personalMemoryReceiptResponse
+	if err := parseResponse(resp, &out); err != nil {
+		return nil, err
+	}
+	return out.Data, nil
+}
+
+func (c *Client) GetPersonalMemoryReceipt(ctx context.Context, operationID string) (*PersonalMemoryReceipt, error) {
+	if operationID == "" {
+		return nil, fmt.Errorf("operation id is required")
+	}
+	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/memory/commands/"+url.PathEscape(operationID), nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	var out personalMemoryReceiptResponse
+	if err := parseResponse(resp, &out); err != nil {
+		return nil, err
+	}
+	return out.Data, nil
+}
+
+func (c *Client) SubmitPersonalMemoryExpression(ctx context.Context, expression *PersonalMemoryExpression) (*PersonalMemoryExpressionReceipt, error) {
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/memory/expressions", expression, nil)
+	if err != nil {
+		return nil, err
+	}
+	var out personalMemoryExpressionReceiptResponse
 	if err := parseResponse(resp, &out); err != nil {
 		return nil, err
 	}

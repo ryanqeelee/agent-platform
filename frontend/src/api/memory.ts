@@ -6,9 +6,11 @@ import { get, put, post, del } from '@/utils/request'
 export type MemoryKind = 'profile' | 'preference' | 'fact' | 'task' | 'interest'
 export type MemoryStatus = 'active' | 'superseded' | 'archived' | 'pending'
 export type MemoryOrigin = 'explicit' | 'extracted' | 'manual'
+export type MemoryScope = 'shared' | 'employee' | 'analysis'
 
 export interface MemoryItem {
   id: string
+  scope: MemoryScope
   kind: MemoryKind
   content: string
   topic: string
@@ -35,6 +37,69 @@ export interface MemorySettings {
   write_mode: string
   item_count: number
   max_items: number
+  workspace_generation: number
+  subject_generation: number
+  revision: number
+}
+
+export interface PersonalMemorySnapshot {
+  schema: 'personal_memory_snapshot/1'
+  status: 'available' | 'disabled'
+  consumer: 'analysis' | 'employee'
+  policy: {
+    workspace_enabled: boolean
+    user_enabled: boolean
+    write_mode: 'explicit_only' | 'auto'
+    workspace_generation: number
+    subject_generation: number
+  }
+  revision: number
+  items: Array<Pick<MemoryItem, 'id' | 'scope' | 'kind' | 'topic' | 'content' | 'importance' | 'origin' | 'status'>>
+}
+
+export interface PersonalMemoryCommand {
+  schema: 'personal_memory_command/1'
+  operation_id: string
+  source: { runtime: 'analysis' | 'employee'; mode: 'explicit' | 'manual'; session_id: string; message_id: string }
+  expected: { workspace_generation: number; subject_generation: number; revision: number }
+  changes: Array<{
+    op: 'create' | 'update' | 'delete'
+    id?: string
+    scope?: MemoryScope
+    kind?: MemoryKind
+    topic?: string
+    content?: string
+    importance?: number
+  }>
+}
+
+export interface PersonalMemoryReceipt {
+  schema: 'personal_memory_receipt/1'
+  operation_id: string
+  status: 'applied' | 'noop' | 'rejected'
+  reason_code: string | null
+  revision: number
+  workspace_generation: number
+  subject_generation: number
+  item_ids: string[]
+  committed_at: string | null
+}
+
+export interface PersonalMemoryExpression {
+  schema: 'personal_memory_expression/1'
+  expression_id: string
+  runtime: 'analysis' | 'employee'
+  session_id: string
+  message_id: string
+  text: string
+  expected_policy: { workspace_generation: number; subject_generation: number }
+}
+
+export interface PersonalMemoryExpressionReceipt {
+  schema: 'personal_memory_expression_receipt/1'
+  expression_id: string
+  status: 'accepted' | 'replayed' | 'rejected'
+  reason_code: string | null
 }
 
 export interface MemoryConfig {
@@ -68,6 +133,28 @@ export function getMemorySettings() {
   return get<{ success: boolean; data: MemorySettings }>('/api/v1/memory/settings')
 }
 
+export function getPersonalMemorySnapshot(consumer: 'analysis' | 'employee' = 'analysis') {
+  return get<{ success: boolean; data: PersonalMemorySnapshot }>(
+    `/api/v1/memory/snapshot?consumer=${consumer}`,
+  )
+}
+
+export function applyPersonalMemoryCommand(command: PersonalMemoryCommand) {
+  return post<{ success: boolean; data: PersonalMemoryReceipt }>('/api/v1/memory/commands', command)
+}
+
+export function getPersonalMemoryReceipt(operationId: string) {
+  return get<{ success: boolean; data: PersonalMemoryReceipt }>(
+    `/api/v1/memory/commands/${encodeURIComponent(operationId)}`,
+  )
+}
+
+export function submitPersonalMemoryExpression(expression: PersonalMemoryExpression) {
+  return post<{ success: boolean; data: PersonalMemoryExpressionReceipt }>(
+    '/api/v1/memory/expressions', expression,
+  )
+}
+
 export function updateMemoryEnabled(enabled: boolean) {
   return put<{ success: boolean; data: MemorySettings }>('/api/v1/memory/settings', { enabled })
 }
@@ -91,11 +178,11 @@ export function rejectMemoryItem(id: string) {
   return post<{ success: boolean }>(`/api/v1/memory/items/${id}/reject`, {})
 }
 
-export function createMemoryItem(payload: { kind: MemoryKind; content: string; importance?: number }) {
+export function createMemoryItem(payload: { scope?: MemoryScope; kind: MemoryKind; content: string; importance?: number }) {
   return post<{ success: boolean; data: MemoryItem }>('/api/v1/memory/items', payload)
 }
 
-export function updateMemoryItem(id: string, payload: { content: string; importance: number }) {
+export function updateMemoryItem(id: string, payload: { scope?: MemoryScope; content: string; importance: number }) {
   return put<{ success: boolean; data: MemoryItem }>(
     `/api/v1/memory/items/${encodeURIComponent(id)}`,
     payload,

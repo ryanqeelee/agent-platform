@@ -24,7 +24,7 @@ Use only when the preceding retrieval did not provide enough source text to reso
 - faq_id (optional): Short cN ID for an FAQ chunk from grep_chunks / knowledge_search.
 - chunk_id (optional): Short cN ID for a single non-FAQ chunk.
 - knowledge_id (optional): Short dN document ID to page through all chunks.
-- limit / offset: Only for knowledge_id paging (default limit 20, max 100).
+- limit / offset: Only for knowledge_id paging (default limit 20, max 100). Offset counts eligible chunks, not chunk_index. Use next_offset only if more source text is needed; has_more=false means the document end was reached.
 
 ## Output:
 Full chunk content. FAQ entries include <faq> with <answer> from metadata.`,
@@ -133,6 +133,9 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 	if input.Limit > 0 {
 		chunkLimit = input.Limit
 	}
+	if chunkLimit > 100 {
+		chunkLimit = 100
+	}
 	offset := 0
 	if input.Offset > 0 {
 		offset = input.Offset
@@ -155,11 +158,27 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 			Error:   fmt.Sprintf("failed to list chunks: %v", err),
 		}, err
 	}
-	if chunks == nil {
-		return &types.ToolResult{
-			Success: false,
-			Error:   "chunk query returned no data",
-		}, fmt.Errorf("chunk query returned no data")
+	// The repository accepts page numbers, while the tool accepts exact offsets.
+	// An unaligned window spans at most two repository pages.
+	if skip := offset % chunkLimit; skip > 0 {
+		if skip >= len(chunks) {
+			chunks = nil
+		} else {
+			chunks = chunks[skip:]
+		}
+		if int64(offset)+int64(len(chunks)) < total && len(chunks) < chunkLimit {
+			nextPage := &types.Pagination{Page: pagination.Page + 1, PageSize: chunkLimit}
+			next, _, nextErr := t.chunkService.GetRepository().ListPagedChunksByKnowledgeID(ctx,
+				effectiveTenantID, knowledgeID, nextPage, []types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, nil, "", "", "", "", &enabled)
+			if nextErr != nil {
+				return &types.ToolResult{Success: false, Error: fmt.Sprintf("failed to list chunks: %v", nextErr)}, nextErr
+			}
+			need := chunkLimit - len(chunks)
+			if len(next) > need {
+				next = next[:need]
+			}
+			chunks = append(chunks, next...)
+		}
 	}
 
 	totalChunks := total
@@ -209,7 +228,7 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 
 	knowledgeTitle := t.lookupKnowledgeTitle(ctx, knowledgeID)
 
-	output := t.buildOutput(knowledgeID, knowledgeTitle, totalChunks, fetched, chunks)
+	output := t.buildOutput(knowledgeID, knowledgeTitle, totalChunks, offset, chunks, false)
 
 	formattedChunks := make([]map[string]interface{}, 0, len(chunks))
 	for idx, c := range chunks {
@@ -269,6 +288,9 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 			"fetched_chunks":  fetched,
 			"page":            pagination.Page,
 			"page_size":       pagination.PageSize,
+			"offset":          offset,
+			"next_offset":     offset + fetched,
+			"has_more":        int64(offset)+int64(fetched) < totalChunks,
 			"chunks":          formattedChunks,
 		},
 	}, nil
@@ -298,7 +320,7 @@ func (t *ListKnowledgeChunksTool) executeByChunkID(ctx context.Context, chunkID 
 	}
 
 	knowledgeTitle := t.lookupKnowledgeTitle(ctx, chunk.KnowledgeID)
-	output := t.buildOutput(chunk.KnowledgeID, knowledgeTitle, 1, 1, chunks)
+	output := t.buildOutput(chunk.KnowledgeID, knowledgeTitle, 1, 0, chunks, true)
 
 	formattedChunks := []map[string]interface{}{
 		{
@@ -355,21 +377,21 @@ func (t *ListKnowledgeChunksTool) buildOutput(
 	knowledgeID string,
 	knowledgeTitle string,
 	total int64,
-	fetched int,
+	offset int,
 	chunks []*types.Chunk,
+	singleChunk bool,
 ) string {
 	var b strings.Builder
+	fetched := len(chunks)
 
 	titleAttr := ""
 	if knowledgeTitle != "" {
 		titleAttr = fmt.Sprintf(" title=\"%s\"", knowledgeTitle)
 	}
-	fmt.Fprintf(&b, "<knowledge_chunks knowledge_id=\"%s\"%s total=\"%d\" fetched=\"%d\">\n",
-		knowledgeID, titleAttr, total, fetched)
-
-	if fetched == 0 {
-		b.WriteString("</knowledge_chunks>")
-		return b.String()
+	if singleChunk {
+		fmt.Fprintf(&b, "<knowledge_chunks knowledge_id=\"%s\"%s single_chunk=\"true\" fetched=\"%d\">\n", knowledgeID, titleAttr, fetched)
+	} else {
+		fmt.Fprintf(&b, "<knowledge_chunks knowledge_id=\"%s\"%s total=\"%d\" offset=\"%d\" fetched=\"%d\">\n", knowledgeID, titleAttr, total, offset, fetched)
 	}
 
 	for _, c := range chunks {
@@ -391,8 +413,10 @@ func (t *ListKnowledgeChunksTool) buildOutput(
 		b.WriteString("</chunk>\n")
 	}
 
-	if int64(fetched) < total {
-		fmt.Fprintf(&b, "<pagination remaining=\"%d\" />\n", int64(total)-int64(fetched))
+	if !singleChunk {
+		nextOffset := offset + fetched
+		remaining := max(int64(0), total-int64(nextOffset))
+		fmt.Fprintf(&b, "<pagination next_offset=\"%d\" remaining=\"%d\" has_more=\"%t\" />\n", nextOffset, remaining, remaining > 0)
 	}
 
 	b.WriteString("</knowledge_chunks>")

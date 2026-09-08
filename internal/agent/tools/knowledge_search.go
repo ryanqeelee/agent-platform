@@ -866,13 +866,8 @@ func (t *KnowledgeSearchTool) formatOutput(
 	writeKnowledgeMetadataHeader(&ob, results)
 
 	formattedResults := make([]map[string]interface{}, 0, len(results))
-	enabled := true
 
 	faqMetadataCache := make(map[string]*types.FAQChunkMetadata)
-
-	knowledgeChunkMap := make(map[string]map[int]bool)
-	knowledgeTotalMap := make(map[string]int64)
-	knowledgeTitleMap := make(map[string]string)
 
 	for i, result := range results {
 		var faqMeta *types.FAQChunkMetadata
@@ -882,38 +877,6 @@ func (t *KnowledgeSearchTool) formatOutput(
 				logger.Warnf(ctx, "[Tool][KnowledgeSearch] Failed to load FAQ metadata for chunk %s: %v", result.ID, err)
 			} else {
 				faqMeta = meta
-			}
-		}
-
-		if knowledgeChunkMap[result.KnowledgeID] == nil {
-			knowledgeChunkMap[result.KnowledgeID] = make(map[int]bool)
-		}
-		knowledgeChunkMap[result.KnowledgeID][result.ChunkIndex] = true
-		knowledgeTitleMap[result.KnowledgeID] = result.KnowledgeTitle
-
-		// Cache total chunk count per knowledge
-		if _, exists := knowledgeTotalMap[result.KnowledgeID]; !exists {
-			effectiveTenantID := t.searchTargets.GetTenantIDForKB(result.KnowledgeBaseID)
-			if effectiveTenantID == 0 {
-				logger.Warnf(ctx, "[Tool][KnowledgeSearch] KB %s not found in searchTargets, skipping chunk count", result.KnowledgeBaseID)
-				knowledgeTotalMap[result.KnowledgeID] = 0
-			} else {
-				// Use the same chunk-type filter as list_knowledge_chunks so the
-				// total reported here matches what list_knowledge_chunks can page
-				// over. Mismatched filters previously let LLMs compute offsets
-				// against an inflated/deflated total and page past the end.
-				_, total, err := t.chunkService.GetRepository().ListPagedChunksByKnowledgeID(ctx,
-					effectiveTenantID, result.KnowledgeID,
-					&types.Pagination{Page: 1, PageSize: 1},
-					[]types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, nil, "", "", "", "",
-					&enabled,
-				)
-				if err != nil {
-					logger.Warnf(ctx, "[Tool][KnowledgeSearch] Failed to get total chunks for knowledge %s: %v", result.KnowledgeID, err)
-					knowledgeTotalMap[result.KnowledgeID] = 0
-				} else {
-					knowledgeTotalMap[result.KnowledgeID] = total
-				}
 			}
 		}
 
@@ -1070,20 +1033,6 @@ func (t *KnowledgeSearchTool) formatOutput(
 		}
 	}
 
-	// Retrieval statistics
-	ob.WriteString("<retrieval_statistics>\n")
-	for knowledgeID, retrievedChunks := range knowledgeChunkMap {
-		totalChunks := knowledgeTotalMap[knowledgeID]
-		retrievedCount := len(retrievedChunks)
-		title := knowledgeTitleMap[knowledgeID]
-		if totalChunks > 0 {
-			remaining := totalChunks - int64(retrievedCount)
-			percentage := float64(retrievedCount) / float64(totalChunks) * 100
-			ob.WriteString(fmt.Sprintf("<document_stat knowledge_id=\"%s\" title=\"%s\" total_chunks=\"%d\" retrieved=\"%d\" remaining=\"%d\" coverage=\"%.1f%%\" />\n",
-				xmlEscape(knowledgeID), xmlEscape(title), totalChunks, retrievedCount, remaining, percentage))
-		}
-	}
-	ob.WriteString("</retrieval_statistics>\n")
 	ob.WriteString("</search_results>")
 
 	output := ob.String()

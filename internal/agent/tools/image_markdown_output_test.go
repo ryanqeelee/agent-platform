@@ -28,7 +28,7 @@ func TestLLMToolOutputsUseMarkdownImages(t *testing.T) {
 		ImageInfo:  string(imageInfo),
 	}
 
-	listOutput := (&ListKnowledgeChunksTool{}).buildOutput("knowledge-1", "测试文档", 1, 1, []*types.Chunk{chunk})
+	listOutput := (&ListKnowledgeChunksTool{}).buildOutput("knowledge-1", "测试文档", 1, 0, []*types.Chunk{chunk}, true)
 	wikiOutput := enrichChunkContent(chunk)
 	for name, output := range map[string]string{
 		"list_knowledge_chunks": listOutput,

@@ -165,7 +165,8 @@ func (s *enterpriseAdministrationService) Resolve(ctx context.Context) (*types.E
 			StorageUsageByte:                        tenant.StorageUsed,
 			StorageQuotaByte:                        tenant.StorageQuota,
 		},
-		Items: items,
+		Items:     items,
+		EdgeNodes: platform.EdgeNodes,
 	}, nil
 }
 

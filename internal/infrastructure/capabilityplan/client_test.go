@@ -247,6 +247,7 @@ func TestClientResolvesEnterpriseAdministrationQueue(t *testing.T) {
 			"contract_version":"EnterpriseAdministrationQueueV1",
 			"scope":{"kind":"enterprise_assigned","product_base_tenant_id":"7"},
 			"as_of":"2026-08-30T00:00:00Z",
+            "edge_nodes":[{"edge_node_id":"edge-1","connection_status":"online","data_service_status":"available","availability":"available","last_seen_at":"2026-08-30T00:00:00Z"}],
 			"summary":{"service_level":"retail_agent_enterprise","status":"active","member_quota":20,"health":"healthy"},
 			"items":[{"code":"operating_analysis_access_gap","priority":"high","count":2,"target":"members"}]
 		}`))
@@ -258,6 +259,9 @@ func TestClientResolvesEnterpriseAdministrationQueue(t *testing.T) {
 		Role: "admin", ActiveMemberCount: 3, OperatingAnalysisMissingAccessCount: 2,
 	})
 	require.NoError(t, err)
+	require.Len(t, projection.EdgeNodes, 1)
+	require.Equal(t, "available", projection.EdgeNodes[0].Availability)
+	require.Equal(t, "edge-1", projection.EdgeNodes[0].EdgeNodeID)
 	require.Equal(t, 20, *projection.Summary.MemberQuota)
 	require.Equal(t, "operating_analysis_access_gap", projection.Items[0].Code)
 }

@@ -22,7 +22,19 @@ type EnterpriseAdministrationPlatformSummary struct {
 	Health       string `json:"health"`
 }
 
+// EnterpriseEdgeNode is the Center-owned, tenant-scoped health projection.
+// A nil EdgeNodes slice means status could not be obtained; an empty slice means
+// the enterprise has no registered edge nodes.
+type EnterpriseEdgeNode struct {
+	EdgeNodeID        string  `json:"edge_node_id"`
+	ConnectionStatus  string  `json:"connection_status"`
+	DataServiceStatus string  `json:"data_service_status"`
+	Availability      string  `json:"availability"`
+	LastSeenAt        *string `json:"last_seen_at"`
+}
+
 type EnterpriseAdministrationPlatformProjection struct {
+	EdgeNodes       []EnterpriseEdgeNode                    `json:"edge_nodes"`
 	ContractVersion string                                  `json:"contract_version"`
 	Scope           PlatformSettingsScope                   `json:"scope"`
 	AsOf            string                                  `json:"as_of"`
@@ -38,6 +50,7 @@ type EnterpriseAdministrationSummary struct {
 }
 
 type EnterpriseAdministrationQueue struct {
+	EdgeNodes       []EnterpriseEdgeNode            `json:"edge_nodes"`
 	ContractVersion string                          `json:"contract_version"`
 	AsOf            string                          `json:"as_of"`
 	Summary         EnterpriseAdministrationSummary `json:"summary"`

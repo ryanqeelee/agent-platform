@@ -207,121 +207,116 @@ export type EnterpriseAdministrationCopy = {
   eyebrow: string
   title: string
   description: string
-  serviceLevel: string
-  serviceStatus: string
   members: string
   storage: string
-  security: string
-  healthy: string
-  attention: string
-  unavailable: string
-  unknown: string
-  queueTitle: string
-  queueDescription: string
-  queueEmpty: string
-  serviceHealthTitle: string
-  serviceHealthDescription: string
-  serviceHealthAction: string
+  serviceLevel: string
+  memberQuota: string
   retry: string
   loadFailed: string
-  itemCopy: Record<string, { title: string; description: string; action: string }>
+  edgeTitle: string
+  edgeDescription: string
+  edgeNode: string
+  availability: string
+  connection: string
+  dataService: string
+  lastSeen: string
+  noContact: string
+  empty: string
+  emptyDescription: string
+  unknown: string
+  statusUnavailable: string
+  refresh: string
+  updatedAt: string
+  nodeCount: string
+  availableCount: string
+  telemetryNote: string
+  statuses: Record<string, string>
+  reasons: Record<string, string>
 }
 
 const enterpriseAdministrationCopyByLocale: Record<string, EnterpriseAdministrationCopy> = {
   'zh-CN': {
-    eyebrow: '企业管理',
-    title: '今天需要关注的企业事项',
-    description: '集中查看成员、知识与服务状态；具体模型和基础设施由平台统一管理。',
-    serviceLevel: '服务级别',
-    serviceStatus: '服务状态',
-    members: '活跃成员',
-    storage: '知识存储',
-    security: '安全动态',
-    healthy: '运行正常',
-    attention: '需要关注',
-    unavailable: '暂不可用',
-    unknown: '待确认',
-    queueTitle: '待处理事项',
-    queueDescription: '按影响程度排列，只展示当前角色可以处理的事项。',
-    queueEmpty: '当前没有需要处理的事项',
-    serviceHealthTitle: '平台服务支持',
-    serviceHealthDescription: '企业侧仅展示可用状态。服务能力、模型与基础设施由环枢平台统一维护。',
-    serviceHealthAction: '联系平台方',
-    retry: '重新加载',
+    eyebrow: '企业管理', title: '企业管理',
+    description: '管理企业知识与成员，查看企业数据连接状态。',
+    members: '活跃成员', storage: '知识存储', serviceLevel: '服务级别', memberQuota: '成员额度', retry: '重新加载',
     loadFailed: '企业管理信息暂时无法加载',
-    itemCopy: {
-      license_or_capability_attention: { title: '服务能力需要处理', description: '当前企业服务配置需要平台方检查。', action: '查看服务状态' },
-      edge_node_offline: { title: '边缘节点连接离线', description: '部分企业侧边缘节点当前未连接平台。', action: '查看服务状态' },
-      operating_analysis_access_gap: { title: '经营分析授权待完善', description: '部分活跃成员尚未获得经营分析权限。', action: '管理成员' },
-      pending_invitations: { title: '成员邀请待接受', description: '已发送的成员邀请尚未完成。', action: '管理成员' },
-      knowledge_processing_failed: { title: '知识内容处理失败', description: '部分知识内容需要重新处理。', action: '查看知识库' },
-      recent_high_risk_operations: { title: '近期重要权限变更', description: '最近 7 天发生了需要复核的重要操作。', action: '查看审计记录' },
+    edgeTitle: '边缘节点状态',
+    edgeDescription: '用于企业数据访问与经营分析；知识库与成员管理不依赖边缘节点。',
+    edgeNode: '边缘节点', availability: '可用状态', connection: '节点连接',
+    dataService: '数据服务', lastSeen: '最近联系', noContact: '暂无记录',
+    empty: '尚未配置边缘节点', emptyDescription: '需要使用企业数据分析时，请联系平台方配置。',
+    unknown: '未知', statusUnavailable: '暂未取得边缘节点状态，无法判断是否可用。',
+    refresh: '刷新状态', updatedAt: '状态更新于', nodeCount: '节点', availableCount: '可用',
+    telemetryNote: '状态来自最近一次心跳；可用表示节点连接与数据服务正常，具体数据访问仍以实际查询为准。',
+    statuses: { available: '可用', abnormal: '异常', offline: '离线', disabled: '已停用', unknown: '未知', online: '在线' },
+    reasons: {
+      available: '', abnormal: '节点已连接，但数据服务异常。',
+      offline: '未收到近期节点心跳，该节点的数据暂时无法访问。',
+      disabled: '节点已停用，该节点的数据暂时无法访问。',
+      unknown: '暂未取得完整节点状态，无法判断数据是否可访问。',
     },
   },
   'en-US': {
-    eyebrow: 'Enterprise administration',
-    title: 'What needs attention today',
-    description: 'Review members, knowledge, and service status in one place. Models and infrastructure are managed by the platform.',
-    serviceLevel: 'Service level',
-    serviceStatus: 'Service status',
-    members: 'Active members',
-    storage: 'Knowledge storage',
-    security: 'Security activity',
-    healthy: 'Healthy',
-    attention: 'Needs attention',
-    unavailable: 'Unavailable',
-    unknown: 'To be confirmed',
-    queueTitle: 'Action queue',
-    queueDescription: 'Sorted by impact and limited to items your role can handle.',
-    queueEmpty: 'Nothing needs attention right now',
-    serviceHealthTitle: 'Platform support',
-    serviceHealthDescription: 'Enterprise users see availability only. The HuanShu platform manages service capabilities, models, and infrastructure.',
-    serviceHealthAction: 'Contact platform support',
-    retry: 'Try again',
+    eyebrow: 'Enterprise administration', title: 'Enterprise administration',
+    description: 'Manage enterprise knowledge and members, and review data connectivity.',
+    members: 'Active members', storage: 'Knowledge storage', serviceLevel: 'Service level', memberQuota: 'Member quota', retry: 'Try again',
     loadFailed: 'Enterprise administration is temporarily unavailable',
-    itemCopy: {
-      license_or_capability_attention: { title: 'Service capability needs attention', description: 'The platform needs to review this enterprise service configuration.', action: 'View service status' },
-      edge_node_offline: { title: 'Edge node offline', description: 'One or more enterprise edge nodes are not connected to the platform.', action: 'View service status' },
-      operating_analysis_access_gap: { title: 'Operating analysis access incomplete', description: 'Some active members do not yet have operating analysis access.', action: 'Manage members' },
-      pending_invitations: { title: 'Member invitations pending', description: 'Sent invitations have not yet been accepted.', action: 'Manage members' },
-      knowledge_processing_failed: { title: 'Knowledge processing failed', description: 'Some knowledge content needs to be processed again.', action: 'Open knowledge bases' },
-      recent_high_risk_operations: { title: 'Recent important permission changes', description: 'Important operations from the last 7 days should be reviewed.', action: 'View audit log' },
+    edgeTitle: 'Edge node status',
+    edgeDescription: 'For enterprise data access and operating analysis. Knowledge and member management do not depend on edge nodes.',
+    edgeNode: 'Edge node', availability: 'Availability', connection: 'Connection',
+    dataService: 'Data service', lastSeen: 'Last contact', noContact: 'No record',
+    empty: 'No edge nodes configured', emptyDescription: 'Contact the platform to configure enterprise data access.',
+    unknown: 'Unknown', statusUnavailable: 'Edge node status could not be obtained. Availability is unknown.',
+    refresh: 'Refresh status', updatedAt: 'Updated at', nodeCount: 'Nodes', availableCount: 'Available',
+    telemetryNote: 'Status reflects the latest heartbeat. Available means the connection and data service are healthy; actual data access is verified when querying.',
+    statuses: { available: 'Available', abnormal: 'Abnormal', offline: 'Offline', disabled: 'Disabled', unknown: 'Unknown', online: 'Online' },
+    reasons: {
+      available: '', abnormal: 'Connected, but the data service is abnormal.',
+      offline: 'No recent heartbeat. Data on this node is temporarily inaccessible.',
+      disabled: 'This node is disabled. Its data is temporarily inaccessible.',
+      unknown: 'Incomplete node status. Data accessibility is unknown.',
     },
   },
   'ru-RU': {
-    eyebrow: 'Управление предприятием',
-    title: 'Что требует внимания сегодня',
-    description: 'Участники, знания и состояние сервиса в одном месте. Модели и инфраструктуру обслуживает платформа.',
-    serviceLevel: 'Уровень сервиса', serviceStatus: 'Состояние сервиса', members: 'Активные участники', storage: 'Хранилище знаний', security: 'События безопасности',
-    healthy: 'Работает нормально', attention: 'Требует внимания', unavailable: 'Недоступно', unknown: 'Нужно уточнить',
-    queueTitle: 'Задачи', queueDescription: 'Сортировка по влиянию; показаны только доступные вашей роли задачи.', queueEmpty: 'Сейчас нет задач, требующих внимания',
-    serviceHealthTitle: 'Поддержка платформы', serviceHealthDescription: 'Предприятие видит только доступность. Возможности, модели и инфраструктуру обслуживает платформа HuanShu.', serviceHealthAction: 'Связаться с платформой',
-    retry: 'Повторить', loadFailed: 'Управление предприятием временно недоступно',
-    itemCopy: {
-      license_or_capability_attention: { title: 'Требуется проверка сервиса', description: 'Платформе нужно проверить конфигурацию сервиса предприятия.', action: 'Состояние сервиса' },
-      edge_node_offline: { title: 'Пограничный узел не в сети', description: 'Один или несколько пограничных узлов не подключены к платформе.', action: 'Состояние сервиса' },
-      operating_analysis_access_gap: { title: 'Не всем выдан доступ к анализу', description: 'У части активных участников нет доступа к операционному анализу.', action: 'Управлять участниками' },
-      pending_invitations: { title: 'Ожидающие приглашения', description: 'Отправленные приглашения еще не приняты.', action: 'Управлять участниками' },
-      knowledge_processing_failed: { title: 'Ошибка обработки знаний', description: 'Некоторые материалы нужно обработать повторно.', action: 'Открыть базы знаний' },
-      recent_high_risk_operations: { title: 'Важные изменения прав', description: 'Следует проверить важные операции за последние 7 дней.', action: 'Открыть аудит' },
+    eyebrow: 'Управление предприятием', title: 'Управление предприятием',
+    description: 'Управление знаниями, участниками и подключением к данным предприятия.',
+    members: 'Активные участники', storage: 'Хранилище знаний', serviceLevel: 'Уровень сервиса', memberQuota: 'Лимит участников', retry: 'Повторить',
+    loadFailed: 'Информация о предприятии временно недоступна',
+    edgeTitle: 'Состояние пограничных узлов',
+    edgeDescription: 'Для доступа к данным и операционного анализа. Управление знаниями и участниками не зависит от узлов.',
+    edgeNode: 'Пограничный узел', availability: 'Доступность', connection: 'Подключение',
+    dataService: 'Сервис данных', lastSeen: 'Последняя связь', noContact: 'Нет записей',
+    empty: 'Пограничные узлы не настроены', emptyDescription: 'Для доступа к данным обратитесь к администратору платформы.',
+    unknown: 'Неизвестно', statusUnavailable: 'Не удалось получить состояние узлов. Доступность неизвестна.',
+    refresh: 'Обновить', updatedAt: 'Обновлено', nodeCount: 'Узлы', availableCount: 'Доступно',
+    telemetryNote: 'Состояние основано на последнем сигнале узла. Доступ к конкретным данным проверяется при запросе.',
+    statuses: { available: 'Доступен', abnormal: 'Ошибка', offline: 'Не в сети', disabled: 'Отключён', unknown: 'Неизвестно', online: 'В сети' },
+    reasons: {
+      available: '', abnormal: 'Узел подключён, но сервис данных работает с ошибкой.',
+      offline: 'Нет недавнего сигнала. Данные узла временно недоступны.',
+      disabled: 'Узел отключён. Его данные временно недоступны.',
+      unknown: 'Недостаточно сведений о состоянии узла.',
     },
   },
   'ko-KR': {
-    eyebrow: '기업 관리',
-    title: '오늘 확인할 기업 운영 항목',
-    description: '구성원, 지식, 서비스 상태를 한곳에서 확인합니다. 모델과 인프라는 플랫폼에서 통합 관리합니다.',
-    serviceLevel: '서비스 수준', serviceStatus: '서비스 상태', members: '활성 구성원', storage: '지식 저장공간', security: '보안 활동',
-    healthy: '정상 운영', attention: '확인 필요', unavailable: '사용 불가', unknown: '확인 대기',
-    queueTitle: '처리할 항목', queueDescription: '영향도 순으로 현재 역할이 처리할 수 있는 항목만 표시합니다.', queueEmpty: '현재 처리할 항목이 없습니다',
-    serviceHealthTitle: '플랫폼 지원', serviceHealthDescription: '기업에는 가용 상태만 표시합니다. 서비스 기능, 모델, 인프라는 HuanShu 플랫폼에서 관리합니다.', serviceHealthAction: '플랫폼에 문의',
-    retry: '다시 불러오기', loadFailed: '기업 관리 정보를 일시적으로 불러올 수 없습니다',
-    itemCopy: {
-      license_or_capability_attention: { title: '서비스 기능 확인 필요', description: '플랫폼에서 기업 서비스 구성을 확인해야 합니다.', action: '서비스 상태 보기' },
-      edge_node_offline: { title: '에지 노드 오프라인', description: '일부 기업 에지 노드가 플랫폼에 연결되어 있지 않습니다.', action: '서비스 상태 보기' },
-      operating_analysis_access_gap: { title: '운영 분석 권한 미완료', description: '일부 활성 구성원에게 운영 분석 권한이 없습니다.', action: '구성원 관리' },
-      pending_invitations: { title: '구성원 초대 대기', description: '발송한 초대가 아직 수락되지 않았습니다.', action: '구성원 관리' },
-      knowledge_processing_failed: { title: '지식 처리 실패', description: '일부 지식 콘텐츠를 다시 처리해야 합니다.', action: '지식 베이스 보기' },
-      recent_high_risk_operations: { title: '최근 중요 권한 변경', description: '최근 7일의 중요 작업을 검토해야 합니다.', action: '감사 기록 보기' },
+    eyebrow: '기업 관리', title: '기업 관리',
+    description: '기업 지식과 구성원을 관리하고 데이터 연결 상태를 확인합니다.',
+    members: '활성 구성원', storage: '지식 저장공간', serviceLevel: '서비스 수준', memberQuota: '구성원 한도', retry: '다시 불러오기',
+    loadFailed: '기업 관리 정보를 불러올 수 없습니다',
+    edgeTitle: '에지 노드 상태',
+    edgeDescription: '기업 데이터 접근과 운영 분석에 사용됩니다. 지식 및 구성원 관리는 에지 노드에 의존하지 않습니다.',
+    edgeNode: '에지 노드', availability: '가용 상태', connection: '노드 연결',
+    dataService: '데이터 서비스', lastSeen: '최근 연결', noContact: '기록 없음',
+    empty: '설정된 에지 노드가 없습니다', emptyDescription: '기업 데이터 분석이 필요하면 플랫폼에 설정을 요청하세요.',
+    unknown: '알 수 없음', statusUnavailable: '에지 노드 상태를 가져오지 못했습니다. 사용 가능 여부를 알 수 없습니다.',
+    refresh: '상태 새로고침', updatedAt: '업데이트', nodeCount: '노드', availableCount: '사용 가능',
+    telemetryNote: '최근 하트비트 기준 상태입니다. 실제 데이터 접근은 쿼리 시 확인됩니다.',
+    statuses: { available: '사용 가능', abnormal: '오류', offline: '오프라인', disabled: '비활성', unknown: '알 수 없음', online: '온라인' },
+    reasons: {
+      available: '', abnormal: '노드는 연결되었지만 데이터 서비스에 오류가 있습니다.',
+      offline: '최근 하트비트가 없습니다. 이 노드의 데이터에 접근할 수 없습니다.',
+      disabled: '노드가 비활성화되어 데이터에 접근할 수 없습니다.',
+      unknown: '노드 상태 정보가 충분하지 않아 데이터 접근 여부를 알 수 없습니다.',
     },
   },
 }

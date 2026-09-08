@@ -991,7 +991,7 @@ func (s *agentService) registerTools(
 	// still names it — a preset, an API caller, or a config saved while memory
 	// was on — cannot outlive the switch being turned off.
 	allowedTools = withoutString(allowedTools, tools.ToolSearchMemory)
-	if !config.EmployeeAssistant && s.memoryService != nil &&
+	if s.memoryService != nil &&
 		s.memoryService.MemoryAvailable(types.ApplyAgentMemoryPreference(ctx, config.MemoryEnabled)) {
 		allowedTools = append(allowedTools, tools.ToolSearchMemory)
 	} else {

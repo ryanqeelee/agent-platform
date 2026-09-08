@@ -43,6 +43,27 @@ func hasTool(registry *tools.ToolRegistry, name string) bool {
 	return err == nil
 }
 
+func TestEmployeeMemorySearchFollowsMemorySwitches(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		available  bool
+		preference *bool
+		want       bool
+	}{
+		{"enabled", true, nil, true},
+		{"workspace or user disabled", false, nil, false},
+		{"agent disabled", true, boolPtr(false), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			registry := registerToolsFor(t, &stubMemoryAvailability{available: tc.available}, &types.AgentConfig{
+				EmployeeAssistant: true, MemoryEnabled: tc.preference,
+				AllowedTools: []string{tools.ToolSearchMemory},
+			})
+			require.Equal(t, tc.want, hasTool(registry, tools.ToolSearchMemory))
+		})
+	}
+}
+
 // Memory search follows the memory switches, not the tool list: an agent whose
 // allowlist never mentions it still gets it while memory is on.
 func TestMemorySearchIsInjectedWithoutBeingAllowlisted(t *testing.T) {

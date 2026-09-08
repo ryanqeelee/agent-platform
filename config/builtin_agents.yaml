@@ -43,7 +43,6 @@ builtin_agents:
       web_search_max_results: 5
       skills_selection_mode: "none"
       mcp_selection_mode: "none"
-      memory_enabled: false
       citation_enabled: true
       allowed_tools:
         - "knowledge_search"

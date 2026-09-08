@@ -787,6 +787,7 @@ import { useChatResourcesStore } from '@/stores/chatResources'
 import { formatStringDate } from '@/utils/index'
 import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
+import { needsKnowledgeBaseConfiguration } from '@/utils/knowledgeBaseInitialization'
 import { useOrganizationStore } from '@/stores/organization'
 import { listOrganizationSharedKnowledgeBases, type SharedKnowledgeBase, type OrganizationSharedKnowledgeBaseItem, type SourceFromAgentInfo } from '@/api/organization'
 import { mergeAllScopeKnowledgeBases, type OwnedKnowledgeBase, type SharedKnowledgeBaseLike } from './kbListMerge'
@@ -1545,15 +1546,7 @@ const confirmDelete = () => {
   })
 }
 
-const isInitialized = (kb: KB) => {
-  // LLM (summary) model is always required
-  if (!kb.summary_model_id || kb.summary_model_id === '') return false
-  // Embedding model only required when RAG indexing is enabled (vector or keyword)
-  const strategy = (kb as any).indexing_strategy
-  const needsEmbedding = !strategy || strategy.vector_enabled || strategy.keyword_enabled
-  if (needsEmbedding && (!kb.embedding_model_id || kb.embedding_model_id === '')) return false
-  return true
-}
+const isInitialized = (kb: KB) => !needsKnowledgeBaseConfiguration(kb, authStore.isSystemAdmin)
 
 const isWikiKb = (kb: unknown) =>
   !!(kb as { indexing_strategy?: { wiki_enabled?: boolean } } | null | undefined)?.indexing_strategy?.wiki_enabled

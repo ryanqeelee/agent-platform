@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { needsKnowledgeBaseConfiguration } from '@/utils/knowledgeBaseInitialization';
 import { ref, onMounted, onUnmounted, watch, reactive, computed, nextTick } from "vue";
 import { MessagePlugin } from "tdesign-vue-next";
 import DocContent from "@/components/doc-content.vue";
@@ -1558,14 +1559,7 @@ const ensureDocumentKbReady = () => {
 	if (!authStore.isSystemAdmin) {
 		return true;
 	}
-	if (!kbInfo.value || !kbInfo.value.summary_model_id) {
-    MessagePlugin.warning(t('knowledgeBase.notInitialized'));
-    return false;
-  }
-  // Embedding model only required when RAG indexing is enabled
-  const strategy = (kbInfo.value as any).indexing_strategy
-  const needsEmbedding = !strategy || strategy.vector_enabled || strategy.keyword_enabled
-  if (needsEmbedding && !kbInfo.value.embedding_model_id) {
+  if (!kbInfo.value || needsKnowledgeBaseConfiguration(kbInfo.value, authStore.isSystemAdmin)) {
     MessagePlugin.warning(t('knowledgeBase.notInitialized'));
     return false;
   }

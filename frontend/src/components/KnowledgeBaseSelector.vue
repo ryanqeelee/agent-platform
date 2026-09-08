@@ -64,6 +64,8 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
+import { useAuthStore } from '@/stores/auth'
+import { needsKnowledgeBaseConfiguration } from '@/utils/knowledgeBaseInitialization'
 import { useSettingsStore } from '@/stores/settings'
 import { listKnowledgeBases } from '@/api/knowledge-base'
 import { useI18n } from 'vue-i18n'
@@ -90,6 +92,7 @@ const props = defineProps<{
 
 const emit = defineEmits(['close', 'update:visible'])
 
+const authStore = useAuthStore()
 const settingsStore = useSettingsStore()
 
 // 本地状态
@@ -104,10 +107,10 @@ const dropdownStyle = ref<Record<string, string>>({})
 const dropdownWidth = props.dropdownWidth ?? 300
 const offsetY = props.offsetY ?? 8
 
-// 过滤：只显示已初始化（有 embedding & summary）的
+// Only platform responses expose the model configuration.
 const filteredKnowledgeBases = computed(() => {
   const valid = knowledgeBases.value.filter(
-    k => k.embedding_model_id && k.summary_model_id
+    k => !needsKnowledgeBaseConfiguration(k, authStore.isSystemAdmin)
   )
   if (!searchQuery.value) return valid
   const q = searchQuery.value.toLowerCase()

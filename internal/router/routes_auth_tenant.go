@@ -15,7 +15,7 @@ import (
 // Tenant-internal RBAC for /tenants/:id:
 //   - GET   /:id          Viewer+ (read tenant settings)
 //   - PUT   /:id          Owner+ (mutate tenant config)
-//   - DELETE /:id         Owner+ (also normally a CanAccessAllTenants op)
+//   - DELETE /:id         platform SystemAdmin only
 //   - GET/POST/PUT/DELETE /:id/api-keys   Owner+ (scoped API key management)
 //   - GET    /:id/members            Viewer+ (any member can see who else is in)
 //   - POST   /:id/members            Owner+ (only Owner can add new members)
@@ -101,7 +101,7 @@ func RegisterTenantRoutes(
 			g.apiKeyRoute(tenantByID, http.MethodPut, "",
 				apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage), g.Admin(), handler.UpdateTenant)
 			g.apiKeyRoute(tenantByID, http.MethodDelete, "",
-				apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage), g.Admin(), handler.DeleteTenant)
+				apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage), g.SystemAdmin(), handler.DeleteTenant)
 			tenantByID.GET("/api-keys", g.Admin(), handler.ListAPIKeys)
 			tenantByID.POST("/api-keys", g.Admin(), handler.CreateAPIKey)
 			tenantByID.PUT("/api-keys/:key_id", g.Admin(), handler.UpdateAPIKey)
@@ -114,6 +114,7 @@ func RegisterTenantRoutes(
 			// and Knowledge Administrators; the service enforces every
 			// actor/target pair. Ownership stays on its explicit endpoint.
 			if memberHandler != nil {
+				tenantByID.POST("/employees", g.Admin(), memberHandler.CreateEmployee)
 				g.apiKeyRoute(tenantByID, http.MethodGet, "/members", apiKeyManageMembers(apiKeyFullAccess()), g.Viewer(), memberHandler.ListMembers)
 				g.apiKeyRoute(tenantByID, http.MethodPost, "/members", apiKeyManageMembers(apiKeyFullAccess()), g.Admin(), memberHandler.AddMember)
 				g.apiKeyRoute(tenantByID, http.MethodPut, "/members/:user_id", apiKeyManageMembers(apiKeyFullAccess()), g.Admin(), memberHandler.UpdateMemberRole)

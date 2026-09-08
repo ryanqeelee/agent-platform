@@ -65,7 +65,7 @@
                here. Even when empty we still render the header so
                operators get a stable "is there anything pending?"
                affordance after they hit "Send invitation". -->
-      <div v-if="canManage" class="pending-invitations-section">
+      <div v-if="canManage && invitationsTotal > 0" class="pending-invitations-section">
         <div class="pending-invitations-header">
           <div class="pending-invitations-titlewrap">
             <span class="pending-invitations-title">
@@ -188,113 +188,9 @@
                 <template #prefix-icon><t-icon name="search" /></template>
               </t-input>
             </div>
-            <t-popup v-if="canManage" v-model="invitePopupVisible" trigger="click" placement="bottom-end"
-              destroy-on-close overlay-class-name="member-invite-popup-overlay">
-              <t-button theme="primary" variant="outline" shape="square" size="small" class="members-list-add-btn"
-                :title="$t('tenantMember.add.button')" :aria-label="$t('tenantMember.add.button')">
-                <template #icon><t-icon name="user-add" /></template>
-              </t-button>
-              <template #content>
-                <div class="member-invite-popup-inner" @click.stop>
-                  <div class="member-invite-popup-title">
-                    {{
-                      addDialogStep === 'form'
-                        ? $t('tenantMember.add.dialogTitle')
-                        : $t('tenantInvitation.confirmInviteTitle')
-                    }}
-                  </div>
-                  <t-form v-if="addDialogStep === 'form'" ref="addFormRef" :data="addForm" :rules="addFormRules"
-                    :label-width="80" class="member-invite-form">
-                    <t-form-item :label="$t('tenantMember.add.emailLabel')" name="email">
-                      <t-input v-model="addForm.email" :placeholder="$t('tenantMember.add.emailPlaceholder')"
-                        clearable />
-                    </t-form-item>
-                    <t-form-item :label="$t('tenantMember.add.roleLabel')" name="role">
-                      <t-select v-model="addForm.role" :options="roleOptions" :popup-props="roleSelectPopupProps" />
-                    </t-form-item>
-                  </t-form>
-                  <div v-else class="invite-confirm-body">
-                    {{ $t('tenantInvitation.confirmInviteBody', {
-                      email: addConfirmEmail,
-                      role: addConfirmRoleLabel,
-                    }) }}
-                  </div>
-                  <div class="invite-popup-footer">
-                    <t-button v-if="addDialogStep === 'form'" variant="outline" :disabled="adding"
-                      @click="invitePopupVisible = false">
-                      {{ $t('common.cancel') }}
-                    </t-button>
-                    <t-button v-else variant="outline" :disabled="adding" @click="goBackToForm">
-                      {{ $t('common.back') }}
-                    </t-button>
-                    <t-button theme="primary" :loading="adding" @click="submitAdd">
-                      {{ dialogConfirmLabel }}
-                    </t-button>
-                  </div>
-                </div>
-              </template>
-            </t-popup>
-            <!-- Share-link generator. Sits next to the invite-by-email
-                 popup so the two flows live side-by-side: "I know who"
-                 (email input) vs "I don't" (one link, group chat). -->
-            <t-popup v-if="canManage" v-model="shareLinkPopupVisible" trigger="click" placement="bottom-end"
-              destroy-on-close overlay-class-name="member-invite-popup-overlay">
-              <t-button theme="default" variant="outline" shape="square" size="small" class="members-list-add-btn"
-                :title="$t('tenantInvitation.shareLink.button')"
-                :aria-label="$t('tenantInvitation.shareLink.button')">
-                <template #icon><t-icon name="link" /></template>
-              </t-button>
-              <template #content>
-                <div class="member-invite-popup-inner" @click.stop>
-                  <div class="member-invite-popup-title">
-                    {{
-                      shareLinkResult
-                        ? $t('tenantInvitation.shareLink.resultTitle')
-                        : $t('tenantInvitation.shareLink.dialogTitle')
-                    }}
-                  </div>
-                  <div v-if="!shareLinkResult" class="member-invite-form">
-                    <p class="invite-confirm-body">
-                      {{ $t('tenantInvitation.shareLink.description', { days: INVITATION_TTL_DAYS }) }}
-                    </p>
-                    <t-form :data="shareLinkForm" :label-width="80">
-                      <t-form-item :label="$t('tenantMember.add.roleLabel')" name="role">
-                        <t-select v-model="shareLinkForm.role" :options="roleOptions"
-                          :popup-props="roleSelectPopupProps" />
-                      </t-form-item>
-                    </t-form>
-                  </div>
-                  <div v-else class="share-link-result">
-                    <p class="invite-confirm-body">
-                      {{ $t('tenantInvitation.shareLink.resultBody') }}
-                    </p>
-                    <div class="share-link-row">
-                      <input class="share-link-row__input"
-                        :value="absoluteInviteURL(shareLinkResult.invite_url || '')"
-                        readonly @click="($event.target as HTMLInputElement).select()" />
-                      <t-button size="small" theme="primary" variant="outline"
-                        @click="copyText(absoluteInviteURL(shareLinkResult.invite_url || ''))">
-                        <template #icon><t-icon name="copy" /></template>
-                        {{ $t('tenantInvitation.copyLink') }}
-                      </t-button>
-                    </div>
-                  </div>
-                  <div class="invite-popup-footer">
-                    <t-button v-if="!shareLinkResult" variant="outline" :disabled="creatingShareLink"
-                      @click="shareLinkPopupVisible = false">
-                      {{ $t('common.cancel') }}
-                    </t-button>
-                    <t-button v-else variant="outline" @click="shareLinkPopupVisible = false">
-                      {{ $t('common.close') }}
-                    </t-button>
-                    <t-button v-if="!shareLinkResult" theme="primary" :loading="creatingShareLink"
-                      @click="submitShareLink">
-                      {{ $t('tenantInvitation.shareLink.generate') }}
-                    </t-button>
-                  </div>
-                </div>
-              </template>
-            </t-popup>
+            <t-button v-if="canManage" theme="primary" size="small" @click="invitePopupVisible = true">
+              {{ $t('tenantMember.create.button') }}
+            </t-button>
           </div>
         </div>
         <div v-if="loading && members.length === 0" class="loading-inline">
@@ -383,6 +279,23 @@
       </div>
 
     </div>
+
+    <t-dialog v-model:visible="invitePopupVisible" :header="$t('tenantMember.create.button')"
+      :confirm-btn="{ content: $t('tenantMember.create.submit'), loading: adding }"
+      :close-on-overlay-click="!adding" :close-btn="!adding" @confirm="submitAdd" destroy-on-close>
+      <t-form ref="addFormRef" :data="addForm" :rules="addFormRules" :label-width="88">
+        <t-form-item :label="$t('tenantMember.create.name')" name="username">
+          <t-input v-model="addForm.username" :maxlength="50" autocomplete="off" />
+        </t-form-item>
+        <t-form-item :label="$t('tenantMember.add.emailLabel')" name="email">
+          <t-input v-model="addForm.email" autocomplete="off" />
+        </t-form-item>
+        <t-form-item :label="$t('tenantMember.create.password')" name="password">
+          <t-input v-model="addForm.password" type="password" autocomplete="new-password" />
+        </t-form-item>
+      </t-form>
+      <p class="section-description">{{ $t('tenantMember.create.hint') }}</p>
+    </t-dialog>
 
     <!-- Audit log drawer. Only rendered for Admin+ because the backend
          route is g.Admin()-gated; rendering it for lower roles would
@@ -528,6 +441,7 @@ import { AUDIT_ACTION_I18N_ROOTS } from '@/i18n/auditActionRegistry'
 import { auditActionLabel } from '@/i18n/auditActionLabel'
 import {
   listMembers,
+  createEmployee,
   updateMemberRole,
   updateMemberStatus,
   updateMemberOperatingAnalysisAccess,
@@ -541,8 +455,6 @@ import {
 } from '@/api/tenant/memberLifecycle'
 import {
   listTenantInvitations,
-  createInvitation,
-  createInviteLink,
   revokeInvitation,
   type TenantInvitation,
 } from '@/api/tenant/invitations'
@@ -576,16 +488,6 @@ const error = ref('')
 const adding = ref(false)
 /** 邀请流程：锚在列表头「+」按钮旁的弹出层（非居中模态）。 */
 const invitePopupVisible = ref(false)
-// share-link generator state (separate popup next to the email
-// invite). shareLinkResult is non-null after a successful create —
-// the popup then switches into "here's your link, copy it" mode.
-const shareLinkPopupVisible = ref(false)
-const shareLinkForm = reactive<{ role: TenantRole }>({ role: 'viewer' })
-const creatingShareLink = ref(false)
-const shareLinkResult = ref<TenantInvitation | null>(null)
-// Two-step invite inside the popup: 'form' renders the email/role inputs;
-// 'confirm' swaps the body for an in-place summary; primary CTA toggles label.
-const addDialogStep = ref<'form' | 'confirm'>('form')
 const addFormRef = ref<any>(null)
 const searchQuery = ref('')
 /** 已应用到服务端筛选的检索词（相对输入框防抖） */
@@ -645,14 +547,7 @@ const auditScrollRoot = ref<HTMLElement | null>(null)
 const auditLoadSentinelEl = ref<HTMLElement | null>(null)
 let auditScrollObserver: IntersectionObserver | null = null
 
-// Add dialog model — reset on each open. Default role is contributor:
-// inviting a fresh member with viewer is too restrictive for the
-// expected "let them collaborate on KBs" use case, and admin/owner
-// should be a deliberate promote step after the user accepts.
-const addForm = reactive<{ email: string; role: TenantRole }>({
-  email: '',
-  role: 'viewer',
-})
+const addForm = reactive({ username: '', email: '', password: '' })
 
 // Role-aware gates. The server enforces every mutation; UI gates here
 // are presentational only, matching the security note in stores/auth.ts.
@@ -811,7 +706,8 @@ const addFormRules = {
     { required: true, message: t('tenantMember.errors.emailRequired'), trigger: 'blur' },
     { email: true, message: t('tenantMember.errors.emailFormat'), trigger: 'blur' },
   ],
-  role: [{ required: true, message: t('tenantMember.errors.roleRequired'), trigger: 'change' }],
+  username: [{ required: true, message: t('tenantMember.create.nameRequired'), trigger: 'blur' }],
+  password: [{ required: true, message: t('tenantMember.create.passwordRequired'), trigger: 'blur' }],
 }
 
 // Pretty role tag colour: Owner stands out, Admin is warning, the rest
@@ -1310,19 +1206,10 @@ watch(
 
 onUnmounted(() => detachAuditInfiniteScroll())
 
-watch(invitePopupVisible, (open) => {
-  if (!open) return
+watch(invitePopupVisible, () => {
+  addForm.username = ''
   addForm.email = ''
-  addForm.role = 'viewer'
-  addDialogStep.value = 'form'
-})
-
-// Share-link popup: re-init on every open so the operator never sees
-// the previous result on a fresh click.
-watch(shareLinkPopupVisible, (open) => {
-  if (!open) return
-  shareLinkForm.role = 'viewer'
-  shareLinkResult.value = null
+  addForm.password = ''
 })
 
 // absoluteInviteURL turns the backend's potentially-host-relative
@@ -1340,102 +1227,24 @@ async function copyText(text: string) {
   await copyWithToast(text, 'tenantInvitation.copied', 'tenantInvitation.copyFailed')
 }
 
-async function submitShareLink() {
-  creatingShareLink.value = true
-  try {
-    const resp = await createInviteLink(activeTenantId.value, { role: shareLinkForm.role })
-    if (!resp.success || !resp.data) {
-      MessagePlugin.error(resp.message || t('tenantInvitation.errors.generic'))
-      return
-    }
-    shareLinkResult.value = resp.data
-    invitationsPage.value = 1
-    await loadInvitations()
-  } catch (err: any) {
-    MessagePlugin.error(err?.message || t('tenantInvitation.errors.generic'))
-  } finally {
-    creatingShareLink.value = false
-  }
-}
-
-// Live display strings for the in-place confirm step. Recomputed
-// every time the user goes Back, tweaks the form, and re-advances —
-// the summary always mirrors the current form state.
-const addConfirmEmail = computed(() => addForm.email.trim())
-const addConfirmRoleLabel = computed(() => t('tenantMember.role.' + addForm.role))
-
-// submitAdd is wired to the popup footer primary CTA. On step='form' it
-// validates and swaps to summary; on step='confirm' it fires the API.
-// With auto-accept the action is a direct add, so we skip the invitation
-// confirm step entirely and fire the API right after validation.
 async function submitAdd() {
-  if (addDialogStep.value === 'form') {
-    const valid = await addFormRef.value?.validate?.()
-    if (valid !== true) return
-    if (authStore.autoAcceptInvitation) {
-      await sendInvitation(addForm.email.trim(), addForm.role)
-      return
-    }
-    addDialogStep.value = 'confirm'
-    return
-  }
-  await sendInvitation(addForm.email.trim(), addForm.role)
-}
-
-// goBackToForm un-advances from confirm to form inside the popup.
-function goBackToForm() {
-  addDialogStep.value = 'form'
-}
-
-// dialogConfirmLabel: "Send" on the confirm step, or when auto-accept makes
-// the form step a direct add; otherwise "Send invitation".
-const dialogConfirmLabel = computed(() =>
-  addDialogStep.value === 'confirm' || authStore.autoAcceptInvitation
-    ? t('tenantInvitation.confirmSend')
-    : t('tenantInvitation.inviteSubmit'),
-)
-
-// sendInvitation actually fires the create-invitation API call.
-async function sendInvitation(email: string, role: TenantRole) {
+  if (adding.value) return
+  const valid = await addFormRef.value?.validate?.()
+  if (valid !== true) return
   adding.value = true
   try {
-    const resp = await createInvitation(activeTenantId.value, { email, role })
-    if (resp.success) {
-      // auto-accept returns a member (user_id) instead of an invitation (id)
-      const autoJoined = !!resp.data && 'user_id' in resp.data
-      invitePopupVisible.value = false
-      if (autoJoined) {
-        // The invitee is already a member — refresh the roster so they
-        // appear immediately. No toast: the new row is the feedback.
-        await loadMembers()
-      } else {
-        invitationsPage.value = 1
-        await loadInvitations()
-        MessagePlugin.success(t('tenantInvitation.inviteSuccess'))
-      }
-    } else {
-      MessagePlugin.error(resp.message || t('tenantInvitation.errors.generic'))
-    }
+    const resp = await createEmployee(activeTenantId.value, {
+      username: addForm.username.trim(), email: addForm.email.trim(), password: addForm.password,
+    })
+    if (!resp.success) throw new Error(resp.message || t('tenantMember.create.failed'))
+    invitePopupVisible.value = false
+    searchQuery.value = ''
+    memberSearchQ.value = ''
+    membersPage.value = 1
+    await loadMembers()
+    MessagePlugin.success(t('tenantMember.create.success'))
   } catch (err: any) {
-    const status = err?.status
-    if (status === 404) {
-      MessagePlugin.error(t('tenantMember.errors.userNotFound'))
-    } else if (status === 409) {
-      // Server returns the same 409 for both "already a member" and
-      // "already a pending invite". The message body discriminates,
-      // but for the toast we show both possibilities folded into one
-      // helpful line.
-      MessagePlugin.error(
-        err?.message ||
-        `${t('tenantInvitation.errors.alreadyMember')} / ${t(
-          'tenantInvitation.errors.pendingExists',
-        )}`,
-      )
-    } else if (status === 400) {
-      MessagePlugin.error(err?.message || t('tenantMember.errors.invalidRole'))
-    } else {
-      MessagePlugin.error(err?.message || t('tenantInvitation.errors.generic'))
-    }
+    MessagePlugin.error(err?.message || t('tenantMember.create.failed'))
   } finally {
     adding.value = false
   }

@@ -129,6 +129,7 @@ export default {
     }
   },
   tenantMember: {
+    create: { button: 'Create employee', submit: 'Create', name: 'Name', password: 'Initial password', hint: 'Use 8–32 characters with letters and numbers. The employee can sign in immediately.', nameRequired: 'Enter a name', passwordRequired: 'Enter an initial password', success: 'Employee created', failed: 'Could not create employee' },
     title: '멤버 관리',
     sectionDescription: '기업 관리자는 구성원, 역할 및 지식 접근 권한을 관리합니다.',
     listTitle: '워크스페이스 멤버',

@@ -12,6 +12,7 @@ import (
 // interface rather than the repository directly so the invariants cannot be
 // silently bypassed.
 type TenantMemberService interface {
+	CreateEmployee(ctx context.Context, user *types.User) (*types.TenantMember, error)
 	// AddMember inserts a new active membership row. Returns an error if
 	// (user, tenant) already has an active membership.
 	AddMember(ctx context.Context, userID string, tenantID uint64, role types.TenantRole, invitedBy *string) (*types.TenantMember, error)

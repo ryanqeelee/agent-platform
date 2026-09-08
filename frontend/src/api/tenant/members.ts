@@ -176,3 +176,11 @@ export async function removeMember(
 export async function leaveTenant(tenantId: number): Promise<SimpleResponse> {
   return (await post(`/api/v1/tenants/${tenantId}/leave`)) as unknown as SimpleResponse
 }
+
+/** Create a new employee identity bound to the current enterprise. */
+export async function createEmployee(
+  tenantId: number,
+  body: { username: string; email: string; password: string },
+): Promise<AddMemberResponse> {
+  return (await post(`/api/v1/tenants/${tenantId}/employees`, body)) as unknown as AddMemberResponse
+}

@@ -698,3 +698,7 @@ func TestTenantRole_HasPermission(t *testing.T) {
 		}
 	}
 }
+
+func (r *fakeTenantMemberRepo) CreateEmployee(context.Context, types.MemberActorAuthority, *types.User, *types.TenantMember) error {
+	panic("unexpected CreateEmployee")
+}

@@ -13,6 +13,7 @@ import (
 // docstring explicitly says otherwise. Soft deletion is handled by GORM
 // via the DeletedAt field on TenantMember.
 type TenantMemberRepository interface {
+	CreateEmployee(ctx context.Context, actor types.MemberActorAuthority, user *types.User, member *types.TenantMember) error
 	// Create atomically binds a tenantless user to the target enterprise and
 	// inserts the active membership. A user already bound elsewhere is rejected.
 	Create(ctx context.Context, member *types.TenantMember) error

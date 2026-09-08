@@ -8,6 +8,7 @@ import (
 
 // UserService defines the user service interface
 type UserService interface {
+	CreateEnterpriseEmployee(ctx context.Context, tenantID uint64, req *types.RegisterRequest) (*types.User, *types.TenantMember, error)
 	// Register creates a new user account
 	Register(ctx context.Context, req *types.RegisterRequest) (*types.User, error)
 	// Login authenticates a user and returns tokens

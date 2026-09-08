@@ -6588,6 +6588,7 @@ export default {
     },
   },
   tenantMember: {
+    create: { button: 'Create employee', submit: 'Create', name: 'Name', password: 'Initial password', hint: 'Use 8–32 characters with letters and numbers. The employee can sign in immediately.', nameRequired: 'Enter a name', passwordRequired: 'Enter an initial password', success: 'Employee created', failed: 'Could not create employee' },
     title: 'Members',
     sectionDescription: 'Enterprise administrators manage members, roles and knowledge access.',
     listTitle: 'Workspace members',

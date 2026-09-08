@@ -315,3 +315,7 @@ func TestResolveTenantRole_SuspendedMembershipCannotBootstrapOrFailOpen(t *testi
 		t.Fatalf("EnsureAdministrator called %d times for suspended membership", svc.ensureOwnerCalls)
 	}
 }
+
+func (f *fakeMemberService) CreateEmployee(context.Context, *types.User) (*types.TenantMember, error) {
+	panic("unexpected CreateEmployee")
+}

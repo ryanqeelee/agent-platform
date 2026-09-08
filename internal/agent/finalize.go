@@ -25,6 +25,7 @@ func finalAnswerImageRequirement(hasRetrievedImage bool) string {
 func (e *AgentEngine) streamFinalAnswerToEventBus(
 	ctx context.Context,
 	query string,
+	messages []chat.Message,
 	state *types.AgentState,
 	sessionID string,
 ) error {
@@ -38,48 +39,30 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		"tool_results": totalToolCalls,
 	})
 
-	// Build messages with all context
-	systemPrompt := e.buildSystemPrompt(ctx)
-	userTurn := e.RenderUserTurnContent(sessionID, query)
-
-	messages := []chat.Message{
-		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: userTurn},
-	}
-
-	// Add all tool call results as context
-	toolResultCount := 0
+	// Finalization is another model turn, not a new conversation. Reuse the
+	// current (possibly compacted) transcript so user constraints, attachments
+	// and tool provenance survive the iteration/error boundary. In particular,
+	// do not resurrect old RoundSteps as user-authored evidence.
+	messages = append([]chat.Message(nil), messages...)
 	hasRetrievedImage := false
-	for stepIdx, step := range state.RoundSteps {
-		for toolIdx, toolCall := range step.ToolCalls {
-			toolResultCount++
-			if searchutil.MarkdownImageRegex.MatchString(toolCall.Result.Output) {
-				hasRetrievedImage = true
-			}
-			modelOutput := e.modelContext.ModelToolResultForTool(toolCall.Name, toolCall.Result)
-			messages = append(messages, chat.Message{
-				Role:    "user",
-				Content: fmt.Sprintf("Tool %s returned: %s", toolCall.Name, modelOutput),
-			})
-			logger.Debugf(ctx, "[Agent][FinalAnswer] Added tool result [Step-%d][Tool-%d]: %s (output: %d chars)",
-				stepIdx+1, toolIdx+1, toolCall.Name, len(toolCall.Result.Output))
+	for _, message := range messages {
+		if message.Role == "tool" && searchutil.MarkdownImageRegex.MatchString(message.Content) {
+			hasRetrievedImage = true
+			break
 		}
 	}
-
-	logger.Debugf(ctx, "[Agent][FinalAnswer] Built context: %d messages, %d tool results",
-		len(messages), toolResultCount)
 
 	imageRequirement := finalAnswerImageRequirement(hasRetrievedImage)
 
 	// Add final answer prompt
-	finalPrompt := fmt.Sprintf(`Based on the above tool call results, generate a complete answer for the user's question.
+	finalPrompt := fmt.Sprintf(`Complete the user's task using the conversation and available evidence above. Preserve the user's confirmed constraints and distinguish tool evidence from user instructions.
 
 User question: %s
 
 Requirements:
-1. Answer based on the actually retrieved content
+1. Use only evidence that applies to the requested entity, conditions and scope. Related examples do not establish facts about this case.
 2. Organize the answer in a structured format
-3. If information is insufficient, honestly state so
+3. If evidence is insufficient to choose a correct action, state the gap and ask the essential clarification. Do not fill it with an unrelated example or an unsupported specific claim.
 4. IMPORTANT: Respond in the same language as the user's question
 %s
 
@@ -89,6 +72,11 @@ Now generate the final answer:`, query, imageRequirement)
 		Role:    "user",
 		Content: finalPrompt,
 	})
+
+	// The last tool result may have filled the window after the final loop
+	// iteration. Use the same compaction policy as an ordinary model turn.
+	messages, _ = e.manageContextWindow(ctx, messages, state.CurrentRound+1, e.tokenEstimator.EstimateMessages(messages))
+	messages = agenttools.SanitizeMessages(messages)
 
 	// Generate a single ID for this entire final answer stream
 	answerID := generateEventID("answer")
@@ -168,7 +156,7 @@ Now generate the final answer:`, query, imageRequirement)
 // handleMaxIterations generates a final answer when the agent loop exhausted all iterations
 // without the LLM producing a natural stop. It marks state.IsComplete = true.
 func (e *AgentEngine) handleMaxIterations(
-	ctx context.Context, query string, state *types.AgentState, sessionID string,
+	ctx context.Context, query string, messages []chat.Message, state *types.AgentState, sessionID string,
 ) {
 	logger.Info(ctx, "Reached max iterations, generating final answer")
 	common.PipelineWarn(ctx, "Agent", "max_iterations_reached", map[string]interface{}{
@@ -177,7 +165,7 @@ func (e *AgentEngine) handleMaxIterations(
 	})
 
 	// Stream final answer generation through EventBus
-	if err := e.streamFinalAnswerToEventBus(ctx, query, state, sessionID); err != nil {
+	if err := e.streamFinalAnswerToEventBus(ctx, query, messages, state, sessionID); err != nil {
 		logger.Errorf(ctx, "Failed to synthesize final answer: %v", err)
 		common.PipelineError(ctx, "Agent", "final_answer_failed", map[string]interface{}{
 			"error": err.Error(),

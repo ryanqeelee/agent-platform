@@ -473,7 +473,7 @@ loop:
 			if totalTC := countTotalToolCalls(state.RoundSteps); totalTC > 0 {
 				logger.Infof(ctx, "[Agent] Synthesizing final answer from %d existing tool results",
 					totalTC)
-				_ = e.streamFinalAnswerToEventBus(ctx, query, state, sessionID)
+				_ = e.streamFinalAnswerToEventBus(ctx, query, messages, state, sessionID)
 				state.IsComplete = true
 			}
 			return state, ctx.Err()
@@ -506,7 +506,7 @@ loop:
 	// complete answer." message, which then leaks to the UI as the final
 	// answer for a conversation the user deliberately stopped.
 	if !state.IsComplete && ctx.Err() == nil {
-		e.handleMaxIterations(ctx, query, state, sessionID)
+		e.handleMaxIterations(ctx, query, messages, state, sessionID)
 	}
 
 	return state, nil

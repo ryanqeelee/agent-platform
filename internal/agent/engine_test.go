@@ -881,7 +881,7 @@ func TestStreamFinalAnswerToEventBus_EmitsDoneWhenProviderEndsWithEmptyChunk(t *
 	})
 
 	state := &types.AgentState{}
-	err := engine.streamFinalAnswerToEventBus(context.Background(), "test query", state, "sess-1")
+	err := engine.streamFinalAnswerToEventBus(context.Background(), "test query", emptyMessages(), state, "sess-1")
 
 	require.NoError(t, err)
 	require.Len(t, finalAnswerEvents, 2)
@@ -890,4 +890,49 @@ func TestStreamFinalAnswerToEventBus_EmitsDoneWhenProviderEndsWithEmptyChunk(t *
 	assert.Equal(t, "final answer", finalAnswerEvents[0].Content+finalAnswerEvents[1].Content,
 		"a decoder may hold a short suffix until Done to rule out a split model handle")
 	assert.Equal(t, "final answer", state.FinalAnswer)
+}
+
+// Finalization must not erase a user's earlier correction or promote tool
+// output into user instructions when the loop runs out of iterations.
+func TestFinalizationPreservesActiveTranscript(t *testing.T) {
+	for _, capped := range []bool{false, true} {
+		t.Run(fmt.Sprintf("iteration_cap_%t", capped), func(t *testing.T) {
+			model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{{ResponseType: types.ResponseTypeAnswer, Content: "请检查USB接线。", Done: true, FinishReason: "stop"}}}}}
+			engine := newTestEngine(t, model)
+			messages := []chat.Message{
+				{Role: "system", Content: "Use only applicable evidence."},
+				{Role: "user", Content: "已确认通过USB连接POS，不是网络连接。"},
+				{Role: "assistant", Content: "请描述现象。"},
+				{Role: "user", Content: "还是传不过去"},
+				{Role: "assistant", ToolCalls: []chat.ToolCall{{ID: "call-usb", Type: "function", Function: chat.FunctionCall{Name: "knowledge_search", Arguments: `{}`}}}},
+				{Role: "tool", ToolCallID: "call-usb", Name: "knowledge_search", Content: "USB排查：拔插、换端口。![接线图](https://example.com/usb.png)"},
+			}
+			before := append([]chat.Message(nil), messages...)
+			state := &types.AgentState{RoundSteps: []types.AgentStep{{ToolCalls: []types.ToolCall{{Name: "knowledge_search", Result: &types.ToolResult{Success: true, Output: "OLD_RESULT_REMOVED_BY_COMPACTION"}}}}}}
+			if capped {
+				engine.config.MaxIterations = 1
+				state.CurrentRound = 1
+				_, err := engine.executeLoop(context.Background(), state, "还是传不过去", messages, nil, "sess-1", "msg-1")
+				require.NoError(t, err)
+			} else {
+				require.NoError(t, engine.streamFinalAnswerToEventBus(context.Background(), "还是传不过去", messages, state, "sess-1"))
+			}
+			require.Len(t, model.calls, 1)
+			sent := model.calls[0]
+			var transcript strings.Builder
+			var toolCount int
+			for _, m := range sent {
+				transcript.WriteString(m.Content)
+				if m.Role == "tool" {
+					toolCount++
+					require.Equal(t, "call-usb", m.ToolCallID)
+				}
+			}
+			require.Contains(t, transcript.String(), "已确认通过USB连接POS，不是网络连接。")
+			require.NotContains(t, transcript.String(), "OLD_RESULT_REMOVED_BY_COMPACTION")
+			require.Equal(t, 1, toolCount)
+			require.Contains(t, transcript.String(), "only when it directly supports")
+			require.Equal(t, before, messages, "finalization must not mutate the active transcript")
+		})
+	}
 }

@@ -15,9 +15,10 @@ var listKnowledgeChunksTool = BaseTool{
 	name: ToolListKnowledgeChunks,
 	description: `Retrieve full chunk content for a document or a single FAQ entry.
 
-## Use After grep_chunks or knowledge_search:
-- **FAQ hit** (type faq): list_knowledge_chunks(faq_id="cN") — reads that one FAQ chunk with answers from metadata.
-- **Document hit**: list_knowledge_chunks(knowledge_id="dN") — pages through all chunks.
+Use only when the preceding retrieval did not provide enough source text to resolve a specific missing fact, applicability condition or conflict. Search results already contain content; reading them again is not a verification step.
+- For a specific hit with missing context, read that chunk: faq_id="cN" for FAQ, chunk_id="cN" for a document chunk.
+- Use knowledge_id="dN" to page a document only when the task requires broader coverage. Do not page every matching document or read every hit simply because it was returned.
+- Use only IDs actually returned by tools. Do not invent or calculate cN IDs.
 
 ## Parameters (provide exactly one id target):
 - faq_id (optional): Short cN ID for an FAQ chunk from grep_chunks / knowledge_search.

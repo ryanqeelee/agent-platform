@@ -248,11 +248,14 @@ func (r *sourceRegistry) modelKnowledgeChunksOutput(data map[string]interface{},
 	if len(rows) == 0 {
 		return output
 	}
-	remaining := intValue(data, "total_chunks") - intValue(data, "fetched_chunks")
-	if remaining > 0 {
+	// Pagination belongs to the retrieval tool. A count difference alone is not
+	// a continuation cursor (single chunks and filtered wiki reads also use this display type).
+	if _, paged := data["next_offset"]; paged {
+		nextOffset := intValue(data, "next_offset")
+		remaining := max(0, intValue(data, "total_chunks")-nextOffset)
 		output = strings.TrimSuffix(output, "</retrieval>")
-		output += fmt.Sprintf("  <pagination remaining=\"%d\" page=\"%d\" page_size=\"%d\" />\n</retrieval>",
-			remaining, intValue(data, "page"), intValue(data, "page_size"))
+		output += fmt.Sprintf("  <pagination offset=\"%d\" next_offset=\"%d\" remaining=\"%d\" has_more=\"%t\" />\n</retrieval>",
+			intValue(data, "offset"), nextOffset, remaining, boolValue(data, "has_more"))
 	}
 	return output
 }

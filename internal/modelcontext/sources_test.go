@@ -615,3 +615,13 @@ func TestModelOutputDoesNotRegisterInternalSchemesAsWebSources(t *testing.T) {
 		registry.ExpandText(`<ref id="w1"/>`),
 	)
 }
+
+func TestModelOutputDoesNotInventPaginationForSelectedChunks(t *testing.T) {
+	result := &types.ToolResult{Success: true, Data: map[string]interface{}{
+		"display_type": "knowledge_chunks_list", "total_chunks": 165, "fetched_chunks": 1,
+		"chunks": []map[string]interface{}{{"chunk_id": "chunk", "knowledge_id": "doc", "content": "evidence"}},
+	}}
+	output := newSourceRegistry().ModelOutput(result)
+	require.Contains(t, output, "evidence")
+	require.NotContains(t, output, "pagination")
+}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/require"
@@ -79,6 +80,10 @@ func TestListKnowledgeChunksExactWindow(t *testing.T) {
 				require.Equal(t, fmt.Sprintf("chunk-%d", tc.offset+i), c["chunk_id"])
 			}
 			require.Contains(t, result.Output, fmt.Sprintf(`remaining="%d" has_more="%t"`, tc.total-tc.offset-tc.want, tc.more))
+			modelOutput := modelcontext.NewRegistry(true).ModelToolResultForTool(ToolListKnowledgeChunks, result)
+			require.Contains(t, modelOutput, fmt.Sprintf(`next_offset="%d"`, tc.offset+tc.want))
+			require.Contains(t, modelOutput, fmt.Sprintf(`has_more="%t"`, tc.more))
+			require.Contains(t, modelOutput, fmt.Sprintf(`remaining="%d"`, tc.total-tc.offset-tc.want))
 		})
 	}
 }

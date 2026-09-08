@@ -80,6 +80,20 @@ func TestBuildFallbackMessages_AttachesImagesToUserTurn(t *testing.T) {
 	assert.Equal(t, cm.Images, withVision[len(withVision)-1].Images)
 }
 
+func TestBuildFallbackMessages_LegacyDoesNotAppendAttachments(t *testing.T) {
+	cm := &types.ChatManage{PipelineRequest: types.PipelineRequest{
+		Query: "legacy question",
+		Attachments: types.MessageAttachments{{
+			FileName: "current.txt",
+			Content:  "current attachment",
+		}},
+	}}
+
+	msgs := buildFallbackMessages(cm, "legacy fallback")
+	require.Len(t, msgs, 2)
+	assert.Equal(t, "legacy question", msgs[1].Content)
+}
+
 func TestPrepareFallbackMessagesMigratesHistoricalCitations(t *testing.T) {
 	cm := &types.ChatManage{}
 	cm.Query = "follow-up"

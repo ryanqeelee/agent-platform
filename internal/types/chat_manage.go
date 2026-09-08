@@ -97,15 +97,15 @@ const (
 )
 
 // NeedsKBRetrieval returns true when the intent requires knowledge base search.
-// The zero value (empty string) is treated as needing retrieval for safety.
-// Note: IntentWebSearch is NOT included — use ChatManage.NeedsRetrieval()
-// which also considers the WebSearchEnabled flag.
+// Unknown and empty intents require retrieval by default. IntentWebSearch is
+// handled by ChatManage.NeedsRetrieval(), which also considers WebSearchEnabled.
 func (i QueryIntent) NeedsKBRetrieval() bool {
 	switch i {
-	case IntentKBSearch, IntentClarification, IntentSummarize, "":
-		return true
-	default:
+	case IntentWebSearch, IntentGreeting, IntentChitchat, IntentFollowUp,
+		IntentImageOnly, IntentDocOnly, IntentNeedsUserInput:
 		return false
+	default:
+		return true
 	}
 }
 

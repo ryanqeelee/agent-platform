@@ -180,11 +180,16 @@ func (s *sessionService) KnowledgeQA(
 	// empty but produce SearchTargets, so the unified targets must participate in
 	// this decision or the request is incorrectly downgraded to pure chat.
 	hasKB := types.HasKnowledgeRetrievalScope(searchTargets, knowledgeBaseIDs, knowledgeIDs)
-	needsRAG := hasKB || req.WebSearchEnabled
 	hasHistory := chatManage.MaxRounds > 0
+	pipeline, needsPipelineDecision := buildKnowledgeQAPipeline(
+		hasKB,
+		req.WebSearchEnabled,
+		hasHistory,
+		chatManage.DataAnalysisEnabled,
+		req.CustomAgent,
+	)
 
-	var pipeline []types.EventType
-	if !needsRAG {
+	if !needsPipelineDecision {
 		// Pure chat — no retrieval needed.
 		userContent := req.Query
 		if req.ImageDescription != "" && !chatModelSupportsVision {
@@ -198,31 +203,10 @@ func (s *sessionService) KnowledgeQA(
 			userContent += req.Attachments.BuildPrompt()
 		}
 		chatManage.UserContent = userContent
-
-		pipeline = types.NewPipelineBuilder().
-			AddIf(hasHistory, types.LOAD_HISTORY).
-			Add(types.MEMORY_RECALL).
-			Add(types.CHAT_COMPLETION_STREAM).
-			Build()
-	} else {
-		// RAG — dynamically assemble based on feature flags.
-		pipeline = types.NewPipelineBuilder().
-			AddIf(hasHistory, types.LOAD_HISTORY).
-			Add(types.MEMORY_RECALL).
-			Add(types.QUERY_UNDERSTAND).
-			Add(types.CHUNK_SEARCH_PARALLEL).
-			Add(types.CHUNK_RERANK).
-			AddIf(req.WebSearchEnabled, types.WEB_FETCH).
-			Add(types.CHUNK_MERGE).
-			Add(types.FILTER_TOP_K).
-			AddIf(chatManage.DataAnalysisEnabled, types.DATA_ANALYSIS).
-			Add(types.INTO_CHAT_MESSAGE).
-			Add(types.CHAT_COMPLETION_STREAM).
-			Build()
 	}
 
-	logger.Infof(ctx, "Assembled pipeline (%d stages), hasKB=%v, webSearch=%v, history=%v",
-		len(pipeline), hasKB, req.WebSearchEnabled, hasHistory)
+	logger.Infof(ctx, "Assembled pipeline (%d stages), hasKB=%v, needsPipelineDecision=%v, webSearch=%v, history=%v",
+		len(pipeline), hasKB, needsPipelineDecision, req.WebSearchEnabled, hasHistory)
 
 	// Start knowledge QA event processing (set session tenant so pipeline session/message lookups use session owner)
 	ctx = context.WithValue(ctx, types.SessionTenantIDContextKey, req.Session.TenantID)
@@ -250,6 +234,43 @@ func (s *sessionService) KnowledgeQA(
 
 	logger.Info(ctx, "Knowledge base question answering initiated")
 	return nil
+}
+
+// buildKnowledgeQAPipeline assembles the existing retrieval pipeline for requests
+// that need a retrieval decision. Employee quick requests always run that decision
+// so an empty authorized scope reaches the normal no-results fallback boundary.
+func buildKnowledgeQAPipeline(
+	hasKB bool,
+	webSearchEnabled bool,
+	hasHistory bool,
+	dataAnalysisEnabled bool,
+	customAgent *types.CustomAgent,
+) ([]types.EventType, bool) {
+	employeeQuick := customAgent != nil &&
+		customAgent.ID == types.BuiltinEmployeeAssistantID &&
+		!customAgent.IsAgentMode()
+	needsPipelineDecision := hasKB || webSearchEnabled || employeeQuick
+	if !needsPipelineDecision {
+		return types.NewPipelineBuilder().
+			AddIf(hasHistory, types.LOAD_HISTORY).
+			Add(types.MEMORY_RECALL).
+			Add(types.CHAT_COMPLETION_STREAM).
+			Build(), false
+	}
+
+	return types.NewPipelineBuilder().
+		AddIf(hasHistory, types.LOAD_HISTORY).
+		Add(types.MEMORY_RECALL).
+		Add(types.QUERY_UNDERSTAND).
+		Add(types.CHUNK_SEARCH_PARALLEL).
+		Add(types.CHUNK_RERANK).
+		AddIf(webSearchEnabled, types.WEB_FETCH).
+		Add(types.CHUNK_MERGE).
+		Add(types.FILTER_TOP_K).
+		AddIf(dataAnalysisEnabled, types.DATA_ANALYSIS).
+		Add(types.INTO_CHAT_MESSAGE).
+		Add(types.CHAT_COMPLETION_STREAM).
+		Build(), true
 }
 
 // selectChatModelID selects the appropriate chat model ID with priority for Remote models
@@ -1118,19 +1139,31 @@ func (s *sessionService) handleFixedFallback(ctx context.Context, chatManage *ty
 
 // handleModelFallback handles model-based fallback response using streaming
 func (s *sessionService) handleModelFallback(ctx context.Context, chatManage *types.ChatManage) {
-	// Check if FallbackPrompt is available
-	if chatManage.FallbackPrompt == "" {
+	evidenceBoundFallback := strings.TrimSpace(chatManage.SystemPromptOverride) != ""
+
+	// Legacy model fallbacks require their configured prompt. An effective
+	// override is itself the governing prompt, so it remains usable even when
+	// the generic fallback prompt is empty.
+	if !evidenceBoundFallback && chatManage.FallbackPrompt == "" {
 		logger.Warnf(ctx, "Fallback strategy is 'model' but FallbackPrompt is empty, falling back to fixed response")
 		s.handleFixedFallback(ctx, chatManage)
 		return
 	}
 
-	// Render template with Query variable
-	promptContent, err := s.renderFallbackPrompt(ctx, chatManage)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to render fallback prompt: %v, falling back to fixed response", err)
-		s.handleFixedFallback(ctx, chatManage)
-		return
+	var promptContent string
+	if evidenceBoundFallback {
+		// Do not render the generic fallback or its KB catalog here: neither is
+		// evidence and generic prompts may invite prior-knowledge answers.
+		promptContent = renderEvidenceBoundFallbackPrompt(chatManage)
+	} else {
+		// Render template with Query variable.
+		var err error
+		promptContent, err = s.renderFallbackPrompt(ctx, chatManage)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to render fallback prompt: %v, falling back to fixed response", err)
+			s.handleFixedFallback(ctx, chatManage)
+			return
+		}
 	}
 
 	// Check if EventBus is available for streaming
@@ -1217,8 +1250,41 @@ func buildFallbackMessages(chatManage *types.ChatManage, promptContent string) [
 	if chatManage.ChatModelSupportsVision && len(chatManage.Images) > 0 {
 		userMsg.Images = chatManage.Images
 	}
+	if strings.TrimSpace(chatManage.SystemPromptOverride) != "" {
+		// Attachments are current-turn material and may support a partial answer.
+		// They must be kept separate from history, which is not evidence for this
+		// fallback decision.
+		if chatManage.ImageDescription != "" && !chatManage.ChatModelSupportsVision {
+			userMsg.Content += "\n\n[用户上传图片内容]\n" + chatManage.ImageDescription
+		}
+		if chatManage.QuotedContext != "" {
+			userMsg.Content += "\n\n" + chatManage.QuotedContext
+		}
+		userMsg.Content += chatManage.Attachments.BuildPrompt()
+	}
 
 	return append(messages, userMsg)
+}
+
+const evidenceBoundFallbackInstruction = `
+
+Runtime evidence status: no matching authorized knowledge-base or search evidence was obtained this turn. This does not prove that no policy, process, or record exists. Do not use general knowledge, chat history, or a knowledge-base catalog as authority. Do not invent document names, clauses, numbers, timelines, or other unsupported details. Current-turn attachments may support only the parts they actually contain. If they do not provide a basis, state the evidence gap and ask for, or propose, the necessary source or responsible owner. Changing between quick and deep modes does not expand knowledge-base permissions. Respond in {{language}}.`
+
+// renderEvidenceBoundFallbackPrompt preserves the effective system override as
+// the governing instruction while adding the no-results boundary for this turn.
+func renderEvidenceBoundFallbackPrompt(chatManage *types.ChatManage) string {
+	query := chatManage.Query
+	if rewriteQuery := strings.TrimSpace(chatManage.RewriteQuery); rewriteQuery != "" {
+		query = rewriteQuery
+	}
+	values := types.PlaceholderValues{
+		"query":    query,
+		"language": chatManage.Language,
+		"contexts": chatManage.RenderedContexts,
+	}
+	override := types.RenderPromptPlaceholders(chatManage.SystemPromptOverride, values)
+	boundary := types.RenderPromptPlaceholders(evidenceBoundFallbackInstruction, values)
+	return strings.TrimRight(override, " \t\r\n") + boundary
 }
 
 // renderFallbackPrompt renders the fallback prompt template with query and image context.

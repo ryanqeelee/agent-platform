@@ -73,6 +73,11 @@
           <t-icon v-if="showTenantSwitcher" name="swap" class="dropdown-tenant-panel-trail"
             :title="$t('tenant.switcher.menuLabel')" />
         </div>
+        <div v-if="!authStore.isLiteMode && !showTenantSwitcher && authStore.canCreateTenant" class="menu-item"
+          @click="openCreateTenantDialog">
+          <t-icon name="add" class="menu-icon" />
+          <span>{{ $t('tenant.create.action') }}</span>
+        </div>
         <div class="menu-divider"></div>
         <!-- 账号与空间是头像菜单的核心上下文；两个入口直接定位到对应设置分区。 -->
         <div class="menu-item" @click="handleQuickNav('general')">
@@ -107,7 +112,7 @@
          as the IM submenu. Data comes from authStore.memberships, kept fresh via
          GET /auth/me when the submenu opens (throttled) and after invite/create. -->
     <Teleport to="body">
-      <div v-if="tenantSubmenuOpen" class="tenant-submenu-floating" :style="tenantSubmenuStyle"
+      <div v-if="showTenantSwitcher && tenantSubmenuOpen" class="tenant-submenu-floating" :style="tenantSubmenuStyle"
         @mouseenter="showTenantSubmenu" @mouseleave="scheduleHideTenantSubmenu">
         <div class="tenant-submenu-header">
           {{ $t('tenant.switcher.menuLabel') }}
@@ -316,14 +321,11 @@ const switchableMemberships = computed<Membership[]>(() => {
   return authStore.memberships ?? []
 })
 
-// Rendered whenever the user has at least one membership — even single-
-// tenant users need this submenu to discover the "create new workspace"
-// entry at the bottom. Multi-tenant users additionally use it to switch
-// between memberships. Cross-tenant superusers keep using the sidebar
-// TenantSelector for the "any tenant in the system" case, so we don't
-// double-show that here.
+// Single-workspace users keep the identity panel without a switch action.
+// Workspace creation remains available separately when the server permits it.
+// Cross-tenant superusers use the sidebar TenantSelector for all tenants.
 const showTenantSwitcher = computed(() => {
-  return switchableMemberships.value.length >= 1
+  return switchableMemberships.value.length > 1
 })
 
 const isCurrentTenant = (id: number) => {

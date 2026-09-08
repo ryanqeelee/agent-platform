@@ -102,7 +102,7 @@ func (m *Manager) SkillOutputDir(sessionID, skillName string) string {
 // Manager manages skills lifecycle including discovery, loading, and script execution
 // It coordinates between the Loader (filesystem operations) and Sandbox (script execution)
 type Manager struct {
-	prepareSkill func(context.Context, string) error
+	prepareSkill func(ctx context.Context, name string, prepareExecution bool) error
 
 	loader     *Loader
 	sandboxMgr sandbox.Manager
@@ -128,8 +128,9 @@ type Manager struct {
 	mu            sync.RWMutex
 }
 
-// WithSkillPreparation prepares a validated skill in the current sandbox before use.
-func (m *Manager) WithSkillPreparation(prepare func(context.Context, string) error) *Manager {
+// WithSkillPreparation validates reads without preparing execution resources.
+// Script execution requests both current validation and sandbox preparation.
+func (m *Manager) WithSkillPreparation(prepare func(context.Context, string, bool) error) *Manager {
 	m.prepareSkill = prepare
 	return m
 }
@@ -277,7 +278,7 @@ func (m *Manager) LoadSkill(ctx context.Context, skillName string) (*Skill, erro
 		return nil, err
 	}
 	if m.prepareSkill != nil {
-		if err := m.prepareSkill(ctx, skillName); err != nil {
+		if err := m.prepareSkill(ctx, skillName, false); err != nil {
 			return nil, err
 		}
 	}
@@ -375,7 +376,7 @@ func (m *Manager) ExecuteScript(ctx context.Context, skillName, scriptPath strin
 	}
 
 	if m.prepareSkill != nil {
-		if err := m.prepareSkill(ctx, skillName); err != nil {
+		if err := m.prepareSkill(ctx, skillName, true); err != nil {
 			return nil, err
 		}
 	}

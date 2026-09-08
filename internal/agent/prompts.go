@@ -237,7 +237,7 @@ func formatSkillsMetadata(skillsMetadata []*skills.SkillMetadata, shellExecEnabl
 	var builder strings.Builder
 	builder.WriteString("\n### Skills\n\n")
 	builder.WriteString("Use a skill when its documented workflow helps complete the user's actual task and its required inputs are available. A keyword match alone is not a reason to load a skill.\n")
-	builder.WriteString("For questions about enterprise policies, search authorized enterprise knowledge first. Missing knowledge is not a reason to search the web or inspect the sandbox for an unprovided document.\n")
+	builder.WriteString("For enterprise policies, use applicable authorized evidence; retrieve when that evidence is missing and retrieval is available. Missing knowledge is not a reason to search the web or inspect the sandbox for an unprovided document.\n")
 	builder.WriteString("For uploaded-file processing, use the files listed in <sandbox_attachments> or an explicit file already produced in this conversation. If the required file is absent, ask for it; do not load file-processing skills or list /workspace/input to look for it. Tasks that create a new file do not require an input attachment.\n")
 	builder.WriteString("When a skill is appropriate, read its instructions before executing its scripts. Once enough evidence exists, answer without additional tools.\n\n")
 
@@ -288,8 +288,8 @@ func formatSkillsMetadata(skillsMetadata []*skills.SkillMetadata, shellExecEnabl
 		// is all in shell_exec's own description, which ships with the tools on
 		// every request and so is never further away than this paragraph.
 		builder.WriteString("- `shell_exec(command, work_dir, timeout_sec, max_output_bytes, max_stderr_bytes, env)`: ")
-		builder.WriteString("Freely execute shell commands and explore the current session's isolated Cube ")
-		builder.WriteString("sandbox. Read its tool description before the first call — it says which work ")
+		builder.WriteString("Execute commands needed for the current task in the session sandbox; do not ")
+		builder.WriteString("probe it for missing enterprise knowledge or tool access. Its description says which work ")
 		builder.WriteString("belongs here and which belongs to `execute_skill_script`\n")
 	}
 

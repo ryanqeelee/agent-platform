@@ -23,6 +23,7 @@ func ConfigureSessionSkillPreparation(agents interfaces.AgentService, service *T
 
 func (s *TenantSkillService) prepareSessionSkill(ctx context.Context, mgr sandbox.Manager,
 	tenantID uint64, sessionID, configID string, selected *types.TenantSkillEntity,
+	prepareExecution bool,
 ) error {
 	cfg, err := s.configs.GetByID(ctx, tenantID, configID)
 	if err != nil {
@@ -54,6 +55,11 @@ func (s *TenantSkillService) prepareSessionSkill(ctx context.Context, mgr sandbo
 		}
 		if len(row.BundleSHA256) != 64 {
 			return fmt.Errorf("skill has no verified bundle digest")
+		}
+		// read_skill uses persisted instructions/archive files, not the sandbox.
+		// Keep the same current-state checks but leave installation to execution.
+		if !prepareExecution {
+			return nil
 		}
 		dir, err := sandbox.SkillDirFor(row.Name)
 		if err != nil {

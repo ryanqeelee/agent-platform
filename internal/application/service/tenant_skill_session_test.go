@@ -21,14 +21,16 @@ func (s preparationSessions) GetSession(_ context.Context, id string) (*types.Se
 
 type preparationSandbox struct {
 	*installSandboxManager
-	marker string
-	digest string
+	marker     string
+	digest     string
+	shellCalls int
 }
 
 func (s *preparationSandbox) SessionInstallShellExecutor() sandbox.SessionInstallShellExecutor {
 	return s
 }
 func (s *preparationSandbox) ExecShellCommandWithOptions(ctx context.Context, session, command string, opts sandbox.ShellExecOptions) (*sandbox.ExecuteResult, error) {
+	s.shellCalls++
 	if strings.HasPrefix(command, "if test -f ") {
 		return &sandbox.ExecuteResult{Stdout: s.marker}, nil
 	}
@@ -54,11 +56,20 @@ func TestSessionPreparationReusesInstanceAndReinstallsAfterRecreation(t *testing
 	fx.storedBundles = map[string][]byte{row.BundleRef: archive}
 	mgr := &preparationSandbox{installSandboxManager: fx.sandboxMgr, digest: row.BundleSHA256}
 	prepare := func() error {
-		return fx.svc.prepareSessionSkill(context.Background(), mgr, 7, "user-session", "cfg-1", row)
+		return fx.svc.prepareSessionSkill(context.Background(), mgr, 7, "user-session", "cfg-1", row, true)
 	}
+	validateRead := func() error {
+		return fx.svc.prepareSessionSkill(context.Background(), mgr, 7, "user-session", "cfg-1", row, false)
+	}
+	require.NoError(t, validateRead())
+	require.Zero(t, mgr.shellCalls, "reading instructions must not even inspect a sandbox marker")
+	require.Empty(t, fx.agentPrompts, "reading instructions must not invoke the installer agent")
 	require.NoError(t, prepare())
 	require.Len(t, fx.agentPrompts, 1)
 	require.Equal(t, row.BundleSHA256, mgr.marker)
+	shellCalls := mgr.shellCalls
+	require.NoError(t, validateRead())
+	require.Equal(t, shellCalls, mgr.shellCalls)
 	require.NoError(t, prepare())
 	require.Len(t, fx.agentPrompts, 1)
 	mgr.marker = "" // a recreated instance has no completion file
@@ -76,7 +87,41 @@ func TestSessionPreparationReusesInstanceAndReinstallsAfterRecreation(t *testing
 
 	fx.svc.sessions = preparationSessions{fx.svc.sessions, 8}
 	require.ErrorContains(t, prepare(), "outside the workspace")
+	require.ErrorContains(t, validateRead(), "outside the workspace")
 	require.Len(t, fx.agentPrompts, 3)
+}
+
+func TestSkillReadRetainsCurrentSessionValidation(t *testing.T) {
+	for _, state := range []string{"disabled", "version_changed", "not_ready", "invalid_digest"} {
+		t.Run(state, func(t *testing.T) {
+			fx := newInstallFixture(t)
+			fx.configRepo.entity.Config.SkillPreparation = "session"
+			fx.svc.sessions = preparationSessions{fx.svc.sessions, 7}
+			row, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+			require.NoError(t, err)
+			row.Status = types.SkillStatusReady
+			row.BundleSHA256 = strings.Repeat("a", 64)
+			selected := *row
+			switch state {
+			case "disabled":
+				row.Enabled = false
+			case "version_changed":
+				row.BundleSHA256 = strings.Repeat("b", 64)
+			case "not_ready":
+				row.Status = types.SkillStatusInstalling
+			case "invalid_digest":
+				row.BundleSHA256 = ""
+				selected.BundleSHA256 = ""
+			}
+			require.NoError(t, fx.skillRepo.UpdateSkill(context.Background(), row))
+			mgr := &preparationSandbox{installSandboxManager: fx.sandboxMgr}
+			for _, execute := range []bool{false, true} {
+				require.Error(t, fx.svc.prepareSessionSkill(context.Background(), mgr, 7, "user-session", "cfg-1", &selected, execute))
+			}
+			require.Zero(t, mgr.shellCalls)
+			require.Empty(t, fx.agentPrompts)
+		})
+	}
 }
 func TestSessionPreparationFailureDoesNotRecordCompletion(t *testing.T) {
 	fx := newInstallFixture(t)
@@ -88,10 +133,10 @@ func TestSessionPreparationFailureDoesNotRecordCompletion(t *testing.T) {
 	row.BundleRef = "file://absent.zip"
 	require.NoError(t, fx.skillRepo.UpdateSkill(context.Background(), row))
 	mgr := &preparationSandbox{installSandboxManager: fx.sandboxMgr, digest: row.BundleSHA256}
-	require.Error(t, fx.svc.prepareSessionSkill(context.Background(), mgr, 7, "user-session", "cfg-1", row))
+	require.Error(t, fx.svc.prepareSessionSkill(context.Background(), mgr, 7, "user-session", "cfg-1", row, true))
 	require.Empty(t, mgr.marker)
 	require.Empty(t, fx.agentPrompts)
 	row.Enabled = false
 	require.NoError(t, fx.skillRepo.UpdateSkill(context.Background(), row))
-	require.ErrorContains(t, fx.svc.prepareSessionSkill(context.Background(), mgr, 7, "user-session", "cfg-1", row), "disabled")
+	require.ErrorContains(t, fx.svc.prepareSessionSkill(context.Background(), mgr, 7, "user-session", "cfg-1", row, true), "disabled")
 }

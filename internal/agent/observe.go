@@ -503,6 +503,7 @@ func buildRuntimeContextBlock(
 	sessionID string,
 	kbs []*KnowledgeBaseInfo,
 	docs []*SelectedDocumentInfo,
+	employeeAssistant bool,
 ) string {
 	var sb strings.Builder
 	sb.WriteString("<runtime_context scope=\"this_turn\">\n")
@@ -549,7 +550,11 @@ func buildRuntimeContextBlock(
 	}
 
 	sb.WriteString("  <communication_instruction>Do not use internal tool names or identifiers in your answers or in Thought. Say \"keyword retrieval\" instead of grep_chunks, \"semantic retrieval\" instead of knowledge_search, \"browse full document\" instead of list_knowledge_chunks; likewise never expose chunk_id, knowledge_id, or other internal IDs—refer to documents by title or name.</communication_instruction>\n")
-	sb.WriteString("  <answer_instruction>When you have gathered enough information, write your complete user-facing answer as your reply and stop—do not request any more tools in that final message. Until then, keep using tools; do not give a partial answer mid-investigation.</answer_instruction>\n")
+	if employeeAssistant {
+		sb.WriteString("  <answer_instruction>When the available evidence is sufficient to complete the task, answer and stop without more tools. If required evidence is missing, use relevant available sources. If it cannot be obtained, explain the limitation and give only supported results or clearly labeled general guidance; do not keep exploring unrelated tools. Complete all requested actions that remain possible, and distinguish completed work from unresolved requirements.</answer_instruction>\n")
+	} else {
+		sb.WriteString("  <answer_instruction>When you have gathered enough information, write your complete user-facing answer as your reply and stop—do not request any more tools in that final message. Until then, keep using tools; do not give a partial answer mid-investigation.</answer_instruction>\n")
+	}
 
 	sb.WriteString("</runtime_context>")
 	return sb.String()
@@ -645,9 +650,12 @@ func commonStringPrefix(a, b string) string {
 // not written to rendered_content / history.
 func (e *AgentEngine) RenderUserTurnContent(sessionID, query string) string {
 	e.registerRuntimeReferences()
-	runtimeCtx := buildRuntimeContextBlock(sessionID, e.knowledgeBasesInfo, e.selectedDocs)
+	runtimeCtx := buildRuntimeContextBlock(sessionID, e.knowledgeBasesInfo, e.selectedDocs, e.config != nil && e.config.EmployeeAssistant)
 	if e.config != nil {
 		runtimeCtx = composeUserTurnContent(runtimeCtx, buildSessionDocumentsContextBlock(e.config.SessionAttachments))
+		if e.config.EmployeeAssistant {
+			runtimeCtx = composeUserTurnContent(runtimeCtx, e.buildTurnCapabilities())
+		}
 	}
 	runtimeCtx = e.modelContext.CompactKnownText(runtimeCtx)
 	mustUse := buildMustUseBlock(e.pinnedMCPServices, e.pinnedSkills)

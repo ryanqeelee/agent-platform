@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"strings"
@@ -294,6 +295,7 @@ func (e *AgentEngine) Execute(
 			"multi_turn":          e.config.MultiTurnEnabled,
 			"knowledge_base_ids":  kbIDs,
 			"allowed_tools":       e.config.AllowedTools,
+			"registered_tools":    e.toolRegistry.ListTools(),
 		},
 	})
 	ctx = spanCtx
@@ -324,9 +326,10 @@ func (e *AgentEngine) Execute(
 	logger.Infof(ctx, "[Agent] Ready: %d messages, %d tools [%s], %d images",
 		len(messages), len(tools), toolListStr, len(imgs))
 	common.PipelineInfo(ctx, "Agent", "tools_ready", map[string]interface{}{
-		"session_id": sessionID,
-		"tool_count": len(tools),
-		"tools":      toolListStr,
+		"session_id":           sessionID,
+		"tool_count":           len(tools),
+		"tools":                toolListStr,
+		"system_prompt_sha256": fmt.Sprintf("%x", sha256.Sum256([]byte(systemPrompt))),
 	})
 
 	_, err := e.executeLoop(ctx, state, query, messages, tools, sessionID, messageID)

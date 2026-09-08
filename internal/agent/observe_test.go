@@ -267,6 +267,7 @@ func TestBuildRuntimeContextBlock_PinnedDocuments(t *testing.T) {
 			Title:       "Report.pdf",
 			FileType:    "pdf",
 		}},
+		false,
 	)
 
 	assert.Contains(t, block, "<pinned_documents")

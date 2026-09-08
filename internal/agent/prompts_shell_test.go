@@ -13,7 +13,7 @@ func TestFormatSkillsMetadataIncludesShellGuidanceOnlyWhenEnabled(t *testing.T) 
 
 	enabled := formatSkillsMetadata(metadata, true)
 	require.Contains(t, enabled, "shell_exec")
-	assert.Contains(t, enabled, "Freely execute shell commands")
+	assert.Contains(t, enabled, "commands needed for the current task")
 
 	// Cross-tool routing is what this section is for, so the skill-environment
 	// rules stay: which tool runs a script, and where an on-demand package goes.

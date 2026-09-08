@@ -288,9 +288,9 @@ func skillEnvironmentSection(skillDir string) string {
 
 ## Execution Environment
 
-- This skill is installed at `+"`%s`"+` inside the sandbox, and its
-  dependencies live there with it, not in the sandbox's system interpreters.
-- `+"`execute_skill_script`"+` already runs its scripts the right way, including
+- This skill's execution directory is `+"`%s`"+` inside the sandbox.
+  Reading these instructions does not install its files or dependencies.
+- `+"`execute_skill_script`"+` prepares the skill when needed and runs its scripts, including
   `+"`/workspace/...`"+` files you wrote that still need this skill's packages. Prefer
   it over invoking them yourself with a bare interpreter.
 - Do NOT paste a program into `+"`python3 -c`"+` or into `+"`%s -c`"+`.

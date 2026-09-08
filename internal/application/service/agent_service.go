@@ -615,10 +615,10 @@ func (s *agentService) initializeSkillsManager(
 		skillsManager.WithTenantSource(source)
 	}
 	if s.sessionSkills != nil && len(config.TenantSkills) > 0 {
-		skillsManager.WithSkillPreparation(func(callCtx context.Context, name string) error {
+		skillsManager.WithSkillPreparation(func(callCtx context.Context, name string, prepareExecution bool) error {
 			for _, row := range config.TenantSkills {
 				if row != nil && row.Name == name {
-					return s.sessionSkills.prepareSessionSkill(callCtx, sandboxMgr, tenantID, sessionID, configID, row)
+					return s.sessionSkills.prepareSessionSkill(callCtx, sandboxMgr, tenantID, sessionID, configID, row, prepareExecution)
 				}
 			}
 			return fmt.Errorf("skill is not available for this run: %s", name)

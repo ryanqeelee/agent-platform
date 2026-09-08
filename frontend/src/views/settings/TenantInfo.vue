@@ -134,6 +134,15 @@
           </div>
         </div>
 
+        <div class="setting-row">
+          <div class="setting-info"><label>{{ administrationCopy.serviceLevel }}</label></div>
+          <div class="setting-control"><span class="info-value">{{ serviceSummary?.service_level && serviceSummary.service_level !== 'unknown' ? serviceSummary.service_level : administrationCopy.unknown }}</span></div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info"><label>{{ administrationCopy.memberQuota }}</label></div>
+          <div class="setting-control"><span class="info-value">{{ serviceSummary?.member_quota ?? administrationCopy.unknown }}</span></div>
+        </div>
+
         <!-- Tenant creation time -->
         <div class="setting-row">
           <div class="setting-info">
@@ -157,8 +166,12 @@ import { getCurrentUser, type TenantInfo } from '@/api/auth'
 import { updateTenant as updateTenantApi } from '@/api/tenant'
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
+import { getEnterpriseAdministrationQueue, type EnterpriseAdministrationQueueV1 } from '@/api/enterpriseAdministration'
+import { getEnterpriseAdministrationCopy } from '@/config/productShellBrand'
 const { t, locale } = useI18n()
 const authStore = useAuthStore()
+const administrationCopy = computed(() => getEnterpriseAdministrationCopy(locale.value))
+const serviceSummary = ref<EnterpriseAdministrationQueueV1['summary'] | null>(null)
 
 // Reactive state
 const tenantInfo = ref<TenantInfo | null>(null)
@@ -318,7 +331,13 @@ const loadInfo = async () => {
     loading.value = true
     error.value = ''
 
-    const userResponse = await getCurrentUser()
+    serviceSummary.value = null
+    const [userResponse, administration] = await Promise.all([
+      getCurrentUser(),
+      // A platform outage makes service details unknown, without hiding tenant information.
+      getEnterpriseAdministrationQueue().catch(() => null),
+    ])
+    serviceSummary.value = administration?.summary ?? null
 
     const data = userResponse?.data as { tenant?: TenantInfo } | undefined
     if ((userResponse as any).success && data?.tenant) {

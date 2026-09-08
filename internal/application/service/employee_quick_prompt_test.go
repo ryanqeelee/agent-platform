@@ -16,6 +16,7 @@ func TestEmployeeQuickProfilePreservesContractForIntentOverride(t *testing.T) {
 		require.Equal(t, "employee evidence rules", cm.SummaryConfig.Prompt)
 		if id == types.BuiltinEmployeeAssistantID {
 			require.Equal(t, "employee evidence rules", cm.SystemPromptOverride)
+			require.Contains(t, cm.RewritePromptSystem, "needs_user_input")
 		} else {
 			require.Empty(t, cm.SystemPromptOverride)
 		}

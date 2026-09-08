@@ -483,6 +483,11 @@ func mergeImageDescAndOCR(desc, ocr string) (string, bool) {
 // overrides are treated as unset and fall through to the global default. Returns
 // true when a non-empty override was applied.
 func applyIntentPromptOverride(chatManage *types.ChatManage, globalPrompts map[string]string) bool {
+	if chatManage.Intent == types.IntentNeedsUserInput {
+		chatManage.RewriteQuery = chatManage.Query
+		chatManage.SystemPromptOverride = chatManage.SummaryConfig.Prompt + "\n本轮问题理解已确认缺少用户才能提供的关键条件。当前只问一个最必要的澄清问题，说明为何需要该信息；不要列出猜测的原因、操作步骤或样本数据，不声称已经检索资料。"
+		return true
+	}
 	intentKey := string(chatManage.Intent)
 	if raw, ok := chatManage.IntentPromptOverrides[intentKey]; ok && strings.TrimSpace(raw) != "" {
 		chatManage.SystemPromptOverride = raw

@@ -30,6 +30,8 @@
     </div>
 </template>
 <script setup lang="ts">
+import { useAuthStore } from '@/stores/auth'
+import { needsKnowledgeBaseConfiguration } from '@/utils/knowledgeBaseInitialization'
 import Menu from '@/components/menu.vue'
 import { computed, ref, shallowRef, onMounted, onUnmounted, nextTick, provide, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router'
@@ -48,6 +50,7 @@ import OperatingWorkspace from '@/views/operating/OperatingWorkspace.vue'
 import { isOperatingRoutePath } from '@/views/operating/operatingHost'
 import type { OperatingController } from '@/views/operating/operatingClient'
 
+const authStore = useAuthStore();
 const mobileMenuOpen = ref(false);
 const route = useRoute();
 const isOperatingRoute = computed(() => isOperatingRoutePath(route.path));
@@ -116,13 +119,7 @@ const checkKnowledgeBaseInitialization = async (): Promise<boolean> => {
         const kbResponse = await getKnowledgeBaseById(currentKbId);
         const kb = kbResponse.data;
         
-        if (!kb.summary_model_id) {
-            MessagePlugin.warning(t('knowledgeBase.notInitialized'));
-            return false;
-        }
-        const strategy = kb.indexing_strategy;
-        const needsEmbedding = !strategy || strategy.vector_enabled || strategy.keyword_enabled;
-        if (needsEmbedding && !kb.embedding_model_id) {
+        if (needsKnowledgeBaseConfiguration(kb, authStore.isSystemAdmin)) {
             MessagePlugin.warning(t('knowledgeBase.notInitialized'));
             return false;
         }

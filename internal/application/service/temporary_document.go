@@ -331,6 +331,7 @@ func (s *temporaryDocumentService) Process(ctx context.Context, task *asynq.Task
 	cfg.Strategy = chunker.StrategyAuto
 	cfg.ChunkSize = 1600
 	cfg.ChunkOverlap = 160
+	cfg = chunker.WithDocumentFormat(cfg, metadata)
 	parts := chunker.Split(content, cfg)
 	chunks := make([]types.TemporaryDocumentChunk, 0, len(parts))
 	for _, part := range parts {

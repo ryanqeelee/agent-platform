@@ -5,9 +5,12 @@ import test from 'node:test'
 
 const source = readFileSync(fileURLToPath(new URL('./EnterpriseAdministrationHome.vue', import.meta.url)), 'utf8')
 
-test('enterprise administration uses the governed read-only queue and fixed product targets', () => {
+test('enterprise home consumes server-owned health and retains management destinations', () => {
   assert.match(source, /getEnterpriseAdministrationQueue\(\)/)
-  assert.match(source, /target === 'service_health'/)
-  assert.match(source, /target === 'knowledge'/)
-  assert.match(source, /target === 'audit' \? \{ section: 'members', audit: '1' \}/)
+  assert.match(source, /queue.edge_nodes != null/)
+  assert.match(source, /node.availability/)
+  assert.match(source, /node.data_service_status/)
+  assert.match(source, /router.push\('\/platform\/knowledge-bases'\)/)
+  assert.match(source, /path: '\/platform\/settings', query: \{ section \}/)
+  assert.doesNotMatch(source, /queue.items|service-health|quotaLabel/)
 })

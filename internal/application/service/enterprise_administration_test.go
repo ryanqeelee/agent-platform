@@ -144,3 +144,25 @@ func TestEnterpriseAdministrationQueueRejectsEmployee(t *testing.T) {
 	_, err := svc.Resolve(enterpriseAdministrationContext(types.TenantRoleViewer))
 	require.Error(t, err)
 }
+
+func TestEnterpriseAdministrationPreservesEdgeObservation(t *testing.T) {
+	seen := "2026-09-08T12:00:00Z"
+	for _, nodes := range [][]types.EnterpriseEdgeNode{
+		nil,
+		{},
+		{{EdgeNodeID: "edge-1", ConnectionStatus: "online", DataServiceStatus: "abnormal", Availability: "abnormal", LastSeenAt: &seen}},
+	} {
+		projection := enterprisePlatformProjection()
+		projection.EdgeNodes = nodes
+		svc := &enterpriseAdministrationService{
+			tenant:  enterpriseTenantStub{tenant: &types.Tenant{ID: 7}},
+			members: enterpriseMembersStub{}, invitations: enterpriseInvitationsStub{},
+			knowledge: enterpriseKBStub{}, knowledgeCnt: enterpriseKnowledgeCountStub{},
+			audit: enterpriseAuditStub{}, platform: &enterprisePlatformStub{projection: projection},
+		}
+		result, err := svc.Resolve(enterpriseAdministrationContext(types.TenantRoleAdmin))
+		require.NoError(t, err)
+		require.Equal(t, nodes, result.EdgeNodes)
+	}
+	require.Nil(t, unavailableEnterpriseAdministrationPlatform("admin").EdgeNodes)
+}

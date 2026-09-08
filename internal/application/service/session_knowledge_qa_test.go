@@ -188,3 +188,104 @@ func TestHandleModelFallback_IncludesHistoryMessages(t *testing.T) {
 	assert.Equal(t, "user", chatModel.lastMessages[3].Role)
 	assert.Contains(t, chatModel.lastMessages[3].Content, "现在还能继续讲吗？")
 }
+
+func TestEmployeeQuickEmptyScopeUsesQueryUnderstandingPipeline(t *testing.T) {
+	employeeQuick := &types.CustomAgent{
+		ID:     types.BuiltinEmployeeAssistantID,
+		Config: types.CustomAgentConfig{AgentMode: types.AgentModeQuickAnswer},
+	}
+
+	pipeline, needsPipelineDecision := buildKnowledgeQAPipeline(false, false, false, false, employeeQuick)
+	require.True(t, needsPipelineDecision)
+	require.Equal(t, []types.EventType{
+		types.MEMORY_RECALL,
+		types.QUERY_UNDERSTAND,
+		types.CHUNK_SEARCH_PARALLEL,
+		types.CHUNK_RERANK,
+		types.CHUNK_MERGE,
+		types.FILTER_TOP_K,
+		types.INTO_CHAT_MESSAGE,
+		types.CHAT_COMPLETION_STREAM,
+	}, pipeline)
+
+	ordinaryPipeline, ordinaryNeedsDecision := buildKnowledgeQAPipeline(
+		false, false, false, false,
+		&types.CustomAgent{ID: "ordinary-agent", Config: types.CustomAgentConfig{AgentMode: types.AgentModeQuickAnswer}},
+	)
+	require.False(t, ordinaryNeedsDecision)
+	require.Equal(t, []types.EventType{types.MEMORY_RECALL, types.CHAT_COMPLETION_STREAM}, ordinaryPipeline)
+
+	withKBPipeline, withKBNeedsDecision := buildKnowledgeQAPipeline(true, false, false, false, nil)
+	require.True(t, withKBNeedsDecision)
+	require.Contains(t, withKBPipeline, types.QUERY_UNDERSTAND)
+}
+
+func TestHandleModelFallback_EvidenceBoundOverrideRetainsCurrentAttachments(t *testing.T) {
+	chatModel := &captureChatModel{}
+	svc := &sessionService{modelService: &stubModelService{chatModel: chatModel}}
+	bus := event.NewEventBus()
+	cm := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{
+			SessionID:               "session-1",
+			Query:                   "what is the rule?",
+			ChatModelID:             "chat-model",
+			FallbackPrompt:          "GENERIC: use general knowledge and the KB catalog",
+			Language:                "English",
+			ChatModelSupportsVision: true,
+			Images:                  []string{"https://example.com/current.png"},
+			Attachments: types.MessageAttachments{{
+				FileName: "current.txt",
+				FileType: ".txt",
+				Content:  "attachment-supported fact",
+			}},
+		},
+		PipelineState: types.PipelineState{
+			RewriteQuery:         "rewritten rule question",
+			SystemPromptOverride: "OVERRIDE {{language}}: {{query}}",
+			QuotedContext:        "current quoted material",
+			History: []*types.History{{
+				Query:  "earlier question",
+				Answer: "earlier answer",
+			}},
+		},
+		PipelineContext: types.PipelineContext{EventBus: bus.AsEventBusInterface()},
+	}
+
+	svc.handleModelFallback(context.Background(), cm)
+
+	require.Len(t, chatModel.lastMessages, 4)
+	system := chatModel.lastMessages[0]
+	require.Equal(t, "system", system.Role)
+	assert.Contains(t, system.Content, "OVERRIDE English: rewritten rule question")
+	assert.Contains(t, system.Content, "no matching authorized knowledge-base or search evidence was obtained this turn")
+	assert.NotContains(t, system.Content, "GENERIC: use general knowledge")
+	assert.Contains(t, system.Content, "Do not use general knowledge")
+
+	assert.Equal(t, "earlier question", chatModel.lastMessages[1].Content)
+	assert.Equal(t, "earlier answer", chatModel.lastMessages[2].Content)
+	user := chatModel.lastMessages[3]
+	assert.Equal(t, "user", user.Role)
+	assert.Contains(t, user.Content, "rewritten rule question")
+	assert.Contains(t, user.Content, "current quoted material")
+	assert.Contains(t, user.Content, "attachment-supported fact")
+	assert.Equal(t, []string{"https://example.com/current.png"}, user.Images)
+}
+
+func TestHandleModelFallback_EvidenceBoundOverrideWorksWithoutGenericPrompt(t *testing.T) {
+	chatModel := &captureChatModel{}
+	svc := &sessionService{modelService: &stubModelService{chatModel: chatModel}}
+	cm := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{
+			Query:       "question",
+			ChatModelID: "chat-model",
+			Language:    "English",
+		},
+		PipelineState:   types.PipelineState{SystemPromptOverride: "evidence-first override"},
+		PipelineContext: types.PipelineContext{EventBus: event.NewEventBus().AsEventBusInterface()},
+	}
+
+	svc.handleModelFallback(context.Background(), cm)
+
+	require.NotEmpty(t, chatModel.lastMessages)
+	assert.Contains(t, chatModel.lastMessages[0].Content, "evidence-first override")
+}

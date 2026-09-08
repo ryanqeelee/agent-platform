@@ -10,8 +10,17 @@ export type EnterpriseAdministrationItemCode =
   | 'knowledge_processing_failed'
   | 'recent_high_risk_operations'
 
+export interface EnterpriseEdgeNode {
+  edge_node_id: string
+  connection_status: 'online' | 'offline' | 'disabled' | 'unknown'
+  data_service_status: 'available' | 'abnormal' | 'unknown'
+  availability: 'available' | 'abnormal' | 'offline' | 'disabled' | 'unknown'
+  last_seen_at: string | null
+}
+
 export interface EnterpriseAdministrationQueueV1 {
   contract_version: 'EnterpriseAdministrationQueueV1'
+  edge_nodes?: EnterpriseEdgeNode[] | null
   as_of: string
   summary: {
     service_level: string

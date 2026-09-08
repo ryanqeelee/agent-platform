@@ -411,8 +411,8 @@ class ExcelParserTest(unittest.TestCase):
         self.assertEqual(
             chunks,
             [
-                "Name: Alice,Age: 30,City: Shenzhen",
-                "Name: Bob,Age: 28,City: Shanghai",
+                "[工作表: Sheet; 行: 2] Name: Alice,Age: 30,City: Shenzhen",
+                "[工作表: Sheet; 行: 3] Name: Bob,Age: 28,City: Shanghai",
             ],
         )
         self.assertNotIn("A: Name", document.content)
@@ -431,8 +431,8 @@ class ExcelParserTest(unittest.TestCase):
 
         chunks = [chunk.content.strip() for chunk in document.chunks]
         self.assertEqual(len(chunks), 2)
-        self.assertEqual(chunks[0], "A: Name,B: City")
-        self.assertEqual(chunks[1], "A: Alice,B: Shenzhen")
+        self.assertEqual(chunks[0], "[工作表: Sheet; 行: 1] A: Name,B: City")
+        self.assertEqual(chunks[1], "[工作表: Sheet; 行: 2] A: Alice,B: Shenzhen")
 
     def test_single_row_xlsx_is_not_consumed_in_header_mode(self):
         content = self._workbook_bytes([["Name", "Age", "City"]])
@@ -445,7 +445,7 @@ class ExcelParserTest(unittest.TestCase):
 
         self.assertEqual(
             [chunk.content.strip() for chunk in document.chunks],
-            ["A: Name,B: Age,C: City"],
+            ["[工作表: Sheet; 行: 1] A: Name,B: Age,C: City"],
         )
 
     def test_header_mode_generates_stable_labels_for_duplicate_and_empty_cells(self):
@@ -464,7 +464,7 @@ class ExcelParserTest(unittest.TestCase):
 
         self.assertEqual(
             [chunk.content.strip() for chunk in document.chunks],
-            ["Name: Alice,Name_2: Alias,C: Shenzhen"],
+            ["[工作表: Sheet; 行: 2] Name: Alice,Name_2: Alias,C: Shenzhen"],
         )
 
     def test_xlsx_explicit_false_override_keeps_first_row_as_data(self):
@@ -482,8 +482,8 @@ class ExcelParserTest(unittest.TestCase):
         ).parse_into_text(content)
 
         chunks = [chunk.content.strip() for chunk in document.chunks]
-        self.assertEqual(chunks[0], "A: Name,B: Age")
-        self.assertEqual(chunks[1], "A: Alice,B: 30")
+        self.assertEqual(chunks[0], "[工作表: Sheet; 行: 1] A: Name,B: Age")
+        self.assertEqual(chunks[1], "[工作表: Sheet; 行: 2] A: Alice,B: 30")
 
     def test_parse_phantom_shared_strings_workbook(self):
         document = ExcelParser().parse_into_text(_xlsx_with_phantom_shared_strings())
@@ -507,6 +507,28 @@ class ExcelParserTest(unittest.TestCase):
             document = ExcelParser().parse_into_text(f.read())
         self.assertGreater(len(document.content), 0)
         self.assertGreater(len(document.chunks), 0)
+
+
+class ExcelRecordBoundaryTests(unittest.TestCase):
+    def test_multiline_cells_and_sheet_identity(self):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "客服"
+        ws.append(["问题", "答案"])
+        ws.append(["甲🙂", "先检查\r\n再处理\r最后"])
+        ws.append([None, None])
+        ws.append(["乙", "另一记录"])
+        wb.create_sheet("贸易").append(["丙", "第三记录"])
+        out = io.BytesIO()
+        wb.save(out)
+        doc = ExcelParser(xlsx_first_row_as_header=True).parse_into_text(out.getvalue())
+        self.assertEqual(doc.metadata["content_format"], "spreadsheet_rows_v1")
+        self.assertEqual(len(doc.content.splitlines()), 3)
+        self.assertIn("先检查<br>再处理<br>最后", doc.content)
+        self.assertIn("[工作表: 客服; 行: 4]", doc.content)
+        self.assertIn("[工作表: 贸易; 行: 1]", doc.content)
+        for chunk in doc.chunks:
+            self.assertEqual(doc.content[chunk.start:chunk.end], chunk.content)
 
 
 if __name__ == "__main__":

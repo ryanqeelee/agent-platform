@@ -108,19 +108,22 @@ class ExcelParser(BaseParser):
             df.dropna(how="all", inplace=True)
 
             # Process each row in the DataFrame
-            for _, row in df.iterrows():
+            for row_index, row in df.iterrows():
                 page_content = []
                 # Build key-value pairs for non-null values
                 for k, v in row.items():
                     if pd.notna(v) and not _is_image_function(v):
-                        page_content.append(f"{k}: {v}")
+                        page_content.append(f"{_record_cell(k)}: {_record_cell(v)}")
                 
                 # Skip rows with no valid content
                 if not page_content:
                     continue
                 
                 # Format row as comma-separated key-value pairs
-                content_row = ",".join(page_content) + "\n"
+                content_row = (
+                    f"[工作表: {_record_cell(excel_sheet_name)}; 行: {row_index + 1}] "
+                    + ",".join(page_content) + "\n"
+                )
                 end += len(content_row)
                 text.append(content_row)
                 
@@ -131,7 +134,15 @@ class ExcelParser(BaseParser):
                 start = end
 
         # Combine all text and return as Document
-        return Document(content="".join(text), chunks=chunks)
+        return Document(
+            content="".join(text), chunks=chunks,
+            metadata={"content_format": "spreadsheet_rows_v1"},
+        )
+
+
+def _record_cell(value: Any) -> str:
+    """Keep one physical line per record across the text-only reader RPC."""
+    return str(value).replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br>")
 
 
 def _read_sheet_dataframe(

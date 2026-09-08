@@ -60,6 +60,9 @@ type ImageRef struct {
 // honored by the strategy entry point in strategy.go; the legacy SplitText
 // path uses only ChunkSize/Overlap/Separators.
 type SplitterConfig struct {
+	// RecordLines is set only for parser-declared spreadsheet_rows_v1 content.
+	// Never merge or overlap separate records; split oversized records normally.
+	RecordLines  bool
 	ChunkSize    int
 	ChunkOverlap int
 	Separators   []string

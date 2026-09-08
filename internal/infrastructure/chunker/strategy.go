@@ -32,6 +32,9 @@ const (
 // SplitWithDiagnostics performs (matters in SplitParentChild where
 // Split is called once per parent).
 func Split(text string, cfg SplitterConfig) []Chunk {
+	if cfg.RecordLines {
+		return splitRecordLines(text, cfg)
+	}
 	if text == "" {
 		return nil
 	}
@@ -86,6 +89,9 @@ type Diagnostics struct {
 // profile when available). Use this for the chunker preview endpoint
 // where the caller wants to know which tier won and why others lost.
 func SplitWithDiagnostics(text string, cfg SplitterConfig) ([]Chunk, *Diagnostics) {
+	if cfg.RecordLines {
+		return splitRecordLines(text, cfg), &Diagnostics{SelectedTier: "records", TierChain: []StrategyTier{"records"}}
+	}
 	// Default selected tier to legacy so an empty diag never carries the
 	// zero string — that would render as a blank tag in the debug UI.
 	diag := &Diagnostics{SelectedTier: TierLegacy}
@@ -225,6 +231,7 @@ func DeriveParentChildConfigs(base SplitterConfig, parentSize, childSize int) (p
 		childSize = 384
 	}
 	parent = SplitterConfig{
+		RecordLines:  base.RecordLines,
 		ChunkSize:    parentSize,
 		ChunkOverlap: base.ChunkOverlap,
 		Separators:   base.Separators,
@@ -232,6 +239,7 @@ func DeriveParentChildConfigs(base SplitterConfig, parentSize, childSize int) (p
 		Languages:    base.Languages,
 	}
 	child = SplitterConfig{
+		RecordLines:  base.RecordLines,
 		ChunkSize:    childSize,
 		ChunkOverlap: childSize / 5,
 		Separators:   base.Separators,

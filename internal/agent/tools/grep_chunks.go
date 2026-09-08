@@ -29,9 +29,10 @@ Examples:
 IMPORTANT — JSON escaping: every backslash in a regex MUST be written as \\ inside the JSON tool arguments (e.g. to search for literal "C++" write "C\\+\\+", NOT "C\+\+"; for "\d+" write "\\d+"). Plain "\+" / "\d" etc. are invalid JSON escapes and will fail to parse.
 Use this to locate candidate chunks by exact identifiers, error codes, product names, or recurring terms.
 
-## Deep read after grep:
+## Read further only when the snippet lacks context needed for the answer:
+Do not read every hit. Prefer the relevant cN chunk; use a full document only when broader context is required.
 - **FAQ hit** (chunk type faq): call list_knowledge_chunks with **faq_id=cN** from the grep result (NOT the parent dN document ID).
-- **Document hit**: call list_knowledge_chunks with **knowledge_id=dN**, or get_document_info with **knowledge_ids=[dN]**.`,
+- **Document hit**: call list_knowledge_chunks with **chunk_id=cN** for the relevant chunk, or **knowledge_id=dN** for the broader document.`,
 	schema: json.RawMessage(`{
   "type": "object",
   "properties": {

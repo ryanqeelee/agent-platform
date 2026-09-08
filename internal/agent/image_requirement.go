@@ -13,13 +13,12 @@ const agentRetrievedImageRequirementMarker = "## Retrieved Image Output Requirem
 const agentRetrievedImageSystemRequirement = `
 
 ## Retrieved Image Output Requirement
-Retrieved tool results for this turn contain Markdown images. Treat images attached to retrieved passages as relevant by default.
-- Unless the user explicitly requests text-only output, or every retrieved image is clearly unrelated, the final answer MUST include at least one relevant Markdown image copied verbatim from the tool results.
-- Preserve the complete Markdown image syntax and URL exactly; never invent, shorten, normalize, or replace the URL.
+Retrieved tool results for this turn contain Markdown images.
+- Include a retrieved Markdown image only when it directly supports the user's requested answer, unless the user requests text-only output. Omit unrelated images, including sample forms used merely to illustrate a generic concept. Text-only answers are valid even when retrieval contains images.
+- If an image is relevant and useful, copy its Markdown syntax verbatim. Preserve its complete URL exactly; never invent, shorten, normalize, or replace it.
 - Use ASCII half-width parentheses exactly as ![alt](url); never use full-width （ or ）.
 - Place each image immediately after the paragraph it supports.
-- When multiple retrieved images support different sections, distribute them across those sections instead of stopping after the first image.
-- Before finishing, silently verify that the answer contains a Markdown image whenever this requirement applies.`
+- Before finishing, silently verify that each included image supports a specific claim or requested illustration; remove any that do not.`
 
 func stepContainsMarkdownImage(step types.AgentStep) bool {
 	for _, toolCall := range step.ToolCalls {

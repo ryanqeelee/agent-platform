@@ -19,67 +19,22 @@ import (
 
 var knowledgeSearchTool = BaseTool{
 	name: ToolKnowledgeSearch,
-	description: `Semantic/vector search tool for retrieving knowledge by meaning, intent, and conceptual relevance.
+	description: `Search authorized enterprise knowledge using the indexes enabled for each knowledge base (keyword and/or vector retrieval), with deduplication and reranking when available.
+Use this for enterprise questions, including product names, model numbers, error messages and conceptual questions. Keep distinguishing identifiers in the query; do not replace a specific symptom with a generic topic.
 
-This tool uses embeddings to understand the user's query and find semantically similar content across knowledge base chunks.
+- queries: 1–5 focused questions. Use one for a single information need; multiple queries are for distinct necessary subquestions, not a list of speculative causes.
+- knowledge_base_ids: optional bound bN IDs. Select the relevant business knowledge bases from runtime context when the topic is clear; keep multiple scopes when the task crosses topics. Scope cannot exceed current authorization.
 
-## Purpose
-Designed for high-level understanding tasks, such as:
-- conceptual explanations
-- topic overviews
-- reasoning-based information needs
-- contextual or intent-driven retrieval
-- queries that cannot be answered with literal keyword matching
+Results contain source text and cN chunk/dN document IDs. Answer directly when the returned evidence is sufficient. Read a specific chunk or document only when missing context, an exception, or a conflict matters to the answer; do not read every matching source or all remaining pages to increase coverage.
 
-The tool searches by MEANING rather than exact text. It identifies chunks that are conceptually relevant even when the wording differs.
-
-## What the Tool Does NOT Do
-- Does NOT perform exact keyword matching
-- Does NOT search for specific named entities
-- Should NOT be used for literal lookup tasks
-- Should NOT receive long raw text or user messages as queries
-- Should NOT be used to locate specific strings or error codes
-
-For literal/keyword/entity search, another tool should be used.
-
-## Required Input Behavior
-"queries" must contain **1–5 short, well-formed semantic questions or conceptual statements** that clearly express the meaning the model is trying to retrieve.
-
-Each query should represent a **concept, idea, topic, explanation, or intent**, such as:
-- abstract topics
-- definitions
-- mechanisms
-- best practices
-- comparisons
-- how/why questions
-
-Avoid:
-- keyword lists
-- raw text from user messages
-- full paragraphs
-- unprocessed input
-
-## Examples of valid query shapes (not content):
-- "What is the main idea of..."
-- "How does X work in general?"
-- "Explain the purpose of..."
-- "What are the key principles behind..."
-- "Overview of ..."
-
-## Parameters
-- queries (required): 1–5 semantic questions or conceptual statements.
-  These should reflect the meaning or topic you want embeddings to capture.
-- knowledge_base_ids (optional): limit the search scope.
-
-## Output
-Returns chunks ranked by semantic similarity, reranked when applicable.  
-Each chunk has a short cN source ID and belongs to a dN document ID. Results represent conceptual relevance, not literal keyword overlap. Use dN for document-level follow-up tool calls.`,
+Matches are candidate evidence, not proof that they apply to the user's device, customer or order. Ask for a critical missing identifier or symptom instead of searching every possible interpretation. Sample forms and historical documents do not establish current order, shipment or repair status.
+For an explicitly literal regex inspection use the keyword tool; this search does not guarantee exhaustive literal matches.`,
 	schema: json.RawMessage(`{
   "type": "object",
   "properties": {
     "queries": {
       "type": "array",
-      "description": "REQUIRED: 1-5 semantic questions/topics (e.g., ['What is RAG?', 'RAG benefits'])",
+      "description": "REQUIRED: 1-5 focused questions preserving product names, model numbers and other distinguishing identifiers",
       "items": {
         "type": "string"
       },
@@ -882,11 +837,9 @@ func (t *KnowledgeSearchTool) formatOutput(
 			data["queries"] = queries
 		}
 		output := fmt.Sprintf("No relevant content found in %d knowledge base(s).\n\n", len(kbsToSearch))
-		output += "=== ⚠️ CRITICAL - Next Steps ===\n"
-		output += "- ❌ DO NOT use training data or general knowledge to answer\n"
-		output += "- ✅ If web_search is enabled: You MUST use web_search to find information\n"
-		output += "- ✅ If web_search is disabled: State 'I couldn't find relevant information in the knowledge base'\n"
-		output += "- NEVER fabricate or infer answers - ONLY use retrieved content\n"
+		output += "No matching evidence was returned for these queries and this scope; this does not prove the enterprise has no such information.\n"
+		output += "Do not invent enterprise facts or replace them with public web results. If a critical identifier or symptom is missing, ask for it. Otherwise explain the evidence gap and complete only supported parts of the task.\n"
+		output += "Search again only for a concrete missing fact or new lead; general guidance must be clearly labeled as such.\n"
 
 		return &types.ToolResult{
 			Success: true,

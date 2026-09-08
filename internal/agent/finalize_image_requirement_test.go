@@ -12,7 +12,7 @@ func TestFinalAnswerImageRequirement(t *testing.T) {
 
 	got := finalAnswerImageRequirement(true)
 	for _, required := range []string{
-		"MUST include at least one relevant Markdown image",
+		"only when it directly supports the user's requested answer",
 		"Preserve its complete URL exactly",
 		"ASCII half-width parentheses",
 		"silently verify",

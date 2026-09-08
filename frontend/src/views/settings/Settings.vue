@@ -19,9 +19,8 @@
                   class="settings-tenant">{{ authStore.currentTenantName }}</p>
               </div>
               <div class="settings-nav">
-                <component :is="group.key === 'advanced' ? 'details' : 'div'" v-for="group in navGroups" :key="group.key"
-                  :open="group.key === 'advanced' && currentSection === 'envvars' ? true : undefined">
-                  <component :is="group.key === 'advanced' ? 'summary' : 'div'" class="nav-group-title">{{ group.label }}</component>
+                <div v-for="group in navGroups" :key="group.key">
+                  <div class="nav-group-title">{{ group.label }}</div>
                   <template v-for="item in group.items" :key="item.key">
                     <div :class="['nav-item', {
                       'active': currentSection === item.key,
@@ -75,7 +74,7 @@
                       </div>
                     </Transition>
                   </template>
-                </component>
+                </div>
               </div>
             </div>
 
@@ -135,11 +134,6 @@
                   <!-- 我的记忆（个人记忆管理） -->
                   <div v-if="currentSection === 'mymemory'" class="section">
                     <MemorySettings />
-                  </div>
-
-                  <!-- 沙箱密钥（成员自己的技能 / 沙箱密钥） -->
-                  <div v-if="currentSection === 'envvars'" class="section">
-                    <EnvVarSettings />
                   </div>
 
                   <!-- 向量数据库引擎 -->
@@ -250,7 +244,6 @@ import McpSettings from './McpSettings.vue'
 import WebSearchSettings from './WebSearchSettings.vue'
 import ChatHistorySettings from './ChatHistorySettings.vue'
 import MemorySettings from './MemorySettings.vue'
-import EnvVarSettings from './EnvVarSettings.vue'
 import MemoryWorkspaceSettings from './MemoryWorkspaceSettings.vue'
 import VectorStoreSettings from './VectorStoreSettings.vue'
 import ParserEngineSettings from './ParserEngineSettings.vue'
@@ -399,7 +392,6 @@ const navItems = computed(() => {
     { key: 'system-audit-log', icon: 'history', label: t('system.globalSettings.audit.tabLabel') },
     { key: 'userprofile', icon: 'user', label: t('userProfile.title') },
     { key: 'mymemory', icon: 'bookmark', label: t('memorySettings.title') },
-    { key: 'envvars', icon: 'key', label: t('envVarSettings.title') },
     { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },
     { key: 'members', icon: 'usergroup', label: t('tenantMember.title') },
     { key: 'businessRoles', icon: 'root-list', label: t('businessRoles.title') },
@@ -426,11 +418,6 @@ const navGroups = computed<NavGroup[]>(() => {
       key: 'account',
       label: t('settings.navGroups.account'),
       items: pickItems(['general', 'userprofile', 'mymemory', 'system']),
-    },
-    {
-      key: 'advanced',
-      label: t('settings.personalAdvanced'),
-      items: pickItems(['envvars']),
     },
     {
       key: 'workspace',

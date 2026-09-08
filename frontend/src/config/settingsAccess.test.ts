@@ -35,11 +35,6 @@ test('the skill catalog and sandbox require platform administration', () => {
   assert.equal(SYSTEM_ADMIN_SETTINGS_SECTIONS.has('sandbox'), true)
 })
 
-test('personal skill environment variables are visible to every member', () => {
-  assert.equal(SETTINGS_SECTION_MIN_ROLE.envvars, 'viewer')
-
-})
-
 test('system administration settings stay explicitly system-admin-only', () => {
   assert.deepEqual(
     [...SYSTEM_ADMIN_SETTINGS_SECTIONS],
@@ -67,7 +62,7 @@ test('system administration settings stay explicitly system-admin-only', () => {
 })
 
 test('personal, enterprise and platform sections never share a settings surface', () => {
-  for (const section of ['general', 'userprofile', 'mymemory', 'envvars', 'system']) {
+  for (const section of ['general', 'userprofile', 'mymemory', 'system']) {
     assert.equal(settingsSurfaceForSection(section), 'personal')
   }
   for (const section of ['tenant', 'members', 'businessRoles', 'memory', 'enterprise-skills']) {

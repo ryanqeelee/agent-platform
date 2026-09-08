@@ -44,6 +44,7 @@ test('every settings nav item writes only section', () => {
 })
 
 test('active integration aliases normalize while dormant product tabs stay inactive', () => {
+  assert.equal(normalizeSettingsSection('envvars'), 'general')
   assert.equal(normalizeSettingsSection('api'), 'integration-api')
   assert.equal(normalizeSettingsSection('claw'), 'claw')
   assert.equal(normalizeSettingsSection('integrations', 'embed'), 'integration-im')

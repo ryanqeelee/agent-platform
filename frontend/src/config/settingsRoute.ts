@@ -35,6 +35,7 @@ function isBareIntegrationTab(section: string): section is IntegrationTab {
  * `api`, and bare tab names remain aliases.
  */
 export function normalizeSettingsSection(section: string, tab?: string | null): string {
+  if (section === 'envvars') return 'general'
   if (section === 'api') {
     return integrationSectionKey('api')
   }

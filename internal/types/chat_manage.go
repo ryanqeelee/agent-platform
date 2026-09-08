@@ -84,15 +84,16 @@ func (c *PipelineRequest) CitationsEnabled() bool {
 type QueryIntent string
 
 const (
-	IntentKBSearch      QueryIntent = "kb_search"
-	IntentWebSearch     QueryIntent = "web_search"
-	IntentGreeting      QueryIntent = "greeting"
-	IntentChitchat      QueryIntent = "chitchat"
-	IntentFollowUp      QueryIntent = "follow_up"
-	IntentImageOnly     QueryIntent = "image_only"
-	IntentDocOnly       QueryIntent = "doc_only"
-	IntentSummarize     QueryIntent = "summarize"
-	IntentClarification QueryIntent = "clarification"
+	IntentKBSearch       QueryIntent = "kb_search"
+	IntentWebSearch      QueryIntent = "web_search"
+	IntentGreeting       QueryIntent = "greeting"
+	IntentChitchat       QueryIntent = "chitchat"
+	IntentFollowUp       QueryIntent = "follow_up"
+	IntentImageOnly      QueryIntent = "image_only"
+	IntentDocOnly        QueryIntent = "doc_only"
+	IntentSummarize      QueryIntent = "summarize"
+	IntentClarification  QueryIntent = "clarification"
+	IntentNeedsUserInput QueryIntent = "needs_user_input"
 )
 
 // NeedsKBRetrieval returns true when the intent requires knowledge base search.

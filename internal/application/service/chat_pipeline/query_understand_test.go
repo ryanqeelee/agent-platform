@@ -1,6 +1,7 @@
 package chatpipeline
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -147,5 +148,24 @@ func TestParseOutput_ValidJSONStillAppliesRewrite(t *testing.T) {
 	}
 	if cm.Intent != types.IntentSummarize {
 		t.Errorf("Intent = %q, want summarize", cm.Intent)
+	}
+}
+
+func TestMissingUserConditionPreservesQuestionAndEmployeeContract(t *testing.T) {
+	cm := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{Query: "the original incomplete request", SummaryConfig: types.SummaryConfig{Prompt: "employee contract"}},
+		PipelineState:   types.PipelineState{Intent: types.IntentNeedsUserInput, RewriteQuery: "speculative rewritten request"},
+	}
+	if !applyIntentPromptOverride(cm, map[string]string{"needs_user_input": "generic prompt"}) {
+		t.Fatal("missing clarification instruction")
+	}
+	if cm.RewriteQuery != cm.Query {
+		t.Fatal("original question was not preserved")
+	}
+	if !strings.Contains(cm.SystemPromptOverride, "employee contract") || !strings.Contains(cm.SystemPromptOverride, "只问一个") {
+		t.Fatal("clarification must preserve employee contract")
+	}
+	if cm.NeedsRetrieval() {
+		t.Fatal("missing user condition must not trigger retrieval")
 	}
 }

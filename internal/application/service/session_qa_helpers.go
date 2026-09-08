@@ -304,6 +304,14 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 			customAgent.Config.QueryUnderstandModelID)
 	}
 
+	// A missing user condition cannot be recovered by retrieving unrelated facts.
+	// Reuse the existing understanding call, preserving all ordinary intent rules.
+	if customAgent.ID == types.BuiltinEmployeeAssistantID && !customAgent.IsAgentMode() {
+		cm.RewritePromptSystem += `
+For this employee quick lookup, an additional intent is available: needs_user_input.
+Choose needs_user_input when the current question and conversation lack a condition that would materially change the answer or identify the requested record, and knowledge retrieval cannot supply that user-specific condition. Do not infer a missing object, symptom, record identity, time range or applicability from plausible examples. Preserve the original question in rewrite_query in this case. Clear procedural questions and factual lookups with enough context still use kb_search; do not ask unnecessary questions. This rule takes precedence over classifying such ambiguity as clarification or kb_search.`
+	}
+
 	// Override fallback settings
 	if customAgent.Config.FallbackStrategy != "" {
 		cm.FallbackStrategy = types.FallbackStrategy(customAgent.Config.FallbackStrategy)

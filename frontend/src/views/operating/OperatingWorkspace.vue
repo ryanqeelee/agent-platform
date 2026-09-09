@@ -7,8 +7,8 @@
   >
     <div ref="runtimeRoot" class="operating-runtime-root" aria-hidden="true"></div>
 
-    <div v-show="surface === 'analysis'" class="operating-analysis">
-      <header class="operating-header">
+    <div v-show="surface === 'analysis'" class="operating-analysis" :class="{ 'operating-analysis--home': isAnalysisHome }">
+      <header v-show="!isAnalysisHome" class="operating-header">
         <div class="operating-header__identity">
           <span class="operating-header__eyebrow">经营分析</span>
           <h1>{{ snapshot.title || '新建分析' }}</h1>
@@ -43,11 +43,12 @@
         </div>
 
         <div v-else-if="snapshot.messages.length === 0" class="operating-welcome">
-          <p class="operating-welcome__kicker">从问题出发，结论落到经营动作</p>
+          <p class="operating-welcome__kicker">经营分析</p>
           <h2>今天想先看哪项经营变化？</h2>
-          <p>可以直接提问，也可以先选一个示例再修改。</p>
-          <div class="operating-examples" aria-label="示例问题">
-            <button v-for="question in exampleQuestions" :key="question" type="button" @click="setDraft(question)">
+          <p>看销售、查毛利、找变化。可以直接提问，或上传经营数据文件。</p>
+          <div ref="homeComposerTarget" class="operating-home-composer"></div>
+          <div v-if="snapshot.attachments.length > 0 && !snapshot.uploadPending && !snapshot.draft.trim()" class="operating-examples" aria-label="文件分析起步问题">
+            <button v-for="question in fileStarterQuestions" :key="question" type="button" @click="setDraft(question)">
               <span>{{ question }}</span>
               <span aria-hidden="true">↗</span>
             </button>
@@ -86,14 +87,16 @@
         <div ref="controlsTarget" class="operating-controls-portal" aria-live="polite"></div>
       </div>
 
-      <div class="operating-composer-wrap">
-        <div v-if="actionError" class="operating-action-error" role="alert">
-          <span>{{ actionError }}</span>
-          <button type="button" aria-label="关闭提示" @click="actionError = ''">×</button>
+      <Teleport :to="homeComposerTarget" :disabled="!isAnalysisHome || !homeComposerTarget">
+        <div class="operating-composer-wrap">
+          <div v-if="actionError" class="operating-action-error" role="alert">
+            <span>{{ actionError }}</span>
+            <button type="button" aria-label="关闭提示" @click="actionError = ''">×</button>
+          </div>
+          <InputField :operating="operatingComposer" />
+          <p class="operating-composer-hint">经营分析支持 CSV 与 XLSX 数据文件</p>
         </div>
-        <InputField :operating="operatingComposer" />
-        <p class="operating-composer-hint">经营分析支持 CSV 与 XLSX 数据文件</p>
-      </div>
+      </Teleport>
     </div>
 
     <div v-show="surface === 'brief'" class="operating-brief">
@@ -187,10 +190,9 @@ const emit = defineEmits<{
 const APP_AUTH_TOKEN_KEY = 'retail_ai_app_auth_token'
 const HANDOFF_PROMPT_KEY = 'operating_analysis_handoff_prompt_v1'
 
-const exampleQuestions = [
-  '本周哪些门店销售额变化最值得关注？',
-  '对比上月，各品类毛利率有什么异常？',
-  '上月销售额相比前一个月发生了什么变化？请找出主要影响门店和商品。',
+const fileStarterQuestions = [
+  '请检查上传文件的字段、时间范围和缺失情况，说明可以支持哪些经营分析。',
+  '请概括上传文件中的主要信息，指出值得进一步核查的变化，并说明数据限制。',
 ]
 
 const route = useRoute()
@@ -200,11 +202,13 @@ const reportTarget = ref<HTMLElement | null>(null)
 const controlsTarget = ref<HTMLElement | null>(null)
 const briefTarget = ref<HTMLElement | null>(null)
 const scrollContainer = ref<HTMLElement | null>(null)
+const homeComposerTarget = ref<HTMLElement | null>(null)
 const loadState = ref<'loading' | 'ready' | 'error'>('loading')
 const loadError = ref('')
 const actionError = ref('')
 const active = computed(() => isOperatingRoutePath(route.path))
 const surface = computed(() => operatingLocationFromRoute(route.path, route.query).surface)
+const isAnalysisHome = computed(() => !snapshot.value.sessionLoadError && snapshot.value.messages.length === 0)
 const titleBeforeHost = document.title
 
 function emptySnapshot(): OperatingSnapshot {
@@ -730,7 +734,7 @@ onBeforeUnmount(() => {
 
 .operating-welcome {
   display: flex;
-  min-height: min(430px, 55vh);
+  min-height: min(240px, 30vh);
   flex-direction: column;
   justify-content: center;
   padding-bottom: 24px;
@@ -1004,6 +1008,27 @@ onBeforeUnmount(() => {
   .operating-examples { grid-template-columns: 1fr; }
   .operating-examples button { min-height: 68px; }
   .operating-composer-wrap { padding: 10px 14px 12px; box-sizing: border-box; }
+}
+
+.operating-analysis--home {
+  .operating-reading-column { padding: clamp(36px, 12vh, 100px) 28px 40px; }
+  .operating-welcome, .operating-controls-portal { max-width: 760px; }
+  .operating-welcome { min-height: 0; padding-bottom: 24px; }
+  .operating-welcome__kicker { margin-bottom: 14px; font-weight: 600; letter-spacing: .06em; }
+  .operating-welcome h2 { margin: 0; font-size: clamp(28px, 3.2vw, 40px); }
+  .operating-welcome > p:not(.operating-welcome__kicker) { margin-top: 16px; line-height: 1.8; }
+  .operating-home-composer { margin-top: 28px; }
+  .operating-composer-wrap { width: 100%; padding: 0; background: none; }
+  .operating-composer-wrap :deep(.answers-input) { width: 100%; max-width: 100%; margin: 0; }
+  .operating-composer-wrap :deep(.rich-input-container) { max-width: none; border-radius: 16px; }
+  .operating-composer-wrap :deep(.t-textarea__inner) { min-height: 96px; font-size: 15px; line-height: 1.7; }
+  .operating-examples { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 24px; }
+}
+
+@media (max-width: 760px) {
+  .operating-analysis--home .operating-reading-column { padding: 32px 18px; }
+  .operating-analysis--home .operating-welcome h2 { font-size: 28px; }
+  .operating-analysis--home .operating-examples { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

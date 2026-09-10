@@ -1,0 +1,253 @@
+{
+  "url": "/api/governed-data/analysis/query",
+  "request": {
+    "runId": "run_gov_cd9a0a812be1e9649ad871063346b33238e169db",
+    "sql": "SELECT '本周' AS period, sum(amount) AS amount FROM rx_retail_semantic.v_sales",
+    "limit": 100
+  },
+  "status": 200,
+  "response": {
+    "schema": "GovernedDataQueryV1",
+    "catalog_version": "cat-1",
+    "catalog_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "query_digest": "sha256:714f0fad213de958a77f30c862054513f019e2350b057532de4aba5792a5cbee",
+    "requested_sql": "SELECT '本周' AS period, sum(amount) AS amount FROM rx_retail_semantic.v_sales",
+    "result": {
+      "status": "ok",
+      "sql": "SELECT '本周' AS period, sum(amount) AS amount FROM (SELECT store_id, amount FROM rx_retail_semantic.v_sales WHERE store_id IN ('S1')) AS v_sales",
+      "source_id": "retail",
+      "query_execution_id": "query_f5c9e6e915a143dcaef0403d68d9671b",
+      "requested_sql": "",
+      "normalized_sql": "",
+      "columns": [
+        "period",
+        "amount"
+      ],
+      "column_types": [
+        "String",
+        "Decimal(38,8)"
+      ],
+      "column_origins": {
+        "period": [],
+        "amount": [
+          "amount"
+        ]
+      },
+      "rows": [
+        {
+          "period": "本周",
+          "amount": "9007199254740993.12345678"
+        }
+      ],
+      "row_count": 1,
+      "truncated": false,
+      "applied_limit": 100,
+      "query_stats": {},
+      "warnings": [],
+      "reasons": [],
+      "messages": [],
+      "tables": [
+        "rx_retail_semantic.v_sales"
+      ],
+      "error": null
+    },
+    "source_notes": [
+      {
+        "table": "rx_retail_semantic.v_sales",
+        "grain": "",
+        "watermark": {
+          "column": "",
+          "min": null,
+          "max": null
+        },
+        "trust": "pending_customer_confirm",
+        "quality_flags": [],
+        "assumption_notes": [],
+        "data_contract": {},
+        "metric_definitions": [
+          {
+            "metric_key": "amount",
+            "metric_name": "",
+            "definition": "sum(amount)",
+            "expression": "",
+            "unit": "",
+            "grain": "",
+            "allowed_dimensions": [],
+            "status": "",
+            "version": "",
+            "confirmed": null,
+            "calculator_ref": ""
+          }
+        ],
+        "confirmation_status": [],
+        "table_columns": [
+          {
+            "name": "store_id",
+            "type": "String",
+            "comment": "",
+            "semantic_role": "identifier",
+            "default_aggregation": "",
+            "query_usage": "default"
+          },
+          {
+            "name": "amount",
+            "type": "Decimal(18,2)",
+            "comment": "",
+            "semantic_role": "",
+            "default_aggregation": "",
+            "query_usage": "default; source parsed at scale 2; storage precision is not source precision"
+          }
+        ]
+      }
+    ],
+    "result_semantics": [
+      {
+        "column": "period",
+        "columnType": "String",
+        "origins": [],
+        "role": "annotation",
+        "resolution": "resolved",
+        "metricRefs": [],
+        "limitationCodes": [
+          "sql_literal_annotation"
+        ]
+      },
+      {
+        "column": "amount",
+        "columnType": "Decimal(38,8)",
+        "origins": [
+          "amount"
+        ],
+        "role": "measure",
+        "resolution": "resolved",
+        "metricRefs": [
+          {
+            "metric_key": "amount",
+            "metric_name": "",
+            "unit": "",
+            "grain": "",
+            "status": "",
+            "version": "",
+            "confirmed": null
+          }
+        ],
+        "limitationCodes": []
+      }
+    ],
+    "checks": [
+      {
+        "kind": "result_delivery",
+        "applies_to": [
+          "query_f5c9e6e915a143dcaef0403d68d9671b"
+        ],
+        "status": "measured",
+        "value": {
+          "query_status": "ok",
+          "returned_rows": 1,
+          "reported_row_count": 1,
+          "truncated": false,
+          "applied_limit": 100
+        },
+        "evidence_refs": [
+          "sha256:714f0fad213de958a77f30c862054513f019e2350b057532de4aba5792a5cbee"
+        ],
+        "limitation_codes": []
+      },
+      {
+        "kind": "authority_scope",
+        "applies_to": [
+          "retail"
+        ],
+        "status": "measured",
+        "value": {
+          "mode": "exact",
+          "scope_digest": "sha256:0dce19148b8f5930162dc7bcdb5cbd97a064c966e2bab247e395711b3fed677e",
+          "revalidated_before_release": true
+        },
+        "evidence_refs": [
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "sha256:0dce19148b8f5930162dc7bcdb5cbd97a064c966e2bab247e395711b3fed677e",
+          "sha256:714f0fad213de958a77f30c862054513f019e2350b057532de4aba5792a5cbee"
+        ],
+        "limitation_codes": []
+      },
+      {
+        "kind": "semantic_binding",
+        "applies_to": [
+          "query_f5c9e6e915a143dcaef0403d68d9671b"
+        ],
+        "status": "measured",
+        "value": {
+          "resolved_columns": 2,
+          "total_columns": 2
+        },
+        "evidence_refs": [
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "sha256:714f0fad213de958a77f30c862054513f019e2350b057532de4aba5792a5cbee"
+        ],
+        "limitation_codes": []
+      },
+      {
+        "kind": "read_consistency",
+        "applies_to": [
+          "query_f5c9e6e915a143dcaef0403d68d9671b"
+        ],
+        "status": "measured",
+        "value": {
+          "mode": "live_read",
+          "catalog_pinned": true,
+          "data_snapshot_pinned": false
+        },
+        "evidence_refs": [
+          "sha256:714f0fad213de958a77f30c862054513f019e2350b057532de4aba5792a5cbee"
+        ],
+        "limitation_codes": [
+          "live_read_not_database_snapshot"
+        ]
+      },
+      {
+        "kind": "source_freshness",
+        "applies_to": [
+          "rx_retail_semantic.v_sales"
+        ],
+        "status": "not_measured",
+        "value": null,
+        "evidence_refs": [],
+        "limitation_codes": [
+          "source_freshness_not_declared"
+        ]
+      },
+      {
+        "kind": "join_integrity",
+        "applies_to": [
+          "query_f5c9e6e915a143dcaef0403d68d9671b"
+        ],
+        "status": "not_applicable",
+        "value": null,
+        "evidence_refs": [],
+        "limitation_codes": []
+      }
+    ],
+    "read_consistency": "live read; catalog pin is not a database snapshot",
+    "analysis_run": {
+      "contractVersion": "governed-analysis-run/1",
+      "runId": "run_gov_cd9a0a812be1e9649ad871063346b33238e169db",
+      "state": "running",
+      "catalogVersion": "cat-1",
+      "catalogDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scopeDigest": "sha256:0dce19148b8f5930162dc7bcdb5cbd97a064c966e2bab247e395711b3fed677e",
+      "bindingDigest": "sha256:14d9ce9ad4812d793fdde9017303fece08767295951768f2861b7caeae6006ee"
+    },
+    "evidence_receipt": {
+      "contractVersion": "governed-query-evidence-receipt/1",
+      "runId": "run_gov_cd9a0a812be1e9649ad871063346b33238e169db",
+      "queryExecutionId": "query_f5c9e6e915a143dcaef0403d68d9671b",
+      "queryDigest": "sha256:714f0fad213de958a77f30c862054513f019e2350b057532de4aba5792a5cbee",
+      "queryStatus": "ok",
+      "returnedRowCount": 1,
+      "persistedRowCount": 1,
+      "citableRowEndExclusive": 1,
+      "queryTruncated": false
+    }
+  }
+}

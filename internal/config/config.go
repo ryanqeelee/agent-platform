@@ -43,12 +43,19 @@ type Config struct {
 
 // AgentConfig represents the global agent settings.
 type AgentConfig struct {
+	// GovernedData connects native analysis to Center. Center resolves the
+	// enterprise source and revalidates user access on each request.
+	GovernedData *GovernedDataConfig `yaml:"governed_data" json:"governed_data,omitempty"`
 	// LLMCallTimeout is the default timeout for a single LLM call in seconds.
 	// Default: 120 (standard agents) or 300 (can be overridden by Env).
 	LLMCallTimeout int `yaml:"llm_call_timeout" json:"llm_call_timeout"`
 	// ToolApprovalTimeoutSeconds is how long the agent waits for human approval on a flagged MCP tool.
 	// 0 means default 600 (10 minutes).
 	ToolApprovalTimeoutSeconds int `yaml:"tool_approval_timeout_seconds" json:"tool_approval_timeout_seconds"`
+}
+
+type GovernedDataConfig struct {
+	BaseURL string `yaml:"base_url" json:"base_url"`
 }
 
 // IMConfig configures the IM integration service.
@@ -535,6 +542,12 @@ func LoadConfig() (*Config, error) {
 		dc.TagName = "yaml"
 	}); err != nil {
 		return nil, fmt.Errorf("unable to decode config into struct: %w", err)
+	}
+	if endpoint := strings.TrimSpace(os.Getenv("WEKNORA_GOVERNED_DATA_BASE_URL")); endpoint != "" {
+		if cfg.Agent == nil {
+			cfg.Agent = &AgentConfig{}
+		}
+		cfg.Agent.GovernedData = &GovernedDataConfig{BaseURL: endpoint}
 	}
 	fmt.Printf("Using configuration file: %s\n", viper.ConfigFileUsed())
 

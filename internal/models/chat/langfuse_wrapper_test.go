@@ -1,7 +1,11 @@
 package chat
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -67,5 +71,57 @@ func TestConvertUsageIncludesPromptCacheCounters(t *testing.T) {
 	}
 	if got.CacheRead != 800 || got.CacheWrite != 100 || got.CacheMiss != 200 {
 		t.Fatalf("cache usage = read:%d write:%d miss:%d", got.CacheRead, got.CacheWrite, got.CacheMiss)
+	}
+}
+
+func TestGovernedLangfuseGenerationIsMetadataOnly(t *testing.T) {
+	ctx := types.WithGovernedDataObservability(context.Background())
+	messages := []Message{{
+		Role:             "user",
+		Content:          "QUERY_SENTINEL",
+		ReasoningContent: "REASONING_SENTINEL",
+		ToolCalls: []ToolCall{{
+			Function: FunctionCall{Name: "governed_data_query", Arguments: `{"sql":"SQL_SENTINEL"}`},
+		}},
+	}}
+	input := langfuseGenerationInput(ctx, messages)
+	output := langfuseGenerationOutput(ctx, "ROWS_SENTINEL", "REASONING_SENTINEL", "stop", []types.LLMToolCall{{
+		Function: types.FunctionCall{Name: "governed_data_query", Arguments: `{"credential":"CREDENTIAL_SENTINEL"}`},
+	}})
+	encoded, err := json.Marshal([]interface{}{input, output})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"QUERY_SENTINEL", "REASONING_SENTINEL", "SQL_SENTINEL", "ROWS_SENTINEL", "CREDENTIAL_SENTINEL"} {
+		if strings.Contains(string(encoded), secret) {
+			t.Fatalf("governed generation leaked %q: %s", secret, encoded)
+		}
+	}
+	for _, metadata := range []string{"message_count", "content_len", "reasoning_len", "tool_call_count", "finish_reason", "payload_omitted"} {
+		if !strings.Contains(string(encoded), metadata) {
+			t.Fatalf("governed generation lost %q: %s", metadata, encoded)
+		}
+	}
+	if got := langfuseGenerationError(ctx, fmt.Errorf("QUERY_SENTINEL")); got == nil || strings.Contains(got.Error(), "QUERY_SENTINEL") {
+		t.Fatalf("governed generation error was not classified safely: %v", got)
+	}
+}
+
+func TestOrdinaryLangfuseGenerationKeepsPayload(t *testing.T) {
+	ctx := context.Background()
+	input, ok := langfuseGenerationInput(ctx, []Message{{Role: "user", Content: "ordinary-query"}}).([]map[string]interface{})
+	if !ok || len(input) != 1 || input[0]["content"] != "ordinary-query" {
+		t.Fatalf("ordinary generation input changed: %#v", input)
+	}
+	output, ok := langfuseGenerationOutput(ctx, "ordinary-answer", "ordinary-reasoning", "stop", nil).(map[string]interface{})
+	if !ok || output["content"] != "ordinary-answer" || output["reasoning_content"] != "ordinary-reasoning" {
+		t.Fatalf("ordinary generation output changed: %#v", output)
+	}
+}
+
+func TestGovernedTurnDisablesLLMDebugSink(t *testing.T) {
+	ctx := types.WithGovernedDataObservability(context.Background())
+	if llmDebugAllowed(ctx) {
+		t.Fatal("governed turn enabled LLM debug sink")
 	}
 }

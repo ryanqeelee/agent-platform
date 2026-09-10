@@ -16,9 +16,10 @@ test('employee input has no agent selector or switch handler', () => {
 })
 
 test('web search readiness comes from unified agent server projection', () => {
-  assert.match(inputField, /employeeAssistantProjection[\s\S]*BUILTIN_EMPLOYEE_ASSISTANT_ID/)
-  assert.match(inputField, /typeof employeeAssistantProjection\.value\?\.web_search_ready === 'boolean'/)
-  assert.match(inputField, /employeeWebSearchEnabled\(true, employeeAssistantProjection\.value\)/)
+  assert.match(inputField, /const selectedAgentId = computed\(\(\) => props\.agentId \|\| BUILTIN_EMPLOYEE_ASSISTANT_ID\)/)
+  assert.match(inputField, /const webSearchProjection = computed\(\(\) =>\s*selectedAgent\.value/)
+  assert.match(inputField, /typeof webSearchProjection\.value\?\.web_search_ready === 'boolean'/)
+  assert.match(inputField, /employeeWebSearchEnabled\(true, webSearchProjection\.value\)/)
   assert.doesNotMatch(inputField, /ensureWebSearchProviders/)
   assert.doesNotMatch(inputField, /getWebSearchProviders/)
   assert.match(inputField, /input\.webSearch\.enterpriseUnavailable/)
@@ -36,7 +37,8 @@ test('ordinary employee prefetch does not load provider catalog or agent choices
 })
 
 test('employee mixed uploads and request always use unified assistant', () => {
-  const employeeIdExpression = /const selectedAgentId = props\.embeddedMode \? props\.agentId : BUILTIN_EMPLOYEE_ASSISTANT_ID;/
+  const employeeIdExpression = /const selectedAgentId = props\.embeddedMode \? props\.agentId : effectiveAgentId\.value;/
+  assert.match(chat, /const effectiveAgentId = computed\(\(\) => props\.agentId \|\| BUILTIN_EMPLOYEE_ASSISTANT_ID\)/)
   assert.match(chat, employeeIdExpression)
   assert.match(chat, /uploadTemporaryAttachment\([\s\S]*selectedAgentId, undefined, 'auto'/)
   assert.match(chat, /agent_enabled: agentEnabled,[\s\S]*agent_id: selectedAgentId/)

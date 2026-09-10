@@ -1,6 +1,6 @@
 import { get, post, put, del } from "../../utils/request";
 
-export { BUILTIN_EMPLOYEE_ASSISTANT_ID } from './constants';
+export { BUILTIN_EMPLOYEE_ASSISTANT_ID, BUILTIN_OPERATING_ANALYST_ID } from './constants';
 
 // 智能体配置
 // 智能推理下的智能体类型预设 ID

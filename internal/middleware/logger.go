@@ -20,6 +20,16 @@ const (
 	maxBodySize = 1024 * 10 // 最大记录10KB的body内容
 )
 
+// isNativeQARoute identifies the two product chat entrypoints whose handlers
+// resolve whether the effective turn is governed after Logger captures input.
+func isNativeQARoute(method, path string) bool {
+	if method != "POST" {
+		return false
+	}
+	return strings.HasPrefix(path, "/api/v1/knowledge-chat/") ||
+		strings.HasPrefix(path, "/api/v1/agent-chat/")
+}
+
 // loggerResponseBodyWriter 自定义ResponseWriter用于捕获响应内容（用于logger中间件）
 type loggerResponseBodyWriter struct {
 	gin.ResponseWriter
@@ -29,7 +39,7 @@ type loggerResponseBodyWriter struct {
 // Write 重写Write方法，同时写入buffer和原始writer
 // 限制buffer大小，避免SSE等流式响应导致内存无限增长
 func (r loggerResponseBodyWriter) Write(b []byte) (int, error) {
-	if r.body.Len() < maxBodySize {
+	if r.body != nil && r.body.Len() < maxBodySize {
 		remaining := maxBodySize - r.body.Len()
 		if len(b) <= remaining {
 			r.body.Write(b)
@@ -157,6 +167,7 @@ func Logger() gin.HandlerFunc {
 		start := time.Now()
 		path := c.Request.URL.Path
 		raw := c.Request.URL.RawQuery
+		nativeQA := isNativeQARoute(c.Request.Method, path)
 
 		isWikiStats := strings.HasPrefix(path, "/api/v1/knowledgebase/") && strings.HasSuffix(path, "/wiki/stats")
 		if strings.HasPrefix(path, "/assets/") || isWikiStats {
@@ -180,6 +191,12 @@ func Logger() gin.HandlerFunc {
 
 		// Process request
 		c.Next()
+		// Native QA resolves the effective agent and replayable history inside the
+		// handler. Emit bodies only for a successfully resolved ordinary turn.
+		// Parse/admission failures remain metadata-only because their governance
+		// status cannot be established safely.
+		metadataOnlyQA := nativeQA &&
+			(types.GovernedDataObservability(c.Request.Context()) || len(c.Errors) > 0 || c.Writer.Status() >= 400)
 
 		// Get request ID from context
 		requestID, exists := c.Get(types.RequestIDContextKey.String())
@@ -205,7 +222,7 @@ func Logger() gin.HandlerFunc {
 
 		// 读取响应体
 		responseBodyStr := ""
-		if responseBody.Len() > 0 {
+		if !metadataOnlyQA && responseBody.Len() > 0 {
 			contentType := c.Writer.Header().Get("Content-Type")
 			if strings.Contains(contentType, "text/event-stream") {
 				responseBodyStr = "[SSE流式响应，已跳过]"
@@ -236,7 +253,7 @@ func Logger() gin.HandlerFunc {
 		})
 
 		// 添加请求体（如果有）
-		if requestBody != "" {
+		if !metadataOnlyQA && requestBody != "" {
 			logMsg = logMsg.WithField("request_body", secutils.SanitizeForLog(requestBody))
 		}
 

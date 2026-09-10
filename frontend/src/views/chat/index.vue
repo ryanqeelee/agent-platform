@@ -1,10 +1,11 @@
 <template>
     <div class="chat" :class="{
         'is-embedded': embeddedMode,
+        'is-operating-native': isNativeOperating,
         'is-sidebar-collapsed': uiStore.sidebarCollapsed,
         'has-references-panel': referencesDrawerVisible,
     }">
-        <ChatHeader v-if="!embeddedMode" :session="currentSession" :has-references-panel="referencesDrawerVisible" />
+        <ChatHeader v-if="!embeddedMode && !isNativeOperating" :session="currentSession" :has-references-panel="referencesDrawerVisible" />
         <div class="chat_thread">
             <div ref="scrollContainer" class="chat_scroll_box" @scroll="handleScroll">
                 <div class="msg_list" :class="{ 'is-embedded': embeddedMode }">
@@ -95,6 +96,7 @@
                             <botmsg :content="session.content" :session="session" :session-id="session_id"
                                 :user-query="getUserQuery(index)" @scroll-bottom="scrollToBottom"
                                 :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"
+                                :session-artifact-refs="sessionArtifactRefs"
                                 :follow-up-loading="Boolean(session.suggestionLoading && !session.suggestionSet?.questions?.length)"
                                 @render-complete-change="(ready) => handleAnswerRenderComplete(session, ready)">
                             </botmsg>
@@ -128,9 +130,10 @@
         </transition>
         <div class="input-container" :class="{ 'is-embedded': embeddedMode }">
             <InputField ref="inputFieldRef"
-                @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles)"
+                @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles, webSearchEnabled) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles, webSearchEnabled)"
                 @stop-generation="handleStopGeneration" :isReplying="isReplying" :sessionId="session_id"
-                :assistantMessageId="currentAssistantMessageId" :embeddedMode="embeddedMode"></InputField>
+                :assistantMessageId="currentAssistantMessageId" :embeddedMode="embeddedMode"
+                :agentId="agentId"></InputField>
         </div>
     </div>
     <KnowledgeBaseEditorModal :visible="uiStore.showKBEditorModal" :mode="uiStore.kbEditorMode"
@@ -147,7 +150,7 @@ import InputField from '../../components/Input-field.vue';
 import botmsg from './components/botmsg.vue';
 import usermsg from './components/usermsg.vue';
 import { getMessageList, getSession } from "@/api/chat/index";
-import { BUILTIN_EMPLOYEE_ASSISTANT_ID, getSuggestedQuestions } from "@/api/agent/index";
+import { BUILTIN_EMPLOYEE_ASSISTANT_ID, BUILTIN_OPERATING_ANALYST_ID, getSuggestedQuestions } from "@/api/agent/index";
 import { deleteTemporaryAttachment, uploadTemporaryAttachment } from '@/api/chat/temporary-attachments';
 import { useStream } from '../../api/chat/streame'
 import { useMenuStore } from '@/stores/menu';
@@ -199,6 +202,9 @@ const props = defineProps({
 
 const usemenuStore = useMenuStore();
 const useSettingsStoreInstance = useSettingsStore();
+const effectiveAgentId = computed(() => props.agentId || BUILTIN_EMPLOYEE_ASSISTANT_ID);
+const isNativeOperating = computed(() => !props.embeddedMode && props.agentId === BUILTIN_OPERATING_ANALYST_ID);
+const isNativeOperatingTrial = isNativeOperating;
 
 // Whether the active chat session is using the Agent pipeline (not quick-answer).
 const isAgentStreamSession = () => {
@@ -211,7 +217,7 @@ const isAgentStreamSession = () => {
 const uiStore = useUIStore();
 const { navigateToKnowledgeBaseList } = useKnowledgeBaseCreationNavigation();
 const { t } = useI18n();
-const { firstQuery, firstMentionedItems, firstModelId, firstImageFiles, firstAttachmentFiles } = storeToRefs(usemenuStore);
+const { firstQuery, firstMentionedItems, firstModelId, firstImageFiles, firstAttachmentFiles, firstWebSearchEnabled } = storeToRefs(usemenuStore);
 const { onChunk, error, startStream, stopStream, lastStreamRequest } = useStream();
 /** Snapshot of the in-flight HTTP request for attaching to the next assistant message. */
 const pendingStreamDebug = ref(null);
@@ -246,7 +252,7 @@ const operatingAnalysisHandoffAvailable = ref(false);
 const handoffPendingMessageId = ref('');
 
 const loadOperatingAnalysisHandoffAvailability = async () => {
-    if (props.embeddedMode) return;
+    if (props.embeddedMode || isNativeOperatingTrial.value) return;
     try {
         const response = await getOperatingAnalysisAvailability();
         operatingAnalysisHandoffAvailable.value = response.availability.state === 'enabled'
@@ -257,7 +263,7 @@ const loadOperatingAnalysisHandoffAvailability = async () => {
 };
 
 const handoffToOperatingAnalysis = async (messageId) => {
-    if (!session_id.value || !messageId || handoffPendingMessageId.value) return;
+    if (isNativeOperatingTrial.value || !session_id.value || !messageId || handoffPendingMessageId.value) return;
     handoffPendingMessageId.value = messageId;
     try {
         const handoff = await createOperatingAnalysisHandoff(session_id.value, messageId);
@@ -280,6 +286,12 @@ const loadSessionAndHydrate = async (sid) => {
         const sessionRes = await getSession(sid);
         if (sessionRes?.data && sid === session_id.value) {
             currentSession.value = sessionRes.data;
+            if (isNativeOperatingTrial.value
+                && sessionRes.data.last_request_state?.agent_id
+                && sessionRes.data.last_request_state.agent_id !== BUILTIN_OPERATING_ANALYST_ID) {
+                await router.replace(`/platform/chat/${sid}`);
+                return;
+            }
             const lastState = sessionRes.data.last_request_state;
             if (lastState) {
                 // 先把当前的"全局默认"快照下来，再用 session 状态覆盖；
@@ -296,6 +308,19 @@ const inputFieldRef = ref();
 const created_at = ref('');
 const limit = ref(20);
 const messagesList = reactive([]);
+// Only artifacts already present on assistant messages in this loaded session
+// may resolve a cross-turn resource:// reference. The receiving component still
+// prefers its own artifacts and requires an exact handle before using this list.
+const sessionArtifactRefs = computed(() => messagesList.flatMap((message) => {
+    if (message?.role !== 'assistant' || !Array.isArray(message.artifacts)) return [];
+    const messageId = String(message.id || message.request_id || message.assistant_message_id || '').trim();
+    if (!messageId) return [];
+    return message.artifacts.map((artifact, index) => ({
+        ...artifact,
+        index: Number.isInteger(artifact?.index) ? artifact.index : index,
+        messageId,
+    }));
+}));
 const isReplying = ref(false);
 const currentAssistantMessageId = ref(''); // 当前正在生成的 assistant message ID
 // True only while attaching to an in-flight *IM-originated* reply via continue-stream.
@@ -397,7 +422,7 @@ const fetchSuggestedQuestions = async () => {
     suggestedQuestionsLoading.value = true;
     // 加载期间保留旧数据，不清空，避免布局抖动
     try {
-        const res = await getSuggestedQuestions(BUILTIN_EMPLOYEE_ASSISTANT_ID, useSettingsStoreInstance.getSuggestedQuestionsParams());
+        const res = await getSuggestedQuestions(effectiveAgentId.value, useSettingsStoreInstance.getSuggestedQuestionsParams());
         if (fetchId === suggestedQuestionsFetchId) {
             suggestedQuestions.value = res?.data?.questions || [];
         }
@@ -740,12 +765,12 @@ const handleStopGeneration = () => {
     // 保留 currentAssistantMessageId，Input-field 仍需用它调用 stop API
 };
 
-const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = [], attachmentFiles = []) => {
+const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = [], attachmentFiles = [], fixedAgentWebSearchEnabled = false) => {
     stopStream();
     prepareForNewOutgoingMessage();
     isReplying.value = true;
     loading.value = true;
-    const selectedAgentId = props.embeddedMode ? props.agentId : BUILTIN_EMPLOYEE_ASSISTANT_ID;
+    const selectedAgentId = props.embeddedMode ? props.agentId : effectiveAgentId.value;
 
     // Images are unified with the attachment pipeline: on the authenticated web
     // client they upload as temporary documents (understood in the background by
@@ -857,17 +882,21 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     userHasScrolledUp.value = false;
     scrollToBottom(true);
 
-    // Embedded consumers retain their deliberate binding; authenticated web
-    // chat always executes the unified employee assistant.
+    // Embedded consumers retain their deliberate binding. The native operating
+    // trial always uses its route-selected custom agent; ordinary web chat
+    // retains the employee quick/deep selection.
     const agentEnabled = props.embeddedMode
         ? (props.agentId && props.agentId !== 'builtin-quick-answer')
-        : useSettingsStoreInstance.assistantMode === 'deep';
+        : isNativeOperatingTrial.value || useSettingsStoreInstance.assistantMode === 'deep';
 
-    // Get web search status from settings store
-    const webSearchEnabled = !props.embeddedMode && useSettingsStoreInstance.assistantMode === 'deep' && employeeWebSearchEnabled(
-        useSettingsStoreInstance.isWebSearchEnabled,
-        useChatResourcesStore().agents.find(agent => agent.id === BUILTIN_EMPLOYEE_ASSISTANT_ID),
-    );
+    // Fixed native agents use their own server projection plus this turn's
+    // explicit web toggle; employee chat retains its quick/deep permission.
+    const webSearchEnabled = !props.embeddedMode && isNativeOperatingTrial.value
+        ? fixedAgentWebSearchEnabled
+        : !props.embeddedMode && useSettingsStoreInstance.assistantMode === 'deep' && employeeWebSearchEnabled(
+            useSettingsStoreInstance.isWebSearchEnabled,
+            useChatResourcesStore().agents.find(agent => agent.id === BUILTIN_EMPLOYEE_ASSISTANT_ID),
+        );
 
     // Get knowledge_base_ids from settings store (selected by user via KnowledgeBaseSelector)
     // Merge @mentioned KB/file IDs so retrieval uses the same targets user @mentioned (including shared KBs)
@@ -905,7 +934,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         knowledge_base_ids: kbIds,
         knowledge_ids: knowledgeIds,
         agent_enabled: agentEnabled,
-        assistant_mode: props.embeddedMode ? undefined : useSettingsStoreInstance.assistantMode,
+        assistant_mode: props.embeddedMode || isNativeOperatingTrial.value ? undefined : useSettingsStoreInstance.assistantMode,
         agent_id: selectedAgentId,
         web_search_enabled: webSearchEnabled,
         summary_model_id: modelId,
@@ -1056,8 +1085,8 @@ onMounted(async () => {
                 rerankModelId: '',
             });
         }
-        sendMsg(firstQuery.value, firstModelId.value || '', firstMentionedItems.value || [], firstImageFiles.value || [], firstAttachmentFiles.value || []);
-        usemenuStore.changeFirstQuery('', [], '', [], []);
+        sendMsg(firstQuery.value, firstModelId.value || '', firstMentionedItems.value || [], firstImageFiles.value || [], firstAttachmentFiles.value || [], firstWebSearchEnabled.value);
+        usemenuStore.changeFirstQuery('', [], '', [], [], false);
     } else {
         scrollLock.value = false;
         hasMoreHistory.value = true;

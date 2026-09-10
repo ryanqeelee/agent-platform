@@ -48,7 +48,9 @@ func AgentView(ctx context.Context, agent *types.CustomAgent) *types.CustomAgent
 	view := *agent
 	view.Config = types.CustomAgentConfig{}
 	applyWorkspaceAgentConfig(&view.Config, agent.Config)
-	if agent.ID == types.BuiltinEmployeeAssistantID {
+	if agent.ID == types.BuiltinEmployeeAssistantID ||
+		agent.ID == types.BuiltinDataAnalysisBaseID ||
+		agent.ID == types.BuiltinOperatingAnalystID {
 		view.Config.SkillsSelectionMode = agent.Config.SkillsSelectionMode
 	}
 	// Describe actual conversation behavior without exposing runtime bindings.
@@ -280,7 +282,35 @@ func validateAssistantScenarioExecution(
 	// that dormant option as active makes ordinary knowledge Q&A unavailable for plans without
 	// external search. Authoring still validates the full saved configuration above.
 	executionConfig := agent.Config
+	// Only the fixed operating product delegates governed SQL admission to Center.
+	// Other agents cannot acquire that authority by naming the tools.
+	if agent.ID == types.BuiltinOperatingAnalystID {
+		executionConfig.AllowedTools = nil
+		for _, name := range agent.Config.AllowedTools {
+			if name != tools.ToolGovernedDataSchema && name != tools.ToolGovernedDataQuery {
+				executionConfig.AllowedTools = append(executionConfig.AllowedTools, name)
+			}
+		}
+		// An empty allowlist means upstream defaults, not no tools.
+		if len(executionConfig.AllowedTools) == 0 {
+			executionConfig.AgentMode = types.AgentModeQuickAnswer
+		}
+	}
+
 	executionConfig.WebSearchEnabled = req.WebSearchEnabled && agent.Config.WebSearchEnabled
+	if !executionConfig.WebSearchEnabled && (agent.ID == types.BuiltinOperatingAnalystID || agent.ID == types.BuiltinDataAnalysisBaseID) {
+		filtered := make([]string, 0, len(executionConfig.AllowedTools))
+		for _, name := range executionConfig.AllowedTools {
+			if name != tools.ToolWebSearch && name != tools.ToolWebFetch {
+				filtered = append(filtered, name)
+			}
+		}
+		executionConfig.AllowedTools = filtered
+		if len(filtered) == 0 {
+			executionConfig.AgentMode = types.AgentModeQuickAnswer
+		}
+	}
+
 	if err := validateAssistantScenarioCapabilities(ctx, resolver, tenantID, executionConfig, true); err != nil {
 		return err
 	}
@@ -435,6 +465,9 @@ func (s *customAgentService) GetAgentByID(ctx context.Context, id string) (*type
 	}
 	if id == types.BuiltinEmployeeAssistantID {
 		return s.employeeAssistant(ctx, tenantID)
+	}
+	if id == "builtin-operating-analyst" || id == "builtin-data-analysis-base" {
+		return s.nativeAnalysisAgent(ctx, id, tenantID)
 	}
 
 	// Check if it's a built-in agent using the registry

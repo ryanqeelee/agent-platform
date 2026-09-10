@@ -1,0 +1,19 @@
+{
+  "url": "/api/governed-data/runs",
+  "request": {
+    "conversationId": "conversation-finalize",
+    "turnId": "turn-finalize",
+    "question": "分析本周销售",
+    "sourceId": "retail"
+  },
+  "status": 200,
+  "response": {
+    "contractVersion": "governed-analysis-run/1",
+    "runId": "run_gov_cd9a0a812be1e9649ad871063346b33238e169db",
+    "state": "running",
+    "catalogVersion": "cat-1",
+    "catalogDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "scopeDigest": "sha256:0dce19148b8f5930162dc7bcdb5cbd97a064c966e2bab247e395711b3fed677e",
+    "bindingDigest": "sha256:14d9ce9ad4812d793fdde9017303fece08767295951768f2861b7caeae6006ee"
+  }
+}

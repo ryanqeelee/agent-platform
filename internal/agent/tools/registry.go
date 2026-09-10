@@ -114,16 +114,23 @@ func (r *ToolRegistry) ExecuteTool(
 	name string,
 	args json.RawMessage,
 ) (*types.ToolResult, error) {
-	common.PipelineInfo(ctx, "AgentTool", "execute_start", map[string]interface{}{
-		"tool": name,
-		"args": args,
-	})
+	startFields := map[string]interface{}{"tool": name}
+	if types.GovernedDataObservability(ctx) {
+		startFields["args_bytes"] = len(args)
+		startFields["payload_omitted"] = true
+	} else {
+		startFields["args"] = args
+	}
+	common.PipelineInfo(ctx, "AgentTool", "execute_start", startFields)
 	tool, err := r.GetTool(name)
 	if err != nil {
-		common.PipelineError(ctx, "AgentTool", "execute_failed", map[string]interface{}{
-			"tool":  name,
-			"error": err.Error(),
-		})
+		failedFields := map[string]interface{}{"tool": name}
+		if types.GovernedDataObservability(ctx) {
+			failedFields["has_error"] = true
+		} else {
+			failedFields["error"] = err.Error()
+		}
+		common.PipelineError(ctx, "AgentTool", "execute_failed", failedFields)
 		return &types.ToolResult{
 			Success: false,
 			Error:   err.Error() + toolErrorHint,
@@ -145,10 +152,13 @@ func (r *ToolRegistry) ExecuteTool(
 			errMsg += editSandboxMissingFieldHint
 		}
 		errMsg += toolErrorHint
-		common.PipelineWarn(ctx, "AgentTool", "validation_failed", map[string]interface{}{
-			"tool":   name,
-			"errors": errMsg,
-		})
+		validationFields := map[string]interface{}{"tool": name}
+		if types.GovernedDataObservability(ctx) {
+			validationFields["has_error"] = true
+		} else {
+			validationFields["errors"] = errMsg
+		}
+		common.PipelineWarn(ctx, "AgentTool", "validation_failed", validationFields)
 		return &types.ToolResult{
 			Success: false,
 			Error:   errMsg,
@@ -172,18 +182,29 @@ func (r *ToolRegistry) ExecuteTool(
 		result.Output = TruncateToolOutput(result.Output, maxOutput)
 	}
 
-	fields := map[string]interface{}{
-		"tool": name,
-		"args": args,
+	fields := map[string]interface{}{"tool": name}
+	if types.GovernedDataObservability(ctx) {
+		fields["args_bytes"] = len(args)
+		fields["payload_omitted"] = true
+	} else {
+		fields["args"] = args
 	}
 	if result != nil {
 		fields["success"] = result.Success
 		if result.Error != "" {
-			fields["error"] = result.Error
+			if types.GovernedDataObservability(ctx) {
+				fields["has_error"] = true
+			} else {
+				fields["error"] = result.Error
+			}
 		}
 	}
 	if execErr != nil {
-		fields["error"] = execErr.Error()
+		if types.GovernedDataObservability(ctx) {
+			fields["has_error"] = true
+		} else {
+			fields["error"] = execErr.Error()
+		}
 		common.PipelineError(ctx, "AgentTool", "execute_done", fields)
 	} else if result != nil && !result.Success {
 		// Append error hint to guide LLM to retry with a different approach

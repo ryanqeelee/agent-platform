@@ -32,12 +32,17 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	totalToolCalls := countTotalToolCalls(state.RoundSteps)
 	logger.Infof(ctx, "[Agent][FinalAnswer] Synthesizing from %d steps, %d tool calls",
 		len(state.RoundSteps), totalToolCalls)
-	common.PipelineInfo(ctx, "Agent", "final_answer_start", map[string]interface{}{
+	finalFields := map[string]interface{}{
 		"session_id":   sessionID,
-		"query":        query,
 		"steps":        len(state.RoundSteps),
 		"tool_results": totalToolCalls,
-	})
+	}
+	if types.GovernedDataObservability(ctx) {
+		finalFields["query_len"] = len(query)
+	} else {
+		finalFields["query"] = query
+	}
+	common.PipelineInfo(ctx, "Agent", "final_answer_start", finalFields)
 
 	// Finalization is another model turn, not a new conversation. Reuse the
 	// current (possibly compacted) transcript so user constraints, attachments
@@ -116,11 +121,15 @@ Now generate the final answer:`, query, imageRequirement)
 		},
 	)
 	if err != nil {
-		logger.Errorf(ctx, "[Agent][FinalAnswer] Final answer generation failed: %v", err)
-		common.PipelineError(ctx, "Agent", "final_answer_stream_failed", map[string]interface{}{
-			"session_id": sessionID,
-			"error":      err.Error(),
-		})
+		failedFields := map[string]interface{}{"session_id": sessionID}
+		if types.GovernedDataObservability(ctx) {
+			logger.Errorf(ctx, "[Agent][FinalAnswer] Final answer generation failed: error_payload_omitted=true")
+			failedFields["has_error"] = true
+		} else {
+			logger.Errorf(ctx, "[Agent][FinalAnswer] Final answer generation failed: %v", err)
+			failedFields["error"] = err.Error()
+		}
+		common.PipelineError(ctx, "Agent", "final_answer_stream_failed", failedFields)
 		return err
 	}
 
@@ -166,10 +175,15 @@ func (e *AgentEngine) handleMaxIterations(
 
 	// Stream final answer generation through EventBus
 	if err := e.streamFinalAnswerToEventBus(ctx, query, messages, state, sessionID); err != nil {
-		logger.Errorf(ctx, "Failed to synthesize final answer: %v", err)
-		common.PipelineError(ctx, "Agent", "final_answer_failed", map[string]interface{}{
-			"error": err.Error(),
-		})
+		failedFields := map[string]interface{}{}
+		if types.GovernedDataObservability(ctx) {
+			logger.Errorf(ctx, "Failed to synthesize final answer: error_payload_omitted=true")
+			failedFields["has_error"] = true
+		} else {
+			logger.Errorf(ctx, "Failed to synthesize final answer: %v", err)
+			failedFields["error"] = err.Error()
+		}
+		common.PipelineError(ctx, "Agent", "final_answer_failed", failedFields)
 		state.FinalAnswer = "Sorry, I was unable to generate a complete answer."
 	}
 	state.IsComplete = true
@@ -177,7 +191,7 @@ func (e *AgentEngine) handleMaxIterations(
 
 // emitCompletionEvent emits the EventAgentComplete event with execution summary.
 func (e *AgentEngine) emitCompletionEvent(
-	ctx context.Context, state *types.AgentState, sessionID, messageID string, startTime time.Time,
+	ctx context.Context, state *types.AgentState, sessionID, messageID string, startTime time.Time, outcome string,
 ) {
 	// Convert knowledge refs to interface{} slice for event data
 	knowledgeRefsInterface := make([]interface{}, 0, len(state.KnowledgeRefs))
@@ -190,6 +204,7 @@ func (e *AgentEngine) emitCompletionEvent(
 		Type:      event.EventAgentComplete,
 		SessionID: sessionID,
 		Data: event.AgentCompleteData{
+			Outcome:         outcome,
 			FinalAnswer:     state.FinalAnswer,
 			KnowledgeRefs:   knowledgeRefsInterface,
 			AgentSteps:      state.RoundSteps, // Include detailed execution steps for message storage

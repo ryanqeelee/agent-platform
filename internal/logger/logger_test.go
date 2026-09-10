@@ -228,6 +228,13 @@ func TestCloneContextPreservesPrivateAuthorizationProvenance(t *testing.T) {
 	}
 }
 
+func TestCloneContextPreservesGovernedObservabilityRestriction(t *testing.T) {
+	ctx := types.WithGovernedDataObservability(context.Background())
+	if !types.GovernedDataObservability(CloneContext(ctx)) {
+		t.Fatal("CloneContext dropped governed observability restriction")
+	}
+}
+
 // setupSSEStream builds its async context through CloneContext, so dropping
 // this key here would silently re-key every session→sandbox binding onto the
 // tenant a shared agent borrowed — stranding the MicroVM at session deletion.

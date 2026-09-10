@@ -39,6 +39,17 @@ export interface ArtifactRefContext {
   messageId: string;
 }
 
+/** 已加载的同会话历史 assistant 消息上的产物，保留其下载授权锚点。 */
+export interface HistoricalArtifactRef extends ArtifactRefMeta {
+  messageId: string;
+}
+
+export interface ResolvedArtifactReference {
+  artifact: ArtifactRefMeta;
+  /** 历史产物必须使用其原消息 ID 下载，而不是引用它的当前消息。 */
+  originMessageId?: string;
+}
+
 export interface ArtifactRefLabels {
   /** 卡片副标题，如「点击预览」。 */
   previewHint: string;
@@ -202,6 +213,29 @@ export function resolveArtifactRef(
   return artifacts.find((item) => (item.file_name || '').trim() === ref.name) || null;
 }
 
+/**
+ * 解析正文里的产物引用。
+ *
+ * 当前消息始终优先，以保留本轮 sandbox: 文件名的既有行为。历史消息只接受
+ * resource handle 的精确命中：文件名、路径和 alt 文案都不是跨消息授权依据。
+ */
+export function resolveArtifactReference(
+  href: string,
+  artifacts: ArtifactRefMeta[] | undefined | null,
+  historicalArtifacts: HistoricalArtifactRef[] | undefined | null,
+): ResolvedArtifactReference | null {
+  const current = resolveArtifactRef(href, artifacts);
+  if (current) return { artifact: current };
+
+  const ref = parseArtifactRef(href);
+  if (!ref || ref.kind !== 'handle' || !historicalArtifacts?.length) return null;
+  const historical = historicalArtifacts.find((item) =>
+    artifactHandle(item) === ref.handle && Boolean((item.messageId || '').trim()),
+  );
+  if (!historical) return null;
+  return { artifact: historical, originMessageId: historical.messageId.trim() };
+}
+
 function fileExtension(fileName: string): string {
   const base = (fileName || '').trim().toLowerCase();
   const dot = base.lastIndexOf('.');
@@ -248,14 +282,19 @@ function fileIconSvg(): string {
 const STREAMING_PLACEHOLDER =
   '<span class="streaming-image-loading"><span class="streaming-image-loading__skeleton"></span></span>';
 
-function renderCard(fileName: string, hint: string, index: number | null): string {
+function renderCard(
+  fileName: string,
+  hint: string,
+  index: number | null,
+  originMessageId?: string,
+): string {
   const safeName = escapeHTML(fileName);
   const safeHint = escapeHTML(hint);
   // 卡片必须是内联元素：marked 会把图片包在 <p> 里，块级元素会被 HTML 解析器
   // 提到段落外面，破坏正文结构。
   const interactive = index === null
     ? ''
-    : ` data-artifact-index="${index}" role="button" tabindex="0"`;
+    : ` data-artifact-index="${index}"${originMessageId ? ` data-artifact-message-id="${escapeHTML(originMessageId)}"` : ''} role="button" tabindex="0"`;
   const state = index === null ? ' artifact-ref-card--pending' : '';
   return (
     `<span class="artifact-ref-card${state}"${interactive} title="${safeName}">`
@@ -271,6 +310,7 @@ function renderImage(
   artifact: ArtifactRefMeta,
   alt: string,
   ctx: ArtifactRefContext | null,
+  originMessageId?: string,
 ): string {
   const safeAlt = escapeHTML(alt || artifact.file_name || '');
   // 已经拉取过就直接给 blob：流式重渲染会重建 <img>，否则每帧都会闪回占位图。
@@ -279,7 +319,7 @@ function renderImage(
   const loading = cached ? '' : ' data-img-loading="1"';
   return (
     `<img class="markdown-image artifact-ref-image" src="${src}" alt="${safeAlt}"`
-    + ` data-artifact-index="${artifact.index}"${loading}>`
+    + ` data-artifact-index="${artifact.index}"${originMessageId ? ` data-artifact-message-id="${escapeHTML(originMessageId)}"` : ''}${loading}>`
   );
 }
 
@@ -293,6 +333,8 @@ export function renderArtifactReference(args: {
   href: string;
   alt?: string;
   artifacts?: ArtifactRefMeta[] | null;
+  /** 已加载的同会话历史 assistant 产物；只用于 resource handle 精确匹配。 */
+  historicalArtifacts?: HistoricalArtifactRef[] | null;
   labels: ArtifactRefLabels;
   context?: ArtifactRefContext | null;
   /** 本轮回答还在生成中。产物要到本轮结束才会收集，此时解析不到是正常的。 */
@@ -301,8 +343,8 @@ export function renderArtifactReference(args: {
   const ref = parseArtifactRef(args.href);
   if (!ref) return null;
 
-  const artifact = resolveArtifactRef(args.href, args.artifacts);
-  if (!artifact) {
+  const resolved = resolveArtifactReference(args.href, args.artifacts, args.historicalArtifacts);
+  if (!resolved) {
     // 句柄对不上本消息的产物，说明这是别的受保护文件（知识库检索图、
     // 附件图……）。交回默认渲染，由 hydrateProtectedFileImages 带鉴权拉取。
     if (ref.kind === 'handle') return null;
@@ -317,10 +359,15 @@ export function renderArtifactReference(args: {
     return renderCard(fallbackName, args.labels.missingHint, null);
   }
 
+  const { artifact, originMessageId } = resolved;
+  const artifactContext = originMessageId && args.context?.sessionId
+    ? { sessionId: args.context.sessionId, messageId: originMessageId }
+    : args.context ?? null;
+
   if (rendersAsImage(artifact)) {
-    return renderImage(artifact, args.alt || '', args.context ?? null);
+    return renderImage(artifact, args.alt || '', artifactContext, originMessageId);
   }
-  return renderCard(artifact.file_name, args.labels.previewHint, artifact.index);
+  return renderCard(artifact.file_name, args.labels.previewHint, artifact.index, originMessageId);
 }
 
 async function loadArtifactBlobURL(ctx: ArtifactRefContext, index: number): Promise<string | null> {
@@ -373,7 +420,9 @@ export async function hydrateArtifactImages(
     if (!Number.isInteger(index) || index < 0) return;
     img.dataset.authHydrated = '1';
 
-    const blobURL = await loadArtifactBlobURL(ctx, index);
+    const originMessageId = (img.getAttribute('data-artifact-message-id') || '').trim();
+    const artifactContext = originMessageId ? { sessionId: ctx.sessionId, messageId: originMessageId } : ctx;
+    const blobURL = await loadArtifactBlobURL(artifactContext, index);
     if (!blobURL) {
       img.dataset.authHydrated = '0';
       return;
@@ -386,10 +435,15 @@ export async function hydrateArtifactImages(
 /**
  * 从点击/键盘事件里取出被激活的产物卡片下标；返回 null 表示事件与卡片无关。
  */
-export function artifactIndexFromEventTarget(target: EventTarget | null): number | null {
+export function artifactReferenceFromEventTarget(target: EventTarget | null): {
+  index: number;
+  originMessageId?: string;
+} | null {
   if (!(target instanceof Element)) return null;
   const card = target.closest('.artifact-ref-card[data-artifact-index]');
   if (!card) return null;
   const index = Number(card.getAttribute('data-artifact-index'));
-  return Number.isInteger(index) && index >= 0 ? index : null;
+  if (!Number.isInteger(index) || index < 0) return null;
+  const originMessageId = (card.getAttribute('data-artifact-message-id') || '').trim();
+  return originMessageId ? { index, originMessageId } : { index };
 }

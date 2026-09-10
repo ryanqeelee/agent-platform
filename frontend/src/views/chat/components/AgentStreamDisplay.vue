@@ -577,11 +577,11 @@
     </template>
   </t-drawer>
   <ChatArtifactsDrawer
-    v-if="!processOnly && hasArtifacts && sessionIdForArtifacts && messageIdForArtifacts"
+    v-if="!processOnly && showArtifactDrawer && sessionIdForArtifacts && artifactDrawerMessageId"
     v-model:visible="showArtifactDrawer"
     :session-id="sessionIdForArtifacts"
-    :message-id="messageIdForArtifacts"
-    :artifacts="artifactList"
+    :message-id="artifactDrawerMessageId"
+    :artifacts="artifactDrawerArtifacts"
     :preview-index="artifactPreviewIndex"
   />
 </template>
@@ -618,10 +618,11 @@ import { useI18n } from 'vue-i18n';
 import i18n from '@/i18n';
 import { hydrateProtectedFileImages, clearProtectedFileFailureCache, sanitizeMarkdownHTML } from '@/utils/security';
 import {
-  artifactIndexFromEventTarget,
+  artifactReferenceFromEventTarget,
   hydrateArtifactImages,
   renderArtifactReference,
 } from '@/utils/sandboxArtifactRefs';
+import type { HistoricalArtifactRef } from '@/utils/sandboxArtifactRefs';
 import type { ProtectedFileAccessContext } from '@/utils/protectedFileAccess';
 import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAnswer';
 import { getAgentToolIconName } from '@/utils/agent-tool-icons';
@@ -931,6 +932,7 @@ interface SessionData {
 const props = defineProps<{
   session: SessionData;
   sessionId?: string;
+  sessionArtifactRefs?: HistoricalArtifactRef[];
   userQuery?: string;
   embeddedMode?: boolean;
   embedChannelId?: string;
@@ -1036,9 +1038,17 @@ const messageIdForArtifacts = computed(() =>
 // Set when the drawer is opened from an inline artifact card in the answer, so
 // it lands on that file's preview instead of the list.
 const artifactPreviewIndex = ref<number | null>(null);
-function openArtifactDrawer(previewIndex: number | null = null) {
-  if (!hasArtifacts.value) return;
+const artifactDrawerMessageId = ref('');
+const artifactDrawerArtifacts = ref<any[]>([]);
+function openArtifactDrawer(previewIndex: number | null = null, originMessageId = '') {
+  const messageId = originMessageId || messageIdForArtifacts.value;
+  const artifacts = originMessageId
+    ? (props.sessionArtifactRefs || []).filter((artifact) => artifact.messageId === originMessageId)
+    : artifactList.value;
+  if (!messageId || !artifacts.length) return;
   artifactPreviewIndex.value = previewIndex;
+  artifactDrawerMessageId.value = messageId;
+  artifactDrawerArtifacts.value = artifacts;
   showArtifactDrawer.value = true;
 }
 
@@ -2376,11 +2386,11 @@ const onRootClick = (e: Event) => {
   if (!target) return;
 
   // Inline artifact card -> open the drawer straight on that file's preview.
-  const artifactIndex = artifactIndexFromEventTarget(target);
-  if (artifactIndex !== null) {
+  const artifactRef = artifactReferenceFromEventTarget(target);
+  if (artifactRef !== null) {
     e.preventDefault();
     e.stopPropagation();
-    openArtifactDrawer(artifactIndex);
+    openArtifactDrawer(artifactRef.index, artifactRef.originMessageId);
     return;
   }
 
@@ -2472,11 +2482,11 @@ const onRootKeydown = (e: KeyboardEvent) => {
   const target = e.target as HTMLElement;
   if (!target) return;
 
-  const artifactIndex = artifactIndexFromEventTarget(target);
-  if (artifactIndex !== null) {
+  const artifactRef = artifactReferenceFromEventTarget(target);
+  if (artifactRef !== null) {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      openArtifactDrawer(artifactIndex);
+      openArtifactDrawer(artifactRef.index, artifactRef.originMessageId);
     }
     return;
   }
@@ -2598,6 +2608,7 @@ agentRenderer.image = function agentImageRenderer(token) {
     href: token.href || '',
     alt: token.text || '',
     artifacts: artifactList.value,
+    historicalArtifacts: props.sessionArtifactRefs,
     labels: artifactRefLabels.value,
     context: artifactRefContext.value,
     streaming: !isConversationDone.value,

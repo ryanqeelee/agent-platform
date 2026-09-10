@@ -7,12 +7,12 @@
         </header>
         <button v-if="mobileMenuOpen" class="mobile-menu-scrim" type="button" :aria-label="t('menu.collapseSidebar')" @click="mobileMenuOpen = false" />
         <Menu id="mobile-workspace-menu" :operating-controller="operatingController" @navigate="mobileMenuOpen = false"></Menu>
-        <div v-if="isRouterAlive" v-show="!isOperatingRoute" class="platform-route-outlet">
+        <div v-if="isRouterAlive" v-show="!isLegacyOperatingRoute" class="platform-route-outlet">
             <RouterView />
         </div>
         <OperatingWorkspace
-            v-if="operatingWorkspaceMounted"
-            v-show="isOperatingRoute"
+            v-if="isLegacyOperatingRoute"
+            :history-only="typeof route.query.data_session === 'string'"
             @controller-change="handleOperatingControllerChange"
         />
         <div class="upload-mask" v-show="ismask">
@@ -53,15 +53,13 @@ import type { OperatingController } from '@/views/operating/operatingClient'
 const authStore = useAuthStore();
 const mobileMenuOpen = ref(false);
 const route = useRoute();
-const isOperatingRoute = computed(() => isOperatingRoutePath(route.path));
-const operatingWorkspaceMounted = ref(isOperatingRoute.value);
+const isLegacyOperatingRoute = computed(() => isOperatingRoutePath(route.path)
+    && (route.path === '/platform/operating-brief' || typeof route.query.data_session === 'string'));
+const isOperatingRoute = computed(() => route.path.startsWith('/platform/operating-analysis') || route.path === '/platform/operating-brief');
 const operatingController = shallowRef<OperatingController | null>(null);
 const handleOperatingControllerChange = (controller: OperatingController | null) => {
     operatingController.value = controller;
 };
-watch(isOperatingRoute, (isOperating) => {
-    if (isOperating) operatingWorkspaceMounted.value = true;
-});
 watch(() => route.fullPath, () => { mobileMenuOpen.value = false; });
 const router = useRouter();
 const commandPaletteStore = useCommandPaletteStore();

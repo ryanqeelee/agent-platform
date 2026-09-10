@@ -18,6 +18,8 @@ const (
 	ToolDatabaseQuery       = "database_query"
 	ToolDataAnalysis        = "data_analysis"
 	ToolDataSchema          = "data_schema"
+	ToolGovernedDataSchema  = "governed_data_schema"
+	ToolGovernedDataQuery   = "governed_data_query"
 	ToolWebSearch           = "web_search"
 	ToolWebFetch            = "web_fetch"
 	// Skills-related tools (only available when skills are enabled).
@@ -102,6 +104,8 @@ func AvailableToolDefinitions() []AvailableTool {
 		{Name: ToolDatabaseQuery, Label: "查询数据库", Description: "查询数据库中的信息"},
 		{Name: ToolDataAnalysis, Label: "数据分析", Description: "理解数据文件并进行数据分析"},
 		{Name: ToolDataSchema, Label: "查看数据元信息", Description: "获取表格文件的元信息"},
+		{Name: ToolGovernedDataSchema, Label: "查看业务数据源", Description: "查看当前用户获准访问的外部业务表及指标口径"},
+		{Name: ToolGovernedDataQuery, Label: "查询业务数据源", Description: "按当前用户的数据权限只读查询外部业务数据"},
 		{Name: ToolWikiReadPage, Label: "读取Wiki页面", Description: "读取指定的Wiki页面内容"},
 		{Name: ToolWikiSearch, Label: "搜索Wiki", Description: "在Wiki中搜索页面"},
 		{Name: ToolWikiReadSourceDoc, Label: "精读源文档", Description: "使用知识点深入阅读特定原始文档"},

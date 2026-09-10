@@ -75,6 +75,27 @@ func TestAgentViewKeepsPlatformBindingsForSystemAdmin(t *testing.T) {
 	assert.Same(t, agent, AgentView(ctx, agent))
 }
 
+func TestAgentViewProjectsPlatformBuiltinSkillAvailabilityWithoutSandboxBinding(t *testing.T) {
+	for _, id := range []string{
+		types.BuiltinEmployeeAssistantID,
+		types.BuiltinDataAnalysisBaseID,
+		types.BuiltinOperatingAnalystID,
+	} {
+		for _, mode := range []string{"all", "none"} {
+			t.Run(id+"/"+mode, func(t *testing.T) {
+				agent := &types.CustomAgent{ID: id, Config: types.CustomAgentConfig{
+					SkillsSelectionMode: mode,
+					SandboxConfigID:     "platform-sandbox-id",
+				}}
+
+				view := AgentView(context.Background(), agent)
+				assert.Equal(t, mode, view.Config.SkillsSelectionMode)
+				assert.Empty(t, view.Config.SandboxConfigID)
+			})
+		}
+	}
+}
+
 func TestAgentViewShowsOnlyScenarioControlsToEnterpriseAdmin(t *testing.T) {
 	ctx := context.WithValue(context.Background(), types.TenantRoleContextKey, types.TenantRoleAdmin)
 	agent := &types.CustomAgent{Config: types.CustomAgentConfig{

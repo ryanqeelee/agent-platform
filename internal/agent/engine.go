@@ -26,6 +26,41 @@ import (
 // span input — long quoted-context queries can be many KB of prose.
 const langfuseQueryPreview = 2000
 
+func isGovernedDataTool(name string) bool {
+	return name == agenttools.ToolGovernedDataSchema || name == agenttools.ToolGovernedDataQuery
+}
+
+func governedSpanError(ctx context.Context, err error, safeMessage string) error {
+	if err == nil || !types.GovernedDataObservability(ctx) {
+		return err
+	}
+	return fmt.Errorf("%s", safeMessage)
+}
+
+// requiresGovernedDataObservability covers direct engine callers that do not
+// enter through native QA. A configured governed tool protects the first turn;
+// visible governed tool history protects replay after an agent switch.
+func (e *AgentEngine) requiresGovernedDataObservability(history []chat.Message) bool {
+	if e != nil && e.config != nil {
+		for _, name := range e.config.AllowedTools {
+			if isGovernedDataTool(name) {
+				return true
+			}
+		}
+	}
+	for _, message := range history {
+		if isGovernedDataTool(message.Name) {
+			return true
+		}
+		for _, call := range message.ToolCalls {
+			if isGovernedDataTool(call.Function.Name) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // AgentEngine is the core engine for running ReAct agents.
 //
 // History persistence note: the engine is stateless across turns. Conversation
@@ -252,17 +287,25 @@ func (e *AgentEngine) Execute(
 	llmContext []chat.Message,
 	imageURLs ...[]string,
 ) (*types.AgentState, error) {
+	if e.requiresGovernedDataObservability(llmContext) {
+		ctx = types.WithGovernedDataObservability(ctx)
+	}
 	logger.Infof(ctx, "[Agent] Starting execution: session=%s, message=%s, query_len=%d, context_msgs=%d",
 		sessionID, messageID, len(query), len(llmContext))
 	// Ensure tools are cleaned up after execution
 	defer e.toolRegistry.Cleanup(ctx)
 
-	common.PipelineInfo(ctx, "Agent", "execute_start", map[string]interface{}{
+	executeFields := map[string]interface{}{
 		"session_id":   sessionID,
 		"message_id":   messageID,
-		"query":        query,
 		"context_msgs": len(llmContext),
-	})
+	}
+	if types.GovernedDataObservability(ctx) {
+		executeFields["query_len"] = len(query)
+	} else {
+		executeFields["query"] = query
+	}
+	common.PipelineInfo(ctx, "Agent", "execute_start", executeFields)
 
 	// Open a top-level Langfuse span so the agent run — including every
 	// round's LLM call and every tool execution — groups under a single
@@ -278,14 +321,17 @@ func (e *AgentEngine) Execute(
 			kbIDs = append(kbIDs, kb.ID)
 		}
 	}
+	agentInput := map[string]interface{}{
+		"query_len":    len(query),
+		"context_msgs": len(llmContext),
+		"image_count":  imgCount,
+	}
+	if !types.GovernedDataObservability(ctx) {
+		agentInput["query"] = truncateRunes(query, langfuseQueryPreview)
+	}
 	spanCtx, agentSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
-		Name: "agent.execute",
-		Input: map[string]interface{}{
-			"query":        truncateRunes(query, langfuseQueryPreview),
-			"query_len":    len(query),
-			"context_msgs": len(llmContext),
-			"image_count":  imgCount,
-		},
+		Name:  "agent.execute",
+		Input: agentInput,
 		Metadata: map[string]interface{}{
 			"session_id":          sessionID,
 			"message_id":          messageID,
@@ -334,7 +380,11 @@ func (e *AgentEngine) Execute(
 
 	_, err := e.executeLoop(ctx, state, query, messages, tools, sessionID, messageID)
 	if err != nil {
-		logger.Errorf(ctx, "[Agent] Execution failed: %v", err)
+		if types.GovernedDataObservability(ctx) {
+			logger.Errorf(ctx, "[Agent] Execution failed: error_payload_omitted=true")
+		} else {
+			logger.Errorf(ctx, "[Agent] Execution failed: %v", err)
+		}
 		e.eventBus.Emit(ctx, event.Event{
 			ID:        generateEventID("error"),
 			Type:      event.EventError,
@@ -345,7 +395,7 @@ func (e *AgentEngine) Execute(
 				SessionID: sessionID,
 			},
 		})
-		finishAgentSpan(agentSpan, state, err)
+		finishAgentSpan(ctx, agentSpan, state, err)
 		return nil, err
 	}
 
@@ -357,14 +407,14 @@ func (e *AgentEngine) Execute(
 		"steps":      len(state.RoundSteps),
 		"complete":   state.IsComplete,
 	})
-	finishAgentSpan(agentSpan, state, nil)
+	finishAgentSpan(ctx, agentSpan, state, nil)
 	return state, nil
 }
 
 // finishAgentSpan records the final outcome of an agent execution onto the
 // top-level Langfuse span. Extracted so the same payload is used for both
 // success and error return paths in Execute().
-func finishAgentSpan(span *langfuse.Span, state *types.AgentState, err error) {
+func finishAgentSpan(ctx context.Context, span *langfuse.Span, state *types.AgentState, err error) {
 	if span == nil {
 		return
 	}
@@ -378,14 +428,17 @@ func finishAgentSpan(span *langfuse.Span, state *types.AgentState, err error) {
 		"tool_calls":       totalToolCalls,
 		"complete":         state.IsComplete,
 		"final_answer_len": len(state.FinalAnswer),
-		"final_answer":     truncateRunes(state.FinalAnswer, langfuseQueryPreview),
 	}
+	if !types.GovernedDataObservability(ctx) {
+		output["final_answer"] = truncateRunes(state.FinalAnswer, langfuseQueryPreview)
+	}
+	spanErr := governedSpanError(ctx, err, "agent execution failed")
 	span.Finish(output, map[string]interface{}{
 		"rounds":     state.CurrentRound,
 		"steps":      len(state.RoundSteps),
 		"tool_calls": totalToolCalls,
 		"complete":   state.IsComplete,
-	}, err)
+	}, spanErr)
 }
 
 // truncateRunes caps s to n runes and appends "…" when truncated. Identical
@@ -436,7 +489,7 @@ func (e *AgentEngine) executeLoop(
 	tools []chat.Tool,
 	sessionID string,
 	messageID string,
-) (*types.AgentState, error) {
+) (result *types.AgentState, retErr error) {
 	startTime := time.Now()
 	common.PipelineInfo(ctx, "Agent", "loop_start", map[string]interface{}{
 		"max_iterations": e.config.MaxIterations,
@@ -455,7 +508,13 @@ func (e *AgentEngine) executeLoop(
 			return
 		}
 		completionEmitted = true
-		e.emitCompletionEvent(context.WithoutCancel(ctx), state, sessionID, messageID, startTime)
+		outcome := "failed"
+		if ctx.Err() != nil {
+			outcome = "cancelled"
+		} else if retErr == nil && state.IsComplete {
+			outcome = "completed"
+		}
+		e.emitCompletionEvent(context.WithoutCancel(ctx), state, sessionID, messageID, startTime, outcome)
 	}
 	defer emitCompletion()
 
@@ -592,7 +651,7 @@ func (e *AgentEngine) runReActIteration(
 			"tool_calls":  toolCallCount,
 			"outcome":     outcome.String(),
 			"duration_ms": time.Since(roundStart).Milliseconds(),
-		}, retErr)
+		}, governedSpanError(ctx, retErr, "agent round failed"))
 	}()
 
 	// Compact older history before the next assistant response when the

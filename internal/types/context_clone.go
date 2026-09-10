@@ -70,6 +70,9 @@ var contextCloneAcrossDetach = map[ContextKey]bool{
 	RequestIDContextKey:     true,
 	LanguageContextKey:      true,
 	LangfuseTraceContextKey: true,
+	// This is a restriction on observability, not an authorization grant. A
+	// detached continuation of the same turn must remain metadata-only.
+	GovernedDataObservabilityContextKey: true,
 
 	// The agent-level opt-out from long-term memory. Recall is gated inside
 	// the QA services, but extraction, the explicit "remember this" route and

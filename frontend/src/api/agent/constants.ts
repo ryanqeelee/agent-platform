@@ -1,4 +1,5 @@
 export const BUILTIN_EMPLOYEE_ASSISTANT_ID = 'builtin-employee-assistant'
+export const BUILTIN_OPERATING_ANALYST_ID = 'builtin-operating-analyst'
 
 /** Web permission is effective only when the current tenant's server projection is ready. */
 export function employeeWebSearchEnabled(permitted: boolean, agent?: {

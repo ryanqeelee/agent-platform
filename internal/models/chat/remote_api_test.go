@@ -1,12 +1,15 @@
 package chat
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
+	appLogger "github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/sashabaranov/go-openai"
 	"github.com/stretchr/testify/assert"
@@ -25,6 +28,44 @@ func newTestRemoteChat(t *testing.T) *RemoteAPIChat {
 	})
 	require.NoError(t, err)
 	return chat
+}
+
+func TestGovernedRemoteRequestLogIsMetadataOnly(t *testing.T) {
+	var logs bytes.Buffer
+	appLogger.SetOutput(&logs)
+	appLogger.SetLogLevel(appLogger.LevelInfo)
+	t.Cleanup(func() {
+		appLogger.SetOutput(os.Stdout)
+		appLogger.SetLogLevel(appLogger.LevelDebug)
+	})
+
+	ctx := types.WithGovernedDataObservability(context.Background())
+	newTestRemoteChat(t).logRequest(ctx, map[string]interface{}{
+		"query":      "QUERY_SENTINEL",
+		"reasoning":  "REASONING_SENTINEL",
+		"credential": "CREDENTIAL_SENTINEL",
+	}, true)
+	got := logs.String()
+	for _, secret := range []string{"QUERY_SENTINEL", "REASONING_SENTINEL", "CREDENTIAL_SENTINEL"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("governed remote request log leaked %q: %s", secret, got)
+		}
+	}
+	for _, metadata := range []string{"model=test-model", "stream=true", "payload_omitted=true"} {
+		if !strings.Contains(got, metadata) {
+			t.Fatalf("governed remote request log lost %q: %s", metadata, got)
+		}
+	}
+	if got := remoteAPIStatusError(ctx, 429, []byte("ROWS_SENTINEL")); strings.Contains(got.Error(), "ROWS_SENTINEL") || !strings.Contains(got.Error(), "429") {
+		t.Fatalf("governed provider status error = %q", got)
+	}
+}
+
+func TestOrdinaryRemoteStatusErrorKeepsProviderBody(t *testing.T) {
+	err := remoteAPIStatusError(context.Background(), 400, []byte("ordinary-provider-detail"))
+	if !strings.Contains(err.Error(), "ordinary-provider-detail") {
+		t.Fatalf("ordinary provider error changed: %v", err)
+	}
 }
 
 func TestBuildChatCompletionRequest_ParallelToolCalls(t *testing.T) {

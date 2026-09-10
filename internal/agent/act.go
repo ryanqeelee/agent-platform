@@ -98,37 +98,58 @@ func buildToolSpanInput(tc types.LLMToolCall, resolvedArgs map[string]any, sensi
 	}
 }
 
-// finishToolSpan serialises a completed tool call into a Langfuse span
-// update. Extracted from runToolCall so the tool-call pipeline keeps
-// a single assignment per line and the observability-specific logic
-// (payload shaping, error classification) lives in one place.
-func finishToolSpan(span *langfuse.Span, tc types.ToolCall, execErr error, durationMs int64) {
-	if span == nil {
-		return
-	}
+func buildToolSpanInputForContext(
+	ctx context.Context, tc types.LLMToolCall, resolvedArgs map[string]any, sensitive bool,
+) map[string]interface{} {
+	return buildToolSpanInput(tc, resolvedArgs,
+		sensitive || types.GovernedDataObservability(ctx))
+}
+
+func buildToolSpanOutput(ctx context.Context, tc types.ToolCall, durationMs int64) map[string]interface{} {
 	success := tc.Result != nil && tc.Result.Success
 	output := map[string]interface{}{
 		"success":     success,
 		"duration_ms": durationMs,
 	}
-	if tc.Result != nil {
-		if tc.Result.Output != "" {
+	if tc.Result == nil {
+		return output
+	}
+	if tc.Result.Output != "" {
+		output["output_len"] = len(tc.Result.Output)
+		if !types.GovernedDataObservability(ctx) {
 			output["output"] = truncateForLangfuse(tc.Result.Output, langfuseToolOutputPreview)
-			output["output_len"] = len(tc.Result.Output)
-		}
-		if tc.Result.Error != "" {
-			output["error"] = tc.Result.Error
-		}
-		if len(tc.Result.Data) > 0 {
-			// Data is structured but can be arbitrarily large (e.g. full
-			// search-result payloads). Only report key shape so Langfuse
-			// users see what was surfaced without blowing up trace size.
-			output["data_keys"] = dataKeys(tc.Result.Data)
-		}
-		if len(tc.Result.Images) > 0 {
-			output["image_count"] = len(tc.Result.Images)
 		}
 	}
+	if tc.Result.Error != "" {
+		if types.GovernedDataObservability(ctx) {
+			output["has_error"] = true
+		} else {
+			output["error"] = tc.Result.Error
+		}
+	}
+	if len(tc.Result.Data) > 0 {
+		if types.GovernedDataObservability(ctx) {
+			output["data_field_count"] = len(tc.Result.Data)
+		} else {
+			output["data_keys"] = dataKeys(tc.Result.Data)
+		}
+	}
+	if len(tc.Result.Images) > 0 {
+		output["image_count"] = len(tc.Result.Images)
+	}
+	return output
+}
+
+// finishToolSpan serialises a completed tool call into a Langfuse span
+// update. Extracted from runToolCall so the tool-call pipeline keeps
+// a single assignment per line and the observability-specific logic
+// (payload shaping, error classification) lives in one place.
+func finishToolSpan(ctx context.Context, span *langfuse.Span, tc types.ToolCall, execErr error, durationMs int64) {
+	if span == nil {
+		return
+	}
+	success := tc.Result != nil && tc.Result.Success
+	output := buildToolSpanOutput(ctx, tc, durationMs)
 	// Classify the span's outcome: a non-nil execErr is always an error, and
 	// a result with Success=false is treated as an error too (matches the
 	// user-visible behaviour — the LLM would see this as a failed tool call
@@ -147,7 +168,7 @@ func finishToolSpan(span *langfuse.Span, tc types.ToolCall, execErr error, durat
 	span.Finish(output, map[string]interface{}{
 		"success":     success,
 		"duration_ms": durationMs,
-	}, spanErr)
+	}, governedSpanError(ctx, spanErr, "tool execution failed"))
 }
 
 // dataKeys returns the sorted top-level keys of a tool's Data map.
@@ -443,7 +464,11 @@ func (e *AgentEngine) runToolCall(
 		}
 	}
 
-	logger.Debugf(ctx, "%s Args: %s", toolTag, tc.Function.Arguments)
+	if types.GovernedDataObservability(ctx) {
+		logger.Debugf(ctx, "%s Args: payload_omitted=true, bytes=%d", toolTag, len(tc.Function.Arguments))
+	} else {
+		logger.Debugf(ctx, "%s Args: %s", toolTag, tc.Function.Arguments)
+	}
 
 	toolCallStartTime := time.Now()
 
@@ -479,7 +504,7 @@ func (e *AgentEngine) runToolCall(
 	// (toolHintSensitiveArgs) because it exposes implementation details.
 	// Mirror that policy for Langfuse: redact raw arguments to avoid
 	// leaking raw SQL into the observability backend.
-	toolSpanInput := buildToolSpanInput(tc, args, toolHintSensitiveArgs[tc.Function.Name])
+	toolSpanInput := buildToolSpanInputForContext(ctx, tc, args, toolHintSensitiveArgs[tc.Function.Name])
 	argumentResolution, _ := toolSpanInput["argument_resolution"].(string)
 	toolCtx, toolSpan := mgr.StartSpan(ctx, langfuse.SpanOptions{
 		Name:  "agent.tool." + tc.Function.Name,
@@ -536,7 +561,11 @@ func (e *AgentEngine) runToolCall(
 	}
 
 	if err != nil {
-		logger.Errorf(ctx, "%s Failed in %dms: %v", toolTag, duration, err)
+		if types.GovernedDataObservability(ctx) {
+			logger.Errorf(ctx, "%s Failed in %dms: error_payload_omitted=true", toolTag, duration)
+		} else {
+			logger.Errorf(ctx, "%s Failed in %dms: %v", toolTag, duration, err)
+		}
 		toolCall.Result = &types.ToolResult{
 			Success: false,
 			Error:   err.Error(),
@@ -551,7 +580,7 @@ func (e *AgentEngine) runToolCall(
 			toolTag, duration, success, outputLen)
 	}
 
-	finishToolSpan(toolSpan, toolCall, err, duration)
+	finishToolSpan(ctx, toolSpan, toolCall, err, duration)
 
 	// Pipeline event for monitoring
 	toolSuccess := toolCall.Result != nil && toolCall.Result.Success
@@ -564,7 +593,11 @@ func (e *AgentEngine) runToolCall(
 		"success":      toolSuccess,
 	}
 	if toolCall.Result != nil && toolCall.Result.Error != "" {
-		pipelineFields["error"] = toolCall.Result.Error
+		if types.GovernedDataObservability(ctx) {
+			pipelineFields["has_error"] = true
+		} else {
+			pipelineFields["error"] = toolCall.Result.Error
+		}
 	}
 	if err != nil {
 		common.PipelineError(ctx, "Agent", "tool_call_result", pipelineFields)
@@ -574,7 +607,7 @@ func (e *AgentEngine) runToolCall(
 		common.PipelineWarn(ctx, "Agent", "tool_call_result", pipelineFields)
 	}
 
-	if toolCall.Result != nil && toolCall.Result.Output != "" {
+	if toolCall.Result != nil && toolCall.Result.Output != "" && !types.GovernedDataObservability(ctx) {
 		preview := toolCall.Result.Output
 		if len(preview) > 500 {
 			preview = preview[:500] + "... (truncated)"
@@ -582,7 +615,11 @@ func (e *AgentEngine) runToolCall(
 		logger.Debugf(ctx, "%s Output preview:\n%s", toolTag, preview)
 	}
 	if toolCall.Result != nil && toolCall.Result.Error != "" {
-		logger.Debugf(ctx, "%s Tool error: %s", toolTag, toolCall.Result.Error)
+		if types.GovernedDataObservability(ctx) {
+			logger.Debugf(ctx, "%s Tool error: payload_omitted=true", toolTag)
+		} else {
+			logger.Debugf(ctx, "%s Tool error: %s", toolTag, toolCall.Result.Error)
+		}
 	}
 
 	return toolCall

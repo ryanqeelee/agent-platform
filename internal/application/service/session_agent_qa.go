@@ -15,6 +15,23 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+func logAgentQAStart(ctx context.Context, sessionID string, agentTenantID uint64, query string, sessionJSON []byte) {
+	if types.GovernedDataObservability(ctx) {
+		logger.Infof(ctx, "Start agent-based question answering, session ID: %s, agent tenant ID: %d, query_bytes: %d, session_payload_omitted=true",
+			sessionID, agentTenantID, len(query))
+		return
+	}
+	logger.Infof(ctx, "Start agent-based question answering, session ID: %s, agent tenant ID: %d, query: %s, session: %s",
+		sessionID, agentTenantID, query, string(sessionJSON))
+}
+
+func appendAgentImageDescription(agentQuery, imageDescription string) string {
+	if imageDescription == "" {
+		return agentQuery
+	}
+	return agentQuery + "\n\n[用户上传图片内容]\n" + imageDescription
+}
+
 // AgentQA performs agent-based question answering with conversation history and streaming support
 // customAgent is optional - if provided, uses custom agent configuration instead of tenant defaults
 // summaryModelID is optional - if provided, overrides the model from customAgent config
@@ -27,10 +44,14 @@ func (s *sessionService) AgentQA(
 	// Propagate the session ID so stateful sandbox backends (CubeSandbox) can
 	// bind script execution to a per-session MicroVM instance.
 	ctx = types.WithSessionID(ctx, sessionID)
-	sessionJSON, err := json.Marshal(req.Session)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to marshal session, session ID: %s, error: %v", sessionID, err)
-		return fmt.Errorf("failed to marshal session: %w", err)
+	var sessionJSON []byte
+	if !types.GovernedDataObservability(ctx) {
+		var err error
+		sessionJSON, err = json.Marshal(req.Session)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to marshal session, session ID: %s, error: %v", sessionID, err)
+			return fmt.Errorf("failed to marshal session: %w", err)
+		}
 	}
 
 	// customAgent is required for AgentQA (handler has already done permission check for shared agent)
@@ -51,8 +72,7 @@ func (s *sessionService) AgentQA(
 	); err != nil {
 		return err
 	}
-	logger.Infof(ctx, "Start agent-based question answering, session ID: %s, agent tenant ID: %d, query: %s, session: %s",
-		sessionID, agentTenantID, req.Query, string(sessionJSON))
+	logAgentQAStart(ctx, sessionID, agentTenantID, req.Query, sessionJSON)
 
 	var tenantInfo *types.Tenant
 	if v := ctx.Value(types.TenantInfoContextKey); v != nil {
@@ -79,6 +99,10 @@ func (s *sessionService) AgentQA(
 	agentConfig, sharedScope, err := s.buildAgentConfig(ctx, req, tenantInfo, agentTenantID)
 	if err != nil {
 		return err
+	}
+	if _, governed := tools.GovernedAnalysisClientFromContext(ctx); governed {
+		agentConfig.MCPSelectionMode = "none"
+		agentConfig.MCPServices = nil
 	}
 
 	if agentConfig.EmployeeAssistant {
@@ -250,12 +274,15 @@ func (s *sessionService) AgentQA(
 	}
 
 	agentQuery := req.Query
+	if _, governed := tools.GovernedAnalysisClientFromContext(ctx); governed {
+		agentQuery += "\n\n" + tools.GovernedAnalysisDraftInstruction
+	}
 	var agentImageURLs []string
 	if agentModelSupportsVision && len(req.ImageURLs) > 0 {
 		agentImageURLs = req.ImageURLs
 		logger.Infof(ctx, "Agent model supports vision, passing %d image(s) directly", len(agentImageURLs))
 	} else if req.ImageDescription != "" {
-		agentQuery = req.Query + "\n\n[用户上传图片内容]\n" + req.ImageDescription
+		agentQuery = appendAgentImageDescription(agentQuery, req.ImageDescription)
 		logger.Infof(ctx, "Agent model does not support vision, appending image description (%d chars)", len(req.ImageDescription))
 	}
 	if req.QuotedContext != "" {
@@ -281,7 +308,11 @@ func (s *sessionService) AgentQA(
 	// Events will be emitted to EventBus and handled by the Handler layer
 	logger.Info(ctx, "Executing agent with streaming")
 	if _, err := engine.Execute(ctx, sessionID, req.AssistantMessageID, agentQuery, llmContext, agentImageURLs); err != nil {
-		logger.Errorf(ctx, "Agent execution failed: %v", err)
+		if types.GovernedDataObservability(ctx) {
+			logger.Errorf(ctx, "Agent execution failed: error_payload_omitted=true")
+		} else {
+			logger.Errorf(ctx, "Agent execution failed: %v", err)
+		}
 		// Emit error event to the EventBus used by this agent
 		eventBus.Emit(ctx, event.Event{
 			Type:      event.EventError,

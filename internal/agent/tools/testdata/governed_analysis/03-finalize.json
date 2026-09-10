@@ -1,0 +1,212 @@
+{
+  "url": "/api/governed-data/analysis/finalize",
+  "request": {
+    "runId": "run_gov_cd9a0a812be1e9649ad871063346b33238e169db",
+    "draft": {
+      "contractVersion": "analysis-draft/1",
+      "summary": {
+        "text": "本周销售额为 9007199254740993.12345678。",
+        "evidence": [
+          {
+            "queryExecutionId": "query_f5c9e6e915a143dcaef0403d68d9671b",
+            "row": 0,
+            "column": "amount"
+          }
+        ]
+      },
+      "limitations": [
+        "当前来源尚未提供可比较的上周同期结果。"
+      ]
+    }
+  },
+  "status": 200,
+  "response": {
+    "contractVersion": "governed-analysis-result/1",
+    "run": {
+      "contractVersion": "governed-analysis-run/1",
+      "runId": "run_gov_cd9a0a812be1e9649ad871063346b33238e169db",
+      "state": "completed",
+      "catalogVersion": "cat-1",
+      "catalogDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scopeDigest": "sha256:0dce19148b8f5930162dc7bcdb5cbd97a064c966e2bab247e395711b3fed677e",
+      "bindingDigest": "sha256:46bdd16de4bf0a13dd3db8bc18e85c57a45154bfc0342d7de47d2ff308fbac2f"
+    },
+    "answer": {
+      "contractVersion": "analytical-answer/1",
+      "runId": "run_gov_cd9a0a812be1e9649ad871063346b33238e169db",
+      "attemptId": "attempt_gov_b2469734bd95fe0483b653e02ac280a24ac4cf1e",
+      "outcome": {
+        "status": "answered",
+        "lane": "exploratory",
+        "trust": "exploratory",
+        "reasonCode": "answered.exploratory",
+        "retryable": false,
+        "message": {
+          "title": "探索性分析已完成",
+          "detail": "结果已绑定本次治理查询，但指标尚未确认为正式经营口径。"
+        },
+        "nextActions": [
+          {
+            "type": "verify_metric_definition"
+          }
+        ]
+      },
+      "trustContext": {
+        "catalogSnapshot": null,
+        "scope": null,
+        "metricContracts": [
+          {
+            "metricId": "query_column:amount",
+            "version": "unconfirmed/1",
+            "governanceTrust": "unknown"
+          }
+        ],
+        "watermarks": [],
+        "qualityFlags": [
+          "metric_definition_unconfirmed",
+          "sql_literal_labels"
+        ],
+        "assumptions": [
+          "仅按本次治理查询字段解释，不作为正式经营指标。",
+          "source-field usage（仅为源字段约束，不是计算结果别名含义）：rx_retail_semantic.v_sales.amount：default; source parsed at scale 2; storage precision is not source precision",
+          "查询 query_f5c9e6e915a143dcaef0403d68d9671b 的列 period 为已执行 SQL 的字符串常量 \"本周\"；仅为结果说明标签，不是来源业务字段、身份或度量。"
+        ]
+      },
+      "factManifest": {
+        "version": "1",
+        "facts": [
+          {
+            "factId": "f_905663468a725911",
+            "metricId": "query_column:amount",
+            "value": {
+              "type": "decimal",
+              "exact": "9007199254740993.12345678"
+            },
+            "unit": "unknown",
+            "display": {
+              "style": "text",
+              "fractionDigits": null
+            },
+            "trust": "exploratory",
+            "verification": "query_verified",
+            "provenance": {
+              "kind": "queryCell",
+              "resultSetId": "rs_7a34c77947d1b48c",
+              "rowKey": {
+                "period": "本周"
+              },
+              "column": "amount"
+            }
+          }
+        ],
+        "resultSets": [
+          {
+            "resultSetId": "rs_7a34c77947d1b48c",
+            "queryExecutionId": "query_f5c9e6e915a143dcaef0403d68d9671b",
+            "derivation": null,
+            "extendedCalculator": null,
+            "evidencePolicy": null,
+            "schema": [
+              {
+                "name": "period",
+                "type": "String",
+                "label": null,
+                "unit": null,
+                "role": "dimension"
+              },
+              {
+                "name": "amount",
+                "type": "Decimal(38,8)",
+                "label": null,
+                "unit": null,
+                "role": "measure"
+              }
+            ],
+            "keyFields": [
+              "period"
+            ],
+            "rows": [
+              {
+                "period": "本周",
+                "amount": "9007199254740993.12345678"
+              }
+            ],
+            "rowCount": 1,
+            "includedRowCount": 1,
+            "truncated": false,
+            "digest": "sha256:938e5295441400a78b8e99f6ca60feda7452fc7f2d9ea9b9e8951c98e85c9591"
+          }
+        ]
+      },
+      "answer": {
+        "title": "经营分析结果",
+        "summary": {
+          "segments": [
+            {
+              "type": "text",
+              "text": "本周销售额为 9007199254740993.12345678。\n\n分析边界：当前来源尚未提供可比较的上周同期结果。"
+            },
+            {
+              "type": "text",
+              "text": "："
+            },
+            {
+              "type": "fact",
+              "ref": {
+                "factId": "f_905663468a725911"
+              }
+            }
+          ]
+        },
+        "kpis": [
+          {
+            "label": "amount",
+            "ref": {
+              "factId": "f_905663468a725911"
+            }
+          }
+        ],
+        "insights": [],
+        "tables": [
+          {
+            "title": "查询结果",
+            "chartType": null,
+            "binding": {
+              "resultSetId": "rs_7a34c77947d1b48c",
+              "dimensions": [
+                "period"
+              ],
+              "measures": [
+                "amount"
+              ],
+              "series": null
+            }
+          }
+        ],
+        "charts": [],
+        "exportPolicy": {
+          "reportExport": {
+            "allowed": true,
+            "reasonCode": null,
+            "classification": "exploratory",
+            "requiredWatermark": "探索性分析 · 核验稿 · 非正式经营结论",
+            "includeTrustContext": true,
+            "includeFactReferences": true
+          },
+          "dataExport": {
+            "allowed": true,
+            "reasonCode": null,
+            "includeTrustMetadata": true,
+            "includeResultSetDigest": true
+          }
+        }
+      },
+      "surfaceOutcomes": [],
+      "policyAcknowledgement": null,
+      "lineageRef": {
+        "runId": "run_gov_cd9a0a812be1e9649ad871063346b33238e169db",
+        "attemptId": "attempt_gov_b2469734bd95fe0483b653e02ac280a24ac4cf1e"
+      }
+    }
+  }
+}

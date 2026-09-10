@@ -5,6 +5,7 @@ import {
   isArtifactRefHref,
   normalizeSandboxArtifactRefs,
   renderArtifactReference,
+  resolveArtifactReference,
   resolveArtifactRef,
   type ArtifactRefMeta,
 } from './sandboxArtifactRefs.ts'
@@ -77,6 +78,66 @@ test('a handle from outside this message falls back to protected-image rendering
     renderArtifactReference({ href: foreignRef, artifacts: [], labels, streaming: true }),
     null,
   )
+})
+
+test('a cross-turn handle resolves the original artifact and download anchor', () => {
+  const oldCsv = { index: 0, handle: refFor(10), file_name: 'analysis.csv', file_type: 'text/csv' }
+  const newCsv = { index: 0, handle: refFor(11), file_name: 'analysis.csv', file_type: 'text/csv' }
+  const historical = [{ ...oldCsv, messageId: 'assistant-message-a' }]
+
+  const resolved = resolveArtifactReference(refFor(10), [newCsv], historical)
+  assert.equal(resolved?.artifact, historical[0])
+  assert.equal(resolved?.originMessageId, 'assistant-message-a')
+
+  const html = renderArtifactReference({
+    href: refFor(10),
+    artifacts: [newCsv],
+    historicalArtifacts: historical,
+    labels,
+    context: { sessionId: 'session-1', messageId: 'assistant-message-b' },
+  })
+  assert.ok(html?.includes('data-artifact-index="0"'))
+  assert.ok(html?.includes('data-artifact-message-id="assistant-message-a"'))
+  assert.ok(html?.includes('analysis.csv'))
+})
+
+test('cross-turn lookup never guesses by file name and preserves current priority', () => {
+  const sameNameOld = { index: 3, handle: refFor(12), file_name: 'report.csv', file_type: 'text/csv', messageId: 'message-a' }
+  const sameNameNew = { index: 1, handle: refFor(13), file_name: 'report.csv', file_type: 'text/csv' }
+  const unknown = refFor(14)
+
+  assert.equal(resolveArtifactReference(unknown, [sameNameNew], [sameNameOld]), null)
+  assert.equal(
+    renderArtifactReference({ href: unknown, artifacts: [sameNameNew], historicalArtifacts: [sameNameOld], labels }),
+    null,
+  )
+
+  const sameHandleCurrent = { index: 1, handle: refFor(12), file_name: 'current.csv', file_type: 'text/csv' }
+  const currentFirst = renderArtifactReference({
+    href: refFor(12),
+    artifacts: [sameHandleCurrent],
+    historicalArtifacts: [sameNameOld],
+    labels,
+  })
+  assert.ok(currentFirst?.includes('current.csv'))
+  assert.ok(!currentFirst?.includes('data-artifact-message-id'))
+})
+
+test('historical message IDs are HTML-escaped in artifact attributes', () => {
+  const html = renderArtifactReference({
+    href: refFor(15),
+    artifacts: [],
+    historicalArtifacts: [{
+      index: 0,
+      handle: refFor(15),
+      file_name: 'old.csv',
+      file_type: 'text/csv',
+      messageId: 'message" onclick="alert(1)',
+    }],
+    labels,
+  })
+  assert.ok(html?.includes('data-artifact-message-id="message&quot; onclick&#x3D;&quot;alert(1)"'))
+  assert.ok(!html?.includes('" onclick="'))
 })
 
 test('renderArtifactReference renders image artifacts inline', () => {

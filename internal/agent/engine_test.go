@@ -531,6 +531,24 @@ func emptyTools() []chat.Tool {
 	return nil
 }
 
+func TestExecuteLoopErrorEmitsFailedCompletionOutcome(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{})
+	var completions []event.AgentCompleteData
+	engine.eventBus.On(event.EventAgentComplete, func(_ context.Context, evt event.Event) error {
+		data, ok := evt.Data.(event.AgentCompleteData)
+		require.True(t, ok)
+		completions = append(completions, data)
+		return nil
+	})
+
+	state := &types.AgentState{}
+	_, err := engine.executeLoop(context.Background(), state, "test query", emptyMessages(), emptyTools(), "sess-1", "msg-1")
+	require.Error(t, err)
+	require.Len(t, completions, 1)
+	require.Equal(t, "failed", completions[0].Outcome)
+	require.False(t, state.IsComplete)
+}
+
 // ---------------------------------------------------------------------------
 // TC1: Empty content + stop → should NOT complete with empty FinalAnswer
 // ---------------------------------------------------------------------------

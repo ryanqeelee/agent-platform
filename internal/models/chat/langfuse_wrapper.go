@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -29,7 +30,7 @@ func (l *langfuseChat) Chat(ctx context.Context, messages []Message, opts *ChatO
 	genCtx, gen := mgr.StartGeneration(ctx, langfuse.GenerationOptions{
 		Name:            "chat.completion",
 		Model:           l.inner.GetModelName(),
-		Input:           buildLangfuseMessages(messages),
+		Input:           langfuseGenerationInput(ctx, messages),
 		ModelParameters: buildLangfuseModelParams(opts),
 		Metadata: map[string]interface{}{
 			"model_id":                  l.inner.GetModelID(),
@@ -46,11 +47,11 @@ func (l *langfuseChat) Chat(ctx context.Context, messages []Message, opts *ChatO
 	var output interface{}
 	if resp != nil {
 		usage = convertUsage(&resp.Usage)
-		output = buildLangfuseGenerationOutput(
+		output = langfuseGenerationOutput(ctx,
 			resp.Content, resp.ReasoningContent, resp.FinishReason, resp.ToolCalls,
 		)
 	}
-	gen.Finish(output, usage, err)
+	gen.Finish(output, usage, langfuseGenerationError(ctx, err))
 	return resp, err
 }
 
@@ -64,7 +65,7 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 	genCtx, gen := mgr.StartGeneration(ctx, langfuse.GenerationOptions{
 		Name:            "chat.completion.stream",
 		Model:           l.inner.GetModelName(),
-		Input:           buildLangfuseMessages(messages),
+		Input:           langfuseGenerationInput(ctx, messages),
 		ModelParameters: buildLangfuseModelParams(opts),
 		Metadata: map[string]interface{}{
 			"model_id":                  l.inner.GetModelID(),
@@ -77,7 +78,7 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 
 	ch, err := l.inner.ChatStream(genCtx, messages, opts)
 	if err != nil {
-		gen.Finish(nil, nil, err)
+		gen.Finish(nil, nil, langfuseGenerationError(ctx, err))
 		return ch, err
 	}
 	if ch == nil {
@@ -90,6 +91,8 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 		defer close(wrapped)
 		var contentBuf []byte
 		var reasoningBuf []byte
+		var contentLen int
+		var reasoningLen int
 		var usage *types.TokenUsage
 		var toolCalls []types.LLMToolCall
 		var finishReason string
@@ -101,14 +104,20 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 					gen.MarkCompletionStart(time.Now())
 					firstToken = true
 				}
-				reasoningBuf = append(reasoningBuf, resp.Content...)
+				reasoningLen += len(resp.Content)
+				if !types.GovernedDataObservability(ctx) {
+					reasoningBuf = append(reasoningBuf, resp.Content...)
+				}
 			}
 			if resp.ResponseType == types.ResponseTypeAnswer && resp.Content != "" {
 				if !firstToken {
 					gen.MarkCompletionStart(time.Now())
 					firstToken = true
 				}
-				contentBuf = append(contentBuf, resp.Content...)
+				contentLen += len(resp.Content)
+				if !types.GovernedDataObservability(ctx) {
+					contentBuf = append(contentBuf, resp.Content...)
+				}
 			}
 			if resp.Usage != nil {
 				usage = resp.Usage
@@ -118,7 +127,11 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 				// place before tool execution. Snapshot the provider payload so
 				// the generation observation remains the exact model output and
 				// cannot be changed through the shared slice backing array.
-				toolCalls = snapshotLangfuseToolCalls(resp.ToolCalls)
+				if types.GovernedDataObservability(ctx) {
+					toolCalls = make([]types.LLMToolCall, len(resp.ToolCalls))
+				} else {
+					toolCalls = snapshotLangfuseToolCalls(resp.ToolCalls)
+				}
 			}
 			if resp.FinishReason != "" {
 				finishReason = resp.FinishReason
@@ -126,12 +139,57 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 			wrapped <- resp
 		}
 
-		output := buildLangfuseGenerationOutput(
-			string(contentBuf), string(reasoningBuf), finishReason, toolCalls,
-		)
+		var output interface{}
+		if types.GovernedDataObservability(ctx) {
+			output = buildMetadataOnlyGenerationOutput(contentLen, reasoningLen, finishReason, len(toolCalls))
+		} else {
+			output = buildLangfuseGenerationOutput(
+				string(contentBuf), string(reasoningBuf), finishReason, toolCalls,
+			)
+		}
 		gen.Finish(output, convertUsage(usage), nil)
 	}()
 	return wrapped, nil
+}
+
+func langfuseGenerationInput(ctx context.Context, messages []Message) interface{} {
+	if types.GovernedDataObservability(ctx) {
+		return map[string]interface{}{
+			"message_count":   len(messages),
+			"payload_omitted": true,
+		}
+	}
+	return buildLangfuseMessages(messages)
+}
+
+func langfuseGenerationOutput(
+	ctx context.Context,
+	content, reasoningContent, finishReason string,
+	toolCalls []types.LLMToolCall,
+) interface{} {
+	if types.GovernedDataObservability(ctx) {
+		return buildMetadataOnlyGenerationOutput(
+			len(content), len(reasoningContent), finishReason, len(toolCalls),
+		)
+	}
+	return buildLangfuseGenerationOutput(content, reasoningContent, finishReason, toolCalls)
+}
+
+func buildMetadataOnlyGenerationOutput(contentLen, reasoningLen int, finishReason string, toolCallCount int) map[string]interface{} {
+	return map[string]interface{}{
+		"content_len":     contentLen,
+		"reasoning_len":   reasoningLen,
+		"tool_call_count": toolCallCount,
+		"finish_reason":   finishReason,
+		"payload_omitted": true,
+	}
+}
+
+func langfuseGenerationError(ctx context.Context, err error) error {
+	if err == nil || !types.GovernedDataObservability(ctx) {
+		return err
+	}
+	return fmt.Errorf("model call failed")
 }
 
 func snapshotLangfuseToolCalls(toolCalls []types.LLMToolCall) []types.LLMToolCall {

@@ -57,7 +57,11 @@ func (e *AgentEngine) streamLLMToEventBus(
 	llmCtx = types.WithLLMCallMetadata(llmCtx, "agent_round", prefixFingerprint)
 	stream, err := e.chatModel.ChatStream(llmCtx, messages, opts)
 	if err != nil {
-		logger.Errorf(ctx, "[Agent][Stream] Failed to start LLM stream: %v", err)
+		if types.GovernedDataObservability(ctx) {
+			logger.Errorf(ctx, "[Agent][Stream] Failed to start LLM stream: error_payload_omitted=true")
+		} else {
+			logger.Errorf(ctx, "[Agent][Stream] Failed to start LLM stream: %v", err)
+		}
 		return nil, err
 	}
 
@@ -436,7 +440,11 @@ func (e *AgentEngine) streamThinkingToEventBus(
 		},
 	)
 	if err != nil {
-		logger.Errorf(ctx, "[Agent][Thinking] Iteration-%d failed: %v", iteration+1, err)
+		if types.GovernedDataObservability(ctx) {
+			logger.Errorf(ctx, "[Agent][Thinking] Iteration-%d failed: error_payload_omitted=true", iteration+1)
+		} else {
+			logger.Errorf(ctx, "[Agent][Thinking] Iteration-%d failed: %v", iteration+1, err)
+		}
 		return nil, err
 	}
 
@@ -507,6 +515,9 @@ func (e *AgentEngine) callLLMWithRetry(
 			}
 			logger.Debugf(ctx, "[Agent][Round-%d] msg[%d]: role=%s, len=%d, tool_calls=%v",
 				round, i, msg.Role, len(msg.Content), tcNames)
+		} else if types.GovernedDataObservability(ctx) {
+			logger.Debugf(ctx, "[Agent][Round-%d] msg[%d]: role=%s, len=%d, payload_omitted=true",
+				round, i, msg.Role, len(msg.Content))
 		} else {
 			preview := msg.Content
 			if len(preview) > 100 {
@@ -533,8 +544,12 @@ func (e *AgentEngine) callLLMWithRetry(
 	// compaction would have rescued. It gets its own one-shot recovery.
 	if err != nil && !e.overflowRecovered && compaction.IsOverflowError(err) {
 		e.overflowRecovered = true
-		logger.Warnf(ctx, "[Agent][Round-%d] Provider rejected the request as too large; "+
-			"compacting and retrying once: %v", round, err)
+		if types.GovernedDataObservability(ctx) {
+			logger.Warnf(ctx, "[Agent][Round-%d] Provider rejected the request as too large; compacting and retrying once", round)
+		} else {
+			logger.Warnf(ctx, "[Agent][Round-%d] Provider rejected the request as too large; "+
+				"compacting and retrying once: %v", round, err)
+		}
 		// The engine's copy stays unsanitized. Sanitizing merges consecutive
 		// same-role messages, and the summary is a `user` message that can end
 		// up adjacent to a real one — merging them folds live conversation
@@ -552,8 +567,13 @@ func (e *AgentEngine) callLLMWithRetry(
 		// Retry transient errors (timeout, rate limit, server errors) up to maxLLMRetries times
 		for retry := 1; retry <= maxLLMRetries; retry++ {
 			retryDelay := time.Duration(retry) * time.Second
-			logger.Warnf(ctx, "[Agent][Round-%d] LLM transient error (attempt %d/%d), retrying in %v: %v",
-				round, retry, maxLLMRetries, retryDelay, err)
+			if types.GovernedDataObservability(ctx) {
+				logger.Warnf(ctx, "[Agent][Round-%d] LLM transient error (attempt %d/%d), retrying in %v; error_payload_omitted=true",
+					round, retry, maxLLMRetries, retryDelay)
+			} else {
+				logger.Warnf(ctx, "[Agent][Round-%d] LLM transient error (attempt %d/%d), retrying in %v: %v",
+					round, retry, maxLLMRetries, retryDelay, err)
+			}
 			time.Sleep(retryDelay)
 
 			response, err = e.streamThinkingToEventBus(ctx, messages, tools, iteration, sessionID)
@@ -563,11 +583,15 @@ func (e *AgentEngine) callLLMWithRetry(
 		}
 	}
 	if err != nil {
-		logger.Errorf(ctx, "[Agent][Round-%d] LLM call failed: %v", round, err)
-		common.PipelineError(ctx, "Agent", "think_failed", map[string]interface{}{
-			"iteration": iteration,
-			"error":     err.Error(),
-		})
+		failedFields := map[string]interface{}{"iteration": iteration}
+		if types.GovernedDataObservability(ctx) {
+			logger.Errorf(ctx, "[Agent][Round-%d] LLM call failed: error_payload_omitted=true", round)
+			failedFields["has_error"] = true
+		} else {
+			logger.Errorf(ctx, "[Agent][Round-%d] LLM call failed: %v", round, err)
+			failedFields["error"] = err.Error()
+		}
+		common.PipelineError(ctx, "Agent", "think_failed", failedFields)
 
 		// Graceful degradation: if we have tool results from previous rounds,
 		// try to synthesize a final answer from them instead of losing everything.
@@ -580,7 +604,11 @@ func (e *AgentEngine) callLLMWithRetry(
 				"tool_calls": totalTC,
 			})
 			if synthErr := e.streamFinalAnswerToEventBus(ctx, query, *messagesPtr, state, sessionID); synthErr != nil {
-				logger.Errorf(ctx, "[Agent] Final answer synthesis also failed: %v", synthErr)
+				if types.GovernedDataObservability(ctx) {
+					logger.Errorf(ctx, "[Agent] Final answer synthesis also failed: error_payload_omitted=true")
+				} else {
+					logger.Errorf(ctx, "[Agent] Final answer synthesis also failed: %v", synthErr)
+				}
 				return nil, fmt.Errorf("LLM call failed: %w (synthesis also failed: %v)", err, synthErr)
 			}
 			state.IsComplete = true
@@ -615,7 +643,7 @@ func (e *AgentEngine) callLLMWithRetry(
 				round, response.FinishReason, len(response.Content))
 		}
 	}
-	if response.Content != "" {
+	if response.Content != "" && !types.GovernedDataObservability(ctx) {
 		preview := response.Content
 		if len(preview) > 300 {
 			preview = preview[:300] + "..."

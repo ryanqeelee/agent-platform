@@ -342,7 +342,13 @@ type MessageExecutionContext struct {
 	// call (or after the SSE handler has already finished the root span);
 	// without this the LLM wrapper auto-creates an orphan chat.completion
 	// trace instead of nesting under the agent turn.
-	LangfuseTraceparent string `json:"langfuse_traceparent,omitempty"`
+	LangfuseTraceparent string                        `json:"langfuse_traceparent,omitempty"`
+	GovernedAnalysisRun *GovernedAnalysisRunReference `json:"governed_analysis_run,omitempty"`
+}
+
+type GovernedAnalysisRunReference struct {
+	ContractVersion string `json:"contract_version"`
+	RunID           string `json:"run_id"`
 }
 
 func (c MessageExecutionContext) Value() (driver.Value, error) {

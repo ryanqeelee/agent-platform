@@ -21,6 +21,10 @@ const (
 	BuiltinDeepResearcherID = "builtin-deep-researcher"
 	// BuiltinDataAnalystID is the ID for the built-in data analyst agent
 	BuiltinDataAnalystID = "builtin-data-analyst"
+	// BuiltinDataAnalysisBaseID is the platform base for native file analysis.
+	BuiltinDataAnalysisBaseID = "builtin-data-analysis-base"
+	// BuiltinOperatingAnalystID is the fixed product identity for governed operating analysis.
+	BuiltinOperatingAnalystID = "builtin-operating-analyst"
 	// BuiltinKnowledgeGraphExpertID is the ID for the built-in knowledge graph expert agent
 	BuiltinKnowledgeGraphExpertID = "builtin-knowledge-graph-expert"
 	// BuiltinDocumentAssistantID is the ID for the built-in document assistant agent

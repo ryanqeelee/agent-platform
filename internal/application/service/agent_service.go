@@ -215,6 +215,9 @@ func (s *agentService) CreateAgentEngine(
 		return nil, fmt.Errorf("failed to register tools: %w", err)
 	}
 	s.registerMCPTools(ctx, toolRegistry, config, eventBus, sessionID, assistantMessageID)
+	if err := s.registerGovernedDataTools(ctx, toolRegistry, config, sessionID); err != nil {
+		return nil, fmt.Errorf("failed to register external business data: %w", err)
+	}
 
 	// File tools are a pure sandbox capability independent of the
 	// skill switch: register them whenever the workspace sandbox supports a
@@ -1163,6 +1166,9 @@ func (s *agentService) registerTools(
 		case tools.ToolWikiDeletePage:
 			toolToRegister = tools.NewWikiDeletePageTool(s.wikiPageService, wikiKBIDs, wikiRoutes)
 
+		case tools.ToolGovernedDataSchema, tools.ToolGovernedDataQuery:
+			// Bound once per turn to the authenticated user and session below.
+			continue
 		case tools.ToolShellExec, tools.ToolReadSkill, tools.ToolExecuteSkillScript,
 			tools.ToolListSandboxFiles, tools.ToolReadSandboxFile, tools.ToolWriteSandboxFile,
 			tools.ToolEditSandboxFile:

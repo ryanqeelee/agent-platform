@@ -354,17 +354,15 @@ func (s *sessionService) selectChatModelID(
 		}
 	}
 
-	// No knowledge bases - try to find any available chat model
+	// No knowledge bases - use the active platform default, then an active chat model
 	models, err := s.modelService.ListModels(ctx)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to list models: %v", err)
 		return "", fmt.Errorf("failed to list models: %w", err)
 	}
-	for _, model := range models {
-		if model != nil && model.Type == types.ModelTypeKnowledgeQA {
-			logger.Infof(ctx, "Using first available KnowledgeQA model: %s", model.ID)
-			return model.ID, nil
-		}
+	if modelID := activePlatformModelID(models, types.ModelTypeKnowledgeQA); modelID != "" {
+		logger.Infof(ctx, "Using active platform chat model: %s", modelID)
+		return modelID, nil
 	}
 
 	logger.Error(ctx, "No chat model ID available")

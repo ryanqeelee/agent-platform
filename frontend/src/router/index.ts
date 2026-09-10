@@ -20,6 +20,7 @@ import {
   normalizedOperatingRoute,
   operatingRouteIsCanonical,
 } from '@/views/operating/operatingHost'
+import { BUILTIN_OPERATING_ANALYST_ID } from '@/api/agent'
 
 /** Lite /桌面 WebView 硬刷新时可能只打开 `/`，用 session 记住上次页面以便恢复 */
 const LITE_LAST_PATH_KEY = 'weknora_lite_last_path'
@@ -63,6 +64,42 @@ function employeeWorkspaceMinRole(to: RouteLocationNormalized) {
     return SETTINGS_SECTION_MIN_ROLE[to.query.section] ?? 'viewer'
   }
   return undefined
+}
+
+async function admitNativeOperatingAnalysis(to: RouteLocationNormalized) {
+  try {
+    const handoffRef = sessionStorage.getItem(OPERATING_ANALYSIS_HANDOFF_REF_KEY)
+    if (handoffRef && to.path === '/platform/operating-analysis') {
+      sessionStorage.removeItem(OPERATING_ANALYSIS_HANDOFF_REF_KEY)
+      const response = await consumeOperatingAnalysisHandoff(handoffRef)
+      if (response.handoff?.schema !== 'OperatingAnalysisHandoffV1' || !response.handoff.question) {
+        return '/platform/creatChat'
+      }
+      sessionStorage.setItem(OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY, JSON.stringify(response.handoff))
+      return true
+    }
+    const availability = await getOperatingAnalysisAvailability()
+    return availability.availability.state === 'enabled' && availability.availability.canExchange
+      ? true
+      : '/platform/creatChat'
+  } catch {
+    return '/platform/creatChat'
+  }
+}
+
+async function authorizeLegacyOperatingAnalysis(to: RouteLocationNormalized) {
+  if (!operatingRouteIsCanonical(to.path, to.query)) {
+    return { ...normalizedOperatingRoute(to.path, to.query), replace: true }
+  }
+  try {
+    const response = await exchangeOperatingAnalysis()
+    if (!response.access_token || response.expires_in !== 900) return '/platform/creatChat'
+    localStorage.setItem('retail_ai_app_auth_token', response.access_token)
+    document.cookie = `retail_ai_app_auth_token=${response.access_token}; Path=/app; Max-Age=900; SameSite=Lax`
+    return true
+  } catch {
+    return '/platform/creatChat'
+  }
 }
 
 const router = createRouter({
@@ -170,48 +207,32 @@ const router = createRouter({
         },
         {
           path: "operating-analysis",
-          alias: "operating-brief",
           name: "operatingAnalysis",
-          component: { render: () => null },
+          component: () => import('../views/operating/OperatingAnalysisHome.vue'),
           meta: { requiresInit: true, requiresAuth: true },
           beforeEnter: async (to) => {
-            if (!operatingRouteIsCanonical(to.path, to.query)) {
-              return { ...normalizedOperatingRoute(to.path, to.query), replace: true }
-            }
-            try {
-              const handoffRef = sessionStorage.getItem(OPERATING_ANALYSIS_HANDOFF_REF_KEY)
-              let response
-              let handoffPrompt = null
-              if (handoffRef) {
-                sessionStorage.removeItem(OPERATING_ANALYSIS_HANDOFF_REF_KEY)
-                response = await consumeOperatingAnalysisHandoff(handoffRef)
-                if (response.handoff?.schema !== 'OperatingAnalysisHandoffV1' || !response.handoff.question) {
-                  return '/platform/creatChat'
-                }
-                handoffPrompt = response.handoff
-              } else {
-                const availability = await getOperatingAnalysisAvailability()
-                if (availability.availability.state !== 'enabled' || !availability.availability.canExchange) {
-                  return '/platform/creatChat'
-                }
-                response = await exchangeOperatingAnalysis()
-              }
-              if (!response.access_token || response.expires_in !== 900) {
-                return '/platform/creatChat'
-              }
-              if (handoffPrompt) {
-                sessionStorage.setItem(
-                  OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY,
-                  JSON.stringify(handoffPrompt),
-                )
-              }
-              localStorage.setItem('retail_ai_app_auth_token', response.access_token)
-              document.cookie = `retail_ai_app_auth_token=${response.access_token}; Path=/app; Max-Age=900; SameSite=Lax`
-              return true
-            } catch {
-              return '/platform/creatChat'
-            }
+            return typeof to.query.data_session === 'string'
+              ? authorizeLegacyOperatingAnalysis(to)
+              : admitNativeOperatingAnalysis(to)
           },
+        },
+        {
+          path: 'operating-analysis/chat/:chatid',
+          name: 'operatingAnalysisChat',
+          component: () => import('../views/chat/index.vue'),
+          props: (route) => ({
+            session_id: route.params.chatid,
+            agentId: BUILTIN_OPERATING_ANALYST_ID,
+          }),
+          meta: { requiresInit: true, requiresAuth: true },
+          beforeEnter: admitNativeOperatingAnalysis,
+        },
+        {
+          path: 'operating-brief',
+          name: 'operatingBrief',
+          component: { render: () => null },
+          meta: { requiresInit: true, requiresAuth: true },
+          beforeEnter: authorizeLegacyOperatingAnalysis,
         },
         {
           path: "knowledge-bases/:kbId",

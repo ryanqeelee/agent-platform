@@ -18,6 +18,7 @@
                 <RagPipelineProgress :session="session" :embedded-mode="embeddedMode" />
                 <AgentStreamDisplay v-if="session.isAgentMode" :session="session" :session-id="sessionId"
                     :user-query="userQuery" :rag-mode="true" :follow-up-loading="followUpLoading"
+                    :session-artifact-refs="sessionArtifactRefs"
                     @render-complete-change="emit('render-complete-change', $event)" />
             </div>
             <template v-else>
@@ -30,6 +31,7 @@
                 <docInfo v-if="session.knowledge_references?.length" :session="session"></docInfo>
                 <AgentStreamDisplay :session="session" :session-id="sessionId" :user-query="userQuery"
                     v-if="session.isAgentMode" :follow-up-loading="followUpLoading"
+                    :session-artifact-refs="sessionArtifactRefs"
                     @render-complete-change="emit('render-complete-change', $event)" />
             </template>
             <deepThink :deepSession="session" v-if="session.showThink && !session.isAgentMode"></deepThink>
@@ -92,11 +94,11 @@
                 :on-leave="scheduleCitationClose" />
         </Teleport>
         <ChatArtifactsDrawer
-            v-if="hasArtifacts"
+            v-if="showArtifactDrawer && artifactDrawerMessageId"
             v-model:visible="showArtifactDrawer"
             :session-id="sessionId"
-            :message-id="messageIdForArtifacts"
-            :artifacts="artifactList"
+            :message-id="artifactDrawerMessageId"
+            :artifacts="artifactDrawerArtifacts"
             :preview-index="artifactPreviewIndex"
         />
     </div>
@@ -116,7 +118,7 @@ import { isCollectingSkillArtifacts } from '@/utils/skillArtifacts';
 import { useArtifactArriveMotion } from '@/composables/useArtifactArriveMotion';
 import { sanitizeMarkdownHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages } from '@/utils/security';
 import {
-    artifactIndexFromEventTarget,
+    artifactReferenceFromEventTarget,
     hydrateArtifactImages,
     isArtifactRefHref,
     renderArtifactReference,
@@ -204,6 +206,13 @@ const props = defineProps({
     followUpLoading: {
         type: Boolean,
         default: false
+    },
+    // The Chat view supplies artifacts from already-loaded assistant messages
+    // in this same session. They are only eligible through exact resource
+    // handles, enforced in sandboxArtifactRefs.
+    sessionArtifactRefs: {
+        type: Array,
+        default: () => []
     }
 });
 
@@ -244,9 +253,17 @@ const messageIdForArtifacts = computed(() => {
 // Set when the drawer is opened by clicking an inline artifact card, so it
 // lands directly on that file's preview instead of the list.
 const artifactPreviewIndex = ref(null);
-function openArtifactDrawer(previewIndex = null) {
-    if (!hasArtifacts.value) return;
+const artifactDrawerMessageId = ref('');
+const artifactDrawerArtifacts = ref([]);
+function openArtifactDrawer(previewIndex = null, originMessageId = '') {
+    const messageId = originMessageId || messageIdForArtifacts.value;
+    const artifacts = originMessageId
+        ? props.sessionArtifactRefs.filter((artifact) => artifact.messageId === originMessageId)
+        : artifactList.value;
+    if (!messageId || !artifacts.length) return;
     artifactPreviewIndex.value = previewIndex;
+    artifactDrawerMessageId.value = messageId;
+    artifactDrawerArtifacts.value = artifacts;
     showArtifactDrawer.value = true;
 }
 
@@ -284,6 +301,7 @@ const markdownRenderer = createChatMarkdownRenderer({
             href,
             alt: text || '',
             artifacts: artifactList.value,
+            historicalArtifacts: props.sessionArtifactRefs,
             labels: artifactRefLabels.value,
             context: artifactRefContext.value,
             streaming: !props.session?.is_completed,
@@ -386,11 +404,11 @@ const handleAddToKnowledge = () => {
 // 处理 markdown-content 中图片的点击事件
 const handleMarkdownImageClick = (e) => {
     const target = e.target;
-    const artifactIndex = artifactIndexFromEventTarget(target);
-    if (artifactIndex !== null) {
+    const artifactRef = artifactReferenceFromEventTarget(target);
+    if (artifactRef !== null) {
         e.preventDefault();
         e.stopPropagation();
-        openArtifactDrawer(artifactIndex);
+        openArtifactDrawer(artifactRef.index, artifactRef.originMessageId);
         return;
     }
     if (target && target.tagName === 'IMG') {

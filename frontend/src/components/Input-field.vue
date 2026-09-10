@@ -20,7 +20,7 @@ import {
   isDefaultContextWindow,
   effectiveContextWindow,
 } from '@/utils/contextWindow';
-import { type CustomAgent, BUILTIN_EMPLOYEE_ASSISTANT_ID } from '@/api/agent';
+import { type CustomAgent, BUILTIN_EMPLOYEE_ASSISTANT_ID, BUILTIN_OPERATING_ANALYST_ID, getAgentById } from '@/api/agent';
 import { employeeWebSearchEnabled } from '@/api/agent/constants';
 import { useChatResourcesStore } from '@/stores/chatResources';
 import { useEditorResourcesStore } from '@/stores/editorResources';
@@ -46,8 +46,10 @@ const props = withDefaults(defineProps<{
   assistantMessageId?: string;
   embeddedMode?: boolean;
   operating?: OperatingComposer;
+  agentId?: string;
 }>(), {
   embeddedMode: false,
+  agentId: '',
 });
 
 const route = useRoute();
@@ -186,13 +188,21 @@ const triggerImageUpload = () => {
   imageInputRef.value?.click();
 };
 const atButtonRef = ref<HTMLElement>();
-const selectedAgentId = computed(() => BUILTIN_EMPLOYEE_ASSISTANT_ID);
+const platformSkillSemanticAgentIds = new Set([
+  BUILTIN_EMPLOYEE_ASSISTANT_ID,
+  'builtin-data-analysis-base',
+  BUILTIN_OPERATING_ANALYST_ID,
+]);
+const selectedAgentId = computed(() => props.agentId || BUILTIN_EMPLOYEE_ASSISTANT_ID);
+const fixedAgent = ref<CustomAgent>();
 const selectedAgent = computed(() => {
+  if (fixedAgent.value?.id === selectedAgentId.value) return fixedAgent.value;
   const mine = agents.value.find(a => a.id === selectedAgentId.value);
   if (mine) return mine;
+  if (props.agentId) return undefined;
   return {
-    id: BUILTIN_EMPLOYEE_ASSISTANT_ID,
-    name: t('menu.chat'),
+    id: selectedAgentId.value,
+    name: selectedAgentId.value === BUILTIN_OPERATING_ANALYST_ID ? '经营分析助手' : t('menu.chat'),
     is_builtin: true,
     config: {
       agent_mode: 'smart-reasoning' as const,
@@ -263,10 +273,10 @@ const isKnowledgeBaseDisabledByAgent = computed(() => {
   return agentKBSelectionMode.value === 'none';
 });
 const isMentionDisabled = computed(() => {
-  if (settingsStore.isAgentStreamMode && isKnowledgeBaseDisabledByAgent.value) {
+  if (isAgentStreamMode.value && isKnowledgeBaseDisabledByAgent.value) {
     return agentMCPSelectionMode.value === 'none' && agentSkillsSelectionMode.value === 'none';
   }
-  return isKnowledgeBaseLockedByAgent.value && !settingsStore.isAgentStreamMode;
+  return isKnowledgeBaseLockedByAgent.value && !isAgentStreamMode.value;
 });
 
 // 智能体配置的模型 ID
@@ -292,8 +302,12 @@ const normalizeSelectionMode = (mode?: string): SelectionMode => {
   return mode === 'all' || mode === 'selected' || mode === 'none' ? mode : 'none';
 };
 
+const isAgentStreamMode = computed(() => (
+  props.agentId ? currentAgentConfig.value?.agent_mode === 'smart-reasoning' : settingsStore.isAgentStreamMode
+));
+
 const agentMCPSelectionMode = computed<SelectionMode>(() => {
-  if (!settingsStore.isAgentStreamMode || !hasAgentConfig.value) return 'none';
+  if (!isAgentStreamMode.value || !hasAgentConfig.value) return 'none';
   return normalizeSelectionMode(currentAgentConfig.value?.mcp_selection_mode);
 });
 
@@ -303,7 +317,7 @@ const agentMCPServiceIds = computed<string[]>(() => {
 });
 
 const isMCPAllowedByAgent = (service: MCPService) => {
-  if (!settingsStore.isAgentStreamMode || !service.enabled) return false;
+  if (!isAgentStreamMode.value || !service.enabled) return false;
   const mode = agentMCPSelectionMode.value;
   if (mode === 'none') return false;
   if (mode === 'selected') return agentMCPServiceIds.value.includes(service.id);
@@ -311,7 +325,7 @@ const isMCPAllowedByAgent = (service: MCPService) => {
 };
 
 const agentSkillsSelectionMode = computed<SelectionMode>(() => {
-  if (!settingsStore.isAgentStreamMode || !hasAgentConfig.value) return 'none';
+  if (!isAgentStreamMode.value || !hasAgentConfig.value) return 'none';
   return normalizeSelectionMode(currentAgentConfig.value?.skills_selection_mode);
 });
 
@@ -321,7 +335,7 @@ const agentSelectedSkills = computed<string[]>(() => {
 });
 
 const isSkillAllowedByAgent = (skillName: string) => {
-  if (!settingsStore.isAgentStreamMode || !editorResources.skillsAvailable) return false;
+  if (!isAgentStreamMode.value || !editorResources.skillsAvailable) return false;
   const mode = agentSkillsSelectionMode.value;
   if (mode === 'none') return false;
   if (mode === 'selected') return agentSelectedSkills.value.includes(skillName);
@@ -378,7 +392,7 @@ const kbToScopeCaps = (kb: any): Partial<ScopeCapabilities> => {
 // 当前智能体的 agent_mode（quick-answer / smart-reasoning），用于把
 // "RAG-only 模式不能 @ wiki-only 知识库"这种隐式约束带进 KB 过滤。
 const agentMode = computed(() => {
-  if (!props.embeddedMode && !props.operating) return settingsStore.assistantMode === 'quick' ? 'quick-answer' : 'smart-reasoning';
+  if (!props.embeddedMode && !props.operating && !props.agentId) return settingsStore.assistantMode === 'quick' ? 'quick-answer' : 'smart-reasoning';
   if (!hasAgentConfig.value) return '';
   return currentAgentConfig.value?.agent_mode || '';
 });
@@ -625,7 +639,9 @@ const inputPlaceholder = computed(() => {
   }
 });
 const composerPlaceholder = computed(() => (
-  props.operating ? '询问经营问题，或上传数据文件进行分析' : inputPlaceholder.value
+  props.operating || props.agentId === BUILTIN_OPERATING_ANALYST_ID
+    ? '询问经营问题，或上传数据文件进行分析'
+    : inputPlaceholder.value
 ));
 
 // 加载知识库列表（自己的 + 共享的，用于 @ 提及等）
@@ -703,15 +719,15 @@ watch(selectedFileIds, () => {
   loadFiles();
 }, { immediate: true });
 
-const employeeAssistantProjection = computed(() =>
-  agents.value.find(agent => agent.id === BUILTIN_EMPLOYEE_ASSISTANT_ID),
+const webSearchProjection = computed(() =>
+  selectedAgent.value,
 );
 const isWebSearchReadinessKnown = computed(() =>
-  typeof employeeAssistantProjection.value?.config?.web_search_enabled === 'boolean'
-  && typeof employeeAssistantProjection.value?.web_search_ready === 'boolean',
+  typeof webSearchProjection.value?.config?.web_search_enabled === 'boolean'
+  && typeof webSearchProjection.value?.web_search_ready === 'boolean',
 );
 const isWebSearchConfigured = computed(() =>
-  employeeWebSearchEnabled(true, employeeAssistantProjection.value),
+  employeeWebSearchEnabled(true, webSearchProjection.value),
 );
 
 // 加载服务端统一员工助理投影，供能力与就绪检查使用。
@@ -719,6 +735,10 @@ const loadAgents = async (force = false) => {
   if (props.operating) return;
   try {
     await chatResources.ensureAgents(force);
+    if (props.agentId) {
+      const response = await getAgentById(props.agentId);
+      fixedAgent.value = response.data;
+    }
   } catch (error) {
     console.error('Failed to load agents:', error);
   }
@@ -1140,8 +1160,8 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
 
     const skillsMode = agentSkillsSelectionMode.value;
     if (skillsMode !== 'none') {
-      await editorResources.ensureSkills(selectedAgentId.value === "builtin-employee-assistant"
-        ? "builtin-employee-assistant" : currentAgentConfig.value?.sandbox_config_id);
+      await editorResources.ensureSkills(platformSkillSemanticAgentIds.has(selectedAgentId.value)
+        ? BUILTIN_EMPLOYEE_ASSISTANT_ID : currentAgentConfig.value?.sandbox_config_id);
       skillItems = editorResources.skills
         .filter(skill => isSkillAllowedByAgent(skill.name))
         .map(skill => ({
@@ -1662,7 +1682,7 @@ watch([selectedKbIds, selectedFileIds], ([kbIds, fileIds]) => {
 }, { deep: true });
 
 const emit = defineEmits<{
-  (e: 'send-msg', query: string, modelId: string, mentionedItems: MentionRequestItem[], imageFiles: File[], attachmentFiles: AttachmentFile[]): void;
+  (e: 'send-msg', query: string, modelId: string, mentionedItems: MentionRequestItem[], imageFiles: File[], attachmentFiles: AttachmentFile[], webSearchEnabled: boolean): void;
   (e: 'stop-generation'): void;
 }>();
 
@@ -1678,7 +1698,7 @@ const createSession = async (val: string) => {
   if (props.isReplying) {
     return MessagePlugin.error(t('input.messages.replying'));
   }
-  if (!props.embeddedMode && settingsStore.assistantMode === 'quick' &&
+  if (!props.embeddedMode && !props.agentId && settingsStore.assistantMode === 'quick' &&
       allSelectedItems.value.some(item => item.type === 'mcp' || item.type === 'skill')) {
     MessagePlugin.info('使用技能或外部工具，请先选择深入处理；已选资料会保留。');
     return;
@@ -1703,7 +1723,7 @@ const createSession = async (val: string) => {
   if (props.embeddedMode) {
     const textarea = getTextareaEl();
     if (textarea) textarea.blur();
-    emit('send-msg', val, selectedModelId.value || '', [], [], []);
+    emit('send-msg', val, selectedModelId.value || '', [], [], [], false);
     clearvalue();
     return;
   }
@@ -1742,7 +1762,8 @@ const createSession = async (val: string) => {
   // detached DOM element (which causes getComputedStyle to throw).
   const textarea = getTextareaEl();
   if (textarea) textarea.blur();
-  emit('send-msg', val, selectedModelId.value, mentionedItems, imageFiles, attachmentFiles);
+  emit('send-msg', val, selectedModelId.value, mentionedItems, imageFiles, attachmentFiles,
+    isWebSearchEnabled.value && isWebSearchConfigured.value);
 
   // Clean up image previews
   uploadedImages.value.forEach(img => URL.revokeObjectURL(img.preview));
@@ -2013,13 +2034,13 @@ defineExpose({
           </t-tooltip>
         </div>
         <div class="control-left" v-else-if="!embeddedMode">
-          <select v-model="settingsStore.assistantMode" class="assistant-mode-select" aria-label="回答方式"
+          <select v-if="!agentId" v-model="settingsStore.assistantMode" class="assistant-mode-select" aria-label="回答方式"
             :disabled="isReplying" :title="settingsStore.assistantMode === 'quick' ? '快速查找事实、规章和资料，给出有依据的答案' : '按任务需要进行多步检索、分析和文件处理'">
             <option value="quick">快速查询</option>
             <option value="deep">深入处理</option>
           </select>
           <!-- 员工联网权限：服务端投影能力与就绪状态，前端只保留本轮许可开关。 -->
-          <t-tooltip v-if="showWebSearchButton && settingsStore.assistantMode === 'deep'" placement="top" theme="light"
+          <t-tooltip v-if="showWebSearchButton && (Boolean(agentId) || settingsStore.assistantMode === 'deep')" placement="top" theme="light"
             :popupProps="{ overlayClassName: 'input-field-tooltip' }">
             <template #content>
               <span v-if="!isWebSearchReadinessKnown">{{ $t('input.webSearch.loading') }}</span>
@@ -2108,7 +2129,7 @@ defineExpose({
           </t-tooltip>
 
           <!-- 模型显示 -->
-          <t-tooltip v-if="canSelectChatModel" :content="isModelLockedByAgent ? $t('input.modelLockedByAgent') : ''"
+          <t-tooltip v-if="canSelectChatModel && !agentId" :content="isModelLockedByAgent ? $t('input.modelLockedByAgent') : ''"
             :disabled="!isModelLockedByAgent">
             <div class="model-display" :class="{ 'agent-controlled': isModelLockedByAgent }">
               <div ref="modelButtonRef" class="model-selector-trigger" @click.stop="toggleModelSelector">
@@ -2131,7 +2152,7 @@ defineExpose({
         </div>
 
         <Teleport to="body">
-          <div v-if="canSelectChatModel && showModelSelector" class="model-selector-overlay" @click="closeModelSelector">
+          <div v-if="canSelectChatModel && !agentId && showModelSelector" class="model-selector-overlay" @click="closeModelSelector">
             <div class="model-selector-dropdown" :style="modelDropdownStyle" @click.stop>
               <div class="model-selector-header">
                 <span>{{ $t('conversationSettings.models.chatGroupLabel') }}</span>

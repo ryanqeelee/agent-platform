@@ -18,6 +18,7 @@
             经营简报
           </button>
           <button
+            v-if="!historyOnly"
             type="button"
             class="operating-header__link"
             :disabled="!controllerReady"
@@ -87,7 +88,7 @@
         <div ref="controlsTarget" class="operating-controls-portal" aria-live="polite"></div>
       </div>
 
-      <Teleport :to="homeComposerTarget" :disabled="!isAnalysisHome || !homeComposerTarget">
+      <Teleport v-if="!historyOnly" :to="homeComposerTarget" :disabled="!isAnalysisHome || !homeComposerTarget">
         <div class="operating-composer-wrap">
           <div v-if="actionError" class="operating-action-error" role="alert">
             <span>{{ actionError }}</span>
@@ -186,6 +187,8 @@ import { operatingProcessSession } from './operatingPresentation'
 const emit = defineEmits<{
   (event: 'controller-change', controller: OperatingController | null): void
 }>()
+
+defineProps<{ historyOnly?: boolean }>()
 
 const APP_AUTH_TOKEN_KEY = 'retail_ai_app_auth_token'
 const HANDOFF_PROMPT_KEY = 'operating_analysis_handoff_prompt_v1'

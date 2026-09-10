@@ -1,10 +1,14 @@
 package agent
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -120,8 +124,59 @@ func TestFinishToolSpanNilSafe(t *testing.T) {
 			t.Fatalf("finishToolSpan panicked on nil span: %v", r)
 		}
 	}()
-	finishToolSpan(nil, types.ToolCall{}, errors.New("boom"), 123)
-	finishToolSpan(nil, types.ToolCall{Result: &types.ToolResult{Success: true}}, nil, 0)
+	finishToolSpan(context.Background(), nil, types.ToolCall{}, errors.New("boom"), 123)
+	finishToolSpan(context.Background(), nil, types.ToolCall{Result: &types.ToolResult{Success: true}}, nil, 0)
+}
+
+func TestGovernedToolSpanIsMetadataOnly(t *testing.T) {
+	ctx := types.WithGovernedDataObservability(context.Background())
+	tc := types.LLMToolCall{
+		ID:             "call-governed",
+		Function:       types.FunctionCall{Name: "governed_data_query", Arguments: `{"sql":"SQL_SENTINEL"}`},
+		ModelArguments: `{"sql":"SQL_SENTINEL"}`,
+	}
+	input := buildToolSpanInputForContext(ctx, tc, map[string]any{"sql": "SQL_SENTINEL"}, false)
+	output := buildToolSpanOutput(ctx, types.ToolCall{Result: &types.ToolResult{
+		Success: true,
+		Output:  `{"rows":["ROWS_SENTINEL"]}`,
+		Data:    map[string]interface{}{"rows": "ROWS_SENTINEL"},
+	}}, 42)
+	encoded, err := json.Marshal([]interface{}{input, output})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"SQL_SENTINEL", "ROWS_SENTINEL"} {
+		if strings.Contains(string(encoded), secret) {
+			t.Fatalf("governed tool span leaked %q: %s", secret, encoded)
+		}
+	}
+	for _, metadata := range []string{"args_redacted", "output_len", "duration_ms", "success"} {
+		if !strings.Contains(string(encoded), metadata) {
+			t.Fatalf("governed tool span lost %q: %s", metadata, encoded)
+		}
+	}
+}
+
+func TestEngineDetectsGovernedToolConfigurationAndHistory(t *testing.T) {
+	cases := []struct {
+		name    string
+		config  *types.AgentConfig
+		history []chat.Message
+		want    bool
+	}{
+		{name: "ordinary", config: &types.AgentConfig{AllowedTools: []string{"knowledge_search"}}},
+		{name: "configured", config: &types.AgentConfig{AllowedTools: []string{"governed_data_schema"}}, want: true},
+		{name: "tool result history", config: &types.AgentConfig{}, history: []chat.Message{{Role: "tool", Name: "governed_data_query", Content: "ROWS_SENTINEL"}}, want: true},
+		{name: "tool call history", config: &types.AgentConfig{}, history: []chat.Message{{Role: "assistant", ToolCalls: []chat.ToolCall{{Function: chat.FunctionCall{Name: "governed_data_query"}}}}}, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := &AgentEngine{config: tc.config}
+			if got := engine.requiresGovernedDataObservability(tc.history); got != tc.want {
+				t.Fatalf("requiresGovernedDataObservability() = %v, want %v", got, tc.want)
+			}
+		})
+	}
 }
 
 // TestIterOutcomeString locks in the string labels that surface in Langfuse

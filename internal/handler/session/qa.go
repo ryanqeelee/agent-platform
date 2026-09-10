@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -42,6 +43,7 @@ type qaRequestContext struct {
 	query                 string
 	session               *types.Session
 	customAgent           *types.CustomAgent
+	mode                  qaMode
 	assistantMessage      *types.Message
 	knowledgeBaseIDs      []string
 	knowledgeIDs          []string
@@ -100,7 +102,8 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 // parseQARequest parses and validates a QA request, returns the request context
 func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestContext, *CreateKnowledgeQARequest, error) {
 	receivedAt := time.Now()
-	ctx := logger.CloneContext(c.Request.Context())
+	requestCtx := c.Request.Context()
+	ctx := cloneInteractiveQATurn(requestCtx)
 	requestID := secutils.SanitizeForLog(c.GetString(types.RequestIDContextKey.String()))
 	logger.Infof(ctx, "[%s] TTFB:start request_id=%s received_at=%d",
 		logPrefix, requestID, receivedAt.UnixMilli())
@@ -156,12 +159,6 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		request.Images[i].Caption = ""
 	}
 
-	// Log request details
-	if requestJSON, err := json.Marshal(request); err == nil {
-		logger.Infof(ctx, "[%s] Request: session_id=%s, request=%s",
-			logPrefix, sessionID, secutils.SanitizeForLog(secutils.CompactImageDataURLForLog(string(requestJSON))))
-	}
-
 	// Get session. QA writes new messages into the session, so use the strict
 	// owner scope: a tenant admin may read an API-key session but must not be
 	// able to post messages to it (which would otherwise fail later at message
@@ -178,16 +175,70 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	// Get custom agent if agent_id is provided. Backend resolves shared agent from
 	// the exact share relation; API keys cannot inherit human workspace shares.
 	customAgent, effectiveTenantID, sharedAgentReadOnly := h.resolveAgent(ctx, c, request.AgentID, request.AgentSourceTenantID)
-	if request.AgentID == types.BuiltinEmployeeAssistantID && customAgent == nil {
+	if (request.AgentID == types.BuiltinEmployeeAssistantID || request.AgentID == "builtin-operating-analyst") && customAgent == nil {
 		return nil, nil, errors.NewServiceUnavailableError("员工助理暂不可用，请稍后重试")
 	}
 	if request.AgentSourceTenantID != 0 && customAgent == nil {
 		return nil, nil, errors.NewNotFoundError("Shared agent not found")
 	}
 
+	if request.AgentID == "builtin-operating-analyst" && request.AgentSourceTenantID != 0 {
+		return nil, nil, errors.NewBadRequestError("经营分析仅使用当前企业数据")
+	}
 	customAgent, assistantMode, modeErr := resolveEmployeeMode(customAgent, request.AssistantMode)
 	if modeErr != nil {
 		return nil, nil, errors.NewBadRequestError(modeErr.Error())
+	}
+	// Resolve the execution path once, before assigning turn credentials. Both
+	// endpoints execute this same mode after parsing.
+	agentMode := assistantMode == assistantModeDeep
+	if logPrefix == "AgentQA" {
+		agentMode = request.AgentEnabled
+		if customAgent != nil {
+			agentMode = customAgent.IsAgentMode()
+		}
+	}
+	mode := qaModeNormal
+	if agentMode {
+		mode = qaModeAgent
+	}
+	governedAgent := agentMode && agentCanConsumeGovernedData(customAgent)
+	if agentRequiresGovernedAdmission(customAgent) {
+		// Admission still applies to governed selections on the normal pipeline,
+		// but only an executable governed turn retains the credential afterward.
+		admissionCtx := types.WithGovernedDataObservability(ctx)
+		if effectiveTenantID == 0 {
+			admissionCtx = types.CopyGovernedDataTurnCredential(admissionCtx, requestCtx)
+		} else {
+			admissionCtx = context.WithValue(admissionCtx, types.TenantIDContextKey, effectiveTenantID)
+		}
+		if err := h.authorizeGovernedAgent(admissionCtx, customAgent); err != nil {
+			if stderrors.Is(err, tools.ErrGovernedDataAccessDenied) {
+				return nil, nil, errors.NewForbiddenError("经营分析未获授权，请联系企业管理员")
+			}
+			return nil, nil, errors.NewServiceUnavailableError("经营分析准入服务暂不可用，请稍后重试")
+		}
+		if governedAgent {
+			ctx = admissionCtx
+			// Logger emits captured bodies only after this handler returns.
+			c.Request = c.Request.WithContext(ctx)
+		}
+	}
+	if !governedAgent {
+		governedHistory, historyErr := h.sessionHasGovernedHistory(ctx, sessionID, customAgent, agentMode)
+		if governedHistory || historyErr != nil {
+			ctx = types.WithGovernedDataObservability(ctx)
+			// A switched ordinary agent may replay governed answers, but it receives
+			// no governed-data credential because it cannot call those tools.
+			c.Request = c.Request.WithContext(ctx)
+		}
+	}
+	if types.GovernedDataObservability(ctx) {
+		logger.Infof(ctx, "[%s] Request: session_id=%s, agent_id=%s, query_bytes=%d, payload_omitted=true",
+			logPrefix, sessionID, secutils.SanitizeForLog(request.AgentID), len(request.Query))
+	} else if requestJSON, err := json.Marshal(request); err == nil {
+		logger.Infof(ctx, "[%s] Request: session_id=%s, request=%s",
+			logPrefix, sessionID, secutils.SanitizeForLog(secutils.CompactImageDataURLForLog(string(requestJSON))))
 	}
 	if assistantMode == assistantModeQuick && (len(request.MCPServiceIDs) > 0 || len(request.SkillNames) > 0 || len(mentionedIDsByType(request.MentionedItems, "mcp")) > 0 || len(mentionedIDsByType(request.MentionedItems, "skill")) > 0) {
 		return nil, nil, errors.NewBadRequestError("使用技能或外部工具需要选择深入处理")
@@ -396,6 +447,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		query:       request.Query,
 		session:     session,
 		customAgent: customAgent,
+		mode:        mode,
 		assistantMessage: &types.Message{
 			SessionID:        sessionID,
 			Role:             "assistant",
@@ -734,7 +786,10 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool) *
 
 	// Create EventBus and cancellable context
 	eventBus := event.NewEventBus()
-	asyncCtx, cancel := context.WithCancel(logger.CloneContext(baseCtx))
+	asyncCtx, cancel := context.WithCancel(cloneInteractiveQATurn(baseCtx))
+	if client, governed := tools.GovernedAnalysisClientFromContext(asyncCtx); governed {
+		client.SetTurnCancel(cancel)
+	}
 
 	streamCtx := &sseStreamContext{
 		eventBus:         eventBus,
@@ -899,13 +954,8 @@ func (h *Handler) KnowledgeQA(c *gin.Context) {
 		return
 	}
 
-	// An explicit employee mode has the same meaning on both QA endpoints.
-	if reqCtx.assistantMode == assistantModeDeep {
-		h.executeQA(reqCtx, qaModeAgent, !request.DisableTitle)
-		return
-	}
-	// Execute normal mode QA, generate title unless disabled
-	h.executeQA(reqCtx, qaModeNormal, !request.DisableTitle)
+	// Execute the mode resolved before credential and history classification.
+	h.executeQA(reqCtx, reqCtx.mode, !request.DisableTitle)
 }
 
 // AgentQA godoc
@@ -930,11 +980,9 @@ func (h *Handler) AgentQA(c *gin.Context) {
 		return
 	}
 
-	// Determine if agent mode should be enabled
-	// Priority: customAgent.IsAgentMode() > request.AgentEnabled
-	agentModeEnabled := request.AgentEnabled
+	// Use the same resolved path that governed credential classification used.
+	agentModeEnabled := reqCtx.mode == qaModeAgent
 	if reqCtx.customAgent != nil {
-		agentModeEnabled = reqCtx.customAgent.IsAgentMode()
 		logger.Infof(reqCtx.ctx, "Agent mode determined by custom agent: %v (config.agent_mode=%s)",
 			agentModeEnabled, reqCtx.customAgent.Config.AgentMode)
 	}
@@ -1026,6 +1074,15 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 		return
 	}
 	reqCtx.assistantMessage = assistantMessagePtr
+	if mode == qaModeAgent && agentCanConsumeGovernedData(reqCtx.customAgent) {
+		reqCtx.ctx, err = h.startGovernedAnalysisTurn(reqCtx.ctx, sessionID, assistantMessagePtr.ID, reqCtx.query)
+		if err != nil {
+			updateCtx := context.WithValue(context.WithoutCancel(reqCtx.ctx), types.TenantIDContextKey, reqCtx.session.TenantID)
+			h.completeAssistantMessage(updateCtx, assistantMessagePtr, "", "")
+			reqCtx.c.Error(errors.NewInternalServerError(err.Error()))
+			return
+		}
+	}
 	// Accept the exact user expression under the policy that exists at input
 	// time. Carry that captured version through the turn for later answer-source
 	// signals; completion must never rescan or retroactively admit this input.
@@ -1077,6 +1134,7 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 				h.completeAssistantMessage(updateCtx, streamCtx.assistantMessage, reqCtx.query, reqCtx.userMessageID)
 				logger.Infof(streamCtx.asyncCtx, "Agent QA service completed for session: %s", sessionID)
 			}
+			terminateAbandonedGovernedAnalysis(streamCtx.asyncCtx)
 		}()
 
 		// Resolve pre-uploaded attachments (may still be parsing): waits with a

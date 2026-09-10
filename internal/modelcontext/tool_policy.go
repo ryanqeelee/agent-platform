@@ -95,6 +95,10 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 	"data_schema": {
 		sourceIDKeys: map[string]struct{}{"knowledge_id": {}},
 	},
+	// External business tables and SQL literals are not knowledge-base IDs.
+	// Query provenance and sandbox paths already have their own identities.
+	"governed_data_schema": {},
+	"governed_data_query":  {},
 	"web_fetch": {
 		sourceIDKeys: map[string]struct{}{"url": {}, "urls": {}},
 		sourceOutput: true,

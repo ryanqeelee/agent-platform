@@ -197,6 +197,88 @@ builtin_agents:
       rerank_top_k: 5
       rerank_threshold: 0.3
 
+  # Platform-owned native analysis base. This is a separate product definition,
+  # not a parent class or replacement for the existing file data analyst above.
+  - id: "builtin-data-analysis-base"
+    avatar: "📈"
+    is_builtin: true
+    i18n:
+      default:
+        name: "Data Analysis Base"
+        description: "Native analysis workspace for uploaded files, calculations, charts and reports"
+      zh-CN:
+        name: "数据分析 Base"
+        description: "用于上传文件、计算、图表与报告的原生分析工作区"
+    config:
+      agent_mode: "smart-reasoning"
+      agent_type: "data-analysis"
+      system_prompt_id: "data_analysis_base"
+      temperature: 0.3
+      max_completion_tokens: 32768
+      max_iterations: 30
+      kb_selection_mode: "all"
+      image_upload_enabled: true
+      allowed_tools:
+        - "knowledge_search"
+        - "grep_chunks"
+        - "list_knowledge_chunks"
+        - "get_document_info"
+        - "query_knowledge_graph"
+        - "wiki_search"
+        - "wiki_read_page"
+        - "wiki_read_source_doc"
+        - "data_schema"
+        - "data_analysis"
+      web_search_enabled: true
+      web_search_max_results: 5
+      multi_turn_enabled: true
+      history_turns: 10
+      skills_selection_mode: "all"
+      mcp_selection_mode: "none"
+      citation_enabled: true
+
+  # Independent governed operating-analysis product. It selects the shared
+  # native engine and sandbox capabilities through ordinary agent config.
+  - id: "builtin-operating-analyst"
+    avatar: "📊"
+    is_builtin: true
+    i18n:
+      default:
+        name: "Operating Analyst"
+        description: "Governed retail operating analysis with calculations, charts and reports"
+      zh-CN:
+        name: "经营分析助手"
+        description: "基于受控经营数据进行计算、图表与报告分析"
+    config:
+      agent_mode: "smart-reasoning"
+      agent_type: "data-analysis"
+      system_prompt_id: "operating_analyst"
+      temperature: 0.3
+      max_completion_tokens: 32768
+      max_iterations: 30
+      kb_selection_mode: "all"
+      image_upload_enabled: true
+      allowed_tools:
+        - "governed_data_schema"
+        - "governed_data_query"
+        - "knowledge_search"
+        - "grep_chunks"
+        - "list_knowledge_chunks"
+        - "get_document_info"
+        - "query_knowledge_graph"
+        - "wiki_search"
+        - "wiki_read_page"
+        - "wiki_read_source_doc"
+        - "data_schema"
+        - "data_analysis"
+      web_search_enabled: true
+      web_search_max_results: 5
+      multi_turn_enabled: true
+      history_turns: 10
+      skills_selection_mode: "all"
+      mcp_selection_mode: "none"
+      citation_enabled: true
+
   - id: "builtin-wiki-researcher"
     avatar: "📚"
     is_builtin: true

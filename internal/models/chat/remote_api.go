@@ -167,10 +167,22 @@ func (c *RemoteAPIChat) buildOutbound(
 
 // logRequest 记录请求日志
 func (c *RemoteAPIChat) logRequest(ctx context.Context, req any, isStream bool) {
+	if types.GovernedDataObservability(ctx) {
+		logger.Infof(ctx, "[LLM Request] model=%s, stream=%v, payload_omitted=true",
+			c.modelName, isStream)
+		return
+	}
 	if jsonData, err := json.MarshalIndent(req, "", "  "); err == nil {
 		logger.Infof(ctx, "[LLM Request] model=%s, stream=%v, request:\n%s",
 			c.modelName, isStream, secutils.CompactImageDataURLForLog(string(jsonData)))
 	}
+}
+
+func remoteAPIStatusError(ctx context.Context, statusCode int, body []byte) error {
+	if types.GovernedDataObservability(ctx) {
+		return fmt.Errorf("API request failed with status %d", statusCode)
+	}
+	return fmt.Errorf("API request failed with status %d: %s", statusCode, string(body))
 }
 
 // Chat 进行非流式聊天
@@ -224,8 +236,13 @@ func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, endpoint string, cu
 	if err := secutils.ValidateURLForSSRF(endpoint); err != nil {
 		return nil, fmt.Errorf("endpoint SSRF check failed: %w", err)
 	}
-	logger.Infof(ctx, "[LLM Request] Remote HTTP, endpoint=%s, model=%s, raw HTTP request:\n%s",
-		endpoint, c.modelName, secutils.CompactImageDataURLForLog(string(jsonData)))
+	if types.GovernedDataObservability(ctx) {
+		logger.Infof(ctx, "[LLM Request] Remote HTTP, endpoint=%s, model=%s, payload_omitted=true",
+			endpoint, c.modelName)
+	} else {
+		logger.Infof(ctx, "[LLM Request] Remote HTTP, endpoint=%s, model=%s, raw HTTP request:\n%s",
+			endpoint, c.modelName, secutils.CompactImageDataURLForLog(string(jsonData)))
+	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
 	if err != nil {
@@ -250,7 +267,7 @@ func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, endpoint string, cu
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+		return nil, remoteAPIStatusError(ctx, resp.StatusCode, body)
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -292,7 +309,7 @@ func (c *RemoteAPIChat) ChatStream(ctx context.Context, messages []Message, opts
 	req := *(body.(*openai.ChatCompletionRequest))
 	c.logRequest(timeoutCtx, req, true)
 
-	streamDumper := newStreamPacketDumper(c.modelName, &req)
+	streamDumper := newStreamPacketDumper(timeoutCtx, c.modelName, &req)
 	if streamDumper != nil {
 		logger.Infof(timeoutCtx, "[LLM Stream Raw Dump] writing packets to %s", streamDumper.Path())
 	}
@@ -357,7 +374,10 @@ func (c *RemoteAPIChat) chatStreamWithRawHTTP(ctx context.Context, endpoint stri
 		return nil, fmt.Errorf("endpoint SSRF check failed: %w", err)
 	}
 
-	if prettyJSON, pErr := json.MarshalIndent(customReq, "", "  "); pErr == nil {
+	if types.GovernedDataObservability(ctx) {
+		logger.Infof(ctx, "[LLM Stream Request] endpoint=%s, model=%s, stream=true, payload_omitted=true",
+			endpoint, c.modelName)
+	} else if prettyJSON, pErr := json.MarshalIndent(customReq, "", "  "); pErr == nil {
 		logger.Infof(ctx, "[LLM Stream Request] endpoint=%s, model=%s, stream=true, request:\n%s",
 			endpoint, c.modelName, secutils.CompactImageDataURLForLog(string(prettyJSON)))
 	} else {
@@ -384,11 +404,11 @@ func (c *RemoteAPIChat) chatStreamWithRawHTTP(ctx context.Context, endpoint stri
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+		return nil, remoteAPIStatusError(ctx, resp.StatusCode, body)
 	}
 
 	streamChan := make(chan types.StreamResponse)
-	streamDumper := newStreamPacketDumper(c.modelName, customReq)
+	streamDumper := newStreamPacketDumper(ctx, c.modelName, customReq)
 	if streamDumper != nil {
 		logger.Infof(ctx, "[LLM Stream Raw Dump] writing packets to %s", streamDumper.Path())
 	}

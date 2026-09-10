@@ -9,9 +9,9 @@ const client = readFileSync(fileURLToPath(new URL('./operatingClient.ts', import
 const menu = readFileSync(fileURLToPath(new URL('../../components/menu.vue', import.meta.url)), 'utf8')
 const router = readFileSync(fileURLToPath(new URL('../../router/index.ts', import.meta.url)), 'utf8')
 
-test('the platform shell keeps one native operating host after the first authorized visit', () => {
-  assert.match(platform, /<OperatingWorkspace[\s\S]*?v-if="operatingWorkspaceMounted"[\s\S]*?v-show="isOperatingRoute"/)
-  assert.match(platform, /if \(isOperating\) operatingWorkspaceMounted\.value = true/)
+test('the platform shell keeps the old host only for legacy history', () => {
+  assert.match(platform, /<OperatingWorkspace[\s\S]*?v-if="isLegacyOperatingRoute"/)
+  assert.doesNotMatch(platform, /operatingWorkspaceMounted/)
   assert.match(platform, /<Menu id="mobile-workspace-menu" :operating-controller="operatingController"[^>]*><\/Menu>[\s\S]*?<OperatingWorkspace/)
   assert.doesNotMatch(workspace, /<iframe|postMessage|contentWindow|buildEmbeddedOperatingPath/)
   assert.match(workspace, /<InputField :operating="operatingComposer"/)
@@ -49,6 +49,8 @@ test('existing route authorization and employee handoff storage remain the entry
   assert.doesNotMatch(router, /window\.location\.assign\(handoffPrompt/)
   assert.match(router, /sessionStorage\.setItem\(\s*OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY/)
   assert.match(router, /localStorage\.setItem\('retail_ai_app_auth_token', response\.access_token\)/)
+  assert.match(router, /path: 'operating-analysis\/chat\/:chatid'[\s\S]*?agentId: BUILTIN_OPERATING_ANALYST_ID/)
+  assert.match(router, /typeof to\.query\.data_session === 'string'[\s\S]*?authorizeLegacyOperatingAnalysis/)
   assert.match(router, /return true/)
 })
 
@@ -59,6 +61,7 @@ test('native sidebar reads operating history from the mounted Center controller'
   assert.match(workspace, /emit\('controller-change', null\)/)
   assert.match(menu, /data-session-source="operating-controller"/)
   assert.match(menu, /<SessionSidebarRow[\s\S]*?:menu-options="operatingSessionMenuOptions"/)
+  assert.match(menu, /const operatingSessionMenuOptions: never\[\] = \[\]/)
   assert.match(menu, /nextController\.getSnapshot\(\)/)
   assert.match(menu, /nextController\.subscribe\(publishOperatingSnapshot\)/)
   assert.match(menu, /groupSessionsByDate\([\s\S]*?classifyDateBucket\(session\.updated_at\)/)
@@ -72,5 +75,6 @@ test('native sidebar reads operating history from the mounted Center controller'
 
 test('employee conversation history remains separate from operating history', () => {
   assert.match(menu, /class="submenu" v-else-if="!uiStore\.sidebarCollapsed"/)
-  assert.match(menu, /route\.path === '\/platform\/operating-brief' \|\| route\.path === '\/platform\/operating-analysis'/)
+  assert.match(menu, /route\.path === '\/platform\/operating-brief' \|\| route\.path\.startsWith\('\/platform\/operating-analysis'\)/)
+  assert.match(menu, /last_request_state\?\.agent_id === BUILTIN_OPERATING_ANALYST_ID/)
 })

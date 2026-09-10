@@ -104,7 +104,7 @@
             </div>
 
             <div
-                v-if="!uiStore.sidebarCollapsed && isOperatingRoute"
+                v-if="!uiStore.sidebarCollapsed && isLegacyOperatingRoute"
                 class="submenu operating-session-list"
                 data-session-source="operating-controller"
             >
@@ -260,6 +260,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { getSessionsList, batchDelSessions, deleteAllSessions, getSession } from "@/api/chat/index";
 import { useChatResourcesStore } from '@/stores/chatResources';
 import { listAllIMChannels } from '@/api/agent/index';
+import { BUILTIN_OPERATING_ANALYST_ID } from '@/api/agent';
 import SessionSidebarRow from './SessionSidebarRow.vue';
 import {
     clearSession,
@@ -478,7 +479,11 @@ const isInAgentList = computed<boolean>(() => route.name === 'agentList');
 const isInOrganizationList = computed<boolean>(() => route.name === 'organizationList');
 
 const isOperatingRoute = computed<boolean>(() =>
-    route.path === '/platform/operating-brief' || route.path === '/platform/operating-analysis'
+    route.path === '/platform/operating-brief' || route.path.startsWith('/platform/operating-analysis')
+);
+const isLegacyOperatingRoute = computed<boolean>(() =>
+    route.path === '/platform/operating-brief'
+    || (route.path === '/platform/operating-analysis' && typeof route.query.data_session === 'string')
 );
 
 // 统一的菜单项激活状态判断
@@ -582,10 +587,7 @@ const operatingGroupedSessions = computed(() => groupSessionsByDate(
     dateBucketLabels.value,
     (session) => classifyDateBucket(session.updated_at),
 ));
-const operatingSessionMenuOptions = [
-    { content: '重命名', value: 'rename' },
-    { content: '删除', value: 'delete', theme: 'error' as const },
-];
+const operatingSessionMenuOptions: never[] = [];
 
 const openOperatingSession = async (id: string): Promise<void> => {
     try {
@@ -817,9 +819,13 @@ const debounce = (fn: (...args: any[]) => void, delay: number) => {
         timer = setTimeout(() => fn(...args), delay)
     }
 }
+const nativeSessionPath = (item: any) => item?.last_request_state?.agent_id === BUILTIN_OPERATING_ANALYST_ID
+    ? `operating-analysis/chat/${item.id}`
+    : `chat/${item.id}`;
+
 const mapSessionRow = (item: any) => ({
     title: item.title ? item.title : t('menu.newSession'),
-    path: `chat/${item.id}`,
+    path: nativeSessionPath(item),
     id: item.id,
     isMore: false,
     isNoTitle: item.title ? false : true,
@@ -843,7 +849,7 @@ const menuChildToSessionRow = (item: Record<string, unknown>): SessionForGroupin
     const id = String(item.id);
     return {
         id,
-        path: typeof item.path === 'string' ? item.path : `chat/${id}`,
+        path: typeof item.path === 'string' ? item.path : nativeSessionPath(item),
         title: typeof item.title === 'string' ? item.title : undefined,
         is_pinned: !!item.is_pinned,
         created_at: typeof item.created_at === 'string' ? item.created_at : undefined,
@@ -1107,7 +1113,9 @@ onMounted(async () => {
     const routeName = typeof route.name === 'string' ? route.name : (route.name ? String(route.name) : '')
     currentpath.value = routeName;
     if (route.params.chatid) {
-        currentSecondpath.value = `chat/${route.params.chatid}`;
+        currentSecondpath.value = route.name === 'operatingAnalysisChat'
+            ? `operating-analysis/chat/${route.params.chatid}`
+            : `chat/${route.params.chatid}`;
     }
 
     window.addEventListener(SESSION_MUTATION_EVENT, handleSessionMutation);
@@ -1144,7 +1152,9 @@ watch([() => route.name, () => route.params], (newvalue, oldvalue) => {
     const nameStr = typeof newvalue[0] === 'string' ? (newvalue[0] as string) : (newvalue[0] ? String(newvalue[0]) : '')
     currentpath.value = nameStr;
     if (newvalue[1].chatid) {
-        currentSecondpath.value = `chat/${newvalue[1].chatid}`;
+        currentSecondpath.value = nameStr === 'operatingAnalysisChat'
+            ? `operating-analysis/chat/${newvalue[1].chatid}`
+            : `chat/${newvalue[1].chatid}`;
     } else {
         currentSecondpath.value = "";
     }
@@ -1152,7 +1162,7 @@ watch([() => route.name, () => route.params], (newvalue, oldvalue) => {
     // 创建新会话时 creatChat 会先 updataMenuChildren，再跳转 chat/:id。
     // 侧栏实际渲染 sessionBuckets，需按 buckets 判断是否缺失，不能把 menuStore 当真相来源。
     const newChatId = (newvalue[1] as any)?.chatid as string | undefined;
-    if (nameStr === 'chat' && newChatId) {
+    if ((nameStr === 'chat' || nameStr === 'operatingAnalysisChat') && newChatId) {
         ensureSessionInSidebar(newChatId);
         void syncActiveBucketFromChat(newChatId);
     }
@@ -1242,9 +1252,9 @@ const gotopage = async (path: string) => {
             const surface = path === 'operating-brief' ? 'brief' : 'analysis';
             router.push({
                 path: `/platform/${path}`,
-                query: isOperatingRoute.value
+                query: path === 'operating-brief' && isLegacyOperatingRoute.value
                     ? { ...route.query, data_surface: surface }
-                    : { data_surface: surface },
+                    : path === 'operating-brief' ? { data_surface: surface } : {},
             });
         } else {
             router.push(`/platform/${path}`);

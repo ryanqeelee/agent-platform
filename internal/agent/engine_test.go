@@ -902,11 +902,14 @@ func TestStreamFinalAnswerToEventBus_EmitsDoneWhenProviderEndsWithEmptyChunk(t *
 	err := engine.streamFinalAnswerToEventBus(context.Background(), "test query", emptyMessages(), state, "sess-1")
 
 	require.NoError(t, err)
-	require.Len(t, finalAnswerEvents, 2)
-	assert.False(t, finalAnswerEvents[0].Done)
-	assert.True(t, finalAnswerEvents[1].Done)
-	assert.Equal(t, "final answer", finalAnswerEvents[0].Content+finalAnswerEvents[1].Content,
-		"a decoder may hold a short suffix until Done to rule out a split model handle")
+	require.NotEmpty(t, finalAnswerEvents)
+	var answer strings.Builder
+	for i, evt := range finalAnswerEvents {
+		answer.WriteString(evt.Content)
+		assert.Equal(t, i == len(finalAnswerEvents)-1, evt.Done)
+	}
+	assert.Equal(t, "final answer", answer.String(),
+		"decoders may hold short suffixes; the final completion follows all decoded text")
 	assert.Equal(t, "final answer", state.FinalAnswer)
 }
 

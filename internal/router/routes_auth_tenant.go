@@ -49,9 +49,13 @@ func RegisterTenantRoutes(
 	g *rbacGuards,
 ) {
 	// Narrow Ringxun activation adapter. It is tenant-header optional because
-	// the prepared tenant does not exist when the first command arrives.
+	// the prepared tenant does not exist when the first command arrives. The
+	// route-specific guard also rejects JWT principals so activation can only
+	// enter through the Ringxun platform API-key command path.
 	g.apiKeyRoute(r, http.MethodPut, "/system/enterprise-activations/:activation_id",
-		apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage), handler.PutEnterpriseActivation)
+		apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage),
+		middleware.RequirePlatformAPIKeyCapability(types.APIKeyCapabilitySystemTenantsManage),
+		handler.PutEnterpriseActivation)
 	g.apiKeyRoute(r, http.MethodPut, "/system/tenants/:id/edge-binding",
 		apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage), handler.PutGovernedEdgeBinding)
 

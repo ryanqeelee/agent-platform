@@ -33,7 +33,7 @@ interface OperatingBriefControllerOptions {
   active: boolean
   visible: boolean
   scheduler?: Scheduler
-  onStartAnalysis(handoff: OperatingBriefAnalysisHandoffDTO): void
+  onStartAnalysis(handoff: OperatingBriefAnalysisHandoffDTO): void | Promise<void>
   onOpenAnalysis(): void
 }
 
@@ -298,7 +298,7 @@ export function createOperatingBriefController(
         if (handoff.schema !== 'OperatingAnalysisHandoffV1' || !handoff.question.trim()) {
           throw new Error('invalid operating analysis handoff')
         }
-        options.onStartAnalysis(handoff)
+        await options.onStartAnalysis(handoff)
       } catch (error) {
         if (!stillOwnsNavigation() || isAbort(error)) return
         launchStarted = false

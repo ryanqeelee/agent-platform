@@ -295,9 +295,25 @@ const controller = createOperatingBriefController({
   })),
   active: props.active,
   visible: typeof document === 'undefined' || document.visibilityState !== 'hidden',
-  onStartAnalysis(handoff) {
-    sessionStorage.setItem(OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY, JSON.stringify(handoff))
-    void router.push('/platform/operating-analysis')
+  async onStartAnalysis(handoff) {
+    const raw = JSON.stringify({ ...handoff, owner: {
+      actorId: String(auth.user?.id ?? ''), tenantId: String(auth.effectiveTenantId ?? ''),
+    } })
+    sessionStorage.setItem(OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY, raw)
+    try {
+      const failure = await router.push('/platform/operating-analysis')
+      if (failure || router.currentRoute.value.path !== '/platform/operating-analysis') {
+        if (sessionStorage.getItem(OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY) === raw) {
+          sessionStorage.removeItem(OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY)
+        }
+        throw new Error('analysis navigation did not complete')
+      }
+    } catch (error) {
+      if (sessionStorage.getItem(OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY) === raw) {
+        sessionStorage.removeItem(OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY)
+      }
+      throw error
+    }
   },
   onOpenAnalysis() {
     void router.push('/platform/operating-analysis')
@@ -448,7 +464,8 @@ function onVisibilityChange() {
   controller.setVisible(document.visibilityState !== 'hidden')
 }
 
-watch([() => auth.user?.id, () => auth.effectiveTenantId], () => {
+watch([() => auth.user?.id, () => auth.effectiveTenantId], (_value, previous) => {
+  if (previous?.length) sessionStorage.removeItem(OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY)
   void controller.resetIdentity()
 }, { immediate: true, flush: 'sync' })
 watch(() => props.active, value => controller.setActive(value))

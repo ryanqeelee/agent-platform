@@ -25,8 +25,12 @@ import { BUILTIN_OPERATING_ANALYST_ID } from '@/api/agent'
 import { createSessions } from '@/api/chat'
 import { OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY } from '@/api/operatingAnalysis'
 import { useMenuStore } from '@/stores/menu'
+import { useAuthStore } from '@/stores/auth'
+import { ownedOperatingPromptQuestion, sameOperatingPromptOwner } from './operatingNavigation'
 
 const router = useRouter()
+const auth = useAuthStore()
+const promptOwner = () => ({ actorId: String(auth.user?.id ?? ''), tenantId: String(auth.effectiveTenantId ?? '') })
 const menuStore = useMenuStore()
 const inputFieldRef = ref<InstanceType<typeof InputField> | null>(null)
 const errorMessage = ref('')
@@ -41,10 +45,12 @@ async function createAnalysis(
   webSearchEnabled = false,
 ) {
   if (creating) return
+  const owner = promptOwner()
   creating = true
   errorMessage.value = ''
   try {
     const response = await createSessions({}) as any
+    if (!sameOperatingPromptOwner(owner, promptOwner())) return
     const sessionId = String(response?.data?.id || '')
     if (!sessionId) throw new Error('missing session')
     menuStore.rememberOperatingSession(sessionId)
@@ -73,14 +79,8 @@ onMounted(() => {
   const raw = sessionStorage.getItem(OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY)
   if (!raw) return
   sessionStorage.removeItem(OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY)
-  try {
-    const handoff = JSON.parse(raw)
-    if (handoff?.schema === 'OperatingAnalysisHandoffV1' && typeof handoff.question === 'string' && handoff.question.trim()) {
-      void createAnalysis(handoff.question.trim())
-    }
-  } catch {
-    errorMessage.value = '经营分析交接内容无法读取，请重新提问。'
-  }
+  const question = ownedOperatingPromptQuestion(raw, promptOwner())
+  if (question) void createAnalysis(question)
 })
 </script>
 

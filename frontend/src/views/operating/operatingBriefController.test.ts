@@ -185,7 +185,7 @@ test('handoff is single-flight and cannot navigate after the brief loses ownersh
     }),
     active: true,
     visible: true,
-    onStartAnalysis: handoff => navigated.push(handoff.question),
+    onStartAnalysis: handoff => { navigated.push(handoff.question) },
     onOpenAnalysis() {},
   })
 

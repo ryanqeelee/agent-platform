@@ -8,7 +8,7 @@ import {
   OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY,
   OPERATING_ANALYSIS_HANDOFF_REF_KEY,
 } from '@/api/operatingAnalysis'
-import { retiredOperatingAnalysisQueryRedirect } from '@/views/operating/operatingNavigation'
+import { retiredOperatingAnalysisQueryRedirect, sameOperatingPromptOwner } from '@/views/operating/operatingNavigation'
 import { employeeSurfaceMinRoleForPath, SETTINGS_SECTION_MIN_ROLE } from '@/config/settingsAccess'
 import { DEFAULT_EMPLOYEE_WORKSPACE_PATH, loginDestination, safeReturnTo } from './safeReturnTo'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
@@ -67,11 +67,15 @@ async function admitNativeOperatingAnalysis(to: RouteLocationNormalized) {
     const handoffRef = sessionStorage.getItem(OPERATING_ANALYSIS_HANDOFF_REF_KEY)
     if (handoffRef && to.path === '/platform/operating-analysis') {
       sessionStorage.removeItem(OPERATING_ANALYSIS_HANDOFF_REF_KEY)
+      const auth = useAuthStore()
+      const currentOwner = () => ({ actorId: String(auth.user?.id ?? ''), tenantId: String(auth.effectiveTenantId ?? '') })
+      const owner = currentOwner()
       const response = await consumeOperatingAnalysisHandoff(handoffRef)
+      if (!sameOperatingPromptOwner(owner, currentOwner())) return '/platform/creatChat'
       if (response.handoff?.schema !== 'OperatingAnalysisHandoffV1' || !response.handoff.question) {
         return '/platform/creatChat'
       }
-      sessionStorage.setItem(OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY, JSON.stringify(response.handoff))
+      sessionStorage.setItem(OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY, JSON.stringify({ ...response.handoff, owner }))
       return true
     }
     const availability = await getOperatingAnalysisAvailability()

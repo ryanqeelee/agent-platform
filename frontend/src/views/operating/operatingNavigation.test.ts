@@ -27,3 +27,14 @@ test('retired Center session query returns to the native analysis home', () => {
   })
   assert.equal(retiredOperatingAnalysisQueryRedirect({}), null)
 })
+
+test('handoff question belongs only to the current actor and effective tenant', async () => {
+  const { ownedOperatingPromptQuestion } = await import('./operatingNavigation.ts')
+  const owner = { actorId: 'a', tenantId: '7' }
+  const raw = JSON.stringify({ schema: 'OperatingAnalysisHandoffV1', question: '原企业观察', owner })
+  assert.equal(ownedOperatingPromptQuestion(raw, owner), '原企业观察')
+  assert.equal(ownedOperatingPromptQuestion(raw, { actorId: 'b', tenantId: '7' }), null)
+  assert.equal(ownedOperatingPromptQuestion(raw, { actorId: 'a', tenantId: '8' }), null)
+  assert.equal(ownedOperatingPromptQuestion(JSON.stringify({ schema: 'OperatingAnalysisHandoffV1', question: '旧未绑定问题' }), owner), null)
+  assert.equal(ownedOperatingPromptQuestion('invalid', owner), null)
+})

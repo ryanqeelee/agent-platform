@@ -210,9 +210,10 @@ func (r *knowledgeBaseRepository) CountByModelID(
 	ctx context.Context, tenantID uint64, modelID string,
 ) (int64, error) {
 	var count int64
-	query := r.db.WithContext(ctx).
-		Model(&types.KnowledgeBase{}).
-		Where("tenant_id = ?", tenantID)
+	query := r.db.WithContext(ctx).Model(&types.KnowledgeBase{})
+	if tenantID != 0 {
+		query = query.Where("tenant_id = ?", tenantID)
+	}
 	query = scopeKnowledgeBasesByModelID(query, modelID)
 	err := query.Count(&count).Error
 	return count, err
@@ -230,8 +231,10 @@ func (r *knowledgeBaseRepository) ListModelUsages(
 		Select(
 			"id", "name", "embedding_model_id", "summary_model_id",
 			"image_processing_config", "vlm_config", "asr_config", "wiki_config",
-		).
-		Where("tenant_id = ?", tenantID)
+		)
+	if tenantID != 0 {
+		query = query.Where("tenant_id = ?", tenantID)
+	}
 	query = scopeKnowledgeBasesByModelID(query, modelID)
 	if err := query.Order("name ASC, id ASC").Limit(types.ModelUsageListLimit).Find(&rows).Error; err != nil {
 		return nil, err

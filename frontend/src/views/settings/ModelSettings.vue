@@ -1,6 +1,6 @@
 <template>
   <div class="model-settings">
-    <PlatformRuntimeContext />
+    <PlatformRuntimeContext v-if="authStore.hasValidTenant" />
     <div class="section-header">
       <div class="section-header__top">
         <div>
@@ -368,6 +368,7 @@ function convertToLegacyFormat(model: ModelConfig) {
     dimension: model.parameters.embedding_parameters?.dimension,
     supportsDimensionOverride: model.parameters.embedding_parameters?.supports_dimension_override || false,
     isBuiltin: model.is_builtin || false,
+    managedBy: model.managed_by || '',
     supportsVision: model.parameters.supports_vision || false,
     contextWindow: model.parameters.context_window || undefined,
     maxConcurrency: model.parameters.max_concurrency,
@@ -509,10 +510,10 @@ const isModelCardClickable = (model: any) => canEditModel(model)
 
 const canManageModel = (model: any) => canEditModel(model)
 
-// Built-in lifecycle remains deployment-managed (YAML / SQL). The UI only
-// exposes configuration and credential editing to SystemAdmin.
+// Only YAML-owned rows are deployment lifecycle state. Manual global models
+// also use the shared visibility flag, but remain removable by SystemAdmin.
 const canDeleteModel = (model: any) =>
-  authStore.isSystemAdmin && !model.isBuiltin
+  authStore.isSystemAdmin && model.managedBy !== 'yaml'
 
 const onModelCardClick = (event: Event, type: ModelType, model: any) => {
   if (!isModelCardClickable(model)) return
@@ -673,7 +674,7 @@ const handleModelSave = async (modelData: any) => {
 // 删除模型
 const deleteModel = async (_type: ModelType, modelId: string) => {
   const model = allModels.value.find(m => m.id === modelId)
-  if (model?.is_builtin) {
+  if (model?.managed_by === 'yaml') {
     MessagePlugin.warning(t('modelSettings.toasts.builtinCannotDelete'))
     return
   }

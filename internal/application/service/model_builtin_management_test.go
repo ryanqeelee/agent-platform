@@ -15,6 +15,66 @@ func builtinModelContext(systemAdmin bool) context.Context {
 	return context.WithValue(ctx, types.SystemAdminContextKey, systemAdmin)
 }
 
+func tenantlessSystemAdminModelContext() context.Context {
+	return context.WithValue(context.Background(), types.SystemAdminContextKey, true)
+}
+
+func TestCreateModel_TenantlessSystemAdminCreatesManualGlobalModel(t *testing.T) {
+	var saved *types.Model
+	svc := NewModelService(&stubModelRepoForDelete{
+		create: func(model *types.Model) error {
+			copy := *model
+			saved = &copy
+			return nil
+		},
+	}, nil, nil, nil, nil, nil)
+
+	input := &types.Model{Name: "platform-chat", Source: types.ModelSourceRemote}
+	require.NoError(t, svc.CreateModel(tenantlessSystemAdminModelContext(), input))
+	require.NotNil(t, saved)
+	assert.Zero(t, saved.TenantID)
+	assert.True(t, saved.IsBuiltin, "global models use the repository's shared visibility flag")
+	assert.Empty(t, saved.ManagedBy, "a UI-created model must not be owned by the YAML reconciler")
+	assert.Equal(t, types.ModelStatusActive, saved.Status)
+}
+
+func TestListModels_TenantlessSystemAdminUsesPlatformScope(t *testing.T) {
+	model := &types.Model{ID: "global-chat", IsBuiltin: true}
+	svc := NewModelService(&stubModelRepoForDelete{
+		list: func(tenantID uint64) ([]*types.Model, error) {
+			assert.Zero(t, tenantID)
+			return []*types.Model{model}, nil
+		},
+	}, nil, nil, nil, nil, nil)
+
+	models, err := svc.ListModels(tenantlessSystemAdminModelContext())
+	require.NoError(t, err)
+	require.Len(t, models, 1)
+	assert.Same(t, model, models[0])
+}
+
+func TestUpdateBuiltinModelCredentials_TenantlessSystemAdminUsesPlatformScope(t *testing.T) {
+	stored := &types.Model{ID: "builtin-chat", IsBuiltin: true, ManagedBy: types.BuiltinModelManagedBy}
+	newKey := "sk-platform"
+	var saved *types.Model
+	svc := NewModelService(&stubModelRepoForDelete{
+		model: stored,
+		update: func(model *types.Model) error {
+			copy := *model
+			saved = &copy
+			return nil
+		},
+	}, nil, nil, nil, nil, nil)
+
+	updated, err := svc.UpdateModelCredentials(
+		tenantlessSystemAdminModelContext(), stored.ID, &newKey, nil,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, newKey, updated.Parameters.APIKey)
+	require.NotNil(t, saved)
+	assert.Empty(t, saved.ManagedBy)
+}
+
 func TestUpdateBuiltinModel_RequiresSystemAdmin(t *testing.T) {
 	stored := &types.Model{
 		ID: "builtin-chat", TenantID: 10000, IsBuiltin: true,

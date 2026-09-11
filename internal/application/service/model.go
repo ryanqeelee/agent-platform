@@ -51,6 +51,19 @@ func NewModelService(repo interfaces.ModelRepository,
 	}
 }
 
+// modelScopeTenantID maps a tenantless platform identity to the repository's
+// platform scope. Ordinary callers retain the established fail-fast invariant
+// that model operations require an authenticated tenant context.
+func modelScopeTenantID(ctx context.Context) uint64 {
+	if tenantID, ok := types.TenantIDFromContext(ctx); ok {
+		return tenantID
+	}
+	if types.IsSystemAdminFromContext(ctx) {
+		return 0
+	}
+	return types.MustTenantIDFromContext(ctx)
+}
+
 // decryptAppSecret 解密 AppSecret（如果为空或 cryptoSvc 为空则原样返回）
 func (s *modelService) decryptAppSecret(encrypted string) string {
 	if encrypted == "" {
@@ -98,6 +111,14 @@ func (s *modelService) resolveWeKnoraCloudCredentials(ctx context.Context, param
 // Remote models are immediately set to active status
 func (s *modelService) CreateModel(ctx context.Context, model *types.Model) error {
 	logger.Infof(ctx, "Creating model: %s, type: %s, source: %s", model.Name, model.Type, model.Source)
+	if _, hasTenant := types.TenantIDFromContext(ctx); !hasTenant && types.IsSystemAdminFromContext(ctx) {
+		// The established repository contract uses IsBuiltin for rows visible
+		// to every tenant. Leaving ManagedBy empty keeps a UI-created global
+		// model outside the YAML reconciler's lifecycle.
+		model.TenantID = 0
+		model.IsBuiltin = true
+		model.ManagedBy = ""
+	}
 
 	// Handle remote models (e.g., OpenAI, Azure)
 	if model.Source == types.ModelSourceRemote {
@@ -164,7 +185,7 @@ func (s *modelService) GetModelByID(ctx context.Context, id string) (*types.Mode
 		return nil, errors.New("model ID cannot be empty")
 	}
 
-	tenantID := types.MustTenantIDFromContext(ctx)
+	tenantID := modelScopeTenantID(ctx)
 
 	// Fetch model from repository
 	model, err := s.repo.GetByID(ctx, tenantID, id)
@@ -207,7 +228,7 @@ func (s *modelService) GetModelByID(ctx context.Context, id string) (*types.Mode
 func (s *modelService) ListModels(ctx context.Context) ([]*types.Model, error) {
 	logger.Info(ctx, "Start listing models")
 
-	tenantID := types.MustTenantIDFromContext(ctx)
+	tenantID := modelScopeTenantID(ctx)
 	logger.Infof(ctx, "Listing models for tenant ID: %d", tenantID)
 
 	// List models from repository with no additional filters
@@ -230,7 +251,7 @@ func (s *modelService) UpdateModel(ctx context.Context, model *types.Model) erro
 
 	// Built-in models are platform-wide. Tenant administrators may view them,
 	// but only a system administrator may change their shared configuration.
-	tenantID := types.MustTenantIDFromContext(ctx)
+	tenantID := modelScopeTenantID(ctx)
 	existingModel, err := s.repo.GetByID(ctx, tenantID, model.ID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -272,7 +293,7 @@ func (s *modelService) UpdateModel(ctx context.Context, model *types.Model) erro
 func (s *modelService) UpdateModelCredentials(
 	ctx context.Context, id string, apiKey, appSecret *string,
 ) (*types.Model, error) {
-	tenantID := types.MustTenantIDFromContext(ctx)
+	tenantID := modelScopeTenantID(ctx)
 	existing, err := s.repo.GetByID(ctx, tenantID, id)
 	if err != nil {
 		return nil, err
@@ -310,7 +331,7 @@ func (s *modelService) UpdateModelCredentials(
 
 // ClearModelCredential removes a single credential field. Idempotent.
 func (s *modelService) ClearModelCredential(ctx context.Context, id, field string) error {
-	tenantID := types.MustTenantIDFromContext(ctx)
+	tenantID := modelScopeTenantID(ctx)
 	existing, err := s.repo.GetByID(ctx, tenantID, id)
 	if err != nil {
 		return err
@@ -356,7 +377,7 @@ func (s *modelService) DeleteModel(ctx context.Context, id string) error {
 	logger.Info(ctx, "Start deleting model")
 	logger.Infof(ctx, "Deleting model ID: %s", id)
 
-	tenantID := types.MustTenantIDFromContext(ctx)
+	tenantID := modelScopeTenantID(ctx)
 	logger.Infof(ctx, "Tenant ID: %d", tenantID)
 
 	// Check if the model is builtin - builtin models cannot be deleted
@@ -370,9 +391,9 @@ func (s *modelService) DeleteModel(ctx context.Context, id string) error {
 	if existingModel == nil {
 		return ErrModelNotFound
 	}
-	if existingModel.IsBuiltin {
-		logger.Warnf(ctx, "Attempted to delete builtin model: %s", id)
-		return apperrors.NewBadRequestError("builtin models cannot be deleted")
+	if existingModel.ManagedBy == types.BuiltinModelManagedBy {
+		logger.Warnf(ctx, "Attempted to delete YAML-managed builtin model: %s", id)
+		return apperrors.NewBadRequestError("YAML-managed builtin models cannot be deleted")
 	}
 
 	usage, err := s.getModelUsageDetails(ctx, tenantID, id)
@@ -400,7 +421,7 @@ func (s *modelService) DeleteModel(ctx context.Context, id string) error {
 	}
 
 	// Delete model from repository
-	err = s.repo.Delete(ctx, tenantID, id)
+	err = s.repo.Delete(ctx, existingModel.TenantID, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":  id,
@@ -453,6 +474,28 @@ func (s *modelService) getModelUsageDetails(
 	}
 
 	if s.tenantService == nil {
+		return details, nil
+	}
+	if tenantID == 0 {
+		tenants, err := s.tenantService.ListTenants(ctx)
+		if err != nil {
+			return details, err
+		}
+		embeddingUsed := false
+		extractUsed := false
+		for _, tenant := range tenants {
+			if tenant == nil || tenant.MemoryConfig == nil {
+				continue
+			}
+			embeddingUsed = embeddingUsed || strings.TrimSpace(tenant.MemoryConfig.EmbeddingModelID) == modelID
+			extractUsed = extractUsed || strings.TrimSpace(tenant.MemoryConfig.ExtractModelID) == modelID
+		}
+		if embeddingUsed {
+			details.LongTermMemory.Bindings = append(details.LongTermMemory.Bindings, types.ModelUsageBindingEmbeddingModel)
+		}
+		if extractUsed {
+			details.LongTermMemory.Bindings = append(details.LongTermMemory.Bindings, types.ModelUsageBindingExtractModel)
+		}
 		return details, nil
 	}
 	tenant, err := s.tenantService.GetTenantByID(ctx, tenantID)
@@ -595,7 +638,7 @@ func (s *modelService) GetChatModel(ctx context.Context, modelId string) (chat.C
 		return nil, errors.New("model ID cannot be empty")
 	}
 
-	tenantID := types.MustTenantIDFromContext(ctx)
+	tenantID := modelScopeTenantID(ctx)
 
 	// Get the model directly from repository to avoid status checks
 	model, err := s.repo.GetByID(ctx, tenantID, modelId)
@@ -634,7 +677,7 @@ func (s *modelService) GetVLMModel(ctx context.Context, modelId string) (vlm.VLM
 		return nil, errors.New("model ID cannot be empty")
 	}
 
-	tenantID := types.MustTenantIDFromContext(ctx)
+	tenantID := modelScopeTenantID(ctx)
 
 	model, err := s.repo.GetByID(ctx, tenantID, modelId)
 	if err != nil {
@@ -674,7 +717,7 @@ func (s *modelService) GetASRModel(ctx context.Context, modelId string) (asr.ASR
 		return nil, errors.New("model ID cannot be empty")
 	}
 
-	tenantID := types.MustTenantIDFromContext(ctx)
+	tenantID := modelScopeTenantID(ctx)
 
 	model, err := s.repo.GetByID(ctx, tenantID, modelId)
 	if err != nil {

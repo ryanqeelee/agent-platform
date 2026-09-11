@@ -29,7 +29,7 @@ var versionedSQLiteTables = []string{
 // versionedSQLiteColumns maps each existing table to the columns that the
 // versioned migrations add and the SQLite baseline was missing.
 var versionedSQLiteColumns = map[string][]string{
-	"tenants":            {"api_principal_config", "memory_generation", "seats_total"}, // 000064, 000101, 000023
+	"tenants":            {"api_principal_config", "memory_generation", "seats_total"}, // 000064, 000101, 000024
 	"users":              {"is_system_admin"},                                          // 000053
 	"knowledges":         {"pending_subtasks_count"},                                   // 000056
 	"messages":           {"attachments", "usage"},                                     // 000034, 000085
@@ -40,7 +40,7 @@ var versionedSQLiteColumns = map[string][]string{
 	"memory_items":       {"scope"},                                                    // 000101
 }
 
-const expectedSQLiteMigrationVersion = 25
+const expectedSQLiteMigrationVersion = 24
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
@@ -139,7 +139,7 @@ func TestSQLiteMigrationsUpgradeV4PreservesData(t *testing.T) {
 
 func TestSQLitePlatformIdentityMigrationNormalizesLegacyMixedIdentity(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
-	legacyRoot := copySQLiteMigrationsThrough(t, repoRoot, 24)
+	legacyRoot := copySQLiteMigrationsThrough(t, repoRoot, 23)
 	chdirAndRestore(t, legacyRoot)
 
 	dbPath := filepath.Join(t.TempDir(), "platform-identity.db")

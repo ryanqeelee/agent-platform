@@ -101,6 +101,23 @@ func TestModelResponse_SystemAdminCanManageBuiltinConfig(t *testing.T) {
 	assert.NotContains(t, string(body), "also-never-returned")
 }
 
+func TestModelResponse_ExposesOnlyNonSecretLifecycleOwnership(t *testing.T) {
+	ctx := context.WithValue(viewerContext(), types.SystemAdminContextKey, true)
+	m := &types.Model{
+		ID:        "builtin-1",
+		IsBuiltin: true,
+		ManagedBy: types.BuiltinModelManagedBy,
+		Parameters: types.ModelParameters{
+			APIKey: "should-never-be-returned",
+		},
+	}
+
+	body, err := json.Marshal(NewModelResponse(ctx, m))
+	require.NoError(t, err)
+	assert.Contains(t, string(body), `"managed_by":"yaml"`)
+	assert.NotContains(t, string(body), "should-never-be-returned")
+}
+
 func TestModelResponse_ViewerStripsIntegrationDetail(t *testing.T) {
 	m := &types.Model{
 		ID: "m-2",

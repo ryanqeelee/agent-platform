@@ -62,6 +62,16 @@ func NewModelHandler(service interfaces.ModelService, audit interfaces.AuditLogS
 	return &ModelHandler{service: service, audit: audit}
 }
 
+func modelRequestScope(ctx context.Context) (uint64, bool) {
+	if tenantID, ok := types.TenantIDFromContext(ctx); ok && tenantID != 0 {
+		return tenantID, true
+	}
+	if types.IsSystemAdminFromContext(ctx) {
+		return 0, true
+	}
+	return 0, false
+}
+
 // Per-response redaction/stripping for Model now lives in
 // dto.NewModelResponse — handlers must use it for every body that contains a
 // model. The previous hideSensitiveInfo helper has been removed.
@@ -100,8 +110,8 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	if tenantID == 0 {
+	tenantID, scopeOK := modelRequestScope(ctx)
+	if !scopeOK {
 		logger.Error(ctx, "Tenant ID is empty")
 		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
 		return
@@ -211,8 +221,8 @@ func (h *ModelHandler) ListModels(c *gin.Context) {
 
 	logger.Info(ctx, "Start retrieving model list")
 
-	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	if tenantID == 0 {
+	tenantID, scopeOK := modelRequestScope(ctx)
+	if !scopeOK {
 		logger.Error(ctx, "Tenant ID is empty")
 		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
 		return

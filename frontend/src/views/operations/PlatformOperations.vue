@@ -6,7 +6,10 @@
         <h1>企业与成员管理</h1>
         <p>创建企业，维护企业成员、席位和存储配额。</p>
       </div>
-      <t-button theme="primary" @click="openCreationWizard">创建企业</t-button>
+      <div class="page-actions">
+        <t-button variant="outline" @click="uiStore.openSettings('models')">模型配置</t-button>
+        <t-button theme="primary" @click="openCreationWizard">创建企业</t-button>
+      </div>
     </header>
 
     <t-alert v-if="errorMessage" theme="error" :message="errorMessage" close @close="errorMessage = ''" />
@@ -182,12 +185,15 @@
       <t-input v-model="newPassword" type="password" placeholder="输入新密码" />
     </t-dialog>
 
+    <Settings />
   </main>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
+import Settings from '@/views/settings/Settings.vue'
+import { useUIStore } from '@/stores/ui'
 import {
   activateEnterprise, createInitialAdministrator, createOperationsEmployee, getEnterpriseActivation,
   getInitialAdministratorCommand,
@@ -210,6 +216,7 @@ import {
   type InitialAdministratorCommand,
 } from './platformOperationsModel'
 
+const uiStore = useUIStore()
 const enterprises = ref<OperationsEnterprise[]>([])
 const selected = ref<OperationsEnterprise>()
 const members = ref<OperationsMember[]>([])
@@ -612,6 +619,7 @@ onMounted(async () => {
 .operations-page { width: min(1240px, calc(100% - 48px)); margin: 0 auto; padding: 38px 0 72px; color: var(--td-text-color-primary); }
 .page-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-bottom: 24px; }
 .page-header h1 { margin: 4px 0 8px; font-size: 32px; }.page-header p { margin: 0; color: var(--td-text-color-secondary); }.eyebrow { color: var(--td-brand-color) !important; font-weight: 700; }
+.page-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .workspace { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 18px; margin-top: 18px; }.detail-column { display: grid; gap: 18px; }.detail-empty { padding-top: 100px; }
 .enterprise-row { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 13px; border: 0; border-radius: 8px; background: transparent; text-align: left; color: inherit; cursor: pointer; }.enterprise-row:hover, .enterprise-row.active { background: var(--td-bg-color-container-hover); }.enterprise-row span:first-child, td:first-child { display: grid; gap: 4px; }.enterprise-row small, td small, .hint { color: var(--td-text-color-secondary); }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }.table-scroll { overflow-x: auto; }table { width: 100%; border-collapse: collapse; }th, td { padding: 12px; border-bottom: 1px solid var(--td-component-stroke); text-align: left; }.actions { display: flex; flex-wrap: wrap; gap: 8px; }.secret { margin: 16px 0; padding: 14px; border-radius: 8px; background: var(--td-bg-color-secondarycontainer); white-space: pre-wrap; overflow-wrap: anywhere; }

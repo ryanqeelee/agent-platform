@@ -38,8 +38,8 @@ type modelCredentialsPutRequest struct {
 func (h *ModelCredentialsHandler) Put(c *gin.Context) {
 	ctx := c.Request.Context()
 	id := c.Param("id")
-	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	if tenantID == 0 {
+	_, scopeOK := modelRequestScope(ctx)
+	if !scopeOK {
 		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
 		return
 	}
@@ -101,8 +101,8 @@ func (h *ModelCredentialsHandler) DeleteField(c *gin.Context) {
 	ctx := c.Request.Context()
 	id := c.Param("id")
 	field := c.Param("field")
-	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	if tenantID == 0 {
+	_, scopeOK := modelRequestScope(ctx)
+	if !scopeOK {
 		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
 		return
 	}

@@ -109,9 +109,56 @@ func isTenantOptionalAPI(path, method string) bool {
 // registration and RequireSystemAdmin still decide whether the concrete
 // method and endpoint exist and whether the authenticated user is allowed;
 // this helper only prevents the earlier tenant resolver from returning 409.
-func isTenantlessSystemAdminAPI(path string) bool {
+func isTenantlessSystemAdminAPI(path, method string) bool {
 	path = strings.TrimSuffix(strings.TrimSpace(path), "/")
-	return path == "/api/v1/system/admin" || strings.HasPrefix(path, "/api/v1/system/admin/")
+	if path == "/api/v1/system/admin" || strings.HasPrefix(path, "/api/v1/system/admin/") {
+		return true
+	}
+	return isTenantlessModelAdminAPI(path, method)
+}
+
+// isTenantlessModelAdminAPI is the narrow browser surface used by the existing
+// model settings UI. The registered routes still apply RequireSystemAdmin;
+// this predicate only permits those requests to reach that authorization
+// guard without inventing an enterprise scope for a platform identity.
+func isTenantlessModelAdminAPI(path, method string) bool {
+	if path == "/api/v1/models" {
+		return method == http.MethodGet || method == http.MethodPost
+	}
+	if path == "/api/v1/models/providers" {
+		return method == http.MethodGet
+	}
+
+	modelPath := strings.TrimPrefix(path, "/api/v1/models/")
+	if modelPath != path {
+		parts := strings.Split(modelPath, "/")
+		switch {
+		case len(parts) == 1 && parts[0] != "":
+			return method == http.MethodGet || method == http.MethodPut || method == http.MethodDelete
+		case len(parts) == 2 && parts[0] != "" && parts[1] == "debug":
+			return method == http.MethodPost
+		case len(parts) == 2 && parts[0] != "" && parts[1] == "credentials":
+			return method == http.MethodPut
+		case len(parts) == 3 && parts[0] != "" && parts[1] == "credentials" && parts[2] != "":
+			return method == http.MethodDelete
+		}
+	}
+
+	switch path {
+	case "/api/v1/initialization/ollama/status", "/api/v1/initialization/ollama/models",
+		"/api/v1/initialization/ollama/download/tasks":
+		return method == http.MethodGet
+	case "/api/v1/initialization/ollama/models/check",
+		"/api/v1/initialization/ollama/models/download",
+		"/api/v1/initialization/remote/check",
+		"/api/v1/initialization/embedding/test",
+		"/api/v1/initialization/rerank/check",
+		"/api/v1/initialization/asr/check":
+		return method == http.MethodPost
+	default:
+		return strings.HasPrefix(path, "/api/v1/initialization/ollama/download/progress/") &&
+			method == http.MethodGet
+	}
 }
 
 func attachTenantlessUserContext(c *gin.Context, user *types.User) {
@@ -221,7 +268,7 @@ func authenticateJWTUser(
 		// tenantless; every enterprise endpoint keeps the normal TENANT_REQUIRED
 		// contract without consulting tenant or membership state.
 		if isTenantOptionalAPI(c.Request.URL.Path, c.Request.Method) ||
-			isTenantlessSystemAdminAPI(c.Request.URL.Path) {
+			isTenantlessSystemAdminAPI(c.Request.URL.Path, c.Request.Method) {
 			attachTenantlessUserContext(c, user)
 			return true
 		}
@@ -242,7 +289,7 @@ func authenticateJWTUser(
 		// 无可用空间：身份级路由（/auth/me 等）放行为 tenantless 会话，
 		// 其余路由返回 TENANT_REQUIRED 让前端引导用户创建/加入空间。
 		if isTenantOptionalAPI(c.Request.URL.Path, c.Request.Method) ||
-			(user.IsSystemAdmin && isTenantlessSystemAdminAPI(c.Request.URL.Path)) {
+			(user.IsSystemAdmin && isTenantlessSystemAdminAPI(c.Request.URL.Path, c.Request.Method)) {
 			attachTenantlessUserContext(c, user)
 			return true
 		}

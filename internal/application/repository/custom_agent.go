@@ -66,9 +66,10 @@ func (r *customAgentRepository) CountByModelID(
 	ctx context.Context, tenantID uint64, modelID string,
 ) (int64, error) {
 	var count int64
-	query := r.db.WithContext(ctx).
-		Model(&types.CustomAgent{}).
-		Where("tenant_id = ?", tenantID)
+	query := r.db.WithContext(ctx).Model(&types.CustomAgent{})
+	if tenantID != 0 {
+		query = query.Where("tenant_id = ?", tenantID)
+	}
 	query = scopeCustomAgentsByModelID(query, modelID)
 	err := query.Count(&count).Error
 	return count, err
@@ -82,8 +83,10 @@ func (r *customAgentRepository) ListModelUsages(
 	rows := make([]*types.CustomAgent, 0)
 	query := r.db.WithContext(ctx).
 		Model(&types.CustomAgent{}).
-		Select("id", "name", "config").
-		Where("tenant_id = ?", tenantID)
+		Select("id", "name", "config")
+	if tenantID != 0 {
+		query = query.Where("tenant_id = ?", tenantID)
+	}
 	query = scopeCustomAgentsByModelID(query, modelID)
 	if err := query.Order("name ASC, id ASC").Limit(types.ModelUsageListLimit).Find(&rows).Error; err != nil {
 		return nil, err

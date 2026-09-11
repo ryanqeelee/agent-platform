@@ -104,18 +104,31 @@ func (s *stubAgentRepoForModelDelete) ListNamesBySandboxConfigID(context.Context
 
 type stubModelRepoForDelete struct {
 	model  *types.Model
+	create func(model *types.Model) error
+	list   func(tenantID uint64) ([]*types.Model, error)
 	delete func(id string) error
-	update func(model *types.Model) error
+	// deleteTenantID captures the persisted row scope used by Delete.
+	deleteTenantID *uint64
+	update         func(model *types.Model) error
 }
 
-func (s *stubModelRepoForDelete) Create(context.Context, *types.Model) error { return nil }
+func (s *stubModelRepoForDelete) Create(_ context.Context, model *types.Model) error {
+	if s.create != nil {
+		return s.create(model)
+	}
+	return nil
+}
 func (s *stubModelRepoForDelete) GetByID(_ context.Context, _ uint64, id string) (*types.Model, error) {
 	if s.model != nil && s.model.ID == id {
 		return s.model, nil
 	}
 	return nil, nil
 }
-func (s *stubModelRepoForDelete) List(context.Context, uint64, types.ModelType, types.ModelSource) ([]*types.Model, error) {
+
+func (s *stubModelRepoForDelete) List(_ context.Context, tenantID uint64, _ types.ModelType, _ types.ModelSource) ([]*types.Model, error) {
+	if s.list != nil {
+		return s.list(tenantID)
+	}
 	return nil, nil
 }
 func (s *stubModelRepoForDelete) Update(_ context.Context, model *types.Model) error {
@@ -124,7 +137,10 @@ func (s *stubModelRepoForDelete) Update(_ context.Context, model *types.Model) e
 	}
 	return nil
 }
-func (s *stubModelRepoForDelete) Delete(_ context.Context, _ uint64, id string) error {
+func (s *stubModelRepoForDelete) Delete(_ context.Context, tenantID uint64, id string) error {
+	if s.deleteTenantID != nil {
+		*s.deleteTenantID = tenantID
+	}
 	if s.delete != nil {
 		return s.delete(id)
 	}
@@ -293,7 +309,8 @@ func TestDeleteModel_ReportsUntruncatedTotalsWhenListsAreCapped(t *testing.T) {
 }
 
 type stubTenantServiceForModelDelete struct {
-	tenant *types.Tenant
+	tenant  *types.Tenant
+	tenants []*types.Tenant
 }
 
 func (s *stubTenantServiceForModelDelete) ApplyGovernedEdgeBinding(context.Context, uint64, types.GovernedEdgeBinding) error {
@@ -316,7 +333,90 @@ func (s *stubTenantServiceForModelDelete) GetTenantsByIDs(context.Context, []uin
 	return nil, nil
 }
 func (s *stubTenantServiceForModelDelete) ListTenants(context.Context) ([]*types.Tenant, error) {
-	return nil, nil
+	return s.tenants, nil
+}
+
+func TestDeleteModel_ManualGlobalModelIsRemovable(t *testing.T) {
+	modelID := "manual-global"
+	deleted := false
+	svc := NewModelService(
+		&stubModelRepoForDelete{
+			model: &types.Model{ID: modelID, IsBuiltin: true, ManagedBy: ""},
+			delete: func(string) error {
+				deleted = true
+				return nil
+			},
+		},
+		&stubKBRepoForModelDelete{},
+		&stubAgentRepoForModelDelete{},
+		nil, nil, &stubTenantServiceForModelDelete{},
+	)
+
+	require.NoError(t, svc.DeleteModel(tenantlessSystemAdminModelContext(), modelID))
+	assert.True(t, deleted)
+}
+
+func TestDeleteModel_RuntimeOverrideUsesPersistedLegacyTenantScope(t *testing.T) {
+	modelID := "legacy-runtime-override"
+	var deletedTenantID uint64
+	svc := NewModelService(
+		&stubModelRepoForDelete{
+			model:          &types.Model{ID: modelID, TenantID: 10000, IsBuiltin: true, ManagedBy: ""},
+			deleteTenantID: &deletedTenantID,
+		},
+		&stubKBRepoForModelDelete{},
+		&stubAgentRepoForModelDelete{},
+		nil, nil, &stubTenantServiceForModelDelete{},
+	)
+
+	require.NoError(t, svc.DeleteModel(tenantlessSystemAdminModelContext(), modelID))
+	assert.Equal(t, uint64(10000), deletedTenantID)
+}
+
+func TestDeleteModel_YAMLManagedBuiltinIsProtected(t *testing.T) {
+	modelID := "yaml-builtin"
+	deleted := false
+	svc := NewModelService(
+		&stubModelRepoForDelete{
+			model: &types.Model{ID: modelID, IsBuiltin: true, ManagedBy: types.BuiltinModelManagedBy},
+			delete: func(string) error {
+				deleted = true
+				return nil
+			},
+		},
+		nil, nil, nil, nil, nil,
+	)
+
+	err := svc.DeleteModel(tenantlessSystemAdminModelContext(), modelID)
+	require.Error(t, err)
+	assert.False(t, deleted)
+}
+
+func TestDeleteModel_ManualGlobalChecksEveryTenantMemoryBinding(t *testing.T) {
+	modelID := "manual-global"
+	deleted := false
+	svc := NewModelService(
+		&stubModelRepoForDelete{
+			model: &types.Model{ID: modelID, IsBuiltin: true},
+			delete: func(string) error {
+				deleted = true
+				return nil
+			},
+		},
+		&stubKBRepoForModelDelete{},
+		&stubAgentRepoForModelDelete{},
+		nil, nil, &stubTenantServiceForModelDelete{tenants: []*types.Tenant{
+			{ID: 1},
+			{ID: 2, MemoryConfig: &types.MemoryConfig{ExtractModelID: modelID}},
+		}},
+	)
+
+	err := svc.DeleteModel(tenantlessSystemAdminModelContext(), modelID)
+	require.Error(t, err)
+	assert.False(t, deleted)
+	appErr, ok := apperrors.IsAppError(err)
+	require.True(t, ok)
+	assert.Equal(t, apperrors.ErrModelInUse, appErr.Code)
 }
 func (s *stubTenantServiceForModelDelete) UpdateTenant(context.Context, *types.Tenant) (*types.Tenant, error) {
 	return nil, nil

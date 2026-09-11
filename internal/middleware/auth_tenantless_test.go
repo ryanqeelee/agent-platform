@@ -58,31 +58,78 @@ func TestTenantlessSystemAdminControlPlaneAdmission(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tests := []struct {
 		name        string
+		method      string
 		path        string
 		systemAdmin bool
 		wantStatus  int
 	}{
 		{
 			name:        "system admin platform key bootstrap",
+			method:      http.MethodPost,
 			path:        "/api/v1/system/admin/api-keys",
 			systemAdmin: true,
 			wantStatus:  http.StatusNoContent,
 		},
 		{
 			name:        "ordinary tenantless user",
+			method:      http.MethodPost,
 			path:        "/api/v1/system/admin/api-keys",
 			systemAdmin: false,
 			wantStatus:  http.StatusConflict,
 		},
 		{
 			name:        "similar prefix is tenant scoped",
+			method:      http.MethodPost,
 			path:        "/api/v1/system/admin-foo/api-keys",
 			systemAdmin: true,
 			wantStatus:  http.StatusConflict,
 		},
 		{
 			name:        "ordinary workspace route still requires workspace",
+			method:      http.MethodPost,
 			path:        "/api/v1/knowledge-bases",
+			systemAdmin: true,
+			wantStatus:  http.StatusConflict,
+		},
+		{
+			name:        "model list is a tenantless platform operation",
+			method:      http.MethodGet,
+			path:        "/api/v1/models",
+			systemAdmin: true,
+			wantStatus:  http.StatusNoContent,
+		},
+		{
+			name:        "model credentials remain a tenantless platform operation",
+			method:      http.MethodPut,
+			path:        "/api/v1/models/model-1/credentials",
+			systemAdmin: true,
+			wantStatus:  http.StatusNoContent,
+		},
+		{
+			name:        "model connection check is a tenantless platform operation",
+			method:      http.MethodPost,
+			path:        "/api/v1/initialization/remote/check",
+			systemAdmin: true,
+			wantStatus:  http.StatusNoContent,
+		},
+		{
+			name:        "workspace WeKnora Cloud status stays tenant scoped",
+			method:      http.MethodGet,
+			path:        "/api/v1/models/weknoracloud/status",
+			systemAdmin: true,
+			wantStatus:  http.StatusConflict,
+		},
+		{
+			name:        "enterprise model runtime projection stays tenant scoped",
+			method:      http.MethodGet,
+			path:        "/api/v1/platform/model-runtime-settings",
+			systemAdmin: true,
+			wantStatus:  http.StatusConflict,
+		},
+		{
+			name:        "unrelated platform settings stay tenant scoped",
+			method:      http.MethodGet,
+			path:        "/api/v1/platform/retrieval-processing-settings",
 			systemAdmin: true,
 			wantStatus:  http.StatusConflict,
 		},
@@ -92,7 +139,7 @@ func TestTenantlessSystemAdminControlPlaneAdmission(t *testing.T) {
 			user := &types.User{ID: "operator", IsActive: true, IsSystemAdmin: tt.systemAdmin}
 			router := gin.New()
 			router.Use(Auth(nil, &oldTenantlessTokenUserService{user: user}, nil, nil, nil))
-			router.POST(tt.path, RequireSystemAdmin(nil), func(c *gin.Context) {
+			router.Handle(tt.method, tt.path, RequireSystemAdmin(nil), func(c *gin.Context) {
 				if !types.IsSystemAdminFromContext(c.Request.Context()) {
 					t.Fatal("system-admin context was not attached")
 				}
@@ -102,7 +149,7 @@ func TestTenantlessSystemAdminControlPlaneAdmission(t *testing.T) {
 				c.Status(http.StatusNoContent)
 			})
 
-			request := httptest.NewRequest(http.MethodPost, tt.path, nil)
+			request := httptest.NewRequest(tt.method, tt.path, nil)
 			request.Header.Set("Authorization", "Bearer tenantless-access-token")
 			response := httptest.NewRecorder()
 			router.ServeHTTP(response, request)

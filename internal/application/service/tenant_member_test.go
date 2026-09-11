@@ -473,6 +473,16 @@ func TestTenantMemberService_AddMember_MapsDuplicateKeyRace(t *testing.T) {
 	}
 }
 
+func TestTenantMemberService_AddMember_MapsInactiveEnterprise(t *testing.T) {
+	svc, repo := newServiceWithRepo()
+	repo.failCreate = apprepo.ErrEnterpriseNotActive
+
+	_, err := svc.AddMember(context.Background(), "u1", 1, types.TenantRoleViewer, nil)
+	if !errors.Is(err, ErrEnterpriseNotActive) {
+		t.Fatalf("want ErrEnterpriseNotActive, got %v", err)
+	}
+}
+
 func TestTenantMemberService_EnsureAdministrator_Idempotent(t *testing.T) {
 	svc, repo := newServiceWithRepo()
 	ctx := context.Background()

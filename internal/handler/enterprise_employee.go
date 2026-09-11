@@ -34,7 +34,7 @@ func (h *TenantMemberHandler) CreateEmployee(c *gin.Context) {
 		switch {
 		case errors.Is(err, service.ErrUserIdentityConflict):
 			c.Error(apperrors.NewConflictError("用户名或邮箱已被使用，请检查现有成员或联系平台管理员"))
-		case errors.Is(err, service.ErrSeatLimitExceeded):
+		case errors.Is(err, service.ErrSeatLimitExceeded), errors.Is(err, service.ErrEnterpriseNotActive):
 			c.Error(apperrors.NewConflictError(err.Error()))
 		case errors.Is(err, service.ErrMemberActionForbidden):
 			c.Error(apperrors.NewForbiddenError("仅本企业管理员可以创建员工"))

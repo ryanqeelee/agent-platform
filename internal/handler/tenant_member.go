@@ -284,7 +284,7 @@ func writeAddMemberError(
 		// 409 reads better than 400 here: the request was syntactically
 		// fine, the conflict is semantic ("already a member").
 		c.Error(apperrors.NewConflictError(err.Error()))
-	case errors.Is(err, service.ErrSeatLimitExceeded):
+	case errors.Is(err, service.ErrSeatLimitExceeded), errors.Is(err, service.ErrEnterpriseNotActive):
 		c.Error(apperrors.NewConflictError(err.Error()))
 	case errors.Is(err, service.ErrUserBoundToAnotherEnterprise):
 		c.Error(apperrors.NewConflictError(err.Error()))
@@ -337,6 +337,8 @@ func (h *TenantMemberHandler) UpdateOperatingAnalysisAccess(c *gin.Context) {
 		switch {
 		case errors.Is(err, service.ErrMembershipNotFound):
 			c.Error(apperrors.NewNotFoundError("membership not found"))
+		case errors.Is(err, service.ErrEnterpriseNotActive):
+			c.Error(apperrors.NewConflictError(err.Error()))
 		case errors.Is(err, service.ErrMemberActionForbidden):
 			c.Error(apperrors.NewForbiddenError(err.Error()))
 		default:
@@ -378,7 +380,7 @@ func (h *TenantMemberHandler) UpdateMemberStatus(c *gin.Context) {
 			c.Error(apperrors.NewNotFoundError("membership not found"))
 		case errors.Is(err, service.ErrLastAdministrator):
 			c.Error(apperrors.NewConflictError(err.Error()))
-		case errors.Is(err, service.ErrSeatLimitExceeded):
+		case errors.Is(err, service.ErrSeatLimitExceeded), errors.Is(err, service.ErrEnterpriseNotActive):
 			c.Error(apperrors.NewConflictError(err.Error()))
 		case errors.Is(err, service.ErrInvalidMemberStatus):
 			c.Error(apperrors.NewValidationError(err.Error()))
@@ -450,6 +452,8 @@ func (h *TenantMemberHandler) UpdateMemberRole(c *gin.Context) {
 			c.Error(apperrors.NewNotFoundError("membership not found"))
 		case errors.Is(err, service.ErrLastAdministrator):
 			c.Error(apperrors.NewConflictError(err.Error()))
+		case errors.Is(err, service.ErrEnterpriseNotActive):
+			c.Error(apperrors.NewConflictError(err.Error()))
 		case errors.Is(err, service.ErrMemberActionForbidden), errors.Is(err, service.ErrCannotManageSelf):
 			c.Error(apperrors.NewForbiddenError(err.Error()))
 		case errors.Is(err, service.ErrInvalidTenantRole):
@@ -495,6 +499,8 @@ func (h *TenantMemberHandler) RemoveMember(c *gin.Context) {
 			c.Error(apperrors.NewNotFoundError("membership not found"))
 		case errors.Is(err, service.ErrLastAdministrator):
 			c.Error(apperrors.NewConflictError(err.Error()))
+		case errors.Is(err, service.ErrEnterpriseNotActive):
+			c.Error(apperrors.NewConflictError(err.Error()))
 		case errors.Is(err, service.ErrMemberActionForbidden), errors.Is(err, service.ErrCannotManageSelf):
 			c.Error(apperrors.NewForbiddenError(err.Error()))
 		default:
@@ -538,6 +544,8 @@ func (h *TenantMemberHandler) LeaveTenant(c *gin.Context) {
 		case errors.Is(err, service.ErrMembershipNotFound):
 			c.Error(apperrors.NewNotFoundError("you are not a member of this workspace"))
 		case errors.Is(err, service.ErrLastAdministrator):
+			c.Error(apperrors.NewConflictError(err.Error()))
+		case errors.Is(err, service.ErrEnterpriseNotActive):
 			c.Error(apperrors.NewConflictError(err.Error()))
 		default:
 			logger.Errorf(ctx, "LeaveTenant failed: user=%s tenant=%d err=%v",

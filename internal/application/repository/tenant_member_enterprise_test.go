@@ -47,10 +47,16 @@ func TestEnterpriseManagedTenantBindingConcurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, statement := range []string{
-		`CREATE TABLE tenants (id bigint PRIMARY KEY, deleted_at timestamptz)`,
+		`CREATE TABLE tenants (
+			id bigint PRIMARY KEY, status varchar(32) NOT NULL DEFAULT 'active',
+			seats_total integer, deleted_at timestamptz
+		)`,
 		`CREATE TABLE users (
             id varchar(36) PRIMARY KEY, tenant_id bigint,
 			username varchar(255) UNIQUE, email varchar(255) UNIQUE,
+			is_active boolean NOT NULL DEFAULT true,
+			is_system_admin boolean NOT NULL DEFAULT false,
+			can_access_all_tenants boolean NOT NULL DEFAULT false,
             updated_at timestamptz, deleted_at timestamptz
         )`,
 		`CREATE TABLE tenant_members (
@@ -147,7 +153,7 @@ func TestEnterpriseManagedTenantBindingConcurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 	invRepo := &tenantInvitationRepository{db: db}
-	if _, err := invRepo.AcceptInvitation(context.Background(), 2, "u1", time.Now()); !errors.Is(err, ErrUserBoundToAnotherEnterprise) {
+	if _, err := invRepo.AcceptInvitation(context.Background(), 2, "u1", time.Now()); !errors.Is(err, ErrMemberActionForbidden) {
 		t.Fatalf("historical foreign membership bypassed enterprise binding: %v", err)
 	}
 	var foreignInvitationStatus string
@@ -369,8 +375,17 @@ func TestTenantMemberRepository_AdministratorLifecyclePostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, statement := range []string{
-		`CREATE TABLE tenants (id bigint PRIMARY KEY, deleted_at timestamptz)`,
-		`CREATE TABLE users (id varchar(36) PRIMARY KEY, tenant_id bigint, deleted_at timestamptz)`,
+		`CREATE TABLE tenants (
+			id bigint PRIMARY KEY, status varchar(32) NOT NULL DEFAULT 'active',
+			seats_total integer, deleted_at timestamptz
+		)`,
+		`CREATE TABLE users (
+			id varchar(36) PRIMARY KEY, tenant_id bigint,
+			is_active boolean NOT NULL DEFAULT true,
+			is_system_admin boolean NOT NULL DEFAULT false,
+			can_access_all_tenants boolean NOT NULL DEFAULT false,
+			deleted_at timestamptz
+		)`,
 		`CREATE TABLE tenant_members (
             id bigserial PRIMARY KEY, user_id varchar(36) NOT NULL, tenant_id bigint NOT NULL,
             role varchar(20) NOT NULL, status varchar(20) NOT NULL, updated_at timestamptz, deleted_at timestamptz
@@ -433,8 +448,8 @@ func TestTenantMemberRepository_AdministratorLifecyclePostgres(t *testing.T) {
 	if err := db.Exec(`UPDATE users SET tenant_id = 2 WHERE id = 'employee'`).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.UpdateStatus(context.Background(), types.MemberActorAuthority{UserID: "owner"}, "employee", 1, types.TenantMemberStatusSuspended); !errors.Is(err, gorm.ErrRecordNotFound) {
-		t.Fatalf("foreign target mutation error = %v, want not found", err)
+	if err := repo.UpdateStatus(context.Background(), types.MemberActorAuthority{UserID: "owner"}, "employee", 1, types.TenantMemberStatusSuspended); !errors.Is(err, ErrMemberActionForbidden) {
+		t.Fatalf("foreign target mutation error = %v, want forbidden", err)
 	}
 	if err := db.Exec(`UPDATE users SET tenant_id = 1 WHERE id = 'employee'`).Error; err != nil {
 		t.Fatal(err)

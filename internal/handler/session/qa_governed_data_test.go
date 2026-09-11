@@ -2,7 +2,6 @@ package session
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -18,41 +17,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/require"
 )
-
-func TestGovernedAbandonedTurnCleanupTerminatesFailedAndCancelled(t *testing.T) {
-	for _, state := range []string{"failed", "cancelled"} {
-		t.Run(state, func(t *testing.T) {
-			var gotState string
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/api/governed-data/runs" {
-					_ = json.NewEncoder(w).Encode(governedTestReceipt("run-1", "running"))
-					return
-				}
-				var body map[string]any
-				require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-				gotState, _ = body["state"].(string)
-				_ = json.NewEncoder(w).Encode(governedTestReceipt("run-1", gotState))
-			}))
-			defer server.Close()
-			ctx := context.WithValue(context.Background(), types.UserIDContextKey, "user")
-			ctx = context.WithValue(ctx, types.TenantIDContextKey, uint64(7))
-			ctx = types.WithGovernedDataObservability(ctx)
-			ctx = types.WithGovernedDataUserCredential(ctx, "jwt")
-			client, err := tools.NewGovernedDataClient(server.URL, "jwt", "7", "")
-			require.NoError(t, err)
-			require.NoError(t, client.Start(ctx, "session", "turn", "question"))
-			ctx = tools.WithGovernedAnalysisClient(ctx, client)
-			if state == "cancelled" {
-				var cancel context.CancelFunc
-				ctx, cancel = context.WithCancel(ctx)
-				cancel()
-			}
-			terminateAbandonedGovernedAnalysis(ctx)
-			require.Equal(t, state, gotState)
-			require.True(t, client.IsTerminal())
-		})
-	}
-}
 
 func TestGovernedDataInteractiveDetach(t *testing.T) {
 	requestCtx := context.WithValue(context.Background(), types.UserIDContextKey, "user-a")

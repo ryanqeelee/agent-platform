@@ -100,10 +100,6 @@ func (s *sessionService) AgentQA(
 	if err != nil {
 		return err
 	}
-	if _, governed := tools.GovernedAnalysisClientFromContext(ctx); governed {
-		agentConfig.MCPSelectionMode = "none"
-		agentConfig.MCPServices = nil
-	}
 
 	if agentConfig.EmployeeAssistant {
 		attachments, err := s.messageRepo.GetSessionAttachments(ctx, sessionID)
@@ -274,9 +270,6 @@ func (s *sessionService) AgentQA(
 	}
 
 	agentQuery := req.Query
-	if _, governed := tools.GovernedAnalysisClientFromContext(ctx); governed {
-		agentQuery += "\n\n" + tools.GovernedAnalysisDraftInstruction
-	}
 	var agentImageURLs []string
 	if agentModelSupportsVision && len(req.ImageURLs) > 0 {
 		agentImageURLs = req.ImageURLs

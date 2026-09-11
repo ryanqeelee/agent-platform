@@ -23,26 +23,17 @@ func TestGovernedDataRegistrationUsesCurrentUser(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Error(err)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Path == "/api/governed-data/runs" {
-			_, _ = w.Write([]byte(`{"contractVersion":"governed-analysis-run/1","runId":"run-1","state":"running","catalogVersion":"version-1","catalogDigest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","scopeDigest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","bindingDigest":"sha256:75ff2b4664e230e2eacc95a6b54ae2d586542c245bdad5ca5267554c7579fd5c"}`))
-			return
+		if body["source_id"] != "" {
+			t.Error("source must be resolved by Center")
 		}
-		_, _ = w.Write([]byte(`{"schema":"GovernedDataSchemaV1","source":{"source_id":"business"},"catalog_version":"version-1","catalog_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","tables":[],"analysis_run":{"contractVersion":"governed-analysis-run/1","runId":"run-1","state":"running"}}`))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"schema":"GovernedDataSchemaV1","source":{"source_id":"business"},"catalog_version":"version-1","catalog_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","tables":[]}`))
 	}))
 	defer endpoint.Close()
 	s := &agentService{cfg: &config.Config{Agent: &config.AgentConfig{GovernedData: &config.GovernedDataConfig{BaseURL: endpoint.URL}}}}
 	ctx := context.WithValue(context.Background(), types.UserIDContextKey, "user-a")
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, uint64(10001))
-	bound := types.WithGovernedDataObservability(types.WithGovernedDataUserCredential(ctx, "user-jwt"))
-	client, err := tools.NewGovernedDataClient(endpoint.URL, "user-jwt", "10001", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := client.Start(bound, "session", "turn", "question"); err != nil {
-		t.Fatal(err)
-	}
-	bound = tools.WithGovernedAnalysisClient(bound, client)
+	bound := types.WithGovernedDataUserCredential(ctx, "user-jwt")
 	selected := &types.AgentConfig{AllowedTools: []string{tools.ToolGovernedDataSchema, tools.ToolGovernedDataQuery}, EmployeeAssistant: true}
 	for _, tc := range []struct {
 		name       string
@@ -75,7 +66,11 @@ func TestGovernedDataRegistrationUsesCurrentUser(t *testing.T) {
 			}
 		})
 	}
-	if calls != 2 {
+	if calls != 1 {
 		t.Fatalf("unexpected data requests: %d", calls)
+	}
+	s.cfg.Agent.GovernedData = nil
+	if err := s.registerGovernedDataTools(bound, tools.NewToolRegistry(), selected, "native-session"); err == nil {
+		t.Fatal("unconfigured service accepted")
 	}
 }

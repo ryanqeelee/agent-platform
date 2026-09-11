@@ -18,37 +18,7 @@ func cloneInteractiveQATurn(ctx context.Context) context.Context {
 	if !types.GovernedDataObservability(ctx) {
 		return cloned
 	}
-	cloned = types.CopyGovernedDataTurnCredential(cloned, ctx)
-	return tools.CopyGovernedAnalysisClient(cloned, ctx)
-}
-
-func (h *Handler) startGovernedAnalysisTurn(ctx context.Context, sessionID, turnID, question string) (context.Context, error) {
-	bearer, tenantID, ok := types.GovernedDataUserCredential(ctx)
-	if !ok || h.config == nil || h.config.Agent == nil || h.config.Agent.GovernedData == nil {
-		return ctx, tools.ErrGovernedDataAccessDenied
-	}
-	client, err := tools.NewGovernedDataClient(h.config.Agent.GovernedData.BaseURL, bearer, strconv.FormatUint(tenantID, 10), "")
-	if err != nil {
-		return ctx, err
-	}
-	if err := client.Start(ctx, sessionID, turnID, question); err != nil {
-		return ctx, err
-	}
-	return tools.WithGovernedAnalysisClient(ctx, client), nil
-}
-
-func terminateAbandonedGovernedAnalysis(ctx context.Context) {
-	client, governed := tools.GovernedAnalysisClientFromContext(ctx)
-	if !governed || client.IsTerminal() {
-		return
-	}
-	state := "failed"
-	code := "native_turn_abandoned"
-	if ctx.Err() != nil {
-		state = "cancelled"
-		code = "native_turn_cancelled"
-	}
-	_ = client.Terminate(context.WithoutCancel(ctx), state, code, "native turn exited without Center terminal")
+	return types.CopyGovernedDataTurnCredential(cloned, ctx)
 }
 
 func agentRequiresGovernedAdmission(agent *types.CustomAgent) bool {

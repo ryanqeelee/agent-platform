@@ -27,16 +27,8 @@ type GovernedDataClient struct {
 	baseURL, bearer, tenantID, sourceID string
 	http                                *http.Client
 	mu                                  sync.Mutex
-	terminalMu                          sync.Mutex
 	catalogVersion                      string
 	catalogDigest                       string
-	scopeDigest                         string
-	runID                               string
-	terminal                            bool
-	starting                            bool
-	heartbeatCancel                     context.CancelFunc
-	lifecycleErr                        error
-	turnCancel                          context.CancelFunc
 }
 
 func NewGovernedDataClient(baseURL, bearer, tenantID, sourceID string) (*GovernedDataClient, error) {
@@ -63,41 +55,10 @@ const governedDataMaxResponse = 8 * 1024 * 1024
 
 func (c *GovernedDataClient) request(ctx context.Context, operation string, body map[string]any) ([]byte, error) {
 	c.mu.Lock()
-	runID, lifecycleErr := c.runID, c.lifecycleErr
+	if _, pinned := body["source_id"]; !pinned {
+		body["source_id"] = c.sourceID
+	}
 	c.mu.Unlock()
-	if lifecycleErr != nil {
-		return nil, lifecycleErr
-	}
-	if runID == "" {
-		return nil, fmt.Errorf("governed analysis run has not been admitted")
-	}
-	analysisBody := map[string]any{"runId": runID}
-	if operation == "schema" {
-		analysisBody["contractVersion"] = "governed-analysis-schema-request/1"
-		if table, ok := body["table"]; ok {
-			analysisBody["table"] = table
-		}
-		operation = "analysis/schema"
-	} else {
-		analysisBody["contractVersion"] = "governed-analysis-query-request/1"
-		analysisBody["sql"] = body["sql"]
-		analysisBody["limit"] = body["limit"]
-		operation = "analysis/query"
-	}
-	return c.analysisRequest(ctx, operation, analysisBody)
-}
-
-func (c *GovernedDataClient) analysisRequest(ctx context.Context, operation string, body map[string]any) ([]byte, error) {
-	c.mu.Lock()
-	lifecycleErr := c.lifecycleErr
-	c.mu.Unlock()
-	if lifecycleErr != nil {
-		return nil, lifecycleErr
-	}
-	return c.rawAnalysisRequest(ctx, operation, body)
-}
-
-func (c *GovernedDataClient) rawAnalysisRequest(ctx context.Context, operation string, body map[string]any) ([]byte, error) {
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
@@ -125,7 +86,7 @@ func (c *GovernedDataClient) rawAnalysisRequest(ctx context.Context, operation s
 		return nil, fmt.Errorf("governed data response exceeds limit; reduce query rows or columns")
 	}
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("governed data service rejected request (HTTP %d)", response.StatusCode)
+		return nil, fmt.Errorf("governed data service rejected request (HTTP %d); refresh schema for 409, check user access for 401/403", response.StatusCode)
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -223,13 +184,14 @@ func (t *GovernedDataTool) Execute(ctx context.Context, args json.RawMessage) (*
 			return nil, fmt.Errorf("query limit must be between 1 and 10000")
 		}
 		t.client.mu.Lock()
+		sourceID := t.client.sourceID
 		version := t.client.catalogVersion
 		digest := t.client.catalogDigest
-		sourceID := t.client.sourceID
 		t.client.mu.Unlock()
 		if sourceID == "" || version == "" || digest == "" {
 			return nil, fmt.Errorf("call governed_data_schema before querying")
 		}
+		body["source_id"], body["catalog_version"], body["catalog_digest"] = sourceID, version, digest
 		body["sql"], body["limit"] = input.SQL, limit
 		operation = "query"
 	} else {
@@ -263,13 +225,6 @@ func (t *GovernedDataTool) Execute(ctx context.Context, args json.RawMessage) (*
 		if result["schema"] != "GovernedDataSchemaV1" || version == "" || digest == "" {
 			return nil, fmt.Errorf("invalid governed schema response")
 		}
-		if version != t.client.catalogVersion || digest != t.client.catalogDigest {
-			return nil, fmt.Errorf("governed schema catalog does not match admitted run")
-		}
-		run, ok := result["analysis_run"].(map[string]any)
-		if !ok || run["contractVersion"] != "governed-analysis-run/1" || run["runId"] != t.client.runID || run["state"] != "running" {
-			return nil, fmt.Errorf("invalid governed schema run receipt")
-		}
 		source, _ := result["source"].(map[string]any)
 		sourceID, _ := source["source_id"].(string)
 		t.client.mu.Lock()
@@ -289,33 +244,10 @@ func (t *GovernedDataTool) Execute(ctx context.Context, args json.RawMessage) (*
 		if !ok {
 			return nil, fmt.Errorf("missing governed query result")
 		}
-		if query["source_id"] != t.client.sourceID ||
-			result["catalog_version"] != t.client.catalogVersion ||
-			result["catalog_digest"] != t.client.catalogDigest {
+		if query["source_id"] != body["source_id"] ||
+			result["catalog_version"] != body["catalog_version"] ||
+			result["catalog_digest"] != body["catalog_digest"] {
 			return nil, fmt.Errorf("governed query source or catalog mismatch")
-		}
-		receipt, receiptOK := result["evidence_receipt"].(map[string]any)
-		run, runOK := result["analysis_run"].(map[string]any)
-		returned, returnedOK := receipt["returnedRowCount"].(json.Number)
-		persisted, persistedOK := receipt["persistedRowCount"].(json.Number)
-		citable, citableOK := receipt["citableRowEndExclusive"].(json.Number)
-		returnedCount, returnedErr := returned.Int64()
-		persistedCount, persistedErr := persisted.Int64()
-		citableCount, citableErr := citable.Int64()
-		resultRows, rowsOK := query["rows"].([]any)
-		queryTruncated, truncatedOK := query["truncated"].(bool)
-		queryExecutionID, queryIDOK := query["query_execution_id"].(string)
-		queryDigest, digestOK := result["query_digest"].(string)
-		queryStatus, statusOK := query["status"].(string)
-		validStatus := queryStatus == "ok" || queryStatus == "rejected" || queryStatus == "error"
-		if !receiptOK || !runOK || receipt["contractVersion"] != "governed-query-evidence-receipt/1" ||
-			receipt["runId"] != t.client.runID || !queryIDOK || queryExecutionID == "" || receipt["queryExecutionId"] != queryExecutionID ||
-			receipt["queryStatus"] != query["status"] || !returnedOK || !persistedOK || !citableOK ||
-			returnedErr != nil || persistedErr != nil || citableErr != nil || citableCount < 0 || citableCount > persistedCount || persistedCount > returnedCount ||
-			!rowsOK || returnedCount != int64(len(resultRows)) || citableCount != persistedCount || !truncatedOK || !statusOK || !validStatus || (queryStatus != "ok" && persistedCount != 0) ||
-			!digestOK || queryDigest == "" || receipt["queryTruncated"] != queryTruncated || receipt["queryDigest"] != queryDigest ||
-			run["contractVersion"] != "governed-analysis-run/1" || run["runId"] != t.client.runID || run["state"] != "running" {
-			return nil, fmt.Errorf("invalid governed query evidence receipt")
 		}
 		if query["status"] != "ok" {
 			return &types.ToolResult{Success: false, Output: string(data), Error: "query was rejected or failed; inspect reasons and correct the SQL", Data: result}, nil
@@ -386,30 +318,11 @@ func boundedGovernedQueryResult(ctx context.Context, result map[string]any) (*ty
 			"rows_preview_only": true, "preview_row_count": 0,
 			"file_contains_all_returned_rows": hasFile, "next_step": result["next_step"],
 			"metadata_in_file": hasFile,
-			"result_semantics": result["result_semantics"], "checks": result["checks"],
-			"analysis_scope":   result["analysis_scope"],
-			"evidence_receipt": result["evidence_receipt"], "analysis_run": result["analysis_run"],
-			"result": map[string]any{"status": query["status"], "source_id": query["source_id"], "query_execution_id": query["query_execution_id"], "row_count": query["row_count"], "truncated": query["truncated"], "applied_limit": query["applied_limit"], "rows": []any{}},
+			"result":           map[string]any{"status": query["status"], "source_id": query["source_id"], "query_execution_id": query["query_execution_id"], "row_count": query["row_count"], "truncated": query["truncated"], "applied_limit": query["applied_limit"], "rows": []any{}},
 		}
 		output, err = json.Marshal(result)
 		if err != nil {
 			return nil, err
-		}
-		if utf8.RuneCount(output) > OutputBudget(ctx) && hasFile {
-			delete(result, "result_semantics")
-			// Scope evidence must stay in the model context even when other
-			// checks are available only in the complete diagnostic file.
-			scopeChecks := []any{}
-			for _, item := range asAnySlice(result["checks"]) {
-				if check, ok := item.(map[string]any); ok && check["kind"] == "analysis_scope" {
-					scopeChecks = append(scopeChecks, item)
-				}
-			}
-			result["checks"] = scopeChecks
-			output, err = json.Marshal(result)
-			if err != nil {
-				return nil, err
-			}
 		}
 	} else {
 		for count := 1; count <= len(rows) && count <= 5; count++ {

@@ -44,7 +44,6 @@ type AgentStreamHandler struct {
 	answerSegments  []*answerSegment     // Per-answer-event-ID accumulation, so superseded preambles can be dropped
 	eventStartTimes map[string]time.Time // Track start time for duration calculation
 	terminal        bool                 // First complete/error event owns stream termination
-	terminalClaimed bool                 // Governed terminal owner while Center I/O is in flight
 	mu              sync.Mutex
 }
 
@@ -509,22 +508,7 @@ func (h *AgentStreamHandler) handleFinalAnswer(ctx context.Context, evt event.Ev
 	}
 
 	h.mu.Lock()
-	if h.terminal || h.terminalClaimed {
-		h.mu.Unlock()
-		return nil
-	}
-	if _, governed := agenttools.GovernedAnalysisClientFromContext(h.ctx); governed {
-		// The model-authored draft is an internal command. Center validation and
-		// grounding decide what may be shown, so raw draft chunks never reach UI.
-		if data.Content != "" {
-			seg := h.findAnswerSegment(evt.ID)
-			if seg == nil {
-				seg = &answerSegment{id: evt.ID}
-				h.answerSegments = append(h.answerSegments, seg)
-			}
-			seg.content += data.Content
-			h.finalAnswer = h.composeFinalAnswer()
-		}
+	if h.terminal {
 		h.mu.Unlock()
 		return nil
 	}
@@ -624,25 +608,13 @@ func (h *AgentStreamHandler) handleError(ctx context.Context, evt event.Event) e
 		return nil
 	}
 	logger.GetLogger(h.ctx).Error("Agent execution failed", "stage", data.Stage, "error", data.Error)
-	client, governed := agenttools.GovernedAnalysisClientFromContext(h.ctx)
 	h.mu.Lock()
-	if h.terminal || h.terminalClaimed {
+	if h.terminal {
 		h.mu.Unlock()
 		return nil
 	}
-	if governed {
-		h.terminalClaimed = true
-	} else {
-		h.terminal = true
-	}
+	h.terminal = true
 	h.mu.Unlock()
-	if governed {
-		_ = client.Terminate(context.WithoutCancel(h.ctx), "failed", "native_agent_error", data.Stage)
-		h.mu.Lock()
-		h.terminal = true
-		h.terminalClaimed = false
-		h.mu.Unlock()
-	}
 
 	status := employeeModelRuntimeFailureStatus()
 	// Build error metadata
@@ -720,68 +692,13 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 	if !ok {
 		return nil
 	}
-	governedOwner := false
-	acceptedRunID := ""
-	if client, governed := agenttools.GovernedAnalysisClientFromContext(h.ctx); governed {
-		h.mu.Lock()
-		if h.terminal || h.terminalClaimed {
-			h.mu.Unlock()
-			return nil
-		}
-		h.terminalClaimed = true
-		h.mu.Unlock()
-		governedOwner = true
-		if lifecycleErr := client.LifecycleError(); lifecycleErr != nil {
-			_ = client.Terminate(context.WithoutCancel(h.ctx), "failed", "heartbeat_failed", lifecycleErr.Error())
-			h.persistGovernedIncomplete(data)
-			h.emitGovernedErrorTerminal(event.ErrorData{Error: lifecycleErr.Error(), Stage: "governed_analysis_heartbeat", SessionID: h.sessionID})
-			return nil
-		}
-		if data.Outcome == "cancelled" || h.ctx.Err() != nil {
-			_ = client.Terminate(context.WithoutCancel(h.ctx), "cancelled", "user_cancelled", "native turn cancelled")
-			h.persistGovernedIncomplete(data)
-			h.mu.Lock()
-			h.terminal = true
-			h.mu.Unlock()
-			return nil
-		}
-		if data.Outcome != "completed" {
-			_ = client.Terminate(context.WithoutCancel(h.ctx), "failed", "native_agent_failed", "native turn did not complete")
-			h.persistGovernedIncomplete(data)
-			h.emitGovernedErrorTerminal(event.ErrorData{Error: "native turn did not complete", Stage: "governed_analysis", SessionID: h.sessionID})
-			return nil
-		}
-		presentation, result, err := client.Finalize(h.ctx, data.FinalAnswer)
-		if err != nil {
-			h.persistGovernedIncomplete(data)
-			if result != nil && client.IsTerminal() {
-				h.mu.Lock()
-				h.assistantMessage.ExecutionContext.GovernedAnalysisRun = &types.GovernedAnalysisRunReference{ContractVersion: "governed-analysis-result/1", RunID: client.RunID()}
-				h.mu.Unlock()
-			} else {
-				_ = client.Terminate(context.WithoutCancel(h.ctx), "failed", "invalid_analysis_draft", err.Error())
-			}
-			h.emitGovernedErrorTerminal(event.ErrorData{Error: err.Error(), Stage: "governed_analysis_finalize", SessionID: h.sessionID})
-			return nil
-		}
-		data.FinalAnswer = presentation
-		acceptedRunID = client.RunID()
-	}
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if governedOwner {
-		h.terminalClaimed = false
-		h.terminal = true
-		h.assistantMessage.ExecutionContext.GovernedAnalysisRun = &types.GovernedAnalysisRunReference{ContractVersion: "governed-analysis-result/1", RunID: acceptedRunID}
-		h.finalAnswer = ""
-		h.answerSegments = nil
-	} else {
-		if h.terminal {
-			return nil
-		}
-		h.terminal = true
+	if h.terminal {
+		return nil
 	}
+	h.terminal = true
 
 	// Update assistant message with final data
 	if data.MessageID == h.assistantMessageID {
@@ -925,36 +842,6 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 	}
 
 	return nil
-}
-
-func (h *AgentStreamHandler) emitGovernedErrorTerminal(data event.ErrorData) {
-	status := employeeModelRuntimeFailureStatus()
-	h.mu.Lock()
-	h.terminal = true
-	h.mu.Unlock()
-	_ = h.streamManager.AppendEvent(context.WithoutCancel(h.ctx), h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
-		ID: fmt.Sprintf("governed-error-%d", time.Now().UnixNano()), Type: types.ResponseTypeError,
-		Content: status.SafeSummary, Done: true, Timestamp: time.Now(),
-		Data: map[string]interface{}{"stage": data.Stage, "error": status.SafeSummary, "operationalStatus": status},
-	})
-	_ = h.streamManager.AppendEvent(context.WithoutCancel(h.ctx), h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
-		ID: fmt.Sprintf("governed-complete-%d", time.Now().UnixNano()), Type: types.ResponseTypeComplete, Done: true, Timestamp: time.Now(),
-	})
-}
-
-func (h *AgentStreamHandler) persistGovernedIncomplete(data event.AgentCompleteData) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if data.MessageID != h.assistantMessageID {
-		return
-	}
-	if steps, ok := data.AgentSteps.([]types.AgentStep); ok {
-		h.assistantMessage.AgentSteps = agenttools.SanitizeAgentStepsForStorage(steps)
-	}
-	if usage, ok := data.Usage.(*types.TokenUsage); ok && usage != nil {
-		h.assistantMessage.Usage = usage
-	}
-	h.assistantMessage.AgentDurationMs = data.TotalDurationMs
 }
 
 // emitArtifactsPending tells the live UI that sandbox files exist and are

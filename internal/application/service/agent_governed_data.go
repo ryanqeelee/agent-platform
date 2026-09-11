@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/sandbox"
@@ -22,9 +23,17 @@ func (s *agentService) registerGovernedDataTools(ctx context.Context, registry *
 	if !wanted[tools.ToolGovernedDataSchema] || !wanted[tools.ToolGovernedDataQuery] {
 		return fmt.Errorf("select both business data schema and query tools")
 	}
-	client, admitted := tools.GovernedAnalysisClientFromContext(ctx)
-	if !admitted || client.RunID() == "" {
-		return fmt.Errorf("business analysis run was not admitted")
+	bearer, tenantID, authenticated := types.GovernedDataUserCredential(ctx)
+	if !authenticated {
+		return fmt.Errorf("business data requires an authenticated user in the current workspace")
+	}
+	if s.cfg == nil || s.cfg.Agent == nil || s.cfg.Agent.GovernedData == nil {
+		return fmt.Errorf("business data source is not configured")
+	}
+	connection := s.cfg.Agent.GovernedData
+	client, err := tools.NewGovernedDataClient(connection.BaseURL, bearer, strconv.FormatUint(tenantID, 10), "")
+	if err != nil {
+		return err
 	}
 	var files sandbox.SessionFileStore
 	if !employeeSandboxDisabled(cfg) {

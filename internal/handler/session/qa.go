@@ -787,9 +787,6 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool) *
 	// Create EventBus and cancellable context
 	eventBus := event.NewEventBus()
 	asyncCtx, cancel := context.WithCancel(cloneInteractiveQATurn(baseCtx))
-	if client, governed := tools.GovernedAnalysisClientFromContext(asyncCtx); governed {
-		client.SetTurnCancel(cancel)
-	}
 
 	streamCtx := &sseStreamContext{
 		eventBus:         eventBus,
@@ -1074,15 +1071,6 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 		return
 	}
 	reqCtx.assistantMessage = assistantMessagePtr
-	if mode == qaModeAgent && agentCanConsumeGovernedData(reqCtx.customAgent) {
-		reqCtx.ctx, err = h.startGovernedAnalysisTurn(reqCtx.ctx, sessionID, assistantMessagePtr.ID, reqCtx.query)
-		if err != nil {
-			updateCtx := context.WithValue(context.WithoutCancel(reqCtx.ctx), types.TenantIDContextKey, reqCtx.session.TenantID)
-			h.completeAssistantMessage(updateCtx, assistantMessagePtr, "", "")
-			reqCtx.c.Error(errors.NewInternalServerError(err.Error()))
-			return
-		}
-	}
 	// Accept the exact user expression under the policy that exists at input
 	// time. Carry that captured version through the turn for later answer-source
 	// signals; completion must never rescan or retroactively admit this input.
@@ -1134,7 +1122,6 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 				h.completeAssistantMessage(updateCtx, streamCtx.assistantMessage, reqCtx.query, reqCtx.userMessageID)
 				logger.Infof(streamCtx.asyncCtx, "Agent QA service completed for session: %s", sessionID)
 			}
-			terminateAbandonedGovernedAnalysis(streamCtx.asyncCtx)
 		}()
 
 		// Resolve pre-uploaded attachments (may still be parsing): waits with a

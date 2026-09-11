@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -17,8 +16,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const externalSchema = `{"schema":"GovernedDataSchemaV1","catalog_version":"cat-1","catalog_digest":"digest-1","source":{"source_id":"retail"},"analysis_run":{"contractVersion":"governed-analysis-run/1","runId":"run-1","state":"running"}}`
-const externalQuery = `{"schema":"GovernedDataQueryV1","catalog_version":"cat-1","catalog_digest":"digest-1","query_digest":"digest","result":{"status":"ok","source_id":"retail","query_execution_id":"query-1","rows":[{"amount":"9007199254740993.12345678"}],"row_count":1,"truncated":false},"evidence_receipt":{"contractVersion":"governed-query-evidence-receipt/1","runId":"run-1","queryExecutionId":"query-1","queryDigest":"digest","queryStatus":"ok","returnedRowCount":1,"persistedRowCount":1,"citableRowEndExclusive":1,"queryTruncated":false},"analysis_run":{"contractVersion":"governed-analysis-run/1","runId":"run-1","state":"running"}}`
+const externalSchema = `{"schema":"GovernedDataSchemaV1","catalog_version":"cat-1","catalog_digest":"digest-1","source":{"source_id":"retail"}}`
+const externalQuery = `{"schema":"GovernedDataQueryV1","catalog_version":"cat-1","catalog_digest":"digest-1","result":{"status":"ok","source_id":"retail","rows":[{"amount":"9007199254740993.12345678"}],"row_count":1,"truncated":false}}`
 
 type queryInputStore struct {
 	sandbox.SessionFileStore
@@ -40,7 +39,7 @@ func TestGovernedDataNativeToolsPreserveIdentityAndExactFile(t *testing.T) {
 		var body map[string]any
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		requests = append(requests, body)
-		if r.URL.Path == "/api/governed-data/analysis/schema" {
+		if r.URL.Path == "/api/governed-data/schema" {
 			fmt.Fprint(w, externalSchema)
 		} else {
 			fmt.Fprint(w, externalQuery)
@@ -49,8 +48,6 @@ func TestGovernedDataNativeToolsPreserveIdentityAndExactFile(t *testing.T) {
 	defer server.Close()
 	client, err := NewGovernedDataClient(server.URL, "user-secret", "10001", "")
 	require.NoError(t, err)
-	client.runID = "run-1"
-	client.catalogVersion, client.catalogDigest = "cat-1", "digest-1"
 	files := &queryInputStore{}
 	tools := NewGovernedDataTools(client, files, "owned-session")
 	_, err = tools[1].Execute(context.Background(), json.RawMessage(`{"sql":"SELECT 1"}`))
@@ -61,9 +58,9 @@ func TestGovernedDataNativeToolsPreserveIdentityAndExactFile(t *testing.T) {
 	result, err := tools[1].Execute(context.Background(), json.RawMessage(`{"sql":"SELECT sum(amount) FROM v_sales"}`))
 	require.NoError(t, err)
 	require.True(t, result.Success)
-	require.Equal(t, "run-1", requests[1]["runId"])
-	require.NotContains(t, requests[1], "source_id")
-	require.NotContains(t, requests[1], "catalog_version")
+	require.Equal(t, "retail", requests[1]["source_id"])
+	require.Equal(t, "cat-1", requests[1]["catalog_version"])
+	require.Equal(t, "digest-1", requests[1]["catalog_digest"])
 	require.Equal(t, "owned-session", files.session)
 	require.Equal(t, externalQuery, string(files.data))
 	require.Equal(t, fmt.Sprintf("%x", sha256.Sum256(files.data)), result.Data["input_sha256"])
@@ -77,19 +74,19 @@ func TestGovernedDataRejectsSameVersionWithDifferentCatalogDigest(t *testing.T) 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		if r.URL.Path == "/api/governed-data/analysis/schema" {
+		if r.URL.Path == "/api/governed-data/schema" {
 			fmt.Fprint(w, externalSchema)
 			return
 		}
-		require.Equal(t, "run-1", body["runId"])
-		fmt.Fprint(w, `{"schema":"GovernedDataQueryV1","catalog_version":"cat-1","catalog_digest":"digest-2","result":{"status":"ok","source_id":"retail","query_execution_id":"q","rows":[],"row_count":0,"truncated":false},"evidence_receipt":{"contractVersion":"governed-query-evidence-receipt/1","runId":"run-1","queryExecutionId":"q","queryDigest":"d","queryStatus":"ok","returnedRowCount":0,"persistedRowCount":0,"citableRowEndExclusive":0,"queryTruncated":false},"analysis_run":{"contractVersion":"governed-analysis-run/1","runId":"run-1","state":"running"}}`)
+		require.Equal(t, "retail", body["source_id"])
+		require.Equal(t, "cat-1", body["catalog_version"])
+		require.Equal(t, "digest-1", body["catalog_digest"])
+		fmt.Fprint(w, `{"schema":"GovernedDataQueryV1","catalog_version":"cat-1","catalog_digest":"digest-2","result":{"status":"ok","source_id":"retail","rows":[],"row_count":0,"truncated":false}}`)
 	}))
 	defer server.Close()
 
 	client, err := NewGovernedDataClient(server.URL, "user", "tenant", "")
 	require.NoError(t, err)
-	client.runID = "run-1"
-	client.catalogVersion, client.catalogDigest = "cat-1", "digest-1"
 	tools := NewGovernedDataTools(client, nil, "")
 	_, err = tools[0].Execute(context.Background(), json.RawMessage(`{}`))
 	require.NoError(t, err)
@@ -122,8 +119,6 @@ func TestGovernedDataNeverForwardsCredentialToRedirect(t *testing.T) {
 	defer server.Close()
 	client, err := NewGovernedDataClient(server.URL, "user-secret", "tenant", "retail")
 	require.NoError(t, err)
-	client.runID = "run-1"
-	client.catalogVersion, client.catalogDigest = "cat-1", "digest-1"
 	_, err = NewGovernedDataTools(client, nil, "")[0].Execute(context.Background(), json.RawMessage(`{}`))
 	require.ErrorContains(t, err, "HTTP 307")
 	require.False(t, called)
@@ -139,8 +134,6 @@ func TestGovernedDataCancelInterruptsHTTPAndDoesNotStage(t *testing.T) {
 	defer server.Close()
 	client, err := NewGovernedDataClient(server.URL, "user", "tenant", "retail")
 	require.NoError(t, err)
-	client.runID = "run-1"
-	client.catalogVersion, client.catalogDigest = "cat-1", "digest-1"
 	client.catalogVersion = "cat-1"
 	client.catalogDigest = "digest-1"
 	files := &queryInputStore{}
@@ -161,8 +154,6 @@ func TestGovernedDataStagingFailureKeepsSuccessfulRows(t *testing.T) {
 	defer server.Close()
 	client, err := NewGovernedDataClient(server.URL, "user", "tenant", "retail")
 	require.NoError(t, err)
-	client.runID = "run-1"
-	client.catalogVersion, client.catalogDigest = "cat-1", "digest-1"
 	client.catalogVersion = "cat-1"
 	client.catalogDigest = "digest-1"
 	result, err := NewGovernedDataTools(client, &queryInputStore{err: fmt.Errorf("sandbox unavailable")}, "s")[1].Execute(context.Background(), json.RawMessage(`{"sql":"SELECT 1"}`))
@@ -219,13 +210,12 @@ func TestGovernedDataLargeOutputIsValidPreviewAndKeepsFullReturnedFile(t *testin
 			for i := range rows {
 				rows[i] = map[string]any{"amount": "9007199254740993.12345678", "description": strings.Repeat("业务", 200)}
 			}
-			raw, err := json.Marshal(map[string]any{"schema": "GovernedDataQueryV1", "catalog_version": "cat-1", "catalog_digest": "catalog-digest", "query_digest": "query-digest", "read_consistency": "live read; not snapshot", "result": map[string]any{"status": "ok", "source_id": "retail", "query_execution_id": "query-1", "rows": rows, "row_count": 20, "truncated": true, "applied_limit": 20}, "evidence_receipt": map[string]any{"contractVersion": "governed-query-evidence-receipt/1", "runId": "run-1", "queryExecutionId": "query-1", "queryDigest": "query-digest", "queryStatus": "ok", "returnedRowCount": 20, "persistedRowCount": 20, "citableRowEndExclusive": 20, "queryTruncated": true}, "analysis_run": map[string]any{"contractVersion": "governed-analysis-run/1", "runId": "run-1", "state": "running"}})
+			raw, err := json.Marshal(map[string]any{"schema": "GovernedDataQueryV1", "catalog_version": "cat-1", "catalog_digest": "catalog-digest", "query_digest": "query-digest", "read_consistency": "live read; not snapshot", "result": map[string]any{"status": "ok", "source_id": "retail", "query_execution_id": "query-1", "rows": rows, "row_count": 20, "truncated": true, "applied_limit": 20}})
 			require.NoError(t, err)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(raw) }))
 			defer server.Close()
 			client, err := NewGovernedDataClient(server.URL, "user", "tenant", "retail")
 			require.NoError(t, err)
-			client.runID = "run-1"
 			client.catalogVersion = "cat-1"
 			client.catalogDigest = "catalog-digest"
 			files := &queryInputStore{}
@@ -252,8 +242,6 @@ func TestGovernedDataLargeOutputIsValidPreviewAndKeepsFullReturnedFile(t *testin
 			require.Equal(t, "query-1", q["query_execution_id"])
 			require.Equal(t, float64(20), q["row_count"])
 			require.Equal(t, true, q["truncated"])
-			require.Equal(t, "governed-query-evidence-receipt/1", preview["evidence_receipt"].(map[string]any)["contractVersion"])
-			require.Equal(t, "run-1", preview["analysis_run"].(map[string]any)["runId"])
 			require.Less(t, len(q["rows"].([]any)), 20)
 			require.Equal(t, float64(len(q["rows"].([]any))), preview["preview_row_count"])
 			require.Equal(t, stage == "file", result.Success)
@@ -265,31 +253,6 @@ func TestGovernedDataLargeOutputIsValidPreviewAndKeepsFullReturnedFile(t *testin
 			}
 		})
 	}
-}
-
-func TestGovernedDataUltraWidePreviewRetainsRunAndEvidenceReceipt(t *testing.T) {
-	var payload map[string]any
-	require.NoError(t, json.Unmarshal([]byte(externalQuery), &payload))
-	payload["result_semantics"] = []any{map[string]any{"column": strings.Repeat("wide", 3000)}}
-	payload["checks"] = []any{map[string]any{"kind": strings.Repeat("check", 3000)}}
-	raw, err := json.Marshal(payload)
-	require.NoError(t, err)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(raw) }))
-	defer server.Close()
-	client, err := NewGovernedDataClient(server.URL, "user", "tenant", "retail")
-	require.NoError(t, err)
-	client.runID, client.catalogVersion, client.catalogDigest = "run-1", "cat-1", "digest-1"
-	files := &queryInputStore{}
-	result, err := NewGovernedDataTools(client, files, "session")[1].Execute(WithOutputBudget(context.Background(), 2000), json.RawMessage(`{"sql":"SELECT 1"}`))
-	require.NoError(t, err)
-	require.True(t, result.Success)
-	var preview map[string]any
-	require.NoError(t, json.Unmarshal([]byte(result.Output), &preview))
-	require.Equal(t, "run-1", preview["analysis_run"].(map[string]any)["runId"])
-	require.Equal(t, "governed-query-evidence-receipt/1", preview["evidence_receipt"].(map[string]any)["contractVersion"])
-	require.Equal(t, true, preview["metadata_in_file"])
-	require.NotContains(t, preview, "result_semantics")
-	require.Equal(t, string(raw), string(files.data))
 }
 
 func TestGovernedSchemaRegistryBudgetPreservesCompleteFile(t *testing.T) {
@@ -309,7 +272,6 @@ func TestGovernedSchemaRegistryBudgetPreservesCompleteFile(t *testing.T) {
 				defer server.Close()
 				client, err := NewGovernedDataClient(server.URL, "user-secret", "tenant", "")
 				require.NoError(t, err)
-				client.runID = "run-1"
 				client.catalogVersion, client.catalogDigest = "cat-1", "digest-1"
 				files := &queryInputStore{}
 				var store sandbox.SessionFileStore = files
@@ -356,7 +318,6 @@ func TestGovernedSmallSchemaRegistryStaysInlineWithoutSandbox(t *testing.T) {
 	defer server.Close()
 	client, err := NewGovernedDataClient(server.URL, "user", "tenant", "")
 	require.NoError(t, err)
-	client.runID = "run-1"
 	client.catalogVersion, client.catalogDigest = "cat-1", "digest-1"
 	registry := NewToolRegistry()
 	registry.SetMaxToolOutputSize(2000)
@@ -365,82 +326,4 @@ func TestGovernedSmallSchemaRegistryStaysInlineWithoutSandbox(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, result.Success)
 	require.JSONEq(t, externalSchema, result.Output)
-}
-
-func TestGovernedAnalysisScopeSurvivesAllBudgetEnvelopes(t *testing.T) {
-	for _, status := range []string{"resolved", "unresolved", "not_applicable"} {
-		for _, mode := range []string{"inline", "rows_preview", "ultra_wide"} {
-			t.Run(status+"/"+mode, func(t *testing.T) {
-				var payload map[string]any
-				require.NoError(t, json.Unmarshal([]byte(externalQuery), &payload))
-				scope := map[string]any{"contractVersion": "governed-query-analysis-scope/1", "status": status}
-				check := map[string]any{"kind": "analysis_scope", "applies_to": []any{"query-1"}, "status": "not_applicable", "value": nil, "evidence_refs": []any{}, "limitation_codes": []any{}}
-				switch status {
-				case "resolved":
-					data, err := os.ReadFile("testdata/governed_analysis/population-scope.json")
-					require.NoError(t, err)
-					require.NoError(t, json.Unmarshal(data, &scope))
-					require.NotEqual(t, scope["authorityScopeDigest"], scope["populationScopeDigest"])
-					require.Len(t, scope["populationFilters"], 2)
-					check["status"] = "measured"
-					check["value"] = map[string]any{"table": scope["table"], "time_column": scope["timeColumn"], "period": scope["period"], "authority_scope_digest": scope["authorityScopeDigest"], "population_filters": scope["populationFilters"], "population_scope_digest": scope["populationScopeDigest"]}
-				case "unresolved":
-					scope["limitationCodes"] = []any{"query_period_unresolved"}
-					check["status"], check["limitation_codes"] = "not_measured", scope["limitationCodes"]
-				}
-				payload["analysis_scope"] = scope
-				otherCheck := map[string]any{"kind": "read_consistency", "status": "not_measured", "limitation_codes": []any{"live_read"}}
-				payload["checks"] = []any{otherCheck, check}
-				budget := 50000
-				if mode != "inline" {
-					budget = 3000
-					payload["result"].(map[string]any)["rows"].([]any)[0].(map[string]any)["description"] = strings.Repeat("wide", 3000)
-				}
-				if mode == "ultra_wide" {
-					payload["result_semantics"] = []any{map[string]any{"column": strings.Repeat("metadata", 3000)}}
-					otherCheck["evidence_refs"] = []any{strings.Repeat("metadata", 3000)}
-				}
-				raw, err := json.Marshal(payload)
-				require.NoError(t, err)
-				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(raw) }))
-				defer server.Close()
-				client, err := NewGovernedDataClient(server.URL, "user", "tenant", "retail")
-				require.NoError(t, err)
-				client.runID, client.catalogVersion, client.catalogDigest = "run-1", "cat-1", "digest-1"
-				files := &queryInputStore{}
-				result, err := NewGovernedDataTools(client, files, "session")[1].Execute(WithOutputBudget(context.Background(), budget), json.RawMessage(`{"sql":"SELECT 1"}`))
-				require.NoError(t, err)
-				require.True(t, result.Success, result.Error)
-				var model map[string]any
-				require.NoError(t, json.Unmarshal([]byte(result.Output), &model))
-				require.Equal(t, scope, model["analysis_scope"])
-				wantChecks := payload["checks"]
-				if mode == "ultra_wide" {
-					wantChecks = []any{check}
-					require.NotContains(t, model, "result_semantics")
-				}
-				require.Equal(t, wantChecks, model["checks"])
-				diagnostics := result.Data
-				require.Equal(t, scope, diagnostics["analysis_scope"])
-				require.Equal(t, wantChecks, diagnostics["checks"])
-				for _, retained := range []map[string]any{SanitizeToolDataForPersist("governed_data_query", result.Data), SanitizeToolResultForClient("governed_data_query", result)} {
-					require.Equal(t, scope, retained["analysis_scope"])
-					require.Equal(t, wantChecks, retained["checks"])
-				}
-				require.Equal(t, string(raw), string(files.data))
-			})
-		}
-	}
-}
-
-func TestGovernedAnalysisScopeTooLargeDoesNotSilentlyDropProvenance(t *testing.T) {
-	var payload map[string]any
-	require.NoError(t, json.Unmarshal([]byte(externalQuery), &payload))
-	payload["analysis_scope"] = map[string]any{"contractVersion": "governed-query-analysis-scope/1", "status": "unresolved", "limitationCodes": []any{strings.Repeat("scope", 3000)}}
-	payload["checks"] = []any{map[string]any{"kind": "analysis_scope", "status": "not_measured", "limitation_codes": []any{strings.Repeat("scope", 3000)}}}
-	payload["input_file"] = "/complete-query.json"
-	result, err := boundedGovernedQueryResult(WithOutputBudget(context.Background(), 2000), payload)
-	require.NoError(t, err)
-	require.False(t, result.Success)
-	require.Contains(t, result.Error, "cannot hold query provenance")
 }

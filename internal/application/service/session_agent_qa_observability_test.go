@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -36,11 +35,11 @@ func TestGovernedAgentQAStartLogIsMetadataOnly(t *testing.T) {
 	}
 }
 
-func TestGovernedAgentImageDescriptionPreservesDraftInstruction(t *testing.T) {
-	query := "分析经营数据\n\n" + tools.GovernedAnalysisDraftInstruction
+func TestAgentImageDescriptionPreservesQuestion(t *testing.T) {
+	query := "分析经营数据"
 	got := appendAgentImageDescription(query, "图中显示华东门店")
-	if !strings.Contains(got, tools.GovernedAnalysisDraftInstruction) {
-		t.Fatal("image description discarded governed draft instruction")
+	if !strings.HasPrefix(got, query) {
+		t.Fatal("image description discarded user question")
 	}
 	if !strings.Contains(got, "[用户上传图片内容]\n图中显示华东门店") {
 		t.Fatal("image description was not appended")

@@ -149,6 +149,10 @@ func (s *messageService) IsGovernedAnalysisMessage(ctx context.Context, messageI
 	return ids[messageID], err
 }
 
+func (s *messageService) GovernedArtifactMessageIDs(ctx context.Context, references []string) ([]string, error) {
+	return s.messageRepo.GovernedArtifactMessageIDs(ctx, references)
+}
+
 // GetMessagesBySession retrieves paginated messages for a specific session
 func (s *messageService) GetMessagesBySession(ctx context.Context,
 	sessionID string, page int, pageSize int,

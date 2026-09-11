@@ -20,6 +20,7 @@ type MessageService interface {
 	// IsGovernedAnalysisMessage classifies a server-derived message binding by
 	// its session's persisted evidence, without loading or returning payloads.
 	IsGovernedAnalysisMessage(ctx context.Context, id string) (bool, error)
+	GovernedArtifactMessageIDs(ctx context.Context, references []string) ([]string, error)
 
 	// GetMessagesBySession gets all messages of a session
 	GetMessagesBySession(ctx context.Context, sessionID string, page int, pageSize int) ([]*types.Message, error)
@@ -132,4 +133,5 @@ type MessageRepository interface {
 	// GovernedAnalysisMessageIDs returns target messages whose containing
 	// session has persisted governed operating-analysis evidence.
 	GovernedAnalysisMessageIDs(ctx context.Context, messageIDs []string) (map[string]bool, error)
+	GovernedArtifactMessageIDs(ctx context.Context, references []string) ([]string, error)
 }

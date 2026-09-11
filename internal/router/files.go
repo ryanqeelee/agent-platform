@@ -51,6 +51,7 @@ type messageFileLookup interface {
 }
 
 type governedMessageLookup interface {
+	GovernedArtifactMessageIDs(ctx context.Context, references []string) ([]string, error)
 	IsGovernedAnalysisMessage(ctx context.Context, messageID string) (bool, error)
 }
 
@@ -368,17 +369,23 @@ func resourceGovernedMessageArtifacts(
 	messageLookup governedMessageLookup,
 	resource *types.StoredResource,
 ) ([]string, error) {
+	if messageLookup == nil {
+		return nil, errors.New("governed message lookup unavailable")
+	}
+	// The message artifact list survives a failed best-effort lifecycle binding.
+	governedIDs, err := messageLookup.GovernedArtifactMessageIDs(ctx, []string{
+		types.BuildResourcePath(resource.Handle), resource.PhysicalPath,
+	})
+	if err != nil {
+		return nil, err
+	}
 	bindings, err := catalog.ListMessageBindings(ctx, types.BuildResourcePath(resource.Handle))
 	if err != nil {
 		return nil, err
 	}
-	var governedIDs []string
 	for _, binding := range bindings {
 		if binding == nil || binding.Relation != types.ResourceRelationArtifact {
 			continue
-		}
-		if messageLookup == nil {
-			return nil, errors.New("governed message lookup unavailable")
 		}
 		governed, err := messageLookup.IsGovernedAnalysisMessage(ctx, binding.OwnerID)
 		if err != nil {

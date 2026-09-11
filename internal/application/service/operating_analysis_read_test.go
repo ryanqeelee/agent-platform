@@ -114,3 +114,33 @@ func TestGovernedHistoryClassifiesPersistedToolEvidenceAndPreservesOwnerBoundary
 	_, err = sessionSvc.GetSession(ctx, toolRun.ID)
 	require.ErrorIs(t, err, apperrors.ErrSessionNotFound)
 }
+
+func TestGovernedArtifactReadUsesPersistedArtifactWithoutLifecycleBinding(t *testing.T) {
+	_, messageSvc, ctx, db := newOperatingReadFixture(t, true)
+	ref := "resource://AbCdEfGhIjKlMnOpQrStUv"
+	sessions := []*types.Session{{ID: "business", TenantID: 1, UserID: "employee"}, {ID: "ordinary", TenantID: 1, UserID: "employee"}}
+	require.NoError(t, db.Session(&gorm.Session{SkipHooks: true}).Create(sessions).Error)
+	messages := []*types.Message{
+		{ID: "evidence", SessionID: "business", Role: "assistant", AgentID: types.BuiltinOperatingAnalystID},
+		{ID: "unbound", SessionID: "business", Role: "assistant", Artifacts: types.MessageArtifacts{{URL: ref}}},
+		{ID: "ordinary", SessionID: "ordinary", Role: "assistant", Artifacts: types.MessageArtifacts{{URL: "resource://ordinary12345678901234"}}},
+	}
+	require.NoError(t, db.Session(&gorm.Session{SkipHooks: true}).Create(messages).Error)
+	ids, err := messageSvc.GovernedArtifactMessageIDs(ctx, []string{ref})
+	require.NoError(t, err)
+	require.Equal(t, []string{"unbound"}, ids)
+	ids, err = messageSvc.GovernedArtifactMessageIDs(ctx, []string{"resource://ordinary12345678901234"})
+	require.NoError(t, err)
+	require.Empty(t, ids)
+	_, err = messageSvc.GetMessageForRead(ctx, "business", "unbound")
+	require.NoError(t, err)
+	messageSvc.tenantMemberService = operatingReadMembers{member: &types.TenantMember{UserID: "employee", TenantID: 1, Status: types.TenantMemberStatusActive, OperatingAnalysisAccess: false}}
+	_, err = messageSvc.GetMessageForRead(ctx, "business", "unbound")
+	require.ErrorIs(t, err, apperrors.ErrSessionNotFound)
+	require.NoError(t, db.Delete(&types.Message{}, "session_id = ?", "business").Error)
+	ids, err = messageSvc.GovernedArtifactMessageIDs(ctx, []string{ref})
+	require.NoError(t, err)
+	require.Equal(t, []string{"unbound"}, ids)
+	_, err = messageSvc.GetMessageForRead(ctx, "business", "unbound")
+	require.Error(t, err)
+}

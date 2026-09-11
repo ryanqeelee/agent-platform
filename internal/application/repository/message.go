@@ -97,6 +97,31 @@ func (r *messageRepository) GovernedAnalysisMessageIDs(
 	return result, nil
 }
 
+// GovernedArtifactMessageIDs reads the artifact list persisted with each answer.
+// Resource lifecycle bindings are best-effort and cannot be the only read authority.
+// Retained artifacts keep their classification even when their source is soft-deleted;
+// the message read service still denies access to deleted sources.
+func (r *messageRepository) GovernedArtifactMessageIDs(ctx context.Context, references []string) ([]string, error) {
+	predicate, args, err := governedAnalysisMessagePredicate(r.db.Dialector.Name(), "evidence")
+	if err != nil {
+		return nil, err
+	}
+	var artifactPredicate string
+	switch r.db.Dialector.Name() {
+	case "postgres":
+		artifactPredicate = "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(target.artifacts, '[]'::jsonb)) artifact WHERE artifact->>'url' IN ?)"
+	case "sqlite":
+		artifactPredicate = "EXISTS (SELECT 1 FROM json_each(COALESCE(target.artifacts, '[]')) artifact WHERE json_extract(artifact.value, '$.url') IN ?)"
+	}
+	var ids []string
+	err = r.db.WithContext(ctx).Table("messages AS target").
+		Distinct("target.id").Where("target.role = ?", "assistant").
+		Where(artifactPredicate, references).
+		Where("EXISTS (SELECT 1 FROM messages AS evidence WHERE evidence.session_id = target.session_id AND evidence.role = ? AND ("+predicate+"))", append([]any{"assistant"}, args...)...).
+		Pluck("target.id", &ids).Error
+	return ids, err
+}
+
 // NewMessageRepository creates a new message repository
 func NewMessageRepository(db *gorm.DB) interfaces.MessageRepository {
 	return &messageRepository{

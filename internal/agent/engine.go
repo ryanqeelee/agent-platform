@@ -97,6 +97,7 @@ type AgentEngine struct {
 	// changed, so there is no reason to spend another summarization call.
 	compactionExhaustedAt int
 	modelContext          *modelcontext.Registry // single request-local boundary for every model handle
+	completionOptions     *chat.ChatOptions      // prepared quick-answer model options; nil keeps Agent defaults
 }
 
 // ImageDescriberFunc generates a text description of an image.
@@ -183,6 +184,18 @@ func (e *AgentEngine) buildSystemPrompt(ctx context.Context) string {
 // input leaves the system prompt untouched.
 func (e *AgentEngine) SetMemoryPrompt(prompt string) {
 	e.memoryPrompt = prompt
+}
+
+// SetCompletionOptions preserves the quick-answer model controls when the
+// existing Agent loop is reused for prepared RAG synthesis.
+func (e *AgentEngine) SetCompletionOptions(options *chat.ChatOptions) {
+	if options == nil {
+		e.completionOptions = nil
+		return
+	}
+	copy := *options
+	copy.Tools = nil
+	e.completionOptions = &copy
 }
 
 // NewAgentEngineWithSkills creates a new agent engine with skills support
@@ -411,6 +424,56 @@ func (e *AgentEngine) Execute(
 	return state, nil
 }
 
+// ExecutePrepared runs the existing ReAct loop over an already prepared and
+// encoded message set. It deliberately bypasses buildSystemPrompt and
+// RenderUserTurnContent so a quick RAG turn keeps its exact retrieval prompt,
+// history, images, evidence status, and request-local model handles.
+func (e *AgentEngine) ExecutePrepared(
+	ctx context.Context,
+	sessionID, messageID, query string,
+	messages []chat.Message,
+	registry *modelcontext.Registry,
+) (*types.AgentState, error) {
+	if registry == nil {
+		return nil, fmt.Errorf("prepared completion requires a model context registry")
+	}
+	e.modelContext = registry
+	defer e.toolRegistry.Cleanup(ctx)
+
+	state := &types.AgentState{
+		RoundSteps:    []types.AgentStep{},
+		KnowledgeRefs: []*types.SearchResult{},
+	}
+	tools := e.buildToolsForLLM()
+	common.PipelineInfo(ctx, "Agent", "prepared_execute_start", map[string]interface{}{
+		"session_id":    sessionID,
+		"message_id":    messageID,
+		"message_count": len(messages),
+		"tool_count":    len(tools),
+	})
+
+	_, err := e.executeLoop(ctx, state, query, messages, tools, sessionID, messageID)
+	if err != nil {
+		// Cancellation is already represented by the caller's stop lifecycle.
+		// Emitting it as a model failure would overwrite the intentionally
+		// stopped quick-answer message.
+		if ctx.Err() == nil {
+			_ = e.eventBus.Emit(ctx, event.Event{
+				ID:        generateEventID("error"),
+				Type:      event.EventError,
+				SessionID: sessionID,
+				Data: event.ErrorData{
+					Error:     err.Error(),
+					Stage:     "agent_prepared_completion",
+					SessionID: sessionID,
+				},
+			})
+		}
+		return nil, err
+	}
+	return state, nil
+}
+
 // finishAgentSpan records the final outcome of an agent execution onto the
 // top-level Langfuse span. Extracted so the same payload is used for both
 // success and error return paths in Execute().
@@ -565,7 +628,9 @@ loop:
 	// complete answer." message, which then leaks to the UI as the final
 	// answer for a conversation the user deliberately stopped.
 	if !state.IsComplete && ctx.Err() == nil {
-		e.handleMaxIterations(ctx, query, messages, state, sessionID)
+		if err := e.handleMaxIterations(ctx, query, messages, state, sessionID); err != nil {
+			return state, err
+		}
 	}
 
 	return state, nil

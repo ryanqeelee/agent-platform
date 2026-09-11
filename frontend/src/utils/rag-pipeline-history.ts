@@ -8,6 +8,7 @@ export const RAG_TIMELINE_TOOL_NAMES = new Set([
   ...RAG_PIPELINE_TOOL_NAMES,
   'attachment_parsing',
   'image_analysis',
+  'shell_exec',
 ])
 
 type RagHistoryReference = {

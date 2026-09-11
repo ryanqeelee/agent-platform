@@ -89,15 +89,31 @@ Now generate the final answer:`, query, imageRequirement)
 	answerDoneEmitted := false
 
 	budget := e.clampCompletionBudgetToContext(e.tokenEstimator.EstimateMessages(messages))
+	finalOptions := &chat.ChatOptions{
+		Temperature:         e.config.Temperature,
+		MaxTokens:           budget,
+		MaxCompletionTokens: budget,
+		PromptCacheKey:      sessionID,
+	}
+	if e.completionOptions != nil {
+		prepared := *e.completionOptions
+		prepared.Tools = nil
+		prepared.ToolChoice = ""
+		prepared.ParallelToolCalls = nil
+		prepared.Thinking = nil
+		prepared.PromptCacheKey = sessionID
+		if prepared.MaxCompletionTokens <= 0 || prepared.MaxCompletionTokens > budget {
+			prepared.MaxCompletionTokens = budget
+		}
+		if prepared.MaxTokens <= 0 || prepared.MaxTokens > budget {
+			prepared.MaxTokens = prepared.MaxCompletionTokens
+		}
+		finalOptions = &prepared
+	}
 	llmResult, err := e.streamLLMToEventBus(
 		ctx,
 		messages,
-		&chat.ChatOptions{
-			Temperature:         e.config.Temperature,
-			MaxTokens:           budget,
-			MaxCompletionTokens: budget,
-			PromptCacheKey:      sessionID,
-		}, // Thinking disabled for final answer synthesis
+		finalOptions, // Thinking disabled for final answer synthesis
 		func(chunk *types.StreamResponse, fullContent string) {
 			// Defensive filter: only emit answer content, skip thinking chunks
 			if chunk.ResponseType == types.ResponseTypeThinking {
@@ -166,7 +182,7 @@ Now generate the final answer:`, query, imageRequirement)
 // without the LLM producing a natural stop. It marks state.IsComplete = true.
 func (e *AgentEngine) handleMaxIterations(
 	ctx context.Context, query string, messages []chat.Message, state *types.AgentState, sessionID string,
-) {
+) error {
 	logger.Info(ctx, "Reached max iterations, generating final answer")
 	common.PipelineWarn(ctx, "Agent", "max_iterations_reached", map[string]interface{}{
 		"iterations": state.CurrentRound,
@@ -184,9 +200,10 @@ func (e *AgentEngine) handleMaxIterations(
 			failedFields["error"] = err.Error()
 		}
 		common.PipelineError(ctx, "Agent", "final_answer_failed", failedFields)
-		state.FinalAnswer = "Sorry, I was unable to generate a complete answer."
+		return err
 	}
 	state.IsComplete = true
+	return nil
 }
 
 // emitCompletionEvent emits the EventAgentComplete event with execution summary.

@@ -263,6 +263,19 @@ func (e *AgentEngine) streamThinkingToEventBus(
 		ParallelToolCalls:   &parallelToolCalls,
 		PromptCacheKey:      sessionID,
 	}
+	if e.completionOptions != nil {
+		prepared := *e.completionOptions
+		prepared.Tools = tools
+		prepared.ParallelToolCalls = &parallelToolCalls
+		prepared.PromptCacheKey = sessionID
+		if prepared.MaxCompletionTokens <= 0 || prepared.MaxCompletionTokens > budget {
+			prepared.MaxCompletionTokens = budget
+		}
+		if prepared.MaxTokens <= 0 || prepared.MaxTokens > budget {
+			prepared.MaxTokens = prepared.MaxCompletionTokens
+		}
+		opts = &prepared
+	}
 
 	pendingToolCalls := make(map[string]bool)
 	thinkingToolIDs := make(map[string]string) // tool_call_id -> event ID for thinking tool streams

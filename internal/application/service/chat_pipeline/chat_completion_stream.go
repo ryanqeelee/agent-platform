@@ -73,6 +73,13 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 	}
 	eventBus := chatManage.EventBus
 
+	if len(chatManage.CompletionTools) > 0 {
+		if err := StartToolCompletion(ctx, chatManage, chatModel, opt, chatMessages, modelContext); err != nil {
+			return ErrModelCall.WithError(err)
+		}
+		return next()
+	}
+
 	pipelineInfo(ctx, "Stream", "eventbus_ready", map[string]interface{}{
 		"session_id": chatManage.SessionID,
 	})

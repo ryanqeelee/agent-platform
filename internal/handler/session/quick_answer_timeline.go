@@ -18,6 +18,7 @@ var quickAnswerTimelineTools = map[string]struct{}{
 	"knowledge_search":   {},
 	"attachment_parsing": {},
 	"image_analysis":     {},
+	"shell_exec":         {},
 }
 
 // quickAnswerTimelineRecorder persists the fast-answer pipeline's timeline into
@@ -106,7 +107,7 @@ func isQuickAnswerTimelineTool(name string) bool {
 }
 
 // ensureQuickAnswerStep returns the single step a fast-answer turn records
-// into. There is no ReAct loop here, so everything belongs to iteration 0.
+// into. Retrieval and optional calculation share one quick timeline at iteration 0.
 func ensureQuickAnswerStep(msg *types.Message) *types.AgentStep {
 	if len(msg.AgentSteps) == 0 {
 		msg.AgentSteps = types.AgentSteps{{

@@ -202,6 +202,11 @@ export function getRagPipelineStepTitle(t: ComposerTranslation, event: RagPipeli
       : t('agentStream.toolStatus.attachmentParsingDone')
   }
 
+  if (toolName === 'shell_exec') {
+    if (pending) return t('agentStream.toolStatus.shellExecRunning')
+    return t('agentStream.tools.shellExec')
+  }
+
   if (toolName === 'image_analysis') {
     if (pending) return t('agentStream.toolStatus.imageAnalyzing')
     return event.success === false

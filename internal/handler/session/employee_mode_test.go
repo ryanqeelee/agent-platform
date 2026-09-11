@@ -33,7 +33,8 @@ func TestEmployeeModeProfiles(t *testing.T) {
 				require.False(t, got.Config.DataAnalysisEnabled)
 				require.Empty(t, got.Config.AllowedTools)
 				require.Contains(t, got.Config.SystemPrompt, "employee contract")
-				require.Contains(t, got.Config.SystemPrompt, "工具核验")
+				require.Contains(t, got.Config.SystemPrompt, "实际执行结果")
+				require.False(t, got.Config.WebSearchEnabled)
 				require.Contains(t, got.Config.SystemPrompt, "不会扩大企业知识权限")
 			}
 		})

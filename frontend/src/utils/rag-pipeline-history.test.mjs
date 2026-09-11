@@ -127,3 +127,12 @@ test('RAG_TIMELINE_TOOL_NAMES includes attachment prep tools', () => {
   assert.equal(RAG_TIMELINE_TOOL_NAMES.has('image_analysis'), true)
   assert.equal(RAG_TIMELINE_TOOL_NAMES.has('knowledge_search'), true)
 })
+
+test('calculation step survives quick-answer history restoration without references', () => {
+  assert.equal(RAG_TIMELINE_TOOL_NAMES.has('shell_exec'), true)
+  const item = { is_completed: true, content: '12.01%', knowledge_references: [],
+    agentEventStream: [{ type: 'tool_call', tool_name: 'shell_exec', success: true, output: '12.01' }] }
+  ensureRagPipelineHistoryStream(item)
+  assert.equal(item.agentEventStream[0].tool_name, 'shell_exec')
+  assert.equal(item.agentEventStream[0].output, '12.01')
+})

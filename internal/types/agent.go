@@ -165,6 +165,9 @@ type AgentConfig struct {
 	SharedAgentReadOnly bool `json:"-"`
 	// LLM call timeout in seconds (default: 120). Controls the maximum time for a single LLM call.
 	LLMCallTimeout int `json:"llm_call_timeout,omitempty"`
+	// ToolExecutionTimeout is a runtime-only per-call cap used by bounded
+	// completion profiles. Zero keeps the tool family's established timeout.
+	ToolExecutionTimeout time.Duration `json:"-"`
 
 	// Maximum completion tokens for each ReAct LLM round. Zero means
 	// DefaultMaxCompletionTokens for this agent's mode and sandbox.

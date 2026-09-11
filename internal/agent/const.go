@@ -61,6 +61,13 @@ func toolExecutionTimeout(toolName string) time.Duration {
 	return defaultToolExecTimeout
 }
 
+func (e *AgentEngine) toolExecutionTimeout(toolName string) time.Duration {
+	if e != nil && e.config != nil && e.config.ToolExecutionTimeout > 0 {
+		return e.config.ToolExecutionTimeout
+	}
+	return toolExecutionTimeout(toolName)
+}
+
 // transientErrorMarkers are substrings that indicate a transient (retryable) error.
 var transientErrorMarkers = []string{
 	"429", "rate limit",

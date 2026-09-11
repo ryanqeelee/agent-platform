@@ -159,7 +159,6 @@ import UserMenu from '@/components/UserMenu.vue'
 import { getSessionsList } from '@/api/chat'
 import {
   getOperatingAnalysisHistory,
-  prefetchOperatingBrief,
   type OperatingAnalysisRevocationHistoryV1,
 } from '@/api/operatingAnalysis'
 import {
@@ -215,9 +214,6 @@ const loadOperatingAnalysis = async () => {
       ? 'absent'
       : response.availability.state
     analysisRecentWork.value = response.availability.canReadHistory ? response.recentWork : undefined
-    if (response.availability.state === 'enabled' && response.availability.canExchange) {
-      void prefetchOperatingBrief()
-    }
   } catch (error: any) {
     analysisState.value = error?.status === 403 ? 'absent' : 'disabled'
   } finally {

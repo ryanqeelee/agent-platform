@@ -6,15 +6,11 @@
             <button type="button" :aria-expanded="mobileMenuOpen" aria-controls="mobile-workspace-menu" @click="mobileMenuOpen = !mobileMenuOpen">{{ mobileMenuOpen ? t('menu.collapseSidebar') : t('menu.expandSidebar') }}</button>
         </header>
         <button v-if="mobileMenuOpen" class="mobile-menu-scrim" type="button" :aria-label="t('menu.collapseSidebar')" @click="mobileMenuOpen = false" />
-        <Menu id="mobile-workspace-menu" :operating-controller="operatingController" @navigate="mobileMenuOpen = false"></Menu>
-        <div v-if="isRouterAlive" v-show="!isLegacyOperatingRoute" class="platform-route-outlet">
+        <Menu id="mobile-workspace-menu" @navigate="mobileMenuOpen = false"></Menu>
+        <div v-if="isRouterAlive" v-show="!isBriefRoute" class="platform-route-outlet">
             <RouterView />
         </div>
-        <OperatingWorkspace
-            v-if="isLegacyOperatingRoute"
-            :history-only="typeof route.query.data_session === 'string'"
-            @controller-change="handleOperatingControllerChange"
-        />
+        <OperatingBriefWorkspace v-if="briefVisited" v-show="isBriefRoute" :active="isBriefRoute" />
         <div class="upload-mask" v-show="ismask">
             <UploadMask></UploadMask>
         </div>
@@ -33,7 +29,7 @@
 import { useAuthStore } from '@/stores/auth'
 import { needsKnowledgeBaseConfiguration } from '@/utils/knowledgeBaseInitialization'
 import Menu from '@/components/menu.vue'
-import { computed, ref, shallowRef, onMounted, onUnmounted, nextTick, provide, watch } from 'vue';
+import { computed, ref, onMounted, onUnmounted, nextTick, provide, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router'
 import UploadMask from '@/components/upload-mask.vue'
 import Settings from '@/views/settings/Settings.vue'
@@ -46,20 +42,15 @@ import { getKnowledgeBaseById } from '@/api/knowledge-base/index'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { collectDroppedFiles } from './collectDroppedFiles'
-import OperatingWorkspace from '@/views/operating/OperatingWorkspace.vue'
-import { isOperatingRoutePath } from '@/views/operating/operatingHost'
-import type { OperatingController } from '@/views/operating/operatingClient'
+import OperatingBriefWorkspace from '@/views/operating/OperatingBriefWorkspace.vue'
 
 const authStore = useAuthStore();
 const mobileMenuOpen = ref(false);
 const route = useRoute();
-const isLegacyOperatingRoute = computed(() => isOperatingRoutePath(route.path)
-    && (route.path === '/platform/operating-brief' || typeof route.query.data_session === 'string'));
-const isOperatingRoute = computed(() => route.path.startsWith('/platform/operating-analysis') || route.path === '/platform/operating-brief');
-const operatingController = shallowRef<OperatingController | null>(null);
-const handleOperatingControllerChange = (controller: OperatingController | null) => {
-    operatingController.value = controller;
-};
+const isBriefRoute = computed(() => route.path === '/platform/operating-brief');
+const briefVisited = ref(isBriefRoute.value);
+watch(isBriefRoute, active => { if (active) briefVisited.value = true; });
+const isOperatingRoute = computed(() => route.path.startsWith('/platform/operating-analysis') || isBriefRoute.value);
 watch(() => route.fullPath, () => { mobileMenuOpen.value = false; });
 const router = useRouter();
 const commandPaletteStore = useCommandPaletteStore();

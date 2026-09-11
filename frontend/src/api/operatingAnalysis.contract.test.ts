@@ -24,7 +24,8 @@ test('employee-assistant handoff carries only an opaque reference across routes'
     /location \^~ \/api\/auth\/operating-analysis-handoffs\/ \{[\s\S]*?proxy_pass \$\{RETAIL_AI_CENTER_BASE_URL\}\/api\/auth\/operating-analysis-handoffs\//,
   )
   assert.match(router, /sessionStorage\.setItem\(\s*OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY/)
-  assert.match(router, /localStorage\.setItem\('retail_ai_app_auth_token', response\.access_token\)/)
+  assert.match(router, /await prepareOperatingDataRead\(\)/)
+  assert.match(api, /localStorage\.setItem\('retail_ai_app_auth_token', response\.access_token\)/)
   assert.doesNotMatch(router, /window\.location\.assign\(handoffPrompt/)
   assert.doesNotMatch(router, /[?&](?:question|prompt)=/)
   assert.match(message, /emit\('handoff', messageId\)/)

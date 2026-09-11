@@ -161,7 +161,15 @@ func (s *resourceCatalog) ListKnowledgeBindings(ctx context.Context, reference s
 	if err != nil {
 		return nil, err
 	}
-	return s.repo.ListBindings(ctx, resource.ID, "knowledge")
+	return s.repo.ListBindings(ctx, resource.ID, types.ResourceOwnerKnowledge)
+}
+
+func (s *resourceCatalog) ListMessageBindings(ctx context.Context, reference string) ([]*types.ResourceBinding, error) {
+	resource, err := s.Resolve(ctx, reference)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.ListBindings(ctx, resource.ID, types.ResourceOwnerMessage)
 }
 
 func (s *resourceCatalog) Bind(ctx context.Context, reference, ownerType, ownerID, relation string) error {

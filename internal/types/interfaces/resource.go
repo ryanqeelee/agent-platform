@@ -50,6 +50,7 @@ type ResourceCatalog interface {
 	ResolvePath(ctx context.Context, value string) (string, *types.StoredResource, error)
 	ResolveTenantPath(ctx context.Context, tenantID uint64, value string) (string, *types.StoredResource, error)
 	ListKnowledgeBindings(ctx context.Context, reference string) ([]*types.ResourceBinding, error)
+	ListMessageBindings(ctx context.Context, reference string) ([]*types.ResourceBinding, error)
 	Bind(ctx context.Context, reference, ownerType, ownerID, relation string) error
 	// Release drops one owner's claim on a resource and reports how many
 	// claims remain. Callers use the count to decide whether the bytes may be

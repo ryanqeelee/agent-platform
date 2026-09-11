@@ -9,7 +9,8 @@ const router = read('../../router/index.ts')
 const chat = read('../chat/index.vue')
 const input = read('../../components/Input-field.vue')
 const menu = read('../../components/menu.vue')
-const workspace = read('./OperatingWorkspace.vue')
+const history = read('./OperatingAnalysisHistory.vue')
+const platform = read('../platform/index.vue')
 
 test('new operating work enters one fixed native agent without URL agent selection', () => {
   assert.match(router, /path: "operating-analysis"[\s\S]*?OperatingAnalysisHome\.vue/)
@@ -47,10 +48,17 @@ test('platform-native agents reuse the server-owned employee skill catalog', () 
   assert.match(input, /if \(skillsMode !== 'none'\)/)
 })
 
-test('legacy Center sessions are history-only while native sessions keep their route origin', () => {
-  assert.match(router, /typeof to\.query\.data_session === 'string'[\s\S]*?authorizeLegacyOperatingAnalysis/)
-  assert.match(workspace, /v-if="!historyOnly"[\s\S]*?新建分析/)
-  assert.match(workspace, /<Teleport v-if="!historyOnly"/)
-  assert.match(menu, /const operatingSessionMenuOptions: never\[\] = \[\]/)
-  assert.match(menu, /last_request_state\?\.agent_id === BUILTIN_OPERATING_ANALYST_ID[\s\S]*?operating-analysis\/chat/)
+test('historical reads cannot mount or submit the retired execution chain', () => {
+  assert.match(router, /operating-analysis\/history\/:sessionId/)
+  assert.match(platform, /OperatingBriefWorkspace/)
+  assert.doesNotMatch(platform, /OperatingWorkspace|operatingController/)
+  assert.doesNotMatch(history, /startStream|ag-ui|createSessions|sendMsg/)
+  assert.doesNotMatch(menu, /operatingController|operating-client/)
+})
+
+test('legacy operating history revalidates the current platform actor', () => {
+  assert.match(history, /localStorage\.getItem\('weknora_token'\)/)
+  assert.match(history, /localStorage\.getItem\('weknora_selected_tenant_id'\)/)
+  assert.match(history, /headers\['x-platform-authorization'\] = `Bearer \$\{platformAuthorization\}`/)
+  assert.match(history, /headers\['x-platform-tenant-id'\] = platformTenantId/)
 })

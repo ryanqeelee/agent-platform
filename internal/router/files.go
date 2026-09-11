@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -45,7 +46,13 @@ type getRouteRegistrar interface {
 // message-scoped file proxy. Keeping it small makes the authorization boundary
 // independently testable.
 type messageFileLookup interface {
-	GetMessage(ctx context.Context, sessionID, messageID string) (*types.Message, error)
+	governedMessageLookup
+	GetMessageForRead(ctx context.Context, sessionID, messageID string) (*types.Message, error)
+}
+
+type governedMessageLookup interface {
+	GovernedArtifactMessageIDs(ctx context.Context, references []string) ([]string, error)
+	IsGovernedAnalysisMessage(ctx context.Context, messageID string) (bool, error)
 }
 
 // sharedAgentFileLookup verifies that a source workspace's agent is still
@@ -253,6 +260,7 @@ func newFileServeHandler(
 	resourceCatalog interfaces.ResourceCatalog,
 	knowledgeService middleware.KnowledgeLookup,
 	kbService middleware.KBLookup,
+	messageLookups ...governedMessageLookup,
 ) gin.HandlerFunc {
 	absDir := localStorageAbsDir()
 	if info, err := os.Stat(absDir); err != nil || !info.IsDir() {
@@ -280,6 +288,19 @@ func newFileServeHandler(
 			c.Request.Context(), resourceCatalog, resource, knowledgeService, kbService,
 		) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: resource not accessible"})
+			return
+		}
+		governed, err := resourceGovernedMessageArtifacts(
+			c.Request.Context(), resourceCatalog, firstGovernedMessageLookup(messageLookups), resource,
+		)
+		if err != nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		if len(governed) > 0 {
+			// Governed artifacts require the authenticated message proxy, which
+			// revalidates the current actor before returning any bytes.
+			c.Status(http.StatusForbidden)
 			return
 		}
 
@@ -317,6 +338,7 @@ func serveFilesWithResources(
 	resourceCatalog interfaces.ResourceCatalog,
 	knowledgeService middleware.KnowledgeLookup,
 	kbService middleware.KBLookup,
+	messageLookups ...governedMessageLookup,
 ) {
 	logger.Infof(context.Background(), "[Router] Serving files from /files")
 	// /files sits outside the /api/v1 APIKeyGate, so it carries its own
@@ -328,8 +350,52 @@ func serveFilesWithResources(
 	r.GET(
 		"/files",
 		middleware.AllowFileServeAPIKey(),
-		newFileServeHandler(globalFileService, storageResolver, resourceCatalog, knowledgeService, kbService),
+		newFileServeHandler(
+			globalFileService, storageResolver, resourceCatalog, knowledgeService, kbService, messageLookups...,
+		),
 	)
+}
+
+func firstGovernedMessageLookup(lookups []governedMessageLookup) governedMessageLookup {
+	if len(lookups) == 0 {
+		return nil
+	}
+	return lookups[0]
+}
+
+func resourceGovernedMessageArtifacts(
+	ctx context.Context,
+	catalog interfaces.ResourceCatalog,
+	messageLookup governedMessageLookup,
+	resource *types.StoredResource,
+) ([]string, error) {
+	if messageLookup == nil {
+		return nil, errors.New("governed message lookup unavailable")
+	}
+	// The message artifact list survives a failed best-effort lifecycle binding.
+	governedIDs, err := messageLookup.GovernedArtifactMessageIDs(ctx, []string{
+		types.BuildResourcePath(resource.Handle), resource.PhysicalPath,
+	})
+	if err != nil {
+		return nil, err
+	}
+	bindings, err := catalog.ListMessageBindings(ctx, types.BuildResourcePath(resource.Handle))
+	if err != nil {
+		return nil, err
+	}
+	for _, binding := range bindings {
+		if binding == nil || binding.Relation != types.ResourceRelationArtifact {
+			continue
+		}
+		governed, err := messageLookup.IsGovernedAnalysisMessage(ctx, binding.OwnerID)
+		if err != nil {
+			return nil, err
+		}
+		if governed {
+			governedIDs = append(governedIDs, binding.OwnerID)
+		}
+	}
+	return governedIDs, nil
 }
 
 // serveResourceGrants exposes short, revocable capability URLs for clients
@@ -342,6 +408,7 @@ func serveResourceGrants(
 	storageResolver interfaces.StorageBackendResolver,
 	knowledgeService middleware.KnowledgeLookup,
 	kbService middleware.KBLookup,
+	messageLookups ...governedMessageLookup,
 ) {
 	if resourceCatalog == nil || tenantService == nil {
 		return
@@ -363,6 +430,19 @@ func serveResourceGrants(
 		// grants for non-knowledge assets only; authenticated KB/file routes
 		// perform the live authorization and binding proof instead.
 		if len(bindings) > 0 {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		governed, bindingErr := resourceGovernedMessageArtifacts(
+			ctx, resourceCatalog, firstGovernedMessageLookup(messageLookups), resource,
+		)
+		if bindingErr != nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		if len(governed) > 0 {
+			// Anonymous grants cannot revalidate a current operating-analysis
+			// actor, so governed message artifacts stay authenticated-only.
 			c.Status(http.StatusNotFound)
 			return
 		}
@@ -576,26 +656,32 @@ func newMessageScopedFileServeHandler(
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: workspace context missing"})
 			return
 		}
-		if messageService == nil {
+		if messageService == nil || resourceCatalog == nil {
 			c.Status(http.StatusNotFound)
 			return
 		}
 
-		message, err := messageService.GetMessage(ctx, c.Param("id"), c.Param("message_id"))
+		message, err := messageService.GetMessageForRead(ctx, c.Param("id"), c.Param("message_id"))
 		if err != nil || message == nil {
 			// Do not reveal whether a message exists outside the caller's session.
 			c.Status(http.StatusNotFound)
 			return
 		}
-
 		resolvedPath := filePath
 		var resource *types.StoredResource
-		if resourceCatalog != nil {
-			resolvedPath, resource, err = resourceCatalog.ResolvePath(ctx, filePath)
-			if err != nil {
-				c.Status(http.StatusNotFound)
-				return
-			}
+		resolvedPath, resource, err = resourceCatalog.ResolvePath(ctx, filePath)
+		if err != nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		if resource == nil && message.AgentTenantID != 0 {
+			// Resolve registered legacy paths too; raw paths must not bypass
+			// the resource's persisted message bindings.
+			resolvedPath, resource, err = resourceCatalog.ResolveTenantPath(ctx, message.AgentTenantID, filePath)
+		}
+		if err != nil || resource == nil {
+			c.Status(http.StatusNotFound)
+			return
 		}
 
 		ownerTenantID := message.AgentTenantID
@@ -614,6 +700,29 @@ func newMessageScopedFileServeHandler(
 			return
 		}
 
+		governedIDs, err := resourceGovernedMessageArtifacts(ctx, resourceCatalog, messageService, resource)
+		if err != nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		if len(governedIDs) > 0 {
+			// Authorize the actual artifact source in this session, rather than
+			// accepting an unrelated ordinary message chosen in the URL.
+			bound := false
+			if ownerTenantID == callerTenantID {
+				for _, sourceID := range governedIDs {
+					if _, readErr := messageService.GetMessageForRead(ctx, c.Param("id"), sourceID); readErr == nil {
+						bound = true
+						break
+					}
+				}
+			}
+			if !bound {
+				c.Status(http.StatusForbidden)
+				return
+			}
+		}
+
 		if ownerTenantID != callerTenantID {
 			if message.AgentID == "" || agentShareService == nil {
 				c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: shared agent access required"})
@@ -628,18 +737,6 @@ func newMessageScopedFileServeHandler(
 			)
 			if shareErr != nil || agent == nil || agent.TenantID != ownerTenantID {
 				c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: shared agent access revoked"})
-				return
-			}
-		}
-
-		// Registered resources carry authoritative tenant ownership. Legacy
-		// provider paths must still encode the authorized owner tenant.
-		if resource == nil {
-			if err := secutils.ValidateStoragePathTenant(resolvedPath, ownerTenantID); err != nil {
-				logger.Warnf(ctx,
-					"[Router] message files denied cross-tenant or invalid path: owner_tenant_id=%d file_path=%q err=%v",
-					ownerTenantID, resolvedPath, err)
-				c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: file path not accessible"})
 				return
 			}
 		}
@@ -679,7 +776,11 @@ func newMessageScopedFileServeHandler(
 		if resource != nil && resource.MimeType != "" && inline {
 			contentType = resource.MimeType
 		}
-		streamStoredFile(c, reader, contentType, inline, "private, max-age=86400", "message files")
+		cacheControl := "private, max-age=86400"
+		if len(governedIDs) > 0 {
+			cacheControl = "private, no-store"
+		}
+		streamStoredFile(c, reader, contentType, inline, cacheControl, "message files")
 	}
 }
 

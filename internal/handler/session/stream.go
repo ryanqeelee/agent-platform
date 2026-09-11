@@ -5,6 +5,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/errors"
@@ -64,12 +65,10 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 		return
 	}
 
-	// Verify that the session exists and belongs to this tenant
-	if _, err := h.sessionService.GetRunnableSession(ctx, sessionID); err != nil {
-		if stderrors.Is(err, interfaces.ErrConversationPlanMissing) {
-			c.Error(errors.NewConflictError("该历史对话缺少 AI 能力方案，请新建对话"))
-			return
-		}
+	// Verify ownership and current governed-history read access before any SSE
+	// header or replay payload is written.
+	session, err := h.sessionService.GetSession(ctx, sessionID)
+	if err != nil {
 		if stderrors.Is(err, errors.ErrSessionNotFound) {
 			logger.Warnf(ctx, "Session not found, ID: %s", sessionID)
 			c.Error(errors.NewNotFoundError(err.Error()))
@@ -79,9 +78,13 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 		}
 		return
 	}
+	if strings.TrimSpace(session.AICapabilityPlanVersionID) == "" {
+		c.Error(errors.NewConflictError("该历史对话缺少 AI 能力方案，请新建对话"))
+		return
+	}
 
 	// Get the incomplete message
-	message, err := h.messageService.GetMessage(ctx, sessionID, messageID)
+	message, err := h.messageService.GetMessageForRead(ctx, sessionID, messageID)
 	if err != nil {
 		if stderrors.Is(err, errors.ErrSessionNotFound) {
 			// PR #1309 plumbed user-scope into messageService.GetMessage's

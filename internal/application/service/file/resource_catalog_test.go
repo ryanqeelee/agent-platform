@@ -56,6 +56,9 @@ func (c *catalogStub) ListKnowledgeBindings(context.Context, string) ([]*types.R
 	}
 	return nil, nil
 }
+func (c *catalogStub) ListMessageBindings(context.Context, string) ([]*types.ResourceBinding, error) {
+	return nil, nil
+}
 func (c *catalogStub) Bind(_ context.Context, _ string, ownerType, ownerID, _ string) error {
 	if ownerType == "knowledge" {
 		c.boundID = ownerID

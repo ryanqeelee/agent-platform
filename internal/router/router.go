@@ -176,11 +176,12 @@ func NewRouter(params RouterParams) *gin.Engine {
 		params.FileService,
 		params.StorageBackendResolver,
 		params.ResourceCatalog,
+		params.MessageService,
 	)
 
 	// Short-lived capability URLs for IM and other clients that cannot attach
 	// WeKnora authentication headers.
-	serveResourceGrants(r, params.ResourceCatalog, params.TenantService, params.FileService, params.StorageBackendResolver, params.KnowledgeService, params.KBService)
+	serveResourceGrants(r, params.ResourceCatalog, params.TenantService, params.FileService, params.StorageBackendResolver, params.KnowledgeService, params.KBService, params.MessageService)
 
 	// 认证中间件
 	r.Use(middleware.Auth(params.TenantService, params.UserService, params.TenantMemberService, params.TenantAPIKeyService, params.Config))
@@ -188,7 +189,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 	// 文件服务：统一代理本地/MinIO/COS/TOS存储后端（需要认证）
 	serveFilesWithResources(
 		r, params.FileService, params.StorageBackendResolver, params.ResourceCatalog,
-		params.KnowledgeService, params.KBService,
+		params.KnowledgeService, params.KBService, params.MessageService,
 	)
 
 	// Presigned file access: no auth required, signature-verified.

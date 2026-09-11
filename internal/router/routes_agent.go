@@ -213,6 +213,7 @@ func RegisterEmbedPublicRoutes(
 	fileService interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
 	resourceCatalog interfaces.ResourceCatalog,
+	messageService interfaces.MessageService,
 ) {
 	if embedHandler == nil || embedService == nil {
 		return
@@ -240,7 +241,9 @@ func RegisterEmbedPublicRoutes(
 		// Serve images embedded in bot replies (e.g. chart exports). EmbedAuth
 		// injects the channel's tenant, and the handler enforces that the
 		// requested path belongs to that tenant.
-		embed.GET("/files", newFileServeHandler(fileService, storageResolver, resourceCatalog, nil, nil))
+		embed.GET("/files", newFileServeHandler(
+			fileService, storageResolver, resourceCatalog, nil, nil, messageService,
+		))
 	}
 }
 

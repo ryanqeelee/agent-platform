@@ -33,46 +33,6 @@ export interface OperatingAnalysisHandoffExchangeV1 extends OperatingAnalysisExc
 
 export const OPERATING_ANALYSIS_HANDOFF_REF_KEY = 'operating_analysis_handoff_ref_v1'
 export const OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY = 'operating_analysis_handoff_prompt_v1'
-export const OPERATING_BRIEF_PREFETCH_KEY = 'operating_brief_prefetch_v1'
-
-let operatingBriefPrefetch: Promise<void> | null = null
-
-function cachedOperatingBriefIsFresh(): boolean {
-  try {
-    const cached = JSON.parse(sessionStorage.getItem(OPERATING_BRIEF_PREFETCH_KEY) || 'null')
-    return cached?.brief?.contractVersion === 'operating-brief/1'
-      && typeof cached?.brief?.expiresAt === 'string'
-      && Date.parse(cached.brief.expiresAt) > Date.now()
-  } catch {
-    sessionStorage.removeItem(OPERATING_BRIEF_PREFETCH_KEY)
-    return false
-  }
-}
-
-// Warm the slow governed brief while the employee is already on the product shell. The cache
-// stores only the public brief DTO; the short-lived Center token never enters browser storage.
-export function prefetchOperatingBrief(): Promise<void> {
-  if (cachedOperatingBriefIsFresh()) return Promise.resolve()
-  if (operatingBriefPrefetch) return operatingBriefPrefetch
-  operatingBriefPrefetch = exchangeOperatingAnalysis().then(async ({ access_token }) => {
-    const response = await fetch('/api/agents/data/operating-brief', {
-      headers: { Authorization: `Bearer ${access_token}` },
-    })
-    if (!response.ok) throw new Error(`operating brief prefetch failed: ${response.status}`)
-    const brief = await response.json()
-    if (brief?.contractVersion !== 'operating-brief/1') {
-      throw new Error('operating brief prefetch returned an invalid contract')
-    }
-    sessionStorage.setItem(OPERATING_BRIEF_PREFETCH_KEY, JSON.stringify({
-      cachedAt: new Date().toISOString(),
-      brief,
-    }))
-  }).catch(() => undefined).finally(() => {
-    operatingBriefPrefetch = null
-  })
-  return operatingBriefPrefetch
-}
-
 export interface OperatingAnalysisRevocationHistoryV1 {
   schema: 'OperatingAnalysisRevocationHistoryV1'
   availability: OperatingAnalysisAvailabilityV1['availability']
@@ -109,4 +69,11 @@ export async function consumeOperatingAnalysisHandoff(
   handoffRef: string,
 ): Promise<OperatingAnalysisHandoffExchangeV1> {
   return (await post(`/api/auth/operating-analysis-handoffs/${encodeURIComponent(handoffRef)}/consume`)) as unknown as OperatingAnalysisHandoffExchangeV1
+}
+
+export async function prepareOperatingDataRead(): Promise<void> {
+  const response = await exchangeOperatingAnalysis()
+  if (!response.access_token || response.expires_in !== 900) throw new Error('无法获取经营数据访问权限。')
+  localStorage.setItem('retail_ai_app_auth_token', response.access_token)
+  document.cookie = `retail_ai_app_auth_token=${response.access_token}; Path=/app; Max-Age=900; SameSite=Lax`
 }

@@ -587,6 +587,7 @@
 </template>
 
 <script setup lang="ts">
+import { queryDescription } from '@/views/operating/queryDescription';
 import { ref, computed, watch, onMounted, onBeforeUnmount, onUpdated, nextTick } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { marked } from 'marked';
@@ -3048,10 +3049,8 @@ const skillScriptCommandLabel = (event: any): string => {
 
 // Tool description
 const getToolDescription = (event: any): string => {
-  if (props.processOnly && event.tool_name === 'database_query') {
-    const intent = event.tool_data?.intent || '核对经营数据';
-    const rows = event.tool_data?.row_count;
-    return `${intent}${event.pending ? '…' : typeof rows === 'number' ? ` · ${rows} 行结果` : ''}`;
+  if (event.tool_name === 'governed_data_query' || (props.processOnly && event.tool_name === 'database_query')) {
+    return queryDescription(event);
   }
   if (props.processOnly && event.tool_name === 'data_analysis') {
     return event.pending ? '计算与核验…' : event.success ? '计算与核验完成' : '计算未完成';

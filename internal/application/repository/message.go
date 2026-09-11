@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"time"
 
@@ -14,6 +15,112 @@ import (
 // messageRepository implements the message repository interface
 type messageRepository struct {
 	db *gorm.DB
+}
+
+func governedAnalysisMessagePredicate(dialect, alias string) (string, []any, error) {
+	column := func(name string) string { return alias + "." + name }
+	args := []any{
+		types.BuiltinOperatingAnalystID,
+		"governed_data_schema",
+		"governed_data_query",
+	}
+	switch dialect {
+	case "postgres":
+		return fmt.Sprintf(
+			"%s = ? OR EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(%s, '[]'::jsonb)) step, jsonb_array_elements(COALESCE(step->'tool_calls', '[]'::jsonb)) call WHERE call->>'name' IN (?, ?))",
+			column("agent_id"), column("agent_steps"),
+		), args, nil
+	case "sqlite":
+		return fmt.Sprintf(
+			"%s = ? OR EXISTS (SELECT 1 FROM json_each(COALESCE(%s, '[]')) step, json_each(step.value, '$.tool_calls') call WHERE json_extract(call.value, '$.name') IN (?, ?))",
+			column("agent_id"), column("agent_steps"),
+		), args, nil
+	default:
+		return "", nil, fmt.Errorf("unsupported database dialect for governed analysis classification: %s", dialect)
+	}
+}
+
+// GovernedAnalysisSessionIDs classifies only the requested session rows and
+// projects only session_id. It avoids loading message bodies or AgentSteps into
+// application memory on passive history reads. Deleting an evidence message
+// does not remove the business-data classification from surviving history.
+func (r *messageRepository) GovernedAnalysisSessionIDs(
+	ctx context.Context, sessionIDs []string,
+) (map[string]bool, error) {
+	result := make(map[string]bool, len(sessionIDs))
+	if len(sessionIDs) == 0 {
+		return result, nil
+	}
+	predicate, args, err := governedAnalysisMessagePredicate(r.db.Dialector.Name(), "messages")
+	if err != nil {
+		return nil, err
+	}
+	q := r.db.WithContext(ctx).Unscoped().Model(&types.Message{}).
+		Distinct("session_id").
+		Where("messages.session_id IN ? AND messages.role = ?", sessionIDs, "assistant").
+		Where(predicate, args...)
+	var ids []string
+	if err := q.Pluck("session_id", &ids).Error; err != nil {
+		return nil, err
+	}
+	for _, id := range ids {
+		result[id] = true
+	}
+	return result, nil
+}
+
+func (r *messageRepository) GovernedAnalysisMessageIDs(
+	ctx context.Context, messageIDs []string,
+) (map[string]bool, error) {
+	result := make(map[string]bool, len(messageIDs))
+	if len(messageIDs) == 0 {
+		return result, nil
+	}
+	predicate, args, err := governedAnalysisMessagePredicate(r.db.Dialector.Name(), "evidence")
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	if err := r.db.WithContext(ctx).Table("messages AS target").
+		Distinct("target.id").
+		Where("target.id IN ? AND target.role = ?", messageIDs, "assistant").
+		Where(
+			"EXISTS (SELECT 1 FROM messages AS evidence WHERE evidence.session_id = target.session_id "+
+				"AND evidence.role = ? AND ("+predicate+"))",
+			append([]any{"assistant"}, args...)...,
+		).
+		Pluck("target.id", &ids).Error; err != nil {
+		return nil, err
+	}
+	for _, id := range ids {
+		result[id] = true
+	}
+	return result, nil
+}
+
+// GovernedArtifactMessageIDs reads the artifact list persisted with each answer.
+// Resource lifecycle bindings are best-effort and cannot be the only read authority.
+// Retained artifacts keep their classification even when their source is soft-deleted;
+// the message read service still denies access to deleted sources.
+func (r *messageRepository) GovernedArtifactMessageIDs(ctx context.Context, references []string) ([]string, error) {
+	predicate, args, err := governedAnalysisMessagePredicate(r.db.Dialector.Name(), "evidence")
+	if err != nil {
+		return nil, err
+	}
+	var artifactPredicate string
+	switch r.db.Dialector.Name() {
+	case "postgres":
+		artifactPredicate = "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(target.artifacts, '[]'::jsonb)) artifact WHERE artifact->>'url' IN ?)"
+	case "sqlite":
+		artifactPredicate = "EXISTS (SELECT 1 FROM json_each(COALESCE(target.artifacts, '[]')) artifact WHERE json_extract(artifact.value, '$.url') IN ?)"
+	}
+	var ids []string
+	err = r.db.WithContext(ctx).Table("messages AS target").
+		Distinct("target.id").Where("target.role = ?", "assistant").
+		Where(artifactPredicate, references).
+		Where("EXISTS (SELECT 1 FROM messages AS evidence WHERE evidence.session_id = target.session_id AND evidence.role = ? AND ("+predicate+"))", append([]any{"assistant"}, args...)...).
+		Pluck("target.id", &ids).Error
+	return ids, err
 }
 
 // NewMessageRepository creates a new message repository

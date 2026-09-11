@@ -9,8 +9,8 @@ const router = read('../../router/index.ts')
 const chat = read('../chat/index.vue')
 const input = read('../../components/Input-field.vue')
 const menu = read('../../components/menu.vue')
-const history = read('./OperatingAnalysisHistory.vue')
 const platform = read('../platform/index.vue')
+const brief = read('./OperatingBriefWorkspace.vue')
 
 test('new operating work enters one fixed native agent without URL agent selection', () => {
   assert.match(router, /path: "operating-analysis"[\s\S]*?OperatingAnalysisHome\.vue/)
@@ -48,17 +48,18 @@ test('platform-native agents reuse the server-owned employee skill catalog', () 
   assert.match(input, /if \(skillsMode !== 'none'\)/)
 })
 
-test('historical reads cannot mount or submit the retired execution chain', () => {
-  assert.match(router, /operating-analysis\/history\/:sessionId/)
+test('the brief is native Vue and the retired Center browser only redirects home', () => {
+  assert.match(router, /path: 'operating-analysis\/history\/:sessionId\?'[\s\S]*?redirect: '\/platform\/operating-analysis'/)
   assert.match(platform, /OperatingBriefWorkspace/)
   assert.doesNotMatch(platform, /OperatingWorkspace|operatingController/)
-  assert.doesNotMatch(history, /startStream|ag-ui|createSessions|sendMsg/)
+  assert.doesNotMatch(home, /迁移前的历史分析|operating-analysis\/history/)
+  assert.doesNotMatch(router, /OperatingAnalysisHistory|authorizeOperatingDataRead/)
+  assert.doesNotMatch(brief, /mountOperatingBrief|\/app\/operating-brief\.js|retail_ai_app_auth_token|document\.cookie/)
   assert.doesNotMatch(menu, /operatingController|operating-client/)
 })
 
-test('legacy operating history revalidates the current platform actor', () => {
-  assert.match(history, /localStorage\.getItem\('weknora_token'\)/)
-  assert.match(history, /localStorage\.getItem\('weknora_selected_tenant_id'\)/)
-  assert.match(history, /headers\['x-platform-authorization'\] = `Bearer \$\{platformAuthorization\}`/)
-  assert.match(history, /headers\['x-platform-tenant-id'\] = platformTenantId/)
+test('native chat and brief routes remain addressable after browser retirement', () => {
+  assert.match(router, /path: 'operating-analysis\/chat\/:chatid'[\s\S]*?agentId: BUILTIN_OPERATING_ANALYST_ID/)
+  assert.match(router, /path: 'operating-brief'[\s\S]*?name: 'operatingBrief'/)
+  assert.match(router, /retiredOperatingAnalysisQueryRedirect\(to\.query\)/)
 })

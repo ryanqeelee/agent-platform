@@ -4,7 +4,6 @@
       <p class="operating-welcome__kicker">经营分析</p>
       <h1>今天想先看哪项经营变化？</h1>
       <p>看销售、查毛利、找变化。可以直接提问，或上传经营数据文件。</p>
-      <RouterLink class="operating-history-link" to="/platform/operating-analysis/history">查看迁移前的历史分析</RouterLink>
       <div class="operating-home-composer">
         <InputField
           ref="inputFieldRef"

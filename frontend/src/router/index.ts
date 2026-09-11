@@ -4,11 +4,11 @@ import { useAuthStore } from '@/stores/auth'
 import { autoSetup, getCurrentUser, getEnterpriseSession, EnterpriseSessionRequestError, userInfoFromApi } from '@/api/auth'
 import {
   consumeOperatingAnalysisHandoff,
-  prepareOperatingDataRead,
   getOperatingAnalysisAvailability,
   OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY,
   OPERATING_ANALYSIS_HANDOFF_REF_KEY,
 } from '@/api/operatingAnalysis'
+import { retiredOperatingAnalysisQueryRedirect } from '@/views/operating/operatingNavigation'
 import { employeeSurfaceMinRoleForPath, SETTINGS_SECTION_MIN_ROLE } from '@/config/settingsAccess'
 import { DEFAULT_EMPLOYEE_WORKSPACE_PATH, loginDestination, safeReturnTo } from './safeReturnTo'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
@@ -78,15 +78,6 @@ async function admitNativeOperatingAnalysis(to: RouteLocationNormalized) {
     return availability.availability.state === 'enabled' && availability.availability.canExchange
       ? true
       : '/platform/creatChat'
-  } catch {
-    return '/platform/creatChat'
-  }
-}
-
-async function authorizeOperatingDataRead() {
-  try {
-    await prepareOperatingDataRead()
-    return true
   } catch {
     return '/platform/creatChat'
   }
@@ -201,9 +192,8 @@ const router = createRouter({
           component: () => import('../views/operating/OperatingAnalysisHome.vue'),
           meta: { requiresInit: true, requiresAuth: true },
           beforeEnter: async (to) => {
-            if (typeof to.query.data_session === 'string') {
-              return { path: `/platform/operating-analysis/history/${encodeURIComponent(to.query.data_session)}`, replace: true }
-            }
+            const retiredRedirect = retiredOperatingAnalysisQueryRedirect(to.query)
+            if (retiredRedirect) return retiredRedirect
             return admitNativeOperatingAnalysis(to)
           },
         },
@@ -220,10 +210,8 @@ const router = createRouter({
         },
         {
           path: 'operating-analysis/history/:sessionId?',
-          name: 'operatingAnalysisHistory',
-          component: () => import('../views/operating/OperatingAnalysisHistory.vue'),
+          redirect: '/platform/operating-analysis',
           meta: { requiresInit: true, requiresAuth: true },
-          beforeEnter: authorizeOperatingDataRead,
         },
         {
           path: 'operating-brief',

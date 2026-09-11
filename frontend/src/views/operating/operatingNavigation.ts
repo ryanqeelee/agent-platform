@@ -1,5 +1,11 @@
 const OPERATING_AGENT = 'builtin-operating-analyst'
 
+export function retiredOperatingAnalysisQueryRedirect(query: Record<string, unknown>) {
+  return typeof query.data_session === 'string'
+    ? { path: '/platform/operating-analysis', replace: true as const }
+    : null
+}
+
 export function nativeChatPath(item: {
   id: string
   path?: string

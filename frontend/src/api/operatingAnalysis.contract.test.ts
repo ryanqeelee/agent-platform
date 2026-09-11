@@ -2,31 +2,40 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-test('fresh operating-analysis history is routed to the governed-analysis authority', () => {
+test('Center history has no product proxy or client', () => {
   const nginx = readFileSync(new URL('../../nginx.conf', import.meta.url), 'utf8')
-
-  assert.match(
-    nginx,
-    /location = \/api\/auth\/operating-analysis-history \{[\s\S]*?proxy_pass \$\{RETAIL_AI_CENTER_BASE_URL\}\/api\/auth\/operating-analysis-history;/,
-  )
+  const api = readFileSync(new URL('./operatingAnalysis.ts', import.meta.url), 'utf8')
+  assert.doesNotMatch(nginx + api, /operating-analysis-history|OperatingAnalysisRevocationHistory/)
 })
 
 test('employee-assistant handoff carries only an opaque reference across routes', () => {
   const api = readFileSync(new URL('./operatingAnalysis.ts', import.meta.url), 'utf8')
-  const nginx = readFileSync(new URL('../../nginx.conf', import.meta.url), 'utf8')
   const router = readFileSync(new URL('../router/index.ts', import.meta.url), 'utf8')
   const message = readFileSync(new URL('../views/chat/components/usermsg.vue', import.meta.url), 'utf8')
 
   assert.match(api, /post\('\/api\/v1\/operating-analysis-handoffs', \{\s*sourceSessionId,\s*sourceMessageId,\s*\}\)/)
   assert.match(api, /\/api\/auth\/operating-analysis-handoffs\/\$\{encodeURIComponent\(handoffRef\)\}\/consume/)
-  assert.match(
-    nginx,
-    /location \^~ \/api\/auth\/operating-analysis-handoffs\/ \{[\s\S]*?proxy_pass \$\{RETAIL_AI_CENTER_BASE_URL\}\/api\/auth\/operating-analysis-handoffs\//,
-  )
   assert.match(router, /sessionStorage\.setItem\(\s*OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY/)
-  assert.match(router, /await prepareOperatingDataRead\(\)/)
-  assert.match(api, /localStorage\.setItem\('retail_ai_app_auth_token', response\.access_token\)/)
   assert.doesNotMatch(router, /window\.location\.assign\(handoffPrompt/)
   assert.doesNotMatch(router, /[?&](?:question|prompt)=/)
   assert.match(message, /emit\('handoff', messageId\)/)
+})
+
+test('native operating brief has no durable Center credential or app bundle bridge', () => {
+  const operatingAnalysisApi = readFileSync(new URL('./operatingAnalysis.ts', import.meta.url), 'utf8')
+  const briefApi = readFileSync(new URL('./operatingBrief.ts', import.meta.url), 'utf8')
+  const briefView = readFileSync(new URL('../views/operating/OperatingBriefWorkspace.vue', import.meta.url), 'utf8')
+
+  assert.match(briefApi, /exchangeOperatingAnalysis\(signal\)/)
+  assert.doesNotMatch(operatingAnalysisApi, /retail_ai_app_auth_token|document\.cookie|localStorage\.setItem/)
+  assert.doesNotMatch(briefApi, /retail_ai_app_auth_token|document\.cookie|localStorage\.setItem/)
+  assert.doesNotMatch(briefView, /\/app\/operating-brief|mountOperatingBrief|document\.cookie|localStorage\.setItem/)
+})
+
+test('brief uses the effective current tenant, including the default tenant before a switch', () => {
+  const view = readFileSync(new URL('../views/operating/OperatingBriefWorkspace.vue', import.meta.url), 'utf8')
+  const api = readFileSync(new URL('./operatingBrief.ts', import.meta.url), 'utf8')
+  assert.match(view, /tenantId: String\(auth\.effectiveTenantId \?\? ''\)/)
+  assert.match(view, /token: auth\.token/)
+  assert.doesNotMatch(view + api, /weknora_selected_tenant_id|auth\.selectedTenantId/)
 })

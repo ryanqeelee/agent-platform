@@ -33,26 +33,12 @@ export interface OperatingAnalysisHandoffExchangeV1 extends OperatingAnalysisExc
 
 export const OPERATING_ANALYSIS_HANDOFF_REF_KEY = 'operating_analysis_handoff_ref_v1'
 export const OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY = 'operating_analysis_handoff_prompt_v1'
-export interface OperatingAnalysisRevocationHistoryV1 {
-  schema: 'OperatingAnalysisRevocationHistoryV1'
-  availability: OperatingAnalysisAvailabilityV1['availability']
-  recentWork?: {
-    sessionId: string
-    title: string
-    updatedAt: string
-  }
-}
-
 export async function getOperatingAnalysisAvailability(): Promise<OperatingAnalysisAvailabilityV1> {
   return (await get('/api/auth/operating-analysis-availability')) as unknown as OperatingAnalysisAvailabilityV1
 }
 
-export async function getOperatingAnalysisHistory(): Promise<OperatingAnalysisRevocationHistoryV1> {
-  return (await get('/api/auth/operating-analysis-history')) as unknown as OperatingAnalysisRevocationHistoryV1
-}
-
-export async function exchangeOperatingAnalysis(): Promise<OperatingAnalysisExchangeV1> {
-  return (await post('/api/auth/weknora-exchange')) as unknown as OperatingAnalysisExchangeV1
+export async function exchangeOperatingAnalysis(signal?: AbortSignal): Promise<OperatingAnalysisExchangeV1> {
+  return (await post('/api/auth/weknora-exchange', {}, signal ? { signal } : undefined)) as unknown as OperatingAnalysisExchangeV1
 }
 
 export async function createOperatingAnalysisHandoff(
@@ -69,11 +55,4 @@ export async function consumeOperatingAnalysisHandoff(
   handoffRef: string,
 ): Promise<OperatingAnalysisHandoffExchangeV1> {
   return (await post(`/api/auth/operating-analysis-handoffs/${encodeURIComponent(handoffRef)}/consume`)) as unknown as OperatingAnalysisHandoffExchangeV1
-}
-
-export async function prepareOperatingDataRead(): Promise<void> {
-  const response = await exchangeOperatingAnalysis()
-  if (!response.access_token || response.expires_in !== 900) throw new Error('无法获取经营数据访问权限。')
-  localStorage.setItem('retail_ai_app_auth_token', response.access_token)
-  document.cookie = `retail_ai_app_auth_token=${response.access_token}; Path=/app; Max-Age=900; SameSite=Lax`
 }

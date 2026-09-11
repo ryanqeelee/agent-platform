@@ -114,6 +114,8 @@ type Tenant struct {
 	RingxunActivationID            *string `yaml:"-" json:"-" gorm:"column:ringxun_activation_id;type:varchar(128);uniqueIndex:idx_tenants_ringxun_activation_id_unique"`
 	RingxunActivationRequestSHA256 *string `yaml:"-" json:"-" gorm:"column:ringxun_activation_request_sha256;type:varchar(64)"`
 	RingxunInitialOwnerUserID      *string `yaml:"-" json:"-" gorm:"column:ringxun_initial_owner_user_id;type:varchar(36)"`
+	// Center-managed connection binding; only the internal management adapter writes it.
+	GovernedEdgeBinding *GovernedEdgeBinding `yaml:"-" json:"-" gorm:"type:jsonb"`
 	// Retriever engines
 	RetrieverEngines RetrieverEngines `yaml:"retriever_engines"   json:"retriever_engines"   gorm:"type:json"`
 	// Business

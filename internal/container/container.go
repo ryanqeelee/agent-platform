@@ -299,6 +299,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	}))
 	// Expose Gate as MCPApproval interface so AgentService and others can depend on the abstraction.
 	must(container.Provide(func(g *approval.Gate) approval.MCPApproval { return g }))
+	must(container.Provide(service.NewGovernedEdgeResolver))
 	must(container.Provide(service.NewAgentService))
 
 	// Session service (depends on agent service)

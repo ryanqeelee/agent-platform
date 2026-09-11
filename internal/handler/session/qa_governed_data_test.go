@@ -11,7 +11,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
-	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -109,19 +108,36 @@ func TestGovernedTurnClassificationUsesEffectiveToolsAndReplayableHistory(t *tes
 	require.False(t, hasHistory)
 }
 
+type governedAdmissionUsers struct{ interfaces.UserService }
+
+func (governedAdmissionUsers) ValidateToken(context.Context, string) (*types.User, uint64, error) {
+	return &types.User{ID: "user-a", TenantID: 10001, IsActive: true}, 10001, nil
+}
+
+type governedAdmissionMembers struct {
+	interfaces.TenantMemberService
+	allowed *bool
+	calls   *int
+}
+
+func (m governedAdmissionMembers) GetMembership(_ context.Context, user string, tenant uint64) (*types.TenantMember, error) {
+	*m.calls++
+	return &types.TenantMember{UserID: user, TenantID: tenant, Status: types.TenantMemberStatusActive, OperatingAnalysisAccess: *m.allowed}, nil
+}
+
+type governedAdmissionResolver struct{}
+
+func (governedAdmissionResolver) Resolve(context.Context, uint64) (types.GovernedEdgeConnection, error) {
+	return types.GovernedEdgeConnection{EnterpriseID: "enterprise", EdgeNodeID: "edge", SourceID: "retail"}, nil
+}
+
 func TestGovernedDataTurnAdmissionRejectsRevokedAndCrossTenantCredentials(t *testing.T) {
 	allowed := true
 	calls := 0
-	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		require.Equal(t, "Bearer private-jwt", r.Header.Get("Authorization"))
-		require.Equal(t, "10001", r.Header.Get("X-Tenant-ID"))
-		fmt.Fprintf(w, `{"schema":"OperatingAnalysisAvailabilityV1","availability":{"canExchange":%t}}`, allowed)
-	}))
-	defer endpoint.Close()
-	h := &Handler{config: &config.Config{Agent: &config.AgentConfig{GovernedData: &config.GovernedDataConfig{BaseURL: endpoint.URL}}}}
+	h := &Handler{userService: governedAdmissionUsers{}, tenantMemberService: governedAdmissionMembers{allowed: &allowed, calls: &calls}, governedEdgeResolver: governedAdmissionResolver{}}
 	ctx := context.WithValue(context.Background(), types.UserIDContextKey, "user-a")
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, uint64(10001))
+	ctx = types.WithPrincipal(ctx, types.Principal{Type: types.PrincipalWebUser, ID: "user-a"})
 	ctx = types.WithGovernedDataUserCredential(ctx, "private-jwt")
 	agent := &types.CustomAgent{ID: "builtin-operating-analyst"}
 	require.NoError(t, h.authorizeGovernedAgent(ctx, agent))
@@ -150,12 +166,6 @@ func TestGovernedCredentialFollowsEffectiveQAPath(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			allowed, calls := true, 0
-			endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				calls++
-				require.Equal(t, "Bearer private-jwt", r.Header.Get("Authorization"))
-				fmt.Fprintf(w, `{"schema":"OperatingAnalysisAvailabilityV1","availability":{"canExchange":%t}}`, allowed)
-			}))
-			defer endpoint.Close()
 			agent := &types.CustomAgent{ID: tc.agentID, Config: types.CustomAgentConfig{
 				AgentMode: tc.agentMode, AllowedTools: tc.tools, MultiTurnEnabled: true, HistoryTurns: 3,
 			}}
@@ -166,7 +176,7 @@ func TestGovernedCredentialFollowsEffectiveQAPath(t *testing.T) {
 			h := &Handler{
 				sessionService: &stubSessionService{}, customAgentService: &resolveOwnAgentStub{agent: agent},
 				messageService: history,
-				config:         &config.Config{Agent: &config.AgentConfig{GovernedData: &config.GovernedDataConfig{BaseURL: endpoint.URL}}},
+				userService:    governedAdmissionUsers{}, tenantMemberService: governedAdmissionMembers{allowed: &allowed, calls: &calls}, governedEdgeResolver: governedAdmissionResolver{},
 			}
 			parse := func() (*qaRequestContext, error) {
 				c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -175,6 +185,7 @@ func TestGovernedCredentialFollowsEffectiveQAPath(t *testing.T) {
 				c.Set(types.TenantIDContextKey.String(), uint64(10001))
 				ctx := context.WithValue(context.Background(), types.UserIDContextKey, "user-a")
 				ctx = context.WithValue(ctx, types.TenantIDContextKey, uint64(10001))
+				ctx = types.WithPrincipal(ctx, types.Principal{Type: types.PrincipalWebUser, ID: "user-a"})
 				ctx = types.WithGovernedDataUserCredential(ctx, "private-jwt")
 				c.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(fmt.Sprintf(`{"query":"hello","agent_id":%q}`, tc.agentID))).WithContext(ctx)
 				c.Request.Header.Set("Content-Type", "application/json")

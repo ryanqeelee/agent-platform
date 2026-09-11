@@ -296,6 +296,10 @@ type stubTenantServiceForModelDelete struct {
 	tenant *types.Tenant
 }
 
+func (s *stubTenantServiceForModelDelete) ApplyGovernedEdgeBinding(context.Context, uint64, types.GovernedEdgeBinding) error {
+	return nil
+}
+
 func (s *stubTenantServiceForModelDelete) ApplyEnterpriseActivation(
 	context.Context, interfaces.EnterpriseActivationCommand,
 ) (*interfaces.EnterpriseActivationResult, error) {

@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
-	"strconv"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/sandbox"
@@ -23,15 +23,20 @@ func (s *agentService) registerGovernedDataTools(ctx context.Context, registry *
 	if !wanted[tools.ToolGovernedDataSchema] || !wanted[tools.ToolGovernedDataQuery] {
 		return fmt.Errorf("select both business data schema and query tools")
 	}
-	bearer, tenantID, authenticated := types.GovernedDataUserCredential(ctx)
-	if !authenticated {
-		return fmt.Errorf("business data requires an authenticated user in the current workspace")
+	connection, err := AuthorizeGovernedData(ctx, s.userService, s.tenantMemberService, s.governedEdgeResolver)
+	if err != nil {
+		return err
 	}
-	if s.cfg == nil || s.cfg.Agent == nil || s.cfg.Agent.GovernedData == nil {
-		return fmt.Errorf("business data source is not configured")
-	}
-	connection := s.cfg.Agent.GovernedData
-	client, err := tools.NewGovernedDataClient(connection.BaseURL, bearer, strconv.FormatUint(tenantID, 10), "")
+	client, err := tools.NewGovernedDataClient(connection, func(callCtx context.Context) error {
+		current, err := AuthorizeGovernedData(callCtx, s.userService, s.tenantMemberService, s.governedEdgeResolver)
+		if err != nil {
+			return err
+		}
+		if current != connection {
+			return tools.ErrGovernedDataAccessDenied
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
@@ -49,4 +54,29 @@ func (s *agentService) registerGovernedDataTools(ctx context.Context, registry *
 		registry.RegisterTool(tool)
 	}
 	return nil
+}
+
+// AuthorizeGovernedData uses the existing live member grant and server-owned
+// connection binding. No browser token is forwarded to the Edge.
+func AuthorizeGovernedData(ctx context.Context, users interfaces.UserService, members interfaces.TenantMemberService, resolver interfaces.GovernedEdgeResolver) (types.GovernedEdgeConnection, error) {
+	bearer, tenantID, authenticated := types.GovernedDataUserCredential(ctx)
+	if !authenticated || users == nil {
+		return types.GovernedEdgeConnection{}, tools.ErrGovernedDataAccessDenied
+	}
+	user, _, err := users.ValidateToken(ctx, bearer)
+	actorID, _ := types.UserIDFromContext(ctx)
+	if err != nil || user == nil || user.ID != actorID || !user.IsActive {
+		return types.GovernedEdgeConnection{}, tools.ErrGovernedDataAccessDenied
+	}
+	allowed, err := currentMemberCanReadOperatingAnalysis(ctx, members)
+	if err != nil {
+		return types.GovernedEdgeConnection{}, err
+	}
+	if !allowed {
+		return types.GovernedEdgeConnection{}, tools.ErrGovernedDataAccessDenied
+	}
+	if resolver == nil {
+		return types.GovernedEdgeConnection{}, fmt.Errorf("business data connection is not configured")
+	}
+	return resolver.Resolve(ctx, tenantID)
 }

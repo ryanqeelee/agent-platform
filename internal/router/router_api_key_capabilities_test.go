@@ -99,6 +99,7 @@ func TestPlatformTenantLifecycleRoutesDeclarePlatformCapabilities(t *testing.T) 
 		{http.MethodGet, "/api/v1/tenants/all", types.APIKeyCapabilitySystemTenantsRead},
 		{http.MethodGet, "/api/v1/tenants/search", types.APIKeyCapabilitySystemTenantsRead},
 		{http.MethodPut, "/api/v1/system/enterprise-activations/:activation_id", types.APIKeyCapabilitySystemTenantsManage},
+		{http.MethodPut, "/api/v1/system/tenants/:id/edge-binding", types.APIKeyCapabilitySystemTenantsManage},
 		{http.MethodPost, "/api/v1/tenants", types.APIKeyCapabilitySystemTenantsManage},
 		{http.MethodGet, "/api/v1/tenants/:id", types.APIKeyCapabilitySystemTenantsRead},
 		{http.MethodPut, "/api/v1/tenants/:id", types.APIKeyCapabilitySystemTenantsManage},

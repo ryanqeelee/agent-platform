@@ -57,7 +57,7 @@ func CopyGovernedDataTurnCredential(dst, src context.Context) context.Context {
 }
 
 // WithGovernedDataUserCredential is called only after JWT authentication and
-// workspace membership resolution. The Center independently verifies the JWT.
+// workspace membership resolution. Only this validated interactive identity can request a server-side Edge connection.
 func WithGovernedDataUserCredential(ctx context.Context, bearer string) context.Context {
 	userID, hasUser := UserIDFromContext(ctx)
 	tenantID, hasTenant := TenantIDFromContext(ctx)

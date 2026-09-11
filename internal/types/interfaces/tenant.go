@@ -32,6 +32,7 @@ type EnterpriseActivationResult struct {
 
 // TenantService defines the tenant service interface
 type TenantService interface {
+	ApplyGovernedEdgeBinding(context.Context, uint64, types.GovernedEdgeBinding) error
 	// ApplyEnterpriseActivation creates or advances one Ringxun-owned tenant
 	// activation receipt without changing the general tenant creation flow.
 	ApplyEnterpriseActivation(ctx context.Context, command EnterpriseActivationCommand) (*EnterpriseActivationResult, error)
@@ -68,6 +69,7 @@ type TenantService interface {
 
 // TenantRepository defines the tenant repository interface
 type TenantRepository interface {
+	ApplyGovernedEdgeBinding(context.Context, uint64, types.GovernedEdgeBinding) error
 	// ApplyEnterpriseActivation atomically owns the activation receipt, binds
 	// the existing first Owner, and advances the tenant/member state pair.
 	ApplyEnterpriseActivation(ctx context.Context, command EnterpriseActivationCommand) (*EnterpriseActivationResult, error)

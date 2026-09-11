@@ -137,6 +137,10 @@ type fakeTenantService struct {
 	tenant *types.Tenant
 }
 
+func (f *fakeTenantService) ApplyGovernedEdgeBinding(context.Context, uint64, types.GovernedEdgeBinding) error {
+	return nil
+}
+
 func (f *fakeTenantService) ApplyEnterpriseActivation(context.Context, interfaces.EnterpriseActivationCommand) (*interfaces.EnterpriseActivationResult, error) {
 	return nil, nil
 }

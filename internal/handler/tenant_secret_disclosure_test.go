@@ -20,6 +20,10 @@ type stubTenantService struct {
 	tenant *types.Tenant
 }
 
+func (s *stubTenantService) ApplyGovernedEdgeBinding(context.Context, uint64, types.GovernedEdgeBinding) error {
+	return nil
+}
+
 func (s *stubTenantService) ApplyEnterpriseActivation(context.Context, interfaces.EnterpriseActivationCommand) (*interfaces.EnterpriseActivationResult, error) {
 	return nil, nil
 }

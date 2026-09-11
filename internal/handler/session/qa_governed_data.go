@@ -2,11 +2,10 @@ package session
 
 import (
 	"context"
-	"fmt"
 	"slices"
-	"strconv"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -106,22 +105,11 @@ func (h *Handler) sessionHasGovernedHistory(
 	return messagesContainGovernedData(messages), nil
 }
 
-// Check the same live Center admission used by the product page before a
-// governed turn can consume even previously staged workspace files.
+// Recheck current authorization before a turn can consume staged business files.
 func (h *Handler) authorizeGovernedAgent(ctx context.Context, agent *types.CustomAgent) error {
 	if !agentRequiresGovernedAdmission(agent) {
 		return nil
 	}
-	bearer, tenantID, ok := types.GovernedDataUserCredential(ctx)
-	if !ok {
-		return tools.ErrGovernedDataAccessDenied
-	}
-	if h.config == nil || h.config.Agent == nil || h.config.Agent.GovernedData == nil {
-		return fmt.Errorf("经营分析数据服务未配置")
-	}
-	client, err := tools.NewGovernedDataClient(h.config.Agent.GovernedData.BaseURL, bearer, strconv.FormatUint(tenantID, 10), "")
-	if err != nil {
-		return err
-	}
-	return client.CheckAccess(ctx)
+	_, err := service.AuthorizeGovernedData(ctx, h.userService, h.tenantMemberService, h.governedEdgeResolver)
+	return err
 }

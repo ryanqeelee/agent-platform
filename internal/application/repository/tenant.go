@@ -407,7 +407,7 @@ func (r *tenantRepository) SearchTenants(ctx context.Context, keyword string, te
 // UpdateTenant updates tenant.
 func (r *tenantRepository) UpdateTenant(ctx context.Context, tenant *types.Tenant) error {
 	return r.db.WithContext(ctx).Model(&types.Tenant{}).Where("id = ?", tenant.ID).
-		Omit("memory_config", "memory_generation").Updates(tenant).Error
+		Omit("governed_edge_binding", "memory_config", "memory_generation").Updates(tenant).Error
 }
 
 func (r *tenantRepository) SetDefaultStorageBackend(ctx context.Context, tenantID uint64, backendID string) error {

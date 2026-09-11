@@ -1,4 +1,4 @@
-import type { EnterpriseActivationPayload, OperationsEnterprise } from '@/api/platformOperations'
+import type { EnterpriseActivationPayload, EnterpriseUpdatePayload, OperationsEnterprise } from '@/api/platformOperations'
 
 export const GIB_BYTES = 1024 ** 3
 export const PENDING_ACTIVATION_STORAGE_KEY = 'weknora_platform_pending_activation_v1'
@@ -61,6 +61,18 @@ export function enterpriseFormDraft(enterprise: OperationsEnterprise): Enterpris
     status: enterprise.status,
     seats_total: enterprise.seats_total,
     storage_quota_gib: bytesToGiB(enterprise.storage_quota),
+  }
+}
+
+export function enterpriseUpdatePayload(
+  draft: Omit<EnterpriseFormDraft, 'seats_total'> & { seats_total?: number | null },
+): EnterpriseUpdatePayload {
+  return {
+    name: draft.name.trim(),
+    description: draft.description.trim(),
+    status: draft.status,
+    seats_total: draft.seats_total == null ? null : Number(draft.seats_total),
+    storage_quota: gibToBytes(draft.storage_quota_gib),
   }
 }
 

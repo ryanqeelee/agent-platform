@@ -17,7 +17,7 @@ func TestClientForwardsServiceActorAndIdempotencyHeaders(t *testing.T) {
 		require.Equal(t, "system-admin-1", request.Header.Get("X-Product-Base-Actor-User-Id"))
 		require.Equal(t, "activation-1", request.Header.Get("Idempotency-Key"))
 		writer.Header().Set("Content-Type", "application/json")
-		_, _ = writer.Write([]byte(`{"status":"active"}`))
+		_, _ = writer.Write([]byte(`{"productBaseTenantId":null,"bindingId":null,"status":"pending"}`))
 	}))
 	defer server.Close()
 	client := &Client{baseURL: server.URL, token: "service-token", http: &http.Client{Timeout: time.Second}}
@@ -26,4 +26,5 @@ func TestClientForwardsServiceActorAndIdempotencyHeaders(t *testing.T) {
 		"system-admin-1", "activation-1", bytes.NewBufferString(`{"name":"Acme"}`))
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, response.StatusCode)
+	require.JSONEq(t, `{"productBaseTenantId":null,"bindingId":null,"status":"pending"}`, string(response.Body))
 }

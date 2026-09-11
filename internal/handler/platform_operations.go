@@ -38,7 +38,7 @@ type enterpriseActivationResponse struct {
 	ActivationID               string  `json:"activationId"`
 	EnterpriseID               string  `json:"enterpriseId"`
 	ProductBaseTenantID        *string `json:"productBaseTenantId"`
-	BindingID                  string  `json:"bindingId"`
+	BindingID                  *string `json:"bindingId"`
 	Status                     string  `json:"status"`
 	LastErrorCode              *string `json:"lastErrorCode"`
 	Name                       string  `json:"name"`

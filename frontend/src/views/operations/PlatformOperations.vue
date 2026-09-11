@@ -201,8 +201,8 @@ import {
   bytesToGiB,
   createActivationCommand,
   enterpriseFormDraft,
+  enterpriseUpdatePayload,
   freshEnterpriseCreationDraft,
-  gibToBytes,
   initialAdministratorCommand,
   PENDING_ACTIVATION_STORAGE_KEY,
   PENDING_INITIAL_ADMIN_STORAGE_KEY,
@@ -292,19 +292,14 @@ async function saveEnterprise() {
     errorMessage.value = '请输入企业名称'
     return
   }
-  if ((editEnterprise.seats_total !== null && editEnterprise.seats_total < selected.value.seats_used) || editEnterprise.storage_quota_gib < 0) {
+  const payload = enterpriseUpdatePayload(editEnterprise)
+  if ((payload.seats_total !== null && payload.seats_total < selected.value.seats_used) || editEnterprise.storage_quota_gib < 0) {
     errorMessage.value = '席位总数不能低于已用席位，存储配额不能小于 0'
     return
   }
   savingEnterprise.value = true
   try {
-    const updated = await updateOperationsEnterprise(selected.value.id, {
-      name: editEnterprise.name.trim(),
-      description: editEnterprise.description.trim(),
-      status: editEnterprise.status,
-      seats_total: editEnterprise.seats_total,
-      storage_quota: gibToBytes(editEnterprise.storage_quota_gib),
-    })
+    const updated = await updateOperationsEnterprise(selected.value.id, payload)
     selected.value = updated
     await loadEnterprises(updated.id)
     MessagePlugin.success('企业信息已保存')

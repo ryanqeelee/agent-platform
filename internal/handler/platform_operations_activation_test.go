@@ -17,6 +17,7 @@ import (
 
 type recordingOperationsBridge struct {
 	method, path, actor, idempotencyKey, body string
+	responseBody                              []byte
 }
 
 func (b *recordingOperationsBridge) Do(
@@ -28,13 +29,17 @@ func (b *recordingOperationsBridge) Do(
 		data, _ = io.ReadAll(body)
 	}
 	b.body = string(data)
-	return &interfaces.PlatformOperationsResponse{StatusCode: http.StatusOK, ContentType: "application/json", Body: []byte(`{
+	responseBody := b.responseBody
+	if responseBody == nil {
+		responseBody = []byte(`{
 		"schema":"EnterpriseActivationV2","activationId":"activation-1","enterpriseId":"enterprise-1",
 		"productBaseTenantId":"pb-tenant-7","bindingId":"binding-1","status":"active","lastErrorCode":null,
 		"name":"Acme","description":"","seatsTotal":2,"storageQuota":0,
 		"initialAdministratorUserId":"owner-1","aiCapabilityPlanVersionId":"plan-1",
 		"createdAt":"2026-09-11T00:00:00Z","updatedAt":"2026-09-11T00:00:00Z","completedAt":null
-	}`)}, nil
+	}`)
+	}
+	return &interfaces.PlatformOperationsResponse{StatusCode: http.StatusOK, ContentType: "application/json", Body: responseBody}, nil
 }
 
 func operationsActivationRouter(bridge interfaces.PlatformOperationsBridge) *gin.Engine {
@@ -81,6 +86,22 @@ func TestPlatformOperationsActivationGetUsesCenterStringFixture(t *testing.T) {
 	require.Equal(t, "/api/internal/product-base/operations/enterprise-activations/activation-1", bridge.path)
 	require.Empty(t, bridge.body)
 	require.JSONEq(t, `{"success":true,"data":{"schema":"EnterpriseActivationV2","activationId":"activation-1","enterpriseId":"enterprise-1","productBaseTenantId":"pb-tenant-7","bindingId":"binding-1","status":"active","lastErrorCode":null,"name":"Acme","description":"","seatsTotal":2,"storageQuota":0,"initialAdministratorUserId":"owner-1","aiCapabilityPlanVersionId":"plan-1","createdAt":"2026-09-11T00:00:00Z","updatedAt":"2026-09-11T00:00:00Z","completedAt":null}}`, response.Body.String())
+}
+
+func TestPlatformOperationsActivationPreservesNullableBindingID(t *testing.T) {
+	bridge := &recordingOperationsBridge{responseBody: []byte(`{
+		"schema":"EnterpriseActivationV2","activationId":"activation-1","enterpriseId":"enterprise-1",
+		"productBaseTenantId":null,"bindingId":null,"status":"pending","lastErrorCode":null,
+		"name":"Acme","description":"","seatsTotal":2,"storageQuota":0,
+		"initialAdministratorUserId":"owner-1","aiCapabilityPlanVersionId":"plan-1",
+		"createdAt":"2026-09-11T00:00:00Z","updatedAt":"2026-09-11T00:00:00Z","completedAt":null
+	}`)}
+	request := httptest.NewRequest(http.MethodGet,
+		"/api/v1/system/admin/operations/enterprise-activations/activation-1", nil)
+	response := httptest.NewRecorder()
+	operationsActivationRouter(bridge).ServeHTTP(response, request)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.JSONEq(t, `{"success":true,"data":{"schema":"EnterpriseActivationV2","activationId":"activation-1","enterpriseId":"enterprise-1","productBaseTenantId":null,"bindingId":null,"status":"pending","lastErrorCode":null,"name":"Acme","description":"","seatsTotal":2,"storageQuota":0,"initialAdministratorUserId":"owner-1","aiCapabilityPlanVersionId":"plan-1","createdAt":"2026-09-11T00:00:00Z","updatedAt":"2026-09-11T00:00:00Z","completedAt":null}}`, response.Body.String())
 }
 
 func TestPlatformOperationsActivationRejectsCallbackDTO(t *testing.T) {

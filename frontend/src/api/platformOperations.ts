@@ -20,6 +20,11 @@ export interface OperationsEnterprise {
   storage_used?: number
 }
 
+export type EnterpriseUpdatePayload = Pick<
+  OperationsEnterprise,
+  'name' | 'description' | 'status' | 'seats_total' | 'storage_quota'
+>
+
 export interface OperationsMember {
   user_id: string
   username: string
@@ -72,7 +77,7 @@ export const getOperationsEnterprise = (tenantId: number) =>
 
 export const updateOperationsEnterprise = (
   tenantId: number,
-  payload: Pick<OperationsEnterprise, 'name' | 'description' | 'status' | 'seats_total' | 'storage_quota'>,
+  payload: EnterpriseUpdatePayload,
 ) => patch<OperationsResponse<OperationsEnterprise>>(`${base}/enterprises/${tenantId}`, payload).then(unwrapOperationsData)
 
 export interface OperationsMemberPage {

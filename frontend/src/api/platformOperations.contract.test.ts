@@ -10,6 +10,8 @@ test('platform operations uses the frozen enterprise mutation and activation con
   assert.match(source, /productBaseTenantId: string \| null/)
   assert.match(source, /'Idempotency-Key': idempotencyKey/)
   assert.match(source, /initial_administrator_user_id: string/)
+  assert.match(viewSource, /const payload = enterpriseUpdatePayload\(editEnterprise\)/)
+  assert.match(viewSource, /updateOperationsEnterprise\(selected\.value\.id, payload\)/)
 })
 
 test('initial administrator creation has a stable command and a recovery read', () => {

@@ -5,6 +5,7 @@ import {
   activationPayload,
   createActivationCommand,
   enterpriseFormDraft,
+  enterpriseUpdatePayload,
   freshEnterpriseCreationDraft,
   GIB_BYTES,
   initialAdministratorCommand,
@@ -45,6 +46,26 @@ test('enterprise edit preserves an unlimited seat quota', () => {
   })
 
   assert.equal(draft.seats_total, null)
+})
+
+test('enterprise update always sends an explicit seat quota', () => {
+  const base = {
+    name: ' Acme ',
+    description: ' Retail ',
+    status: 'active' as const,
+    storage_quota_gib: 1,
+  }
+
+  assert.deepEqual(enterpriseUpdatePayload({ ...base, seats_total: undefined }), {
+    name: 'Acme',
+    description: 'Retail',
+    status: 'active',
+    seats_total: null,
+    storage_quota: GIB_BYTES,
+  })
+  assert.equal(enterpriseUpdatePayload({ ...base, seats_total: null }).seats_total, null)
+  assert.equal(enterpriseUpdatePayload({ ...base, seats_total: 0 }).seats_total, 0)
+  assert.equal(enterpriseUpdatePayload({ ...base, seats_total: 7 }).seats_total, 7)
 })
 
 test('enterprise edit and activation preserve an unlimited storage quota', () => {

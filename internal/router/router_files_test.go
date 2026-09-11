@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"errors"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -103,8 +104,11 @@ func (s *stubResourceCatalog) ResolvePath(_ context.Context, value string) (stri
 	return value, nil, nil
 }
 
-func (s *stubResourceCatalog) ResolveTenantPath(_ context.Context, _ uint64, value string) (string, *types.StoredResource, error) {
-	return s.ResolvePath(context.Background(), value)
+func (s *stubResourceCatalog) ResolveTenantPath(ctx context.Context, tenantID uint64, value string) (string, *types.StoredResource, error) {
+	if s.resource != nil && s.resource.TenantID == tenantID && s.resource.PhysicalPath == value {
+		return value, s.resource, nil
+	}
+	return s.ResolvePath(ctx, value)
 }
 
 func (s *stubResourceCatalog) ListKnowledgeBindings(context.Context, string) ([]*types.ResourceBinding, error) {
@@ -802,6 +806,86 @@ func TestMessageScopedFilesServesSameTenantResource(t *testing.T) {
 	}
 	if requestedPath != physical {
 		t.Fatalf("requested path = %q, want %q", requestedPath, physical)
+	}
+}
+
+// A URL message must not lend its authorization to an unrelated business file.
+func TestMessageScopedFilesAuthorizesGovernedArtifactSource(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("STORAGE_TYPE", "local")
+	const handle = "AbCdEfGhIjKlMnOpQrStUv"
+	const physical = "local://42/exports/chart.png"
+	for _, tc := range []struct {
+		name         string
+		session      string
+		callerTenant uint64
+		revoked      bool
+		bindingErr   bool
+		lookupErr    bool
+		unknown      bool
+		want         int
+	}{
+		{name: "authorized source session", session: "business", callerTenant: 42, want: http.StatusOK},
+		{name: "ordinary session substitution", session: "ordinary", callerTenant: 42, want: http.StatusForbidden},
+		{name: "other owned session substitution", session: "other-business", callerTenant: 42, want: http.StatusForbidden},
+		{name: "revoked source session", session: "business", callerTenant: 42, revoked: true, want: http.StatusNotFound},
+		{name: "shared agent cannot share business artifact", session: "ordinary", callerTenant: 7, want: http.StatusForbidden},
+		{name: "binding failure", session: "ordinary", callerTenant: 42, bindingErr: true, want: http.StatusNotFound},
+		{name: "classification failure", session: "ordinary", callerTenant: 42, lookupErr: true, want: http.StatusNotFound},
+		{name: "unknown path cannot bypass catalog", session: "ordinary", callerTenant: 42, unknown: true, want: http.StatusNotFound},
+	} {
+		for _, reference := range []string{types.BuildResourcePath(handle), physical} {
+			t.Run(tc.name+"/"+reference, func(t *testing.T) {
+				catalog := &stubResourceCatalog{
+					resource: &types.StoredResource{Handle: handle, TenantID: 42, PhysicalPath: physical, MimeType: "image/png"},
+					bindings: []*types.ResourceBinding{{OwnerType: types.ResourceOwnerMessage, OwnerID: "source", Relation: types.ResourceRelationArtifact}},
+				}
+				if tc.bindingErr {
+					catalog.bindingErr = errors.New("binding lookup failed")
+				}
+				if tc.unknown {
+					catalog.resource = nil
+				}
+				reads := 0
+				engine := newMessageScopedFilesTestEngine(tc.callerTenant,
+					&stubMessageFileLookup{
+						get: func(_ context.Context, sessionID, messageID string) (*types.Message, error) {
+							if tc.revoked || (messageID == "source" && sessionID != "business") {
+								return nil, errors.New("message not accessible")
+							}
+							return &types.Message{ID: messageID, SessionID: sessionID, AgentID: "agent", AgentTenantID: 42}, nil
+						},
+						governed: func(_ context.Context, messageID string) (bool, error) {
+							if tc.lookupErr {
+								return false, errors.New("classification failed")
+							}
+							return messageID == "source", nil
+						},
+					},
+					&stubSharedAgentFileLookup{get: func(context.Context, uint64, types.TenantRole, string, ...uint64) (*types.CustomAgent, error) {
+						t.Fatal("business artifacts must not use shared agent access")
+						return nil, nil
+					}},
+					&stubTenantService{get: func(_ context.Context, id uint64) (*types.Tenant, error) { return &types.Tenant{ID: id}, nil }},
+					&stubFileService{getFile: func(_ context.Context, path string) (io.ReadCloser, error) {
+						reads++
+						require.Equal(t, physical, path)
+						return io.NopCloser(strings.NewReader("business-data")), nil
+					}}, catalog)
+				request := httptest.NewRequest(http.MethodGet, "/sessions/"+tc.session+"/messages/url-message/files?file_path="+url.QueryEscape(reference), nil)
+				response := httptest.NewRecorder()
+				engine.ServeHTTP(response, request)
+				require.Equal(t, tc.want, response.Code, response.Body.String())
+				if tc.want == http.StatusOK {
+					require.Equal(t, 1, reads)
+					require.Equal(t, "business-data", response.Body.String())
+					require.Equal(t, "private, no-store", response.Header().Get("Cache-Control"))
+				} else {
+					require.Zero(t, reads)
+					require.NotContains(t, response.Body.String(), "business-data")
+				}
+			})
+		}
 	}
 }
 

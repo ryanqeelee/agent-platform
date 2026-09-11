@@ -42,7 +42,8 @@ func governedAnalysisMessagePredicate(dialect, alias string) (string, []any, err
 
 // GovernedAnalysisSessionIDs classifies only the requested session rows and
 // projects only session_id. It avoids loading message bodies or AgentSteps into
-// application memory on passive history reads.
+// application memory on passive history reads. Deleting an evidence message
+// does not remove the business-data classification from surviving history.
 func (r *messageRepository) GovernedAnalysisSessionIDs(
 	ctx context.Context, sessionIDs []string,
 ) (map[string]bool, error) {
@@ -54,9 +55,9 @@ func (r *messageRepository) GovernedAnalysisSessionIDs(
 	if err != nil {
 		return nil, err
 	}
-	q := r.db.WithContext(ctx).Model(&types.Message{}).
+	q := r.db.WithContext(ctx).Unscoped().Model(&types.Message{}).
 		Distinct("session_id").
-		Where("messages.session_id IN ? AND messages.role = ? AND messages.deleted_at IS NULL", sessionIDs, "assistant").
+		Where("messages.session_id IN ? AND messages.role = ?", sessionIDs, "assistant").
 		Where(predicate, args...)
 	var ids []string
 	if err := q.Pluck("session_id", &ids).Error; err != nil {
@@ -82,10 +83,10 @@ func (r *messageRepository) GovernedAnalysisMessageIDs(
 	var ids []string
 	if err := r.db.WithContext(ctx).Table("messages AS target").
 		Distinct("target.id").
-		Where("target.id IN ? AND target.role = ? AND target.deleted_at IS NULL", messageIDs, "assistant").
+		Where("target.id IN ? AND target.role = ?", messageIDs, "assistant").
 		Where(
 			"EXISTS (SELECT 1 FROM messages AS evidence WHERE evidence.session_id = target.session_id "+
-				"AND evidence.role = ? AND evidence.deleted_at IS NULL AND ("+predicate+"))",
+				"AND evidence.role = ? AND ("+predicate+"))",
 			append([]any{"assistant"}, args...)...,
 		).
 		Pluck("target.id", &ids).Error; err != nil {

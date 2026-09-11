@@ -134,9 +134,19 @@ func TestGovernedArtifactReadUsesPersistedArtifactWithoutLifecycleBinding(t *tes
 	require.Empty(t, ids)
 	_, err = messageSvc.GetMessageForRead(ctx, "business", "unbound")
 	require.NoError(t, err)
+	// Only the evidence is deleted; the later artifact source remains live.
+	require.NoError(t, db.Delete(&types.Message{}, "id = ?", "evidence").Error)
+	ids, err = messageSvc.GovernedArtifactMessageIDs(ctx, []string{ref})
+	require.NoError(t, err)
+	require.Equal(t, []string{"unbound"}, ids)
 	messageSvc.tenantMemberService = operatingReadMembers{member: &types.TenantMember{UserID: "employee", TenantID: 1, Status: types.TenantMemberStatusActive, OperatingAnalysisAccess: false}}
 	_, err = messageSvc.GetMessageForRead(ctx, "business", "unbound")
 	require.ErrorIs(t, err, apperrors.ErrSessionNotFound)
+	_, err = messageSvc.GetMessagesBySession(ctx, "business", 1, 20)
+	require.ErrorIs(t, err, apperrors.ErrSessionNotFound)
+	messageSvc.tenantMemberService = operatingReadMembers{member: &types.TenantMember{UserID: "employee", TenantID: 1, Status: types.TenantMemberStatusActive, OperatingAnalysisAccess: true}}
+	_, err = messageSvc.GetMessageForRead(ctx, "business", "unbound")
+	require.NoError(t, err)
 	require.NoError(t, db.Delete(&types.Message{}, "session_id = ?", "business").Error)
 	ids, err = messageSvc.GovernedArtifactMessageIDs(ctx, []string{ref})
 	require.NoError(t, err)

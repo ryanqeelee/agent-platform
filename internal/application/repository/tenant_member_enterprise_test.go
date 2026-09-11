@@ -298,7 +298,7 @@ func TestEnterpriseMembershipRejectsPlatformIdentityAndExcludesLegacyRows(t *tes
 	}
 
 	// A historical mixed row is ignored by member and seat projections until
-	// migration 000104/000025 removes it.
+	// migration 000105/000026 removes it.
 	if err := db.Model(&types.User{}).Where("id = ?", platform.ID).Update("tenant_id", tenant.ID).Error; err != nil {
 		t.Fatal(err)
 	}

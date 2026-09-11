@@ -52,6 +52,8 @@ func RegisterTenantRoutes(
 	// the prepared tenant does not exist when the first command arrives.
 	g.apiKeyRoute(r, http.MethodPut, "/system/enterprise-activations/:activation_id",
 		apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage), handler.PutEnterpriseActivation)
+	g.apiKeyRoute(r, http.MethodPut, "/system/tenants/:id/edge-binding",
+		apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage), handler.PutGovernedEdgeBinding)
 
 	// Cross-tenant superuser endpoints — promoted from handler if-blocks
 	// to middleware.RequireCrossTenantAccess at the route layer.

@@ -58,8 +58,12 @@ func (p *PluginMerge) OnEvent(ctx context.Context,
 	// Step 2: Initial dedup
 	searchResult = p.dedup(ctx, "dedup_summary", searchResult)
 
-	// Step 3: Inject history references
-	searchResult = p.injectHistoryResults(ctx, chatManage, searchResult)
+	// Step 3: Inject history references for legacy agents. Employee answers may
+	// use chat history as context, but factual evidence must survive this turn's
+	// retrieval and rerank under the current conditions.
+	if !chatManage.EmployeeAssistant {
+		searchResult = p.injectHistoryResults(ctx, chatManage, searchResult)
+	}
 
 	pipelineInfo(ctx, "Merge", "candidate_ready", map[string]interface{}{
 		"chunk_cnt": len(searchResult),
@@ -101,6 +105,12 @@ func (p *PluginMerge) OnEvent(ctx context.Context,
 func (p *PluginMerge) selectInputResults(ctx context.Context, chatManage *types.ChatManage) []*types.SearchResult {
 	if len(chatManage.RerankResult) > 0 {
 		return chatManage.RerankResult
+	}
+	if chatManage.EmployeeAssistant && chatManage.RerankExecuted && !chatManage.RerankFailed {
+		pipelineInfo(ctx, "Merge", "semantic_rejection", map[string]interface{}{
+			"reason": "rerank_returned_no_matching_candidates",
+		})
+		return nil
 	}
 	pipelineWarn(ctx, "Merge", "fallback", map[string]interface{}{
 		"reason": "empty_rerank_result",

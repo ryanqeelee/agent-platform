@@ -2,10 +2,46 @@ package chatpipeline
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+func boolPtr(value bool) *bool { return &value }
+
+func TestEmployeeEvidenceStatusReachesCurrentUserMessage(t *testing.T) {
+	cases := []struct {
+		name  string
+		state types.PipelineState
+		scope types.SearchTargets
+		want  string
+	}{
+		{name: "not searched", state: types.PipelineState{RetrievalNeeded: boolPtr(false)}, want: `status="not_searched"`},
+		{name: "no sources", state: types.PipelineState{RetrievalNeeded: boolPtr(true)}, want: `status="no_sources_in_scope"`},
+		{name: "no match", scope: types.SearchTargets{{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb"}}, state: types.PipelineState{RetrievalNeeded: boolPtr(true), RetrievalExecuted: true}, want: `status="no_matching_evidence"`},
+		{name: "candidate", scope: types.SearchTargets{{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb"}}, state: types.PipelineState{RetrievalNeeded: boolPtr(true), RetrievalExecuted: true, MergeResult: []*types.SearchResult{{ID: "chunk"}}}, want: `status="candidate_evidence"`},
+		{name: "partial", scope: types.SearchTargets{{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb"}}, state: types.PipelineState{RetrievalNeeded: boolPtr(true), RetrievalExecuted: true, RetrievalDegraded: true, MergeResult: []*types.SearchResult{{ID: "chunk"}}}, want: `status="candidate_evidence_partial_search"`},
+		{name: "rerank failed", scope: types.SearchTargets{{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb"}}, state: types.PipelineState{RetrievalNeeded: boolPtr(true), RetrievalExecuted: true, RerankFailed: true, SearchResult: []*types.SearchResult{{ID: "chunk"}}}, want: `status="candidate_evidence_rerank_failed"`},
+		{name: "partial search and rerank failed", scope: types.SearchTargets{{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb"}}, state: types.PipelineState{RetrievalNeeded: boolPtr(true), RetrievalExecuted: true, RetrievalDegraded: true, RerankFailed: true, SearchResult: []*types.SearchResult{{ID: "chunk"}}}, want: `status="candidate_evidence_rerank_failed" attachments_available="false" retrieval_degraded="true"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cm := &types.ChatManage{
+				PipelineRequest: types.PipelineRequest{EmployeeAssistant: true, SearchTargets: tc.scope, SummaryConfig: types.SummaryConfig{Prompt: "stable-system"}},
+				PipelineState:   tc.state,
+			}
+			cm.UserContent = "current question"
+			messages := prepareMessagesWithHistory(cm)
+			if strings.Contains(messages[0].Content, "<turn_evidence") {
+				t.Fatal("dynamic evidence status must not change the stable system prefix")
+			}
+			if !strings.Contains(messages[len(messages)-1].Content, tc.want) {
+				t.Fatalf("current user message = %q, want %s", messages[len(messages)-1].Content, tc.want)
+			}
+		})
+	}
+}
 
 // --- IntoChatMessage tests ---
 

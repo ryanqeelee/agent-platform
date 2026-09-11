@@ -111,6 +111,8 @@ type agentService struct {
 	wikiPageService       interfaces.WikiPageService
 	tenantService         interfaces.TenantService
 	tenantMemberService   interfaces.TenantMemberService
+	userService           interfaces.UserService
+	governedEdgeResolver  interfaces.GovernedEdgeResolver
 	kbShareService        interfaces.KBShareService
 	agentShareService     interfaces.AgentShareService
 	messageService        interfaces.MessageService
@@ -142,6 +144,8 @@ func NewAgentService(
 	wikiPageService interfaces.WikiPageService,
 	tenantService interfaces.TenantService,
 	tenantMemberService interfaces.TenantMemberService,
+	userService interfaces.UserService,
+	governedEdgeResolver interfaces.GovernedEdgeResolver,
 	kbShareService interfaces.KBShareService,
 	agentShareService interfaces.AgentShareService,
 	messageService interfaces.MessageService,
@@ -172,6 +176,8 @@ func NewAgentService(
 		wikiPageService:       wikiPageService,
 		tenantService:         tenantService,
 		tenantMemberService:   tenantMemberService,
+		userService:           userService,
+		governedEdgeResolver:  governedEdgeResolver,
 		kbShareService:        kbShareService,
 		agentShareService:     agentShareService,
 		messageService:        messageService,

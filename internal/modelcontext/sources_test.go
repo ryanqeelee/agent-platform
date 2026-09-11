@@ -515,11 +515,12 @@ func TestModelOutputDocumentInfoUsesDocumentAndFAQAliases(t *testing.T) {
 			"display_type": "document_info",
 			"documents": []map[string]interface{}{
 				{
-					"knowledge_id": "doc-real-id",
-					"title":        "Architecture",
-					"description":  "System overview",
-					"type":         "file",
-					"chunk_count":  12,
+					"knowledge_id":       "doc-real-id",
+					"title":              "Architecture",
+					"description":        "System overview",
+					"knowledge_metadata": "authority: draft & reviewed",
+					"type":               "file",
+					"chunk_count":        12,
 				},
 				{
 					"faq_id":       "faq-chunk-real-id",
@@ -537,6 +538,7 @@ func TestModelOutputDocumentInfoUsesDocumentAndFAQAliases(t *testing.T) {
 		require.NotContains(t, output, raw)
 	}
 	require.Contains(t, output, `<document id="d1" title="Architecture"`)
+	require.Contains(t, output, `<metadata>authority: draft &amp; reviewed</metadata>`)
 	require.Contains(t, output, `<chunk id="c1" type="faq">`)
 	require.Contains(t, registry.ExpandText(`Answer <ref id="c1"/>`), `chunk_id="faq-chunk-real-id"`)
 }

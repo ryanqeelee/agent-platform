@@ -13,11 +13,16 @@ import (
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
 
-const externalSchema = `{"schema":"GovernedDataSchemaV1","catalog_version":"cat-1","catalog_digest":"digest-1","source":{"source_id":"retail"}}`
-const externalQuery = `{"schema":"GovernedDataQueryV1","catalog_version":"cat-1","catalog_digest":"digest-1","result":{"status":"ok","source_id":"retail","rows":[{"amount":"9007199254740993.12345678"}],"row_count":1,"truncated":false}}`
+const externalSchema = `{"contract_version":"edge-governed-query-v1","enterprise_id":"tenant","edge_node_id":"edge","catalog":{"version":"cat-1","freshness_token":"digest-1"},"source":{"source_id":"retail"}}`
+const externalQuery = `{"contract_version":"edge-governed-query-v1","enterprise_id":"tenant","edge_node_id":"edge","catalog":{"version":"cat-1","freshness_token":"digest-1"},"query":{"id":"query-1","rows_returned":1,"truncated":false},"columns":[{"name":"amount","type":"Decimal(30,8)"}],"rows":[{"amount":"9007199254740993.12345678"}],"evidence":{"receipt_sha256":"sha256:receipt"}}`
+
+func testEdgeClient(endpoint string) (*GovernedDataClient, error) {
+	return NewGovernedDataClient(types.GovernedEdgeConnection{BaseURL: endpoint, Token: "edge-secret", EnterpriseID: "tenant", EdgeNodeID: "edge", SourceID: "retail"}, func(context.Context) error { return nil })
+}
 
 type queryInputStore struct {
 	sandbox.SessionFileStore
@@ -34,19 +39,26 @@ func (s *queryInputStore) WriteSessionWorkspaceFile(ctx context.Context, session
 func TestGovernedDataNativeToolsPreserveIdentityAndExactFile(t *testing.T) {
 	var requests []map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "Bearer user-secret", r.Header.Get("Authorization"))
-		require.Equal(t, "10001", r.Header.Get("X-Tenant-ID"))
+		require.Equal(t, "Bearer edge-secret", r.Header.Get("Authorization"))
+		require.Empty(t, r.Header.Get("X-Tenant-ID"))
 		var body map[string]any
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		if r.Method == http.MethodPost {
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		} else {
+			body = map[string]any{}
+			for k := range r.URL.Query() {
+				body[k] = r.URL.Query().Get(k)
+			}
+		}
 		requests = append(requests, body)
-		if r.URL.Path == "/api/governed-data/schema" {
+		if r.URL.Path == "/v1/catalog" {
 			fmt.Fprint(w, externalSchema)
 		} else {
 			fmt.Fprint(w, externalQuery)
 		}
 	}))
 	defer server.Close()
-	client, err := NewGovernedDataClient(server.URL, "user-secret", "10001", "")
+	client, err := testEdgeClient(server.URL)
 	require.NoError(t, err)
 	files := &queryInputStore{}
 	tools := NewGovernedDataTools(client, files, "owned-session")
@@ -60,32 +72,39 @@ func TestGovernedDataNativeToolsPreserveIdentityAndExactFile(t *testing.T) {
 	require.True(t, result.Success)
 	require.Equal(t, "retail", requests[1]["source_id"])
 	require.Equal(t, "cat-1", requests[1]["catalog_version"])
-	require.Equal(t, "digest-1", requests[1]["catalog_digest"])
+	require.Equal(t, "digest-1", requests[1]["freshness_token"])
 	require.Equal(t, "owned-session", files.session)
 	require.Equal(t, externalQuery, string(files.data))
 	require.Equal(t, fmt.Sprintf("%x", sha256.Sum256(files.data)), result.Data["input_sha256"])
 	require.True(t, strings.HasPrefix(files.path, "/workspace/data/governed-query-"))
 	require.Contains(t, result.Output, "9007199254740993.12345678")
-	require.NotContains(t, result.Output, "user-secret")
-	require.NotContains(t, string(files.data), "user-secret")
+	require.NotContains(t, result.Output, "edge-secret")
+	require.NotContains(t, string(files.data), "edge-secret")
 }
 
 func TestGovernedDataRejectsSameVersionWithDifferentCatalogDigest(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		if r.URL.Path == "/api/governed-data/schema" {
+		if r.Method == http.MethodPost {
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		} else {
+			body = map[string]any{}
+			for k := range r.URL.Query() {
+				body[k] = r.URL.Query().Get(k)
+			}
+		}
+		if r.URL.Path == "/v1/catalog" {
 			fmt.Fprint(w, externalSchema)
 			return
 		}
 		require.Equal(t, "retail", body["source_id"])
 		require.Equal(t, "cat-1", body["catalog_version"])
-		require.Equal(t, "digest-1", body["catalog_digest"])
-		fmt.Fprint(w, `{"schema":"GovernedDataQueryV1","catalog_version":"cat-1","catalog_digest":"digest-2","result":{"status":"ok","source_id":"retail","rows":[],"row_count":0,"truncated":false}}`)
+		require.Equal(t, "digest-1", body["freshness_token"])
+		fmt.Fprint(w, strings.Replace(externalQuery, "digest-1", "digest-2", 1))
 	}))
 	defer server.Close()
 
-	client, err := NewGovernedDataClient(server.URL, "user", "tenant", "")
+	client, err := testEdgeClient(server.URL)
 	require.NoError(t, err)
 	tools := NewGovernedDataTools(client, nil, "")
 	_, err = tools[0].Execute(context.Background(), json.RawMessage(`{}`))
@@ -95,10 +114,10 @@ func TestGovernedDataRejectsSameVersionWithDifferentCatalogDigest(t *testing.T) 
 }
 
 func TestGovernedDataRejectsModelAuthorityOverrides(t *testing.T) {
-	client, err := NewGovernedDataClient("http://127.0.0.1:1", "user", "tenant", "retail")
+	client, err := testEdgeClient("http://127.0.0.1:1")
 	require.NoError(t, err)
 	client.catalogVersion = "cat-1"
-	client.catalogDigest = "digest-1"
+	client.freshnessToken = "digest-1"
 	tools := NewGovernedDataTools(client, nil, "")
 	for _, args := range []string{`{"sql":"SELECT 1","tenant_id":"other"}`, `{"sql":"SELECT 1","source_id":"other"}`, `{"sql":"SELECT 1","limit":0}`, `null`, `{} {}`} {
 		_, err := tools[1].Execute(context.Background(), json.RawMessage(args))
@@ -117,7 +136,7 @@ func TestGovernedDataNeverForwardsCredentialToRedirect(t *testing.T) {
 		http.Redirect(w, r, destination.URL, http.StatusTemporaryRedirect)
 	}))
 	defer server.Close()
-	client, err := NewGovernedDataClient(server.URL, "user-secret", "tenant", "retail")
+	client, err := testEdgeClient(server.URL)
 	require.NoError(t, err)
 	_, err = NewGovernedDataTools(client, nil, "")[0].Execute(context.Background(), json.RawMessage(`{}`))
 	require.ErrorContains(t, err, "HTTP 307")
@@ -132,10 +151,10 @@ func TestGovernedDataCancelInterruptsHTTPAndDoesNotStage(t *testing.T) {
 		<-r.Context().Done()
 	}))
 	defer server.Close()
-	client, err := NewGovernedDataClient(server.URL, "user", "tenant", "retail")
+	client, err := testEdgeClient(server.URL)
 	require.NoError(t, err)
 	client.catalogVersion = "cat-1"
-	client.catalogDigest = "digest-1"
+	client.freshnessToken = "digest-1"
 	files := &queryInputStore{}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -152,10 +171,10 @@ func TestGovernedDataCancelInterruptsHTTPAndDoesNotStage(t *testing.T) {
 func TestGovernedDataStagingFailureKeepsSuccessfulRows(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, externalQuery) }))
 	defer server.Close()
-	client, err := NewGovernedDataClient(server.URL, "user", "tenant", "retail")
+	client, err := testEdgeClient(server.URL)
 	require.NoError(t, err)
 	client.catalogVersion = "cat-1"
-	client.catalogDigest = "digest-1"
+	client.freshnessToken = "digest-1"
 	result, err := NewGovernedDataTools(client, &queryInputStore{err: fmt.Errorf("sandbox unavailable")}, "s")[1].Execute(context.Background(), json.RawMessage(`{"sql":"SELECT 1"}`))
 	require.NoError(t, err)
 	require.True(t, result.Success)
@@ -166,41 +185,34 @@ func TestGovernedDataStagingFailureKeepsSuccessfulRows(t *testing.T) {
 
 func TestGovernedDataTransportRequiresHTTPSOutsideLiteralLoopback(t *testing.T) {
 	for _, endpoint := range []string{"http://center:8891", "http://example.com", "http://localhost:8891", "http://127.0.0.1.example.com", "https://user:password@example.com"} {
-		_, err := NewGovernedDataClient(endpoint, "secret", "tenant", "")
+		_, err := testEdgeClient(endpoint)
 		require.Error(t, err)
 	}
-	for _, endpoint := range []string{"https://center.example.com", "http://127.0.0.1:8891", "http://[::1]:8891"} {
-		_, err := NewGovernedDataClient(endpoint, "secret", "tenant", "")
+	for _, endpoint := range []string{"https://edge.example.com", "http://127.0.0.1:8891", "http://[::1]:8891", "http://10.92.0.11:8891"} {
+		_, err := testEdgeClient(endpoint)
 		require.NoError(t, err)
 	}
 }
 
-func TestGovernedDataAccessUsesProductAdmissionBeforeAnyModelTurn(t *testing.T) {
-	for _, tc := range []struct {
-		name, body string
-		status     int
-		allowed    bool
-	}{
-		{"enabled", `{"schema":"OperatingAnalysisAvailabilityV1","availability":{"canExchange":true}}`, 200, true},
-		{"revoked", `{"schema":"OperatingAnalysisAvailabilityV1","availability":{"canExchange":false}}`, 200, false},
-		{"unavailable", `{}`, 503, false},
-		{"invalid", `{"availability":{"canExchange":true}}`, 200, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				require.Equal(t, "GET", r.Method)
-				require.Equal(t, "/api/auth/operating-analysis-availability", r.URL.Path)
-				require.Equal(t, "Bearer user", r.Header.Get("Authorization"))
-				require.Equal(t, "tenant", r.Header.Get("X-Tenant-ID"))
-				w.WriteHeader(tc.status)
-				fmt.Fprint(w, tc.body)
-			}))
-			defer server.Close()
-			client, err := NewGovernedDataClient(server.URL, "user", "tenant", "")
-			require.NoError(t, err)
-			require.Equal(t, tc.allowed, client.CheckAccess(context.Background()) == nil)
-		})
+func TestGovernedDataRechecksAuthorityBeforeReleasingRows(t *testing.T) {
+	allowed := true
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { allowed = false; fmt.Fprint(w, externalQuery) }))
+	defer server.Close()
+	client, err := testEdgeClient(server.URL)
+	require.NoError(t, err)
+	client.authorize = func(context.Context) error {
+		if !allowed {
+			return ErrGovernedDataAccessDenied
+		}
+		return nil
 	}
+	client.catalogVersion, client.freshnessToken = "cat-1", "digest-1"
+	files := &queryInputStore{}
+	_, err = NewGovernedDataTools(client, files, "s")[1].Execute(context.Background(), json.RawMessage(`{"sql":"SELECT 1"}`))
+	require.ErrorIs(t, err, ErrGovernedDataAccessDenied)
+	require.Empty(t, files.data)
+	_, err = NewGovernedDataTools(client, nil, "s")[0].Execute(context.Background(), json.RawMessage(`{}`))
+	require.ErrorIs(t, err, ErrGovernedDataAccessDenied)
 }
 
 func TestGovernedDataLargeOutputIsValidPreviewAndKeepsFullReturnedFile(t *testing.T) {
@@ -210,14 +222,14 @@ func TestGovernedDataLargeOutputIsValidPreviewAndKeepsFullReturnedFile(t *testin
 			for i := range rows {
 				rows[i] = map[string]any{"amount": "9007199254740993.12345678", "description": strings.Repeat("业务", 200)}
 			}
-			raw, err := json.Marshal(map[string]any{"schema": "GovernedDataQueryV1", "catalog_version": "cat-1", "catalog_digest": "catalog-digest", "query_digest": "query-digest", "read_consistency": "live read; not snapshot", "result": map[string]any{"status": "ok", "source_id": "retail", "query_execution_id": "query-1", "rows": rows, "row_count": 20, "truncated": true, "applied_limit": 20}})
+			raw, err := json.Marshal(map[string]any{"contract_version": governedEdgeContract, "enterprise_id": "tenant", "edge_node_id": "edge", "catalog": map[string]any{"version": "cat-1", "freshness_token": "catalog-digest"}, "evidence": map[string]any{"receipt_sha256": "query-digest"}, "query": map[string]any{"id": "query-1", "rows_returned": 20, "truncated": true, "applied_limit": 20}, "rows": rows})
 			require.NoError(t, err)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(raw) }))
 			defer server.Close()
-			client, err := NewGovernedDataClient(server.URL, "user", "tenant", "retail")
+			client, err := testEdgeClient(server.URL)
 			require.NoError(t, err)
 			client.catalogVersion = "cat-1"
-			client.catalogDigest = "catalog-digest"
+			client.freshnessToken = "catalog-digest"
 			files := &queryInputStore{}
 			var store sandbox.SessionFileStore = files
 			if stage == "failed" {
@@ -237,13 +249,13 @@ func TestGovernedDataLargeOutputIsValidPreviewAndKeepsFullReturnedFile(t *testin
 			var preview map[string]any
 			require.NoError(t, json.Unmarshal([]byte(result.Output), &preview))
 			require.Equal(t, true, preview["rows_preview_only"])
-			require.Equal(t, "query-digest", preview["query_digest"])
-			q := preview["result"].(map[string]any)
-			require.Equal(t, "query-1", q["query_execution_id"])
-			require.Equal(t, float64(20), q["row_count"])
+			require.Equal(t, "query-digest", preview["evidence"].(map[string]any)["receipt_sha256"])
+			q := preview["query"].(map[string]any)
+			require.Equal(t, "query-1", q["id"])
+			require.Equal(t, float64(20), q["rows_returned"])
 			require.Equal(t, true, q["truncated"])
-			require.Less(t, len(q["rows"].([]any)), 20)
-			require.Equal(t, float64(len(q["rows"].([]any))), preview["preview_row_count"])
+			require.Less(t, len(preview["rows"].([]any)), 20)
+			require.Equal(t, float64(len(preview["rows"].([]any))), preview["preview_row_count"])
 			require.Equal(t, stage == "file", result.Success)
 			if stage == "file" {
 				require.Equal(t, string(raw), string(files.data))
@@ -262,7 +274,7 @@ func TestGovernedSchemaRegistryBudgetPreservesCompleteFile(t *testing.T) {
 	}
 	var schema map[string]any
 	require.NoError(t, json.Unmarshal([]byte(externalSchema), &schema))
-	schema["tables"] = []any{map[string]any{"table": "v_wide", "columns": columns, "assumption_notes": []string{"不能推断完整"}, "data_contract": map[string]any{"read_consistency": "not a snapshot"}}}
+	schema["source"].(map[string]any)["tables"] = []any{map[string]any{"table": "v_wide", "columns": columns, "assumption_notes": []string{"不能推断完整"}, "data_contract": map[string]any{"read_consistency": "not a snapshot"}}}
 	raw, err := json.Marshal(schema)
 	require.NoError(t, err)
 	for _, budget := range []int{DefaultMaxToolOutput, 2000, 32} {
@@ -270,9 +282,9 @@ func TestGovernedSchemaRegistryBudgetPreservesCompleteFile(t *testing.T) {
 			t.Run(fmt.Sprintf("%d/%s", budget, stage), func(t *testing.T) {
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(raw) }))
 				defer server.Close()
-				client, err := NewGovernedDataClient(server.URL, "user-secret", "tenant", "")
+				client, err := testEdgeClient(server.URL)
 				require.NoError(t, err)
-				client.catalogVersion, client.catalogDigest = "cat-1", "digest-1"
+				client.catalogVersion, client.freshnessToken = "cat-1", "digest-1"
 				files := &queryInputStore{}
 				var store sandbox.SessionFileStore = files
 				if stage == "failed" {
@@ -293,9 +305,9 @@ func TestGovernedSchemaRegistryBudgetPreservesCompleteFile(t *testing.T) {
 					var envelope map[string]any
 					require.NoError(t, json.Unmarshal([]byte(result.Output), &envelope))
 					require.Equal(t, "v_wide", envelope["table"])
-					require.Equal(t, "cat-1", envelope["catalog_version"])
-					require.Equal(t, "digest-1", envelope["catalog_digest"])
-					require.Equal(t, schema["source"], envelope["source"])
+					require.Equal(t, "cat-1", envelope["catalog"].(map[string]any)["version"])
+					require.Equal(t, "digest-1", envelope["catalog"].(map[string]any)["freshness_token"])
+					require.Equal(t, schema["source"].(map[string]any)["source_id"], envelope["source"].(map[string]any)["source_id"])
 					require.Equal(t, true, envelope["file_contains_complete_schema"])
 					require.Equal(t, raw, files.data)
 					require.Equal(t, fmt.Sprintf("%x", sha256.Sum256(raw)), envelope["input_sha256"])
@@ -307,7 +319,7 @@ func TestGovernedSchemaRegistryBudgetPreservesCompleteFile(t *testing.T) {
 					require.NotContains(t, result.Output, "input_file")
 					require.NotContains(t, result.Output, "internal staging detail")
 				}
-				require.NotContains(t, result.Output, "user-secret")
+				require.NotContains(t, result.Output, "edge-secret")
 			})
 		}
 	}
@@ -316,9 +328,9 @@ func TestGovernedSchemaRegistryBudgetPreservesCompleteFile(t *testing.T) {
 func TestGovernedSmallSchemaRegistryStaysInlineWithoutSandbox(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, externalSchema) }))
 	defer server.Close()
-	client, err := NewGovernedDataClient(server.URL, "user", "tenant", "")
+	client, err := testEdgeClient(server.URL)
 	require.NoError(t, err)
-	client.catalogVersion, client.catalogDigest = "cat-1", "digest-1"
+	client.catalogVersion, client.freshnessToken = "cat-1", "digest-1"
 	registry := NewToolRegistry()
 	registry.SetMaxToolOutputSize(2000)
 	registry.RegisterTool(NewGovernedDataTools(client, nil, "")[0])

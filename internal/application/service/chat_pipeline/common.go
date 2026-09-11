@@ -2,6 +2,8 @@ package chatpipeline
 
 import (
 	"context"
+	"fmt"
+	"html"
 	"regexp"
 	"slices"
 	"sort"
@@ -110,6 +112,9 @@ func prepareMessagesWithHistory(chatManage *types.ChatManage) []chat.Message {
 	// message keeps the system prefix byte-stable so provider prompt caches
 	// still hit on later turns of the same session.
 	userContent := appendRetrievedImageOutputRequirement(chatManage.UserContent, chatManage.RenderedContexts)
+	if evidenceStatus := EmployeeEvidenceStatus(chatManage); evidenceStatus != "" {
+		userContent = evidenceStatus + "\n\n" + userContent
+	}
 
 	// Add current user message. Only include images when the chat model supports
 	// vision; non-vision models rely on the text description in UserContent.
@@ -120,6 +125,43 @@ func prepareMessagesWithHistory(chatManage *types.ChatManage) []chat.Message {
 	chatMessages = append(chatMessages, userMsg)
 
 	return chatMessages
+}
+
+// EmployeeEvidenceStatus describes only server-observed facts for this turn.
+// Retrieval candidates are inputs to assessment, never a confidence verdict.
+func EmployeeEvidenceStatus(chatManage *types.ChatManage) string {
+	if chatManage == nil || !chatManage.EmployeeAssistant {
+		return ""
+	}
+	hasScope := types.HasKnowledgeRetrievalScope(
+		chatManage.SearchTargets, chatManage.KnowledgeBaseIDs, chatManage.KnowledgeIDs,
+	) || (chatManage.WebSearchEnabled && chatManage.Intent == types.IntentWebSearch)
+	status := "not_searched"
+	switch {
+	case chatManage.RerankFailed && len(chatManage.SearchResult) > 0:
+		status = "candidate_evidence_rerank_failed"
+	case chatManage.RetrievalExecuted && len(chatManage.MergeResult) > 0 && chatManage.RetrievalDegraded:
+		status = "candidate_evidence_partial_search"
+	case chatManage.RetrievalExecuted && len(chatManage.MergeResult) > 0:
+		status = "candidate_evidence"
+	case chatManage.RetrievalExecuted && chatManage.RetrievalDegraded:
+		status = "search_failed_or_degraded"
+	case chatManage.RetrievalExecuted:
+		status = "no_matching_evidence"
+	case chatManage.NeedsRetrieval() && !hasScope:
+		status = "no_sources_in_scope"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "<turn_evidence status=\"%s\" attachments_available=\"%t\" retrieval_degraded=\"%t\"", status, len(chatManage.Attachments) > 0, chatManage.RetrievalDegraded)
+	if chatManage.RerankExecuted {
+		b.WriteString(" rerank_executed=\"true\"")
+	}
+	b.WriteString(" />\n")
+	b.WriteString("This is execution state, not a confidence score. Candidate evidence may support only part of the question; assess its content and applicability before answering. Search summaries, questions, filenames and prior assistant answers help locate evidence but are not factual proof. State unsupported parts and any unresolved conflict; do not describe a failed or partial search as no match.")
+	if condition := strings.TrimSpace(chatManage.MissingUserCondition); condition != "" {
+		fmt.Fprintf(&b, "\n<missing_user_condition>%s</missing_user_condition>", html.EscapeString(condition))
+	}
+	return b.String()
 }
 
 func withPromptCacheMetadata(

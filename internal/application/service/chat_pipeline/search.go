@@ -74,6 +74,7 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 		})
 		return nil
 	}
+	chatManage.RetrievalExecuted = true
 
 	pipelineInfo(ctx, "Search", "input", map[string]interface{}{
 		"session_id":     chatManage.SessionID,
@@ -94,13 +95,15 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 	var mu sync.Mutex
 	allResults := make([]*types.SearchResult, 0)
 	var kbSearchErr error
+	var kbSearchDegraded bool
 
 	wg.Add(2)
 	// Goroutine 1: Knowledge base search using SearchTargets
 	go func() {
 		defer wg.Done()
-		kbResults, err := p.searchByTargets(ctx, chatManage)
+		kbResults, degraded, err := p.searchByTargets(ctx, chatManage)
 		kbSearchErr = err
+		kbSearchDegraded = degraded
 		if len(kbResults) > 0 {
 			mu.Lock()
 			allResults = append(allResults, kbResults...)
@@ -120,13 +123,16 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 	}()
 
 	wg.Wait()
+	chatManage.RetrievalDegraded = chatManage.RetrievalDegraded || kbSearchDegraded
 	if kbSearchErr != nil && len(allResults) == 0 {
+		chatManage.RetrievalDegraded = true
 		pipelineError(ctx, "Search", "kb_search_failed", map[string]interface{}{
 			"error": kbSearchErr.Error(),
 		})
 		return ErrSearch.WithError(kbSearchErr)
 	}
 	if kbSearchErr != nil {
+		chatManage.RetrievalDegraded = true
 		pipelineWarn(ctx, "Search", "kb_search_partial_failure", map[string]interface{}{
 			"error":        kbSearchErr.Error(),
 			"result_count": len(allResults),
@@ -348,9 +354,9 @@ func targetReportsEmbedFailure(kb *types.KnowledgeBase) bool {
 func (p *PluginSearch) searchByTargets(
 	ctx context.Context,
 	chatManage *types.ChatManage,
-) ([]*types.SearchResult, error) {
+) ([]*types.SearchResult, bool, error) {
 	if len(chatManage.SearchTargets) == 0 {
-		return nil, nil
+		return nil, false, nil
 	}
 
 	queryText := strings.TrimSpace(chatManage.RewriteQuery)
@@ -396,6 +402,7 @@ func (p *PluginSearch) searchByTargets(
 	var mu sync.Mutex
 	var results []*types.SearchResult
 	var firstErr error
+	degraded := false
 	var errOnce sync.Once
 	recordError := func(err error) {
 		if err != nil {
@@ -417,6 +424,9 @@ func (p *PluginSearch) searchByTargets(
 			if modelKey != "" {
 				emb, err := p.knowledgeBaseService.GetQueryEmbedding(ctx, targets[0].KnowledgeBaseID, queryText)
 				if err != nil {
+					mu.Lock()
+					degraded = true
+					mu.Unlock()
 					searchableTargets = make([]*types.SearchTarget, 0, len(targets))
 					for _, target := range targets {
 						kb := kbMap[target.KnowledgeBaseID]
@@ -515,7 +525,7 @@ func (p *PluginSearch) searchByTargets(
 	pipelineInfo(ctx, "Search", "kb_result_summary", map[string]interface{}{
 		"total_hits": len(results),
 	})
-	return results, firstErr
+	return results, degraded, firstErr
 }
 
 // searchSingleTarget performs hybrid retrieval inside one constrained target.
@@ -588,6 +598,7 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 	providerID := chatManage.WebSearchProviderID
 
 	if providerID == "" {
+		chatManage.RetrievalDegraded = true
 		pipelineWarn(ctx, "Search", "web_config_missing", map[string]interface{}{
 			"tenant_id": chatManage.TenantID,
 		})
@@ -621,6 +632,7 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 		"hit_count": len(webResults),
 	}, nil, err)
 	if err != nil {
+		chatManage.RetrievalDegraded = true
 		pipelineWarn(ctx, "Search", "web_search_error", map[string]interface{}{
 			"tenant_id": chatManage.TenantID,
 			"error":     err.Error(),

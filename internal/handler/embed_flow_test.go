@@ -89,6 +89,10 @@ type flowTenantSvc struct {
 	tenant *types.Tenant
 }
 
+func (f *flowTenantSvc) ApplyGovernedEdgeBinding(context.Context, uint64, types.GovernedEdgeBinding) error {
+	return nil
+}
+
 func (f *flowTenantSvc) ApplyEnterpriseActivation(context.Context, interfaces.EnterpriseActivationCommand) (*interfaces.EnterpriseActivationResult, error) {
 	return nil, nil
 }

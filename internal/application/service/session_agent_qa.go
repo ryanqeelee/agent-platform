@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -153,22 +154,11 @@ func (s *sessionService) AgentQA(
 	// must not force users to configure an otherwise-unused rerank model.
 	var rerankModel rerank.Reranker
 	if agentRequiresRerankModel(req.CustomAgent) && agentHasKnowledgeScope(agentConfig) {
-		rerankModelID := req.CustomAgent.Config.RerankModelID
-		if rerankModelID != "" {
-			rerankModel, err = s.modelService.GetRerankModel(ctx, rerankModelID)
-		}
-		if rerankModelID == "" || err != nil {
-			models, listErr := s.modelService.ListModels(ctx)
-			if listErr != nil {
-				return fmt.Errorf("failed to resolve platform rerank model: %w", listErr)
-			}
-			rerankModelID = activePlatformModelID(models, types.ModelTypeRerank)
-			if rerankModelID != "" {
-				rerankModel, err = s.modelService.GetRerankModel(ctx, rerankModelID)
-			}
-		}
-		if rerankModelID == "" || err != nil {
-			return errors.New("platform rerank model is unavailable")
+		_, rerankModel, err = chatpipeline.ResolvePlatformRerankModel(
+			ctx, s.modelService, req.CustomAgent.Config.RerankModelID,
+		)
+		if err != nil {
+			return err
 		}
 	} else {
 		logger.Infof(ctx, "knowledge_search is unavailable for the effective agent scope, skipping rerank model initialization")

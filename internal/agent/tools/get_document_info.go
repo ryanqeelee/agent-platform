@@ -277,30 +277,30 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 		output += fmt.Sprintf("  Parse Status: %s\n", formatParseStatus(k.ParseStatus))
 		output += fmt.Sprintf("  Chunk Count:  %d\n", doc.chunkCount)
 
-		if k.Metadata != nil {
-			if metadata, err := k.Metadata.Map(); err == nil && len(metadata) > 0 {
-				output += "  Metadata:\n"
-				for key, value := range metadata {
-					output += fmt.Sprintf("    - %s: %v\n", key, value)
-				}
+		customMetadata := k.CustomMetadataText()
+		if customMetadata != "" {
+			output += "  Custom Metadata:\n"
+			for _, line := range strings.Split(customMetadata, "\n") {
+				output += fmt.Sprintf("    - %s\n", line)
 			}
 		}
 
 		output += "\n"
 
 		formattedDocs = append(formattedDocs, map[string]interface{}{
-			"knowledge_id": k.ID,
-			"title":        k.Title,
-			"description":  k.Description,
-			"type":         k.Type,
-			"source":       k.Source,
-			"file_name":    k.FileName,
-			"file_type":    k.FileType,
-			"file_size":    k.FileSize,
-			"parse_status": k.ParseStatus,
-			"chunk_count":  doc.chunkCount,
-			"metadata":     k.GetMetadata(),
-			"is_faq":       false,
+			"knowledge_id":       k.ID,
+			"title":              k.Title,
+			"description":        k.Description,
+			"type":               k.Type,
+			"source":             k.Source,
+			"file_name":          k.FileName,
+			"file_type":          k.FileType,
+			"file_size":          k.FileSize,
+			"parse_status":       k.ParseStatus,
+			"chunk_count":        doc.chunkCount,
+			"metadata":           k.GetMetadata(),
+			"knowledge_metadata": customMetadata,
+			"is_faq":             false,
 		})
 	}
 

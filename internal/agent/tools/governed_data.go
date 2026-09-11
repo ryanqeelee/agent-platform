@@ -20,118 +20,113 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// GovernedDataClient is a per-agent-turn external data connection. User identity
-// and source are application supplied, never model arguments or sandbox secrets.
-// The Center revalidates current membership and data grants for every query.
+// GovernedDataClient is scoped to one native turn. The application supplies
+// both the trusted Edge connection and the live authorization check.
 type GovernedDataClient struct {
-	baseURL, bearer, tenantID, sourceID string
-	http                                *http.Client
-	mu                                  sync.Mutex
-	catalogVersion                      string
-	catalogDigest                       string
+	connection     types.GovernedEdgeConnection
+	authorize      func(context.Context) error
+	http           *http.Client
+	mu             sync.Mutex
+	catalogVersion string
+	freshnessToken string
 }
 
-func NewGovernedDataClient(baseURL, bearer, tenantID, sourceID string) (*GovernedDataClient, error) {
-	u, err := url.Parse(baseURL)
-	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return nil, fmt.Errorf("invalid governed data service URL")
+func NewGovernedDataClient(connection types.GovernedEdgeConnection, authorize func(context.Context) error) (*GovernedDataClient, error) {
+	u, err := url.Parse(connection.BaseURL)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
+		return nil, fmt.Errorf("invalid Edge service URL")
 	}
 	if u.Scheme == "http" {
 		ip := net.ParseIP(u.Hostname())
-		if ip == nil || !ip.IsLoopback() {
-			return nil, fmt.Errorf("governed data requires HTTPS outside loopback")
+		if ip == nil || (!ip.IsLoopback() && !ip.IsPrivate()) {
+			return nil, fmt.Errorf("Edge requires HTTPS or a literal private network address")
 		}
 	}
-	if bearer == "" || tenantID == "" {
-		return nil, fmt.Errorf("governed data requires user authentication and tenant")
+	if connection.Token == "" || connection.EnterpriseID == "" || connection.EdgeNodeID == "" || connection.SourceID == "" || authorize == nil {
+		return nil, fmt.Errorf("Edge connection requires authenticated enterprise binding")
 	}
+	connection.BaseURL = strings.TrimRight(connection.BaseURL, "/")
 	return &GovernedDataClient{
-		baseURL: strings.TrimRight(baseURL, "/"), bearer: bearer, tenantID: tenantID, sourceID: sourceID,
+		connection: connection, authorize: authorize,
 		http: &http.Client{Timeout: 45 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 	}, nil
 }
 
 const governedDataMaxResponse = 8 * 1024 * 1024
+const governedEdgeContract = "edge-governed-query-v1"
+
+var ErrGovernedDataAccessDenied = errors.New("operating analysis access is not permitted")
 
 func (c *GovernedDataClient) request(ctx context.Context, operation string, body map[string]any) ([]byte, error) {
-	c.mu.Lock()
-	if _, pinned := body["source_id"]; !pinned {
-		body["source_id"] = c.sourceID
+	if err := c.authorize(ctx); err != nil {
+		return nil, err
 	}
-	c.mu.Unlock()
-	payload, err := json.Marshal(body)
+	body["enterprise_id"], body["edge_node_id"] = c.connection.EnterpriseID, c.connection.EdgeNodeID
+	body["source_id"] = c.connection.SourceID
+	method, path := http.MethodGet, "/v1/catalog"
+	var payload io.Reader
+	if operation == "query" {
+		method, path = http.MethodPost, "/v1/query"
+		body["contract_version"] = governedEdgeContract
+		raw, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		payload = bytes.NewReader(raw)
+	} else {
+		params := url.Values{}
+		for _, key := range []string{"enterprise_id", "edge_node_id", "source_id"} {
+			params.Set(key, body[key].(string))
+		}
+		if table, ok := body["table"].(string); ok {
+			path += "/" + url.PathEscape(c.connection.SourceID) + "/tables/" + url.PathEscape(table)
+			params.Del("source_id")
+			c.mu.Lock()
+			version, freshness := c.catalogVersion, c.freshnessToken
+			c.mu.Unlock()
+			if version == "" || freshness == "" {
+				return nil, fmt.Errorf("call governed_data_schema without a table before table discovery")
+			}
+			params.Set("catalog_version", version)
+			params.Set("freshness_token", freshness)
+		}
+		path += "?" + params.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.connection.BaseURL+path, payload)
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/governed-data/"+operation, bytes.NewReader(payload))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.bearer)
-	req.Header.Set("X-Tenant-ID", c.tenantID)
+	req.Header.Set("Authorization", "Bearer "+c.connection.Token)
 	req.Header.Set("Content-Type", "application/json")
 	response, err := c.http.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return nil, fmt.Errorf("governed data service request failed")
+		return nil, fmt.Errorf("Edge service request failed")
 	}
 	defer response.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(response.Body, governedDataMaxResponse+1))
 	if err != nil {
-		return nil, fmt.Errorf("governed data response could not be read")
+		return nil, fmt.Errorf("Edge response could not be read")
 	}
 	if len(data) > governedDataMaxResponse {
-		return nil, fmt.Errorf("governed data response exceeds limit; reduce query rows or columns")
+		return nil, fmt.Errorf("Edge response exceeds limit; reduce query rows or columns")
+	}
+	if err := c.authorize(ctx); err != nil {
+		return nil, err
 	}
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("governed data service rejected request (HTTP %d); refresh schema for 409, check user access for 401/403", response.StatusCode)
+		var failure struct {
+			Detail string `json:"detail"`
+		}
+		_ = json.Unmarshal(data, &failure)
+		return nil, fmt.Errorf("Edge request failed (HTTP %d): %s", response.StatusCode, failure.Detail)
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	return data, nil
-}
-
-var ErrGovernedDataAccessDenied = errors.New("operating analysis access is not permitted")
-
-// CheckAccess uses the same server-owned admission projection as the product page.
-// It runs before a native governed turn, including turns that only read prior files.
-func (c *GovernedDataClient) CheckAccess(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/auth/operating-analysis-availability", nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.bearer)
-	req.Header.Set("X-Tenant-ID", c.tenantID)
-	response, err := c.http.Do(req)
-	if err != nil {
-		return fmt.Errorf("operating analysis access service unavailable")
-	}
-	defer response.Body.Close()
-	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
-		return ErrGovernedDataAccessDenied
-	}
-	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("operating analysis access service unavailable (HTTP %d)", response.StatusCode)
-	}
-	var envelope struct {
-		Schema       string `json:"schema"`
-		Availability struct {
-			CanExchange bool `json:"canExchange"`
-		} `json:"availability"`
-	}
-	if err := json.NewDecoder(io.LimitReader(response.Body, 65536)).Decode(&envelope); err != nil {
-		return fmt.Errorf("invalid operating analysis access response")
-	}
-	if envelope.Schema != "OperatingAnalysisAvailabilityV1" {
-		return fmt.Errorf("invalid operating analysis access response")
-	}
-	if !envelope.Availability.CanExchange {
-		return ErrGovernedDataAccessDenied
-	}
-	return nil
 }
 
 type GovernedDataTool struct {
@@ -184,14 +179,15 @@ func (t *GovernedDataTool) Execute(ctx context.Context, args json.RawMessage) (*
 			return nil, fmt.Errorf("query limit must be between 1 and 10000")
 		}
 		t.client.mu.Lock()
-		sourceID := t.client.sourceID
+		sourceID := t.client.connection.SourceID
 		version := t.client.catalogVersion
-		digest := t.client.catalogDigest
+		freshness := t.client.freshnessToken
 		t.client.mu.Unlock()
-		if sourceID == "" || version == "" || digest == "" {
+		if sourceID == "" || version == "" || freshness == "" {
 			return nil, fmt.Errorf("call governed_data_schema before querying")
 		}
-		body["source_id"], body["catalog_version"], body["catalog_digest"] = sourceID, version, digest
+		body["source_id"], body["catalog_version"], body["freshness_token"] = sourceID, version, freshness
+		body["client_context"] = map[string]any{"agent_id": "weknora", "run_id": t.sessionID}
 		body["sql"], body["limit"] = input.SQL, limit
 		operation = "query"
 	} else {
@@ -219,38 +215,31 @@ func (t *GovernedDataTool) Execute(ctx context.Context, args json.RawMessage) (*
 	if err := decode.Decode(&result); err != nil {
 		return nil, fmt.Errorf("invalid governed data response")
 	}
+	catalog, _ := result["catalog"].(map[string]any)
+	version, _ := catalog["version"].(string)
+	freshness, _ := catalog["freshness_token"].(string)
+	if result["contract_version"] != governedEdgeContract || result["enterprise_id"] != t.client.connection.EnterpriseID || result["edge_node_id"] != t.client.connection.EdgeNodeID || version == "" || freshness == "" {
+		return nil, fmt.Errorf("invalid Edge response identity")
+	}
 	if !t.query {
-		version, _ := result["catalog_version"].(string)
-		digest, _ := result["catalog_digest"].(string)
-		if result["schema"] != "GovernedDataSchemaV1" || version == "" || digest == "" {
-			return nil, fmt.Errorf("invalid governed schema response")
+		sourceID, _ := result["source_id"].(string)
+		if source, ok := result["source"].(map[string]any); ok {
+			sourceID, _ = source["source_id"].(string)
 		}
-		source, _ := result["source"].(map[string]any)
-		sourceID, _ := source["source_id"].(string)
+		if sourceID != t.client.connection.SourceID {
+			return nil, fmt.Errorf("Edge schema source mismatch")
+		}
 		t.client.mu.Lock()
-		if sourceID == "" || (t.client.sourceID != "" && sourceID != t.client.sourceID) {
-			t.client.mu.Unlock()
-			return nil, fmt.Errorf("governed schema source mismatch")
-		}
-		t.client.sourceID = sourceID
-		t.client.catalogVersion = version
-		t.client.catalogDigest = digest
+		t.client.catalogVersion, t.client.freshnessToken = version, freshness
 		t.client.mu.Unlock()
 	} else {
-		if result["schema"] != "GovernedDataQueryV1" {
-			return nil, fmt.Errorf("invalid governed query response")
+		if version != body["catalog_version"] || freshness != body["freshness_token"] {
+			return nil, fmt.Errorf("Edge query source or catalog mismatch")
 		}
-		query, ok := result["result"].(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("missing governed query result")
-		}
-		if query["source_id"] != body["source_id"] ||
-			result["catalog_version"] != body["catalog_version"] ||
-			result["catalog_digest"] != body["catalog_digest"] {
-			return nil, fmt.Errorf("governed query source or catalog mismatch")
-		}
-		if query["status"] != "ok" {
-			return &types.ToolResult{Success: false, Output: string(data), Error: "query was rejected or failed; inspect reasons and correct the SQL", Data: result}, nil
+		query, _ := result["query"].(map[string]any)
+		evidence, _ := result["evidence"].(map[string]any)
+		if query["id"] == nil || evidence["receipt_sha256"] == nil || result["rows"] == nil {
+			return nil, fmt.Errorf("missing Edge query result or evidence")
 		}
 		if t.files != nil && t.sessionID != "" {
 			digest := fmt.Sprintf("%x", sha256.Sum256(data))
@@ -284,41 +273,31 @@ func (t *GovernedDataTool) Execute(ctx context.Context, args json.RawMessage) (*
 	return &types.ToolResult{Success: true, Output: string(output), Data: result}, nil
 }
 
-// Preserve a valid bounded model response; the Center result is unchanged.
+// Preserve a valid bounded model response; the complete Edge result stays in its working file.
 func boundedGovernedQueryResult(ctx context.Context, result map[string]any) (*types.ToolResult, error) {
-	query := result["result"].(map[string]any)
-	rows, _ := query["rows"].([]any)
-	preview := make(map[string]any, len(query))
-	for key, value := range query {
-		preview[key] = value
-	}
-	result["result"] = preview
-	preview["rows"] = []any{}
-	result["rows_preview_only"] = true
-	result["preview_row_count"] = 0
+	rows, _ := result["rows"].([]any)
+	result["rows"] = []any{}
+	result["rows_preview_only"], result["preview_row_count"] = true, 0
 	hasFile := result["input_file"] != nil
 	result["file_contains_all_returned_rows"] = hasFile
-	if hasFile {
-		result["next_step"] = "Read input_file with native sandbox tools for all returned rows. The file is not a full-source export; result.truncated describes the database row limit."
-	} else {
-		result["next_step"] = "Full rows could not be delivered within the tool budget and no complete sandbox file is available. Narrow or aggregate the query; do not treat this preview as the complete result."
+	result["next_step"] = "Read input_file with native sandbox tools for all returned rows. query.truncated describes the database row limit."
+	if !hasFile {
+		result["next_step"] = "Complete rows are unavailable within the tool budget. Narrow or aggregate the query; do not treat this preview as the complete result."
 	}
 	output, err := json.Marshal(result)
 	if err != nil {
 		return nil, err
 	}
 	if utf8.RuneCount(output) > OutputBudget(ctx) {
-		// Very wide schemas/SQL can themselves exhaust the budget. Their complete
-		// provenance remains in the file when staging succeeded.
+		// Wide SQL/column/limit metadata remains in the complete file.
+		query := result["query"].(map[string]any)
 		result = map[string]any{
-			"schema": result["schema"], "catalog_version": result["catalog_version"],
-			"catalog_digest": result["catalog_digest"], "query_digest": result["query_digest"],
-			"read_consistency": result["read_consistency"],
-			"input_file":       result["input_file"], "input_sha256": result["input_sha256"],
+			"contract_version": result["contract_version"], "catalog": result["catalog"],
+			"query":    map[string]any{"id": query["id"], "rows_returned": query["rows_returned"], "truncated": query["truncated"]},
+			"evidence": result["evidence"], "rows": []any{},
+			"input_file": result["input_file"], "input_sha256": result["input_sha256"],
 			"rows_preview_only": true, "preview_row_count": 0,
-			"file_contains_all_returned_rows": hasFile, "next_step": result["next_step"],
-			"metadata_in_file": hasFile,
-			"result":           map[string]any{"status": query["status"], "source_id": query["source_id"], "query_execution_id": query["query_execution_id"], "row_count": query["row_count"], "truncated": query["truncated"], "applied_limit": query["applied_limit"], "rows": []any{}},
+			"file_contains_all_returned_rows": hasFile, "next_step": result["next_step"], "metadata_in_file": hasFile,
 		}
 		output, err = json.Marshal(result)
 		if err != nil {
@@ -326,15 +305,13 @@ func boundedGovernedQueryResult(ctx context.Context, result map[string]any) (*ty
 		}
 	} else {
 		for count := 1; count <= len(rows) && count <= 5; count++ {
-			preview["rows"] = rows[:count]
-			result["preview_row_count"] = count
-			candidate, marshalErr := json.Marshal(result)
-			if marshalErr != nil {
-				return nil, marshalErr
+			result["rows"], result["preview_row_count"] = rows[:count], count
+			candidate, err := json.Marshal(result)
+			if err != nil {
+				return nil, err
 			}
 			if utf8.RuneCount(candidate) > OutputBudget(ctx) {
-				preview["rows"] = rows[:count-1]
-				result["preview_row_count"] = count - 1
+				result["rows"], result["preview_row_count"] = rows[:count-1], count-1
 				break
 			}
 			output = candidate
@@ -351,11 +328,15 @@ func boundedGovernedQueryResult(ctx context.Context, result map[string]any) (*ty
 }
 
 // Only the model envelope is bounded; the working file preserves the complete
-// Center response, including field guidance and source contracts.
+// Edge response, including field guidance and source contracts.
 func (t *GovernedDataTool) boundedSchemaResult(ctx context.Context, schema map[string]any, raw []byte, table any) (*types.ToolResult, error) {
+	var source map[string]any
+	if index, ok := schema["source"].(map[string]any); ok {
+		source = map[string]any{"source_id": index["source_id"], "name": index["name"], "database": index["database"]}
+	}
 	envelope := map[string]any{
-		"schema": schema["schema"], "source": schema["source"],
-		"catalog_version": schema["catalog_version"], "catalog_digest": schema["catalog_digest"],
+		"contract_version": schema["contract_version"], "source": source,
+		"catalog": schema["catalog"], "source_id": schema["source_id"],
 		"table": table, "schema_in_file": true, "file_contains_complete_schema": false,
 	}
 	failure := "Complete schema exceeds the tool budget and no sandbox file is available; schema constraints have not been delivered."

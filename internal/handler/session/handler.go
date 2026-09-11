@@ -24,10 +24,13 @@ type Handler struct {
 	config               *config.Config                  // Application configuration
 	knowledgebaseService interfaces.KnowledgeBaseService // Service for managing knowledge bases
 	customAgentService   interfaces.CustomAgentService   // Service for managing custom agents
-	tenantService        interfaces.TenantService        // Service for loading tenant (shared agent context)
-	agentShareService    interfaces.AgentShareService    // Service for resolving shared agents (KB scope in retrieval)
-	kbShareService       interfaces.KBShareService       // Service for resolving shared KB permissions
-	fileService          interfaces.FileService          // Service for file storage (image uploads)
+	tenantMemberService  interfaces.TenantMemberService
+	userService          interfaces.UserService
+	governedEdgeResolver interfaces.GovernedEdgeResolver
+	tenantService        interfaces.TenantService     // Service for loading tenant (shared agent context)
+	agentShareService    interfaces.AgentShareService // Service for resolving shared agents (KB scope in retrieval)
+	kbShareService       interfaces.KBShareService    // Service for resolving shared KB permissions
+	fileService          interfaces.FileService       // Service for file storage (image uploads)
 	storageResolver      interfaces.StorageBackendResolver
 	modelService         interfaces.ModelService // Service for model management (VLM access)
 	attachmentProcessor  *AttachmentProcessor    // Processor for file attachments
@@ -49,6 +52,9 @@ func NewHandler(
 	knowledgebaseService interfaces.KnowledgeBaseService,
 	customAgentService interfaces.CustomAgentService,
 	tenantService interfaces.TenantService,
+	tenantMemberService interfaces.TenantMemberService,
+	userService interfaces.UserService,
+	governedEdgeResolver interfaces.GovernedEdgeResolver,
 	agentShareService interfaces.AgentShareService,
 	kbShareService interfaces.KBShareService,
 	fileService interfaces.FileService,
@@ -69,6 +75,9 @@ func NewHandler(
 		knowledgebaseService: knowledgebaseService,
 		customAgentService:   customAgentService,
 		tenantService:        tenantService,
+		tenantMemberService:  tenantMemberService,
+		userService:          userService,
+		governedEdgeResolver: governedEdgeResolver,
 		agentShareService:    agentShareService,
 		kbShareService:       kbShareService,
 		fileService:          fileService,

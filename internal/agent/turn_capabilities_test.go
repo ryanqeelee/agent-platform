@@ -70,6 +70,10 @@ func TestEmployeeTurnCapabilitiesFollowEffectiveTools(t *testing.T) {
 			require.NotNil(t, engine)
 			content := engine.RenderUserTurnContent("session", "question")
 			require.Contains(t, content, tc.want)
+			if tc.name == "no_scope" {
+				require.Contains(t, content, "says nothing about the user's permissions")
+				require.NotContains(t, content, "creating a new file requires an input attachment")
+			}
 			require.Contains(t, content, `<public_web search_available="false" fetch_available="false"/>`, "configuration is not tool availability")
 			registry.RegisterTool(newCountingTool(agenttools.ToolWebFetch))
 			registry.RegisterTool(newCountingTool(agenttools.ToolReadSkill))

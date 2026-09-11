@@ -1245,6 +1245,9 @@ func buildFallbackMessages(chatManage *types.ChatManage, promptContent string) [
 		query = rq
 	}
 	userMsg := chat.Message{Role: "user", Content: query}
+	if status := chatpipeline.EmployeeEvidenceStatus(chatManage); status != "" {
+		userMsg.Content = status + "\n\n" + userMsg.Content
+	}
 	if chatManage.ChatModelSupportsVision && len(chatManage.Images) > 0 {
 		userMsg.Images = chatManage.Images
 	}
@@ -1281,6 +1284,10 @@ func renderEvidenceBoundFallbackPrompt(chatManage *types.ChatManage) string {
 		"contexts": chatManage.RenderedContexts,
 	}
 	override := types.RenderPromptPlaceholders(chatManage.SystemPromptOverride, values)
+	if chatManage.EmployeeAssistant {
+		return strings.TrimRight(override, " \t\r\n") +
+			"\n\nUse only applicable current-turn evidence. Do not use general knowledge, chat history, or a source catalog as enterprise authority."
+	}
 	boundary := types.RenderPromptPlaceholders(evidenceBoundFallbackInstruction, values)
 	return strings.TrimRight(override, " \t\r\n") + boundary
 }

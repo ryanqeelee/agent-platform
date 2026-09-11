@@ -43,8 +43,8 @@ type Config struct {
 
 // AgentConfig represents the global agent settings.
 type AgentConfig struct {
-	// GovernedData connects native analysis to Center. Center resolves the
-	// enterprise source and revalidates user access on each request.
+	// GovernedData locates private Edge service credentials. Enterprise bindings
+	// and member permissions are read from the current platform database.
 	GovernedData *GovernedDataConfig `yaml:"governed_data" json:"governed_data,omitempty"`
 	// LLMCallTimeout is the default timeout for a single LLM call in seconds.
 	// Default: 120 (standard agents) or 300 (can be overridden by Env).
@@ -55,7 +55,7 @@ type AgentConfig struct {
 }
 
 type GovernedDataConfig struct {
-	BaseURL string `yaml:"base_url" json:"base_url"`
+	ConnectionsFile string `yaml:"connections_file" json:"-"`
 }
 
 // IMConfig configures the IM integration service.
@@ -543,11 +543,11 @@ func LoadConfig() (*Config, error) {
 	}); err != nil {
 		return nil, fmt.Errorf("unable to decode config into struct: %w", err)
 	}
-	if endpoint := strings.TrimSpace(os.Getenv("WEKNORA_GOVERNED_DATA_BASE_URL")); endpoint != "" {
+	if path := strings.TrimSpace(os.Getenv("WEKNORA_EDGE_CONNECTIONS_FILE")); path != "" {
 		if cfg.Agent == nil {
 			cfg.Agent = &AgentConfig{}
 		}
-		cfg.Agent.GovernedData = &GovernedDataConfig{BaseURL: endpoint}
+		cfg.Agent.GovernedData = &GovernedDataConfig{ConnectionsFile: path}
 	}
 	fmt.Printf("Using configuration file: %s\n", viper.ConfigFileUsed())
 

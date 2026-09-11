@@ -89,9 +89,12 @@ func interpolateBuiltinModelEnv(s string) string {
 //   - YAML parse error: prints a warning and aborts the reconcile (the
 //     drift sweep is NOT run, so a malformed file cannot accidentally wipe
 //     YAML-managed rows)
-//   - per-entry UPSERT error: prints a warning, the entry is dropped from
-//     the "current YAML id set" so the sweep won't delete its existing
-//     row either (treats the failure as "leave alone")
+//   - any per-entry validation, lookup, default-clear, or UPSERT error: prints
+//     a warning and skips the entire drift sweep for this run. Successfully
+//     applied entries remain applied, but no YAML-managed row is retired from
+//     an incomplete view of the declared model set.
+//   - preserving an explicit runtime override is intentional and does not
+//     count as an entry failure.
 func LoadBuiltinModelsConfig(ctx context.Context, db *gorm.DB, configDir string) error {
 	path := os.Getenv("BUILTIN_MODELS_CONFIG")
 	if path == "" {
@@ -126,11 +129,13 @@ func LoadBuiltinModelsConfig(ctx context.Context, db *gorm.DB, configDir string)
 	// have disappeared and should be retired.
 	yamlIDs := make([]string, 0, len(file.BuiltinModels))
 	applied := 0
+	reconcileFailed := false
 
 	for i := range file.BuiltinModels {
 		e := &file.BuiltinModels[i]
 		if err := validateBuiltinModelEntry(e, i); err != nil {
-			log.Printf("[builtin-models] WARN: %v; skipping", err)
+			log.Printf("[builtin-models] WARN: %v; skipping entry and drift sweep", err)
+			reconcileFailed = true
 			continue
 		}
 		m := e.toModel()
@@ -149,7 +154,8 @@ func LoadBuiltinModelsConfig(ctx context.Context, db *gorm.DB, configDir string)
 			continue
 		}
 		if lookupErr != nil && lookupErr != gorm.ErrRecordNotFound {
-			log.Printf("[builtin-models] WARN: inspect existing model %s failed: %v; skipping", m.ID, lookupErr)
+			log.Printf("[builtin-models] WARN: inspect existing model %s failed: %v; skipping entry and drift sweep", m.ID, lookupErr)
+			reconcileFailed = true
 			continue
 		}
 
@@ -162,8 +168,9 @@ func LoadBuiltinModelsConfig(ctx context.Context, db *gorm.DB, configDir string)
 				Where("tenant_id = ? AND type = ? AND id <> ? AND is_default = ?",
 					m.TenantID, m.Type, m.ID, true).
 				Update("is_default", false).Error; err != nil {
-				log.Printf("[builtin-models] WARN: clear existing default for tenant=%d type=%s failed: %v; continuing",
+				log.Printf("[builtin-models] WARN: clear existing default for tenant=%d type=%s failed: %v; continuing without drift sweep",
 					m.TenantID, m.Type, err)
+				reconcileFailed = true
 			}
 		}
 
@@ -176,12 +183,18 @@ func LoadBuiltinModelsConfig(ctx context.Context, db *gorm.DB, configDir string)
 			}),
 		}).Create(&m)
 		if res.Error != nil {
-			log.Printf("[builtin-models] WARN: upsert %s failed: %v; continuing", e.ID, res.Error)
+			log.Printf("[builtin-models] WARN: upsert %s failed: %v; skipping entry and drift sweep", e.ID, res.Error)
+			reconcileFailed = true
 			continue
 		}
 		applied++
 		yamlIDs = append(yamlIDs, e.ID)
 		log.Printf("[builtin-models] upserted: id=%s name=%s type=%s", e.ID, e.Name, e.Type)
+	}
+
+	if reconcileFailed {
+		log.Printf("[builtin-models] WARN: reconcile incomplete: %d upserted from %s; drift sweep skipped", applied, path)
+		return nil
 	}
 
 	// Drift sweep: retire YAML-managed rows that no longer appear in the

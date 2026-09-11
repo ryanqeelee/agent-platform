@@ -351,6 +351,74 @@ func TestLoadBuiltinModelsConfig_RejectsInvalidEntries(t *testing.T) {
 	}
 }
 
+func TestLoadBuiltinModelsConfig_EntryFailureSkipsDriftSweep(t *testing.T) {
+	tests := []struct {
+		name   string
+		aesKey string
+		yaml   string
+	}{
+		{
+			name:   "missing AES key",
+			aesKey: "",
+			yaml: `builtin_models:
+  - id: declared-model
+    name: replacement
+    type: KnowledgeQA
+    parameters:
+      api_key: secret-value
+`,
+		},
+		{
+			name:   "invalid AES key",
+			aesKey: "too-short",
+			yaml: `builtin_models:
+  - id: declared-model
+    name: replacement
+    type: KnowledgeQA
+    parameters:
+      api_key: secret-value
+`,
+		},
+		{
+			name:   "invalid declaration",
+			aesKey: "",
+			yaml: `builtin_models:
+  - id: declared-model
+    name: replacement
+    type: unknown
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("SYSTEM_AES_KEY", tt.aesKey)
+			db := setupBuiltinModelsDB(t)
+			require.NoError(t, db.Create(&Model{
+				ID: "declared-model", Name: "existing-declared", Type: ModelTypeKnowledgeQA,
+				Source: ModelSourceRemote, Status: ModelStatusActive,
+				IsBuiltin: true, ManagedBy: BuiltinModelManagedBy,
+			}).Error)
+			require.NoError(t, db.Create(&Model{
+				ID: "old-yaml-model", Name: "old", Type: ModelTypeRerank,
+				Source: ModelSourceRemote, Status: ModelStatusActive,
+				IsBuiltin: true, ManagedBy: BuiltinModelManagedBy,
+			}).Error)
+
+			require.NoError(t, LoadBuiltinModelsConfig(context.Background(), db, writeYAML(t, tt.yaml)))
+
+			var declared Model
+			require.NoError(t, db.Where("id = ?", "declared-model").First(&declared).Error)
+			assert.Equal(t, "existing-declared", declared.Name,
+				"failed declaration must leave its existing row unchanged")
+			live, deleted := countModels(t, db, "old-yaml-model")
+			assert.Equal(t, int64(1), live,
+				"any declaration failure must skip the entire orphan sweep")
+			assert.Equal(t, int64(0), deleted)
+		})
+	}
+}
+
 // repeatChar returns s repeated n times. Used to synthesize id strings
 // that exceed ModelIDMaxLen without depending on strings.Repeat in tests.
 func repeatChar(s string, n int) string {

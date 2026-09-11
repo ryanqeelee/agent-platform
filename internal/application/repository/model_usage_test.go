@@ -63,6 +63,16 @@ func TestCountByModelID_KnowledgeBase(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), count)
 
+	otherTenant := makeKB(nil)
+	otherTenant.ID = uuid.New().String()
+	otherTenant.TenantID = 2
+	otherTenant.EmbeddingModelID = modelID
+	require.NoError(t, db.Create(otherTenant).Error)
+
+	count, err = repo.CountByModelID(ctx, 0, modelID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), count)
+
 	require.NoError(t, db.Delete(kb2).Error)
 	count, err = repo.CountByModelID(ctx, 1, modelID)
 	require.NoError(t, err)
@@ -116,6 +126,13 @@ func TestListModelUsages_KnowledgeBase(t *testing.T) {
 		types.ModelUsageBindingASRModel,
 		types.ModelUsageBindingWikiSynthesisModel,
 	}, usages[1].Bindings)
+
+	platformUsages, err := repo.ListModelUsages(ctx, 0, modelID)
+	require.NoError(t, err)
+	require.Len(t, platformUsages, 3)
+	assert.Equal(t, []string{"Alpha KB", "Other tenant", "Zulu KB"}, []string{
+		platformUsages[0].Name, platformUsages[1].Name, platformUsages[2].Name,
+	})
 }
 
 func TestListModelUsages_KnowledgeBaseRespectsLimit(t *testing.T) {
@@ -178,6 +195,15 @@ func TestCountByModelID_CustomAgent(t *testing.T) {
 	count, err = repo.CountByModelID(ctx, 2, modelID)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), count)
+
+	otherTenant := &types.CustomAgent{
+		ID: uuid.New().String(), Name: "other-tenant-agent", TenantID: 2,
+		Config: types.CustomAgentConfig{ModelID: modelID},
+	}
+	require.NoError(t, repo.CreateAgent(ctx, otherTenant))
+	count, err = repo.CountByModelID(ctx, 0, modelID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), count)
 
 	require.NoError(t, repo.DeleteAgent(ctx, agent2.ID, 1))
 	count, err = repo.CountByModelID(ctx, 1, modelID)
@@ -243,6 +269,13 @@ func TestListModelUsages_CustomAgent(t *testing.T) {
 		types.ModelUsageBindingQueryUnderstandModel,
 		types.ModelUsageBindingFollowUpModel,
 	}, usages[1].Bindings)
+
+	platformUsages, err := repo.ListModelUsages(ctx, 0, modelID)
+	require.NoError(t, err)
+	require.Len(t, platformUsages, 3)
+	assert.Equal(t, []string{"Alpha agent", "Other tenant", "Zulu agent"}, []string{
+		platformUsages[0].Name, platformUsages[1].Name, platformUsages[2].Name,
+	})
 }
 
 func TestCustomAgentSandboxConfigReferences(t *testing.T) {

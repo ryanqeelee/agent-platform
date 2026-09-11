@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
@@ -69,6 +70,7 @@ Requirements:
 2. Organize the answer in a structured format
 3. If evidence is insufficient to choose a correct action, state the gap and ask the essential clarification. Do not fill it with an unrelated example or an unsupported specific claim.
 4. IMPORTANT: Respond in the same language as the user's question
+5. The tool budget is exhausted. Do not call tools. Deliver the answer only. When the evidence is incomplete, still deliver verified partial findings, state concrete limitations, and give concrete next actions in the user's language.
 %s
 
 Now generate the final answer:`, query, imageRequirement)
@@ -86,19 +88,18 @@ Now generate the final answer:`, query, imageRequirement)
 	// Generate a single ID for this entire final answer stream
 	answerID := generateEventID("answer")
 	logger.Debugf(ctx, "[Agent][FinalAnswer] AnswerID: %s", answerID)
-	answerDoneEmitted := false
-
 	budget := e.clampCompletionBudgetToContext(e.tokenEstimator.EstimateMessages(messages))
 	finalOptions := &chat.ChatOptions{
 		Temperature:         e.config.Temperature,
 		MaxTokens:           budget,
 		MaxCompletionTokens: budget,
+		ToolChoice:          "none",
 		PromptCacheKey:      sessionID,
 	}
 	if e.completionOptions != nil {
 		prepared := *e.completionOptions
 		prepared.Tools = nil
-		prepared.ToolChoice = ""
+		prepared.ToolChoice = "none"
 		prepared.ParallelToolCalls = nil
 		prepared.Thinking = nil
 		prepared.PromptCacheKey = sessionID
@@ -110,32 +111,70 @@ Now generate the final answer:`, query, imageRequirement)
 		}
 		finalOptions = &prepared
 	}
-	llmResult, err := e.streamLLMToEventBus(
-		ctx,
-		messages,
-		finalOptions, // Thinking disabled for final answer synthesis
-		func(chunk *types.StreamResponse, fullContent string) {
-			// Defensive filter: only emit answer content, skip thinking chunks
-			if chunk.ResponseType == types.ResponseTypeThinking {
+	emitAnswerChunk := func(content string) {
+		// A provider's Done only means its stream ended. Final synthesis is not
+		// complete until the accumulated result is proven to contain answer text
+		// and no tool calls, so terminal Done is emitted after validation below.
+		if content == "" {
+			return
+		}
+		logger.Debugf(ctx, "[Agent][FinalAnswer] Emitting answer chunk: %d chars", len(content))
+		e.eventBus.Emit(ctx, event.Event{
+			ID:        answerID,
+			Type:      event.EventAgentFinalAnswer,
+			SessionID: sessionID,
+			Data: event.AgentFinalAnswerData{
+				Content: content,
+				Done:    false,
+			},
+		})
+	}
+
+	callSynthesis := func(attemptMessages []chat.Message) (*streamLLMResult, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		splitter := agenttools.NewThinkStreamSplitter()
+		answerStreamed := false
+		emitValidatedContent := func(content string) {
+			if !answerStreamed && strings.TrimSpace(content) == "" {
 				return
 			}
-			if chunk.Content != "" {
-				logger.Debugf(ctx, "[Agent][FinalAnswer] Emitting answer chunk: %d chars", len(chunk.Content))
-				e.eventBus.Emit(ctx, event.Event{
-					ID:        answerID,
-					Type:      event.EventAgentFinalAnswer,
-					SessionID: sessionID,
-					Data: event.AgentFinalAnswerData{
-						Content: chunk.Content,
-						Done:    chunk.Done,
-					},
-				})
-				if chunk.Done {
-					answerDoneEmitted = true
-				}
+			if content != "" {
+				answerStreamed = true
+				emitAnswerChunk(content)
 			}
-		},
-	)
+		}
+		result, err := e.streamLLMToEventBus(
+			ctx,
+			attemptMessages,
+			finalOptions, // Thinking and tools disabled for final answer synthesis
+			func(chunk *types.StreamResponse, _ string) {
+				if chunk.ResponseType == types.ResponseTypeThinking || chunk.ResponseType == types.ResponseTypeToolCall {
+					return
+				}
+				_, answerPart := splitter.Feed(chunk.Content)
+				emitValidatedContent(answerPart)
+				if chunk.Done {
+					_, answerPart = splitter.Flush()
+					emitValidatedContent(answerPart)
+				}
+			},
+		)
+		// Providers normally send a Done chunk, but Flush here also preserves a
+		// valid trailing partial-tag prefix when they close the channel without it.
+		_, answerTail := splitter.Flush()
+		emitValidatedContent(answerTail)
+		if result != nil && result.Usage != nil {
+			state.TurnUsage.Accumulate(*result.Usage)
+		}
+		if ctx.Err() != nil {
+			return result, ctx.Err()
+		}
+		return result, err
+	}
+
+	llmResult, err := callSynthesis(messages)
 	if err != nil {
 		failedFields := map[string]interface{}{"session_id": sessionID}
 		if types.GovernedDataObservability(ctx) {
@@ -149,26 +188,43 @@ Now generate the final answer:`, query, imageRequirement)
 		return err
 	}
 
-	if !answerDoneEmitted {
-		e.eventBus.Emit(ctx, event.Event{
-			ID:        answerID,
-			Type:      event.EventAgentFinalAnswer,
-			SessionID: sessionID,
-			Data: event.AgentFinalAnswerData{
-				Content: "",
-				Done:    true,
-			},
-		})
-	}
-
-	// The synthesis call is often the largest of the turn — fold its usage
-	// into the turn aggregate like every ReAct round.
-	if llmResult.Usage != nil {
-		state.TurnUsage.Accumulate(*llmResult.Usage)
-	}
-
-	// Safety net: strip any residual <think> blocks that may have leaked through
 	fullAnswer := agenttools.StripThinkBlocks(llmResult.Content)
+	if len(llmResult.ToolCalls) > 0 && strings.TrimSpace(fullAnswer) != "" {
+		return fmt.Errorf("final answer synthesis returned tool calls together with answer text")
+	}
+	if len(llmResult.ToolCalls) > 0 || strings.TrimSpace(fullAnswer) == "" {
+		correctiveMessages := append([]chat.Message(nil), messages...)
+		correctiveMessages = append(correctiveMessages, chat.Message{
+			Role: "user",
+			Content: "Your previous synthesis did not provide a usable answer. " +
+				"The tool budget is exhausted: do not call tools. Answer the user's question now in the user's language, " +
+				"using only the evidence already in the conversation. If evidence is incomplete, deliver verified partial findings, " +
+				"state concrete limitations, and give concrete next actions.",
+		})
+		llmResult, err = callSynthesis(correctiveMessages)
+		if err != nil {
+			return err
+		}
+		fullAnswer = agenttools.StripThinkBlocks(llmResult.Content)
+	}
+
+	if len(llmResult.ToolCalls) > 0 {
+		return fmt.Errorf("final answer synthesis returned tool calls instead of an answer after one corrective retry")
+	}
+	if strings.TrimSpace(fullAnswer) == "" {
+		return fmt.Errorf("final answer synthesis returned no usable answer after one corrective retry")
+	}
+
+	e.eventBus.Emit(ctx, event.Event{
+		ID:        answerID,
+		Type:      event.EventAgentFinalAnswer,
+		SessionID: sessionID,
+		Data: event.AgentFinalAnswerData{
+			Content: "",
+			Done:    true,
+		},
+	})
+
 	logger.Infof(ctx, "[Agent][FinalAnswer] Final answer generated: %d characters", len(fullAnswer))
 	common.PipelineInfo(ctx, "Agent", "final_answer_done", map[string]interface{}{
 		"session_id": sessionID,

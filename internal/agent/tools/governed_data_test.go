@@ -339,3 +339,34 @@ func TestGovernedSmallSchemaRegistryStaysInlineWithoutSandbox(t *testing.T) {
 	require.True(t, result.Success)
 	require.JSONEq(t, externalSchema, result.Output)
 }
+
+func TestGovernedSchemaNameIndexIsCompleteOrOmittedWithinBudget(t *testing.T) {
+	for _, n := range []int{61, 3000} {
+		t.Run(fmt.Sprint(n), func(t *testing.T) {
+			tables := make([]any, n)
+			expected := make([]string, n)
+			for i := range tables {
+				expected[i] = fmt.Sprintf("v_store_%04d", i)
+				tables[i] = map[string]any{"table": expected[i], "columns": strings.Repeat("constraint", 100)}
+			}
+			schema := map[string]any{"contract_version": governedEdgeContract, "source": map[string]any{"source_id": "retail", "tables": tables}, "catalog": map[string]any{"version": "cat-1", "freshness_token": "digest-1"}}
+			raw, err := json.Marshal(schema)
+			require.NoError(t, err)
+			files := &queryInputStore{}
+			tool := &GovernedDataTool{files: files, sessionID: "session"}
+			ctx := WithOutputBudget(context.Background(), 4000)
+			result, err := tool.boundedSchemaResult(ctx, schema, raw, nil)
+			require.NoError(t, err)
+			require.True(t, result.Success)
+			require.LessOrEqual(t, utf8.RuneCountInString(result.Output), 4000)
+			require.Equal(t, raw, files.data)
+			require.Contains(t, result.Data["next_step"], "source.tables")
+			require.Contains(t, result.Data["next_step"], "definition")
+			if n == 61 {
+				require.Equal(t, expected, result.Data["table_names"])
+			} else {
+				require.NotContains(t, result.Data, "table_names", "never advertise an incomplete table index")
+			}
+		})
+	}
+}

@@ -254,7 +254,7 @@ builtin_agents:
       system_prompt_id: "operating_analyst"
       temperature: 0.3
       max_completion_tokens: 32768
-      max_iterations: 30
+      max_iterations: 60
       kb_selection_mode: "all"
       image_upload_enabled: true
       allowed_tools:

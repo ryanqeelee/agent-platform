@@ -358,7 +358,7 @@ func (t *GovernedDataTool) boundedSchemaResult(ctx context.Context, schema map[s
 	}
 	hasFile := envelope["file_contains_complete_schema"] == true
 	if hasFile {
-		envelope["next_step"] = "The schema is not inline. Use shell_exec to load input_file as JSON and inspect the needed columns (including query_usage), assumption_notes, data_contract and metric definitions before querying. Print selected sections within the tool budget. This is a complete schema working file, not a durable attachment; call governed_data_schema again if the file expires."
+		envelope["next_step"] = "Use shell_exec to load input_file as JSON. The catalog object contains version/freshness only; table definitions are in source.tables (index response), or definition (single-table response). Read the relevant complete columns, query_usage, assumption_notes, data_contract and metric definitions before querying; do not truncate needed sections or guess table names. Reuse definitions already read from this current file. Print only relevant sections. This is a working file, not a durable attachment; request schema again if it expires."
 	} else {
 		envelope["schema_in_file"] = false
 		envelope["next_step"] = failure + " Restore sandbox file access and request the schema again before querying."
@@ -369,6 +369,34 @@ func (t *GovernedDataTool) boundedSchemaResult(ctx context.Context, schema map[s
 	}
 	if utf8.RuneCount(output) > OutputBudget(ctx) {
 		return &types.ToolResult{Success: false, Output: "{}", Error: "Tool budget cannot hold the schema file reference; complete schema was not delivered."}, nil
+	}
+	// Keep discovery cheap even when full definitions require a working file.
+	// Include only the complete name index, and only when it fits the same budget.
+	if hasFile {
+		if source, ok := schema["source"].(map[string]any); ok {
+			if tables, ok := source["tables"].([]any); ok {
+				names := make([]string, 0, len(tables))
+				for _, item := range tables {
+					definition, _ := item.(map[string]any)
+					name, _ := definition["table"].(string)
+					if name != "" {
+						names = append(names, name)
+					}
+				}
+				if len(names) == len(tables) && len(names) > 0 {
+					envelope["table_names"] = names
+					candidate, err := json.Marshal(envelope)
+					if err != nil {
+						return nil, err
+					}
+					if utf8.RuneCount(candidate) <= OutputBudget(ctx) {
+						output = candidate
+					} else {
+						delete(envelope, "table_names")
+					}
+				}
+			}
+		}
 	}
 	result := &types.ToolResult{Success: hasFile, Output: string(output), Data: envelope}
 	if !hasFile {

@@ -73,7 +73,7 @@ func newSwitchTenantTestService(repo *switchTenantUserRepo, memberSvc interfaces
 func TestSwitchTenantRecordsLastActiveTenantPreference(t *testing.T) {
 	ctx := context.Background()
 	repo := &switchTenantUserRepo{users: map[string]types.User{
-		"alice": {ID: "alice", TenantID: 42},
+		"alice": {ID: "alice", TenantID: 42, IsActive: true},
 	}}
 	memberSvc := &membershipLookupService{
 		byTenant: map[uint64]*types.TenantMember{
@@ -108,7 +108,7 @@ func TestSwitchTenantRecordsLastActiveTenantPreference(t *testing.T) {
 func TestSwitchTenantBackToHomeWritesHomePreference(t *testing.T) {
 	ctx := context.Background()
 	repo := &switchTenantUserRepo{users: map[string]types.User{
-		"alice": {ID: "alice", TenantID: 7},
+		"alice": {ID: "alice", TenantID: 7, IsActive: true},
 	}}
 	memberSvc := &membershipLookupService{
 		byTenant: map[uint64]*types.TenantMember{
@@ -175,7 +175,7 @@ func TestSwitchTenantPreferenceWriteFailureAbortsSwitch(t *testing.T) {
 func TestSwitchTenantSuperuserRecordsPreferenceWithoutMembership(t *testing.T) {
 	ctx := context.Background()
 	repo := &switchTenantUserRepo{users: map[string]types.User{
-		"alice": {ID: "alice", TenantID: 7, CanAccessAllTenants: true},
+		"alice": {ID: "alice", TenantID: 7, CanAccessAllTenants: true, IsActive: true},
 	}}
 	svc := newSwitchTenantTestService(repo, &membershipLookupService{byTenant: map[uint64]*types.TenantMember{}})
 	svc.config = &config.Config{Tenant: &config.TenantConfig{EnableCrossTenantAccess: true}}
@@ -203,6 +203,7 @@ func TestSwitchTenantPreservesOidcOnlyLogin(t *testing.T) {
 		"alice": {
 			ID:       "alice",
 			TenantID: 7,
+			IsActive: true,
 			Preferences: types.UserPreferences{
 				OidcOnlyLogin: &oidcOnly,
 			},

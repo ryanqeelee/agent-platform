@@ -4,7 +4,7 @@ import { useAuthStore } from '@/stores/auth'
 import { autoSetup, getCurrentUser, getEnterpriseSession, EnterpriseSessionRequestError, userInfoFromApi } from '@/api/auth'
 import {
   consumeOperatingAnalysisHandoff,
-  exchangeOperatingAnalysis,
+  prepareOperatingDataRead,
   getOperatingAnalysisAvailability,
   OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY,
   OPERATING_ANALYSIS_HANDOFF_REF_KEY,
@@ -16,10 +16,6 @@ import type { DeploymentCapabilityKey } from '@/config/deploymentCapabilities'
 import { MessagePlugin } from 'tdesign-vue-next'
 import i18n from '@/i18n'
 import { normalizeSettingsSection } from '@/config/settingsRoute'
-import {
-  normalizedOperatingRoute,
-  operatingRouteIsCanonical,
-} from '@/views/operating/operatingHost'
 import { BUILTIN_OPERATING_ANALYST_ID } from '@/api/agent'
 
 /** Lite /桌面 WebView 硬刷新时可能只打开 `/`，用 session 记住上次页面以便恢复 */
@@ -87,15 +83,9 @@ async function admitNativeOperatingAnalysis(to: RouteLocationNormalized) {
   }
 }
 
-async function authorizeLegacyOperatingAnalysis(to: RouteLocationNormalized) {
-  if (!operatingRouteIsCanonical(to.path, to.query)) {
-    return { ...normalizedOperatingRoute(to.path, to.query), replace: true }
-  }
+async function authorizeOperatingDataRead() {
   try {
-    const response = await exchangeOperatingAnalysis()
-    if (!response.access_token || response.expires_in !== 900) return '/platform/creatChat'
-    localStorage.setItem('retail_ai_app_auth_token', response.access_token)
-    document.cookie = `retail_ai_app_auth_token=${response.access_token}; Path=/app; Max-Age=900; SameSite=Lax`
+    await prepareOperatingDataRead()
     return true
   } catch {
     return '/platform/creatChat'
@@ -211,9 +201,10 @@ const router = createRouter({
           component: () => import('../views/operating/OperatingAnalysisHome.vue'),
           meta: { requiresInit: true, requiresAuth: true },
           beforeEnter: async (to) => {
-            return typeof to.query.data_session === 'string'
-              ? authorizeLegacyOperatingAnalysis(to)
-              : admitNativeOperatingAnalysis(to)
+            if (typeof to.query.data_session === 'string') {
+              return { path: `/platform/operating-analysis/history/${encodeURIComponent(to.query.data_session)}`, replace: true }
+            }
+            return admitNativeOperatingAnalysis(to)
           },
         },
         {
@@ -228,11 +219,17 @@ const router = createRouter({
           beforeEnter: admitNativeOperatingAnalysis,
         },
         {
+          path: 'operating-analysis/history/:sessionId?',
+          name: 'operatingAnalysisHistory',
+          component: () => import('../views/operating/OperatingAnalysisHistory.vue'),
+          meta: { requiresInit: true, requiresAuth: true },
+          beforeEnter: authorizeOperatingDataRead,
+        },
+        {
           path: 'operating-brief',
           name: 'operatingBrief',
           component: { render: () => null },
           meta: { requiresInit: true, requiresAuth: true },
-          beforeEnter: authorizeLegacyOperatingAnalysis,
         },
         {
           path: "knowledge-bases/:kbId",

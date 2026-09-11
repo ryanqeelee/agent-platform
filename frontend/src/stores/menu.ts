@@ -43,6 +43,21 @@ export const useMenuStore = defineStore('menuStore', () => {
   const firstAttachmentFiles = ref<any[]>([])
   const firstWebSearchEnabled = ref(false)
   const prefillQuery = ref('')
+  const lastOperatingSessionId = ref('')
+  const operatingSessionIds = ref<string[]>([])
+  const rememberOperatingSession = (id: string) => {
+    lastOperatingSessionId.value = id
+    if (!operatingSessionIds.value.includes(id)) operatingSessionIds.value.push(id)
+  }
+  const forgetOperatingSession = (id: string) => {
+    operatingSessionIds.value = operatingSessionIds.value.filter(value => value !== id)
+    if (lastOperatingSessionId.value === id) lastOperatingSessionId.value = ''
+  }
+  const auth = useAuthStore()
+  watch([() => auth.user?.id, () => auth.selectedTenantId], () => {
+    lastOperatingSessionId.value = ''
+    operatingSessionIds.value = []
+  })
 
   const applyMenuTranslations = () => {
     menuArr.forEach(item => {
@@ -158,6 +173,10 @@ export const useMenuStore = defineStore('menuStore', () => {
     firstAttachmentFiles,
     firstWebSearchEnabled,
     prefillQuery,
+    lastOperatingSessionId,
+    operatingSessionIds,
+    rememberOperatingSession,
+    forgetOperatingSession,
     clearMenuArr,
     updatemenuArr,
     updataMenuChildren,

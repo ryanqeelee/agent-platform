@@ -103,62 +103,8 @@
                 </t-tooltip>
             </div>
 
-            <div
-                v-if="!uiStore.sidebarCollapsed && isLegacyOperatingRoute"
-                class="submenu operating-session-list"
-                data-session-source="operating-controller"
-            >
-                <div class="timeline_header session-list-row session-list-row--flat operating-session-list__heading">
-                    <span class="session-list-row__body">
-                        <span class="timeline_header-label">历史分析</span>
-                    </span>
-                    <t-loading v-if="operatingSessionsLoading" size="small" />
-                </div>
-                <template v-if="operatingSessionsLoading && operatingSidebar.sessions.length === 0">
-                    <div v-for="n in 4" :key="'operating-skel-' + n" class="submenu_item_p session-chat-row">
-                        <div class="session-list-row session-list-row--flat">
-                            <t-skeleton animation="gradient" class="session-list-row__body"
-                                :row-col="[{ width: '100%', height: '14px' }]" />
-                        </div>
-                    </div>
-                </template>
-                <div v-else class="session-filtered-list">
-                    <div v-if="operatingSidebar.sessions.length === 0" class="submenu_empty">暂无历史分析</div>
-                    <template v-else>
-                        <template v-for="group in operatingGroupedSessions" :key="group.key">
-                            <div class="timeline_header session-list-row session-list-row--flat">
-                                <span class="session-list-row__body">
-                                    <span class="timeline_header-label">{{ group.label }}</span>
-                                </span>
-                            </div>
-                            <div
-                                v-for="session in group.items"
-                                :key="session.id"
-                                class="submenu_item_p session-chat-row"
-                                :class="{ 'session-chat-row--active': session.path === operatingSidebar.activePath }"
-                            >
-                                <div class="session-list-row session-list-row--flat">
-                                    <div class="session-list-row__body">
-                                        <SessionSidebarRow
-                                            :item="session"
-                                            :batch-mode="false"
-                                            :active-path="operatingSidebar.activePath"
-                                            :selected-ids="[]"
-                                            :menu-options="operatingSessionMenuOptions"
-                                            @navigate="openOperatingSession(session.id)"
-                                            @menu-click="handleOperatingSessionMenuClick($event, session.id)"
-                                            @rename-submit="renameOperatingSession(session.id, $event.title)"
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-                        </template>
-                    </template>
-                </div>
-            </div>
-
             <!-- 历史会话：按来源筛选后统一按日期分组展示 -->
-            <div class="submenu" v-else-if="!uiStore.sidebarCollapsed">
+            <div class="submenu" v-if="!uiStore.sidebarCollapsed">
                 <!-- Stable, always-mounted source filter: reserving its row here
                      (instead of embedding it in the first date group, which
                      appears/disappears while a bucket loads) prevents the
@@ -255,12 +201,11 @@
 
 <script setup lang="ts">
 import { storeToRefs } from 'pinia';
-import { onMounted, onUnmounted, watch, computed, ref, shallowRef, h, nextTick } from 'vue';
+import { onMounted, onUnmounted, watch, computed, ref, h, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { getSessionsList, batchDelSessions, deleteAllSessions, getSession } from "@/api/chat/index";
 import { useChatResourcesStore } from '@/stores/chatResources';
 import { listAllIMChannels } from '@/api/agent/index';
-import { BUILTIN_OPERATING_ANALYST_ID } from '@/api/agent';
 import SessionSidebarRow from './SessionSidebarRow.vue';
 import {
     clearSession,
@@ -313,11 +258,9 @@ import { MessagePlugin, DialogPlugin, Icon as TIcon } from "tdesign-vue-next";
 import UserMenu from '@/components/UserMenu.vue';
 import TenantSelector from '@/components/TenantSelector.vue';
 import { useI18n } from 'vue-i18n';
+import { nativeChatPath, operatingMenuTarget } from '@/views/operating/operatingNavigation';
 import { getSystemInfo } from '@/api/system';
-import { getOperatingAnalysisAvailability, prefetchOperatingBrief, type OperatingAnalysisAvailabilityV1 } from '@/api/operatingAnalysis';
-import type { OperatingController, OperatingSnapshot } from '@/views/operating/operatingClient';
-import { operatingSessionLocation, projectOperatingSidebar } from '@/views/operating/operatingSidebar';
-import { operatingRouteLocationFromRuntime } from '@/views/operating/operatingHost';
+import { getOperatingAnalysisAvailability, type OperatingAnalysisAvailabilityV1 } from '@/api/operatingAnalysis';
 
 const chatResources = useChatResourcesStore();
 // Platform logos reused from IMChannelsOverviewPanel — keeps the session list
@@ -346,9 +289,6 @@ const PLATFORM_LOGO: Record<string, string> = {
 
 const platformLogo = (p: string): string => (p ? PLATFORM_LOGO[p] || '' : '');
 
-const props = defineProps<{
-    operatingController?: OperatingController | null;
-}>();
 
 const { t } = useI18n();
 const usemenuStore = useMenuStore();
@@ -365,6 +305,9 @@ const isMacLike = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.tes
 const cmdModKeyLabel = isMacLike ? '⌘' : 'Ctrl';
 const route = useRoute();
 const router = useRouter();
+watch(() => [route.name, route.params.chatid], ([name, id]) => {
+    if (name === 'operatingAnalysisChat' && typeof id === 'string') usemenuStore.rememberOperatingSession(id);
+}, { immediate: true });
 const currentpath = ref('');
 const total = ref(0);
 const sessionBuckets = ref<Record<string, SidebarSessionBucket>>({});
@@ -408,24 +351,6 @@ const { menuArr, visibleMenuArr } = storeToRefs(usemenuStore);
 let activeSubmenu = ref<string>('');
 const isLiteEdition = ref(false);
 const operatingAnalysisAvailability = ref<OperatingAnalysisAvailabilityV1 | null>(null);
-const operatingSnapshot = shallowRef<OperatingSnapshot | null>(null);
-
-watch(() => props.operatingController, (nextController, _previousController, onCleanup) => {
-    if (!nextController) {
-        operatingSnapshot.value = null;
-        return;
-    }
-
-    const publishOperatingSnapshot = () => {
-        if (props.operatingController === nextController) {
-            operatingSnapshot.value = nextController.getSnapshot();
-        }
-    };
-    publishOperatingSnapshot();
-    const unsubscribe = nextController.subscribe(publishOperatingSnapshot);
-    onCleanup(unsubscribe);
-}, { immediate: true });
-
 // 批量管理状态
 const batchMode = ref(false)
 const batchSelectedIds = ref<string[]>([])
@@ -481,11 +406,6 @@ const isInOrganizationList = computed<boolean>(() => route.name === 'organizatio
 const isOperatingRoute = computed<boolean>(() =>
     route.path === '/platform/operating-brief' || route.path.startsWith('/platform/operating-analysis')
 );
-const isLegacyOperatingRoute = computed<boolean>(() =>
-    route.path === '/platform/operating-brief'
-    || (route.path === '/platform/operating-analysis' && typeof route.query.data_session === 'string')
-);
-
 // 统一的菜单项激活状态判断
 const isMenuItemActive = (itemPath: string): boolean => {
     const currentRoute = route.name;
@@ -498,7 +418,7 @@ const isMenuItemActive = (itemPath: string): boolean => {
         case 'operating-brief':
             return route.path === '/platform/operating-brief';
         case 'operating-analysis':
-            return route.path === '/platform/operating-analysis';
+            return route.path.startsWith('/platform/operating-analysis');
         case 'agents':
             return currentRoute === 'agentList';
         case 'organizations':
@@ -528,10 +448,6 @@ const topMenuItems = computed<MenuItem[]>(() => {
 const refreshOperatingAnalysisAvailability = async () => {
     try {
         operatingAnalysisAvailability.value = await getOperatingAnalysisAvailability();
-        if (operatingAnalysisAvailability.value.availability.state === 'enabled'
-            && operatingAnalysisAvailability.value.availability.canExchange) {
-            void prefetchOperatingBrief();
-        }
     } catch {
         operatingAnalysisAvailability.value = null;
     }
@@ -570,53 +486,13 @@ const filteredGroupedSessions = computed(() => {
     return groupSessionsByDate(
         bucket.items.map((item) => ({
             ...item,
-            path: `chat/${item.id}`,
+            path: nativeSessionPath(item),
             title: item.title || '',
         })),
         dateBucketLabels.value,
         (session) => classifyDateBucket(session.updated_at || session.created_at),
     );
 });
-
-const operatingSidebar = computed(() => projectOperatingSidebar(operatingSnapshot.value));
-const operatingSessionsLoading = computed(() =>
-    operatingSnapshot.value === null || operatingSnapshot.value.sessionsLoading,
-);
-const operatingGroupedSessions = computed(() => groupSessionsByDate(
-    operatingSidebar.value.sessions,
-    dateBucketLabels.value,
-    (session) => classifyDateBucket(session.updated_at),
-));
-const operatingSessionMenuOptions: never[] = [];
-
-const openOperatingSession = async (id: string): Promise<void> => {
-    try {
-        const current = props.operatingController?.getSnapshot().location;
-        if (!current) return;
-        const target = operatingRouteLocationFromRuntime(operatingSessionLocation(current, id));
-        // Vue owns navigation; its route subscription hydrates a different session once.
-        if (target) await router.push(target);
-    } catch {
-        MessagePlugin.error('历史分析打开失败，请重试。');
-    }
-};
-
-const renameOperatingSession = async (id: string, title: string): Promise<void> => {
-    try {
-        await props.operatingController?.renameSession(id, title);
-    } catch {
-        MessagePlugin.error('重命名失败，请重试。');
-    }
-};
-
-const handleOperatingSessionMenuClick = async (event: { value: string }, id: string): Promise<void> => {
-    if (event.value !== 'delete') return;
-    try {
-        await props.operatingController?.deleteSession(id);
-    } catch {
-        MessagePlugin.error('删除失败，请重试。');
-    }
-};
 
 const refreshSessionListScrollability = async () => {
     await nextTick();
@@ -696,12 +572,14 @@ const handleInlineBatchDelete = () => {
                 }
                 if (res && res.success === true) {
                     if (isDeleteAll) {
+                        [...usemenuStore.operatingSessionIds].forEach(id => usemenuStore.forgetOperatingSession(id));
                         usemenuStore.clearMenuArr();
                         total.value = 0;
                         await getMessageList();
                     } else {
                         let next = sessionBuckets.value;
                         for (const id of batchSelectedIds.value) {
+                            usemenuStore.forgetOperatingSession(id);
                             next = removeSessionFromBuckets(next, id);
                         }
                         sessionBuckets.value = next;
@@ -709,7 +587,7 @@ const handleInlineBatchDelete = () => {
                     }
                     const currentChatId = route.params.chatid as string;
                     if (currentChatId && (isDeleteAll || batchSelectedIds.value.includes(currentChatId))) {
-                        router.push('/platform/creatChat');
+                        router.push(route.name === 'operatingAnalysisChat' ? '/platform/operating-analysis' : '/platform/creatChat');
                     }
                     batchSelectedIds.value = []
                     MessagePlugin.success(t('batchManage.deleteSuccess'))
@@ -819,9 +697,7 @@ const debounce = (fn: (...args: any[]) => void, delay: number) => {
         timer = setTimeout(() => fn(...args), delay)
     }
 }
-const nativeSessionPath = (item: any) => item?.last_request_state?.agent_id === BUILTIN_OPERATING_ANALYST_ID
-    ? `operating-analysis/chat/${item.id}`
-    : `chat/${item.id}`;
+const nativeSessionPath = (item: any) => nativeChatPath(item, usemenuStore.operatingSessionIds.includes(String(item.id)));
 
 const mapSessionRow = (item: any) => ({
     title: item.title ? item.title : t('menu.newSession'),
@@ -1101,10 +977,11 @@ const handleSessionMutation = (event: Event) => {
         });
     }
     if (detail.removed) {
+        usemenuStore.forgetOperatingSession(detail.sessionId);
         sessionBuckets.value = removeSessionFromBuckets(sessionBuckets.value, detail.sessionId);
         syncMenuStoreFromBuckets();
         if (detail.sessionId === route.params.chatid) {
-            router.push('/platform/creatChat');
+            router.push(route.name === 'operatingAnalysisChat' ? '/platform/operating-analysis' : '/platform/creatChat');
         }
     }
 };
@@ -1248,14 +1125,10 @@ const gotopage = async (path: string) => {
                 // 如果不在知识库内，进入对话创建页
                 router.push(`/platform/creatChat`)
             }
-        } else if (path === 'operating-brief' || path === 'operating-analysis') {
-            const surface = path === 'operating-brief' ? 'brief' : 'analysis';
-            router.push({
-                path: `/platform/${path}`,
-                query: path === 'operating-brief' && isLegacyOperatingRoute.value
-                    ? { ...route.query, data_surface: surface }
-                    : path === 'operating-brief' ? { data_surface: surface } : {},
-            });
+        } else if (path === 'operating-analysis') {
+            router.push(operatingMenuTarget(route.path, usemenuStore.lastOperatingSessionId));
+        } else if (path === 'operating-brief') {
+            router.push('/platform/operating-brief');
         } else {
             router.push(`/platform/${path}`);
         }

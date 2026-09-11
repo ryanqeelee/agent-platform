@@ -145,6 +145,9 @@ func TestSearchEmbeddingFailureDegradesToKeywordSearch(t *testing.T) {
 	if len(svc.gotParams.QueryEmbedding) != 0 {
 		t.Fatalf("expected empty query embedding in degraded mode")
 	}
+	if !chatManage.RetrievalDegraded {
+		t.Fatal("embedding fallback must be disclosed as degraded retrieval")
+	}
 }
 
 type vectorOnlySearchKnowledgeBaseService struct {
@@ -400,5 +403,8 @@ func TestSearchKeepsSuccessfulResultsWhenAnotherTargetFails(t *testing.T) {
 	}
 	if len(chatManage.SearchResult) != 1 || chatManage.SearchResult[0].ID != "chunk-good" {
 		t.Fatalf("expected successful target result, got %#v", chatManage.SearchResult)
+	}
+	if !chatManage.RetrievalDegraded {
+		t.Fatal("partial target failure must be disclosed as degraded retrieval")
 	}
 }

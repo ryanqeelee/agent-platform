@@ -20,6 +20,51 @@ type PluginRerank struct {
 	modelService interfaces.ModelService // Service to access rerank models
 }
 
+// ResolvePlatformRerankModel preserves a usable configured binding, then
+// falls back to the active platform default (or the first active reranker).
+func ResolvePlatformRerankModel(
+	ctx context.Context,
+	modelService interfaces.ModelService,
+	configuredID string,
+) (string, rerank.Reranker, error) {
+	configuredID = strings.TrimSpace(configuredID)
+	if configuredID != "" {
+		model, err := modelService.GetRerankModel(ctx, configuredID)
+		if err == nil && model != nil {
+			return configuredID, model, nil
+		}
+	}
+
+	models, err := modelService.ListModels(ctx)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to resolve platform rerank model: %w", err)
+	}
+	modelID := ""
+	for _, model := range models {
+		if model != nil && model.Type == types.ModelTypeRerank &&
+			model.Status == types.ModelStatusActive && model.IsDefault {
+			modelID = model.ID
+			break
+		}
+	}
+	if modelID == "" {
+		for _, model := range models {
+			if model != nil && model.Type == types.ModelTypeRerank && model.Status == types.ModelStatusActive {
+				modelID = model.ID
+				break
+			}
+		}
+	}
+	if modelID == "" {
+		return "", nil, fmt.Errorf("platform rerank model is unavailable")
+	}
+	model, err := modelService.GetRerankModel(ctx, modelID)
+	if err != nil || model == nil {
+		return "", nil, fmt.Errorf("platform rerank model is unavailable")
+	}
+	return modelID, model, nil
+}
+
 // NewPluginRerank creates a new rerank plugin instance
 func NewPluginRerank(eventManager *EventManager, modelService interfaces.ModelService) *PluginRerank {
 	res := &PluginRerank{
@@ -54,16 +99,26 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		})
 		return next()
 	}
-	if chatManage.RerankModelID == "" {
-		pipelineWarn(ctx, "Rerank", "skip", map[string]interface{}{
-			"reason": "empty_model_id",
-		})
-		return next()
-	}
 
-	// Get rerank model from service
-	rerankModel, err := p.modelService.GetRerankModel(ctx, chatManage.RerankModelID)
+	var rerankModel rerank.Reranker
+	var err error
+	if chatManage.EmployeeAssistant {
+		chatManage.RerankModelID, rerankModel, err = ResolvePlatformRerankModel(
+			ctx, p.modelService, chatManage.RerankModelID,
+		)
+	} else {
+		if chatManage.RerankModelID == "" {
+			pipelineWarn(ctx, "Rerank", "skip", map[string]interface{}{
+				"reason": "empty_model_id",
+			})
+			return next()
+		}
+		rerankModel, err = p.modelService.GetRerankModel(ctx, chatManage.RerankModelID)
+	}
 	if err != nil {
+		if chatManage.EmployeeAssistant {
+			chatManage.RerankFailed = true
+		}
 		pipelineError(ctx, "Rerank", "get_model", map[string]interface{}{
 			"model_id": chatManage.RerankModelID,
 			"error":    err.Error(),
@@ -122,12 +177,18 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 
 	// Only call rerank model if there are candidates
 	if len(candidatesToRerank) > 0 {
+		if chatManage.EmployeeAssistant {
+			chatManage.RerankExecuted = true
+		}
 		// Single rerank call with RewriteQuery, use threshold degradation if no results
 		originalThreshold := chatManage.RerankThreshold
 		var rerankErr error
 		rerankResp, rerankErr = p.rerank(ctx, chatManage, rerankModel, chatManage.RewriteQuery, passages, candidatesToRerank)
 
 		if rerankErr != nil {
+			if chatManage.EmployeeAssistant {
+				chatManage.RerankFailed = true
+			}
 			// Rerank API failed — fallback to original retrieval results so the
 			// pipeline can still return something useful to the caller.
 			pipelineWarn(ctx, "Rerank", "api_error_fallback", map[string]interface{}{
@@ -162,6 +223,9 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 			// Restore original threshold
 			chatManage.RerankThreshold = originalThreshold
 			if rerankErr != nil {
+				if chatManage.EmployeeAssistant {
+					chatManage.RerankFailed = true
+				}
 				pipelineWarn(ctx, "Rerank", "api_error_fallback", map[string]interface{}{
 					"error":         rerankErr.Error(),
 					"candidate_cnt": len(candidatesToRerank),

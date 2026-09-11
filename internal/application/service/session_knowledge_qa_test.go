@@ -49,6 +49,7 @@ func (m *captureChatModel) GetModelID() string   { return "capture" }
 
 type stubModelService struct {
 	chatModel       chat.Chat
+	rerankModel     rerank.Reranker
 	modelsByID      map[string]*types.Model
 	availableModels []*types.Model
 }
@@ -127,7 +128,7 @@ func (s *stubModelService) GetEmbeddingModelForTenant(context.Context, string, u
 }
 
 func (s *stubModelService) GetRerankModel(context.Context, string) (rerank.Reranker, error) {
-	return nil, nil
+	return s.rerankModel, nil
 }
 
 func (s *stubModelService) GetChatModel(context.Context, string) (chat.Chat, error) {
@@ -233,6 +234,7 @@ func TestHandleModelFallback_EvidenceBoundOverrideRetainsCurrentAttachments(t *t
 			Language:                "English",
 			ChatModelSupportsVision: true,
 			Images:                  []string{"https://example.com/current.png"},
+			EmployeeAssistant:       true,
 			Attachments: types.MessageAttachments{{
 				FileName: "current.txt",
 				FileType: ".txt",
@@ -241,6 +243,7 @@ func TestHandleModelFallback_EvidenceBoundOverrideRetainsCurrentAttachments(t *t
 		},
 		PipelineState: types.PipelineState{
 			RewriteQuery:         "rewritten rule question",
+			RetrievalExecuted:    true,
 			SystemPromptOverride: "OVERRIDE {{language}}: {{query}}",
 			QuotedContext:        "current quoted material",
 			History: []*types.History{{
@@ -257,7 +260,7 @@ func TestHandleModelFallback_EvidenceBoundOverrideRetainsCurrentAttachments(t *t
 	system := chatModel.lastMessages[0]
 	require.Equal(t, "system", system.Role)
 	assert.Contains(t, system.Content, "OVERRIDE English: rewritten rule question")
-	assert.Contains(t, system.Content, "no matching authorized knowledge-base or search evidence was obtained this turn")
+	assert.NotContains(t, system.Content, "<turn_evidence")
 	assert.NotContains(t, system.Content, "GENERIC: use general knowledge")
 	assert.Contains(t, system.Content, "Do not use general knowledge")
 
@@ -266,6 +269,7 @@ func TestHandleModelFallback_EvidenceBoundOverrideRetainsCurrentAttachments(t *t
 	user := chatModel.lastMessages[3]
 	assert.Equal(t, "user", user.Role)
 	assert.Contains(t, user.Content, "rewritten rule question")
+	assert.Contains(t, user.Content, `status="no_matching_evidence"`)
 	assert.Contains(t, user.Content, "current quoted material")
 	assert.Contains(t, user.Content, "attachment-supported fact")
 	assert.Equal(t, []string{"https://example.com/current.png"}, user.Images)

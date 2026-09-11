@@ -1,10 +1,10 @@
 package chatpipeline
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/stretchr/testify/require"
 )
 
 func TestApplyIntentPromptOverride_AgentOverrideWins(t *testing.T) {
@@ -153,19 +153,29 @@ func TestParseOutput_ValidJSONStillAppliesRewrite(t *testing.T) {
 
 func TestMissingUserConditionPreservesQuestionAndEmployeeContract(t *testing.T) {
 	cm := &types.ChatManage{
-		PipelineRequest: types.PipelineRequest{Query: "the original incomplete request", SummaryConfig: types.SummaryConfig{Prompt: "employee contract"}},
-		PipelineState:   types.PipelineState{Intent: types.IntentNeedsUserInput, RewriteQuery: "speculative rewritten request"},
+		PipelineRequest: types.PipelineRequest{Query: "the original incomplete request", EmployeeAssistant: true, SummaryConfig: types.SummaryConfig{Prompt: "employee contract"}},
+		PipelineState:   types.PipelineState{RewriteQuery: "the original incomplete request"},
 	}
-	if !applyIntentPromptOverride(cm, map[string]string{"needs_user_input": "generic prompt"}) {
-		t.Fatal("missing clarification instruction")
-	}
+	(&PluginQueryUnderstand{}).parseOutput(cm, `{"rewrite_query":"the original incomplete request","intent":"needs_user_input","needs_retrieval":true,"missing_user_condition":"device date"}`)
 	if cm.RewriteQuery != cm.Query {
 		t.Fatal("original question was not preserved")
 	}
-	if !strings.Contains(cm.SystemPromptOverride, "employee contract") || !strings.Contains(cm.SystemPromptOverride, "只问一个") {
-		t.Fatal("clarification must preserve employee contract")
+	if cm.MissingUserCondition != "device date" {
+		t.Fatal("missing condition was not preserved")
 	}
-	if cm.NeedsRetrieval() {
-		t.Fatal("missing user condition must not trigger retrieval")
+	if !cm.NeedsRetrieval() {
+		t.Fatal("missing user condition must coexist with retrieval")
+	}
+}
+
+func TestEmployeeMissingNeedsRetrievalFieldDefaultsToFreshEvidence(t *testing.T) {
+	for _, output := range []string{
+		`{"rewrite_query":"follow-up","intent":"follow_up"}`,
+		`{"rewrite_query":"follow-up","intent":"follow_up","needs_retrieval":null}`,
+	} {
+		cm := &types.ChatManage{PipelineRequest: types.PipelineRequest{EmployeeAssistant: true}, PipelineState: types.PipelineState{RewriteQuery: "follow-up"}}
+		(&PluginQueryUnderstand{}).parseOutput(cm, output)
+		require.Nil(t, cm.RetrievalNeeded)
+		require.True(t, cm.NeedsRetrieval())
 	}
 }

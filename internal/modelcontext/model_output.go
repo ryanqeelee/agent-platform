@@ -140,6 +140,9 @@ func (r *sourceRegistry) modelDocumentInfoOutput(rows []map[string]interface{}, 
 		if description := stringValue(row, "description"); description != "" {
 			fmt.Fprintf(&b, "    <description>%s</description>\n", escapeText(description))
 		}
+		if metadata := stringValue(row, "knowledge_metadata"); metadata != "" {
+			fmt.Fprintf(&b, "    <metadata>%s</metadata>\n", escapeText(metadata))
+		}
 		b.WriteString("  </document>\n")
 		count++
 	}
@@ -236,12 +239,16 @@ func (r *sourceRegistry) modelKnowledgeChunksOutput(data map[string]interface{},
 	rows := mapsValue(data["chunks"])
 	title := stringValue(data, "knowledge_title")
 	knowledgeID := stringValue(data, "knowledge_id")
+	metadata := stringValue(data, "knowledge_metadata")
 	for _, row := range rows {
 		if stringValue(row, "knowledge_id") == "" {
 			row["knowledge_id"] = knowledgeID
 		}
 		if stringValue(row, "knowledge_title") == "" {
 			row["knowledge_title"] = title
+		}
+		if stringValue(row, "knowledge_metadata") == "" {
+			row["knowledge_metadata"] = metadata
 		}
 	}
 	output := r.modelKnowledgeOutput("deep_read", rows, fallback)

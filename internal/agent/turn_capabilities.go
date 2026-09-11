@@ -35,7 +35,7 @@ func (e *AgentEngine) buildTurnCapabilities() string {
 	b.WriteString("<turn_capabilities>\n")
 	fmt.Fprintf(&b, "<enterprise_knowledge scope=\"%s\" tools_available=\"%t\"/>\n", scope, knowledge)
 	if scope == "none_in_scope" {
-		b.WriteString("No enterprise knowledge is in this turn's retrieval scope. This does not establish that the enterprise has no documents.\n")
+		b.WriteString("No enterprise knowledge source is attached to this turn's retrieval scope. This says nothing about the user's permissions or whether the enterprise has documents. Use actual conversation attachments and produced resources for the parts they support.\n")
 	} else if !knowledge {
 		b.WriteString("Knowledge scope is configured, but no knowledge retrieval/read tool is available this turn. Do not infer that the knowledge base is empty or that a search returned no results.\n")
 	} else {
@@ -45,7 +45,7 @@ func (e *AgentEngine) buildTurnCapabilities() string {
 		hasTool(agenttools.ToolWebSearch), hasTool(agenttools.ToolWebFetch))
 	fmt.Fprintf(&b, "<skills read_available=\"%t\" execute_available=\"%t\"/>\n",
 		hasTool(agenttools.ToolReadSkill), hasTool(agenttools.ToolExecuteSkillScript))
-	b.WriteString("These availability facts describe this turn only. Skills and the sandbox do not provide a hidden enterprise knowledge or web-search endpoint; do not probe directories or environment variables to find one. Use conversation attachments and already-produced files when relevant; creating a new file requires no input attachment. Skill instructions can be read without preparing execution resources.\n")
+	b.WriteString("These availability facts describe this turn only. Response mode does not grant broader enterprise knowledge permissions or establish missing evidence; public web availability follows the registered tools above. Skills and the sandbox do not provide a hidden enterprise knowledge or web-search endpoint; do not probe directories or environment variables to find one. Use conversation attachments and already-produced files when relevant; creating a new file requires no input attachment. Skill instructions can be read without preparing execution resources.\n")
 	b.WriteString("</turn_capabilities>")
 	return b.String()
 }

@@ -66,6 +66,7 @@ type PipelineRequest struct {
 	IntentPromptOverrides map[string]string `json:"-"`
 
 	// Misc request-scoped config
+	EmployeeAssistant   bool   `json:"-"`
 	TenantID            uint64 `json:"-"`
 	WebSearchEnabled    bool   `json:"-"`
 	WebSearchProviderID string `json:"-"` // Resolved from agent config or tenant default
@@ -115,6 +116,17 @@ type PipelineState struct {
 	RewriteQuery string      `json:"rewrite_query,omitempty"`
 	Intent       QueryIntent `json:"intent,omitempty"`
 	History      []*History  `json:"history,omitempty"`
+	// RetrievalNeeded is the optional, independent decision produced by the
+	// employee quick-query understanding call. Nil keeps employee follow-ups
+	// eligible for retrieval; other agents retain their intent-based routing.
+	RetrievalNeeded      *bool  `json:"-"`
+	MissingUserCondition string `json:"-"`
+	// Runtime-only evidence facts consumed by the final prompt. They are not a
+	// confidence score or a persistent evidence ledger.
+	RetrievalExecuted bool `json:"-"`
+	RetrievalDegraded bool `json:"-"`
+	RerankExecuted    bool `json:"-"`
+	RerankFailed      bool `json:"-"`
 
 	SearchResult         []*SearchResult   `json:"-"`
 	RerankResult         []*SearchResult   `json:"-"`
@@ -158,6 +170,19 @@ type ChatManage struct {
 // For IntentWebSearch, retrieval is only needed if web search is enabled;
 // for all other intents it delegates to QueryIntent.NeedsKBRetrieval().
 func (c *ChatManage) NeedsRetrieval() bool {
+	if c.EmployeeAssistant {
+		if c.RetrievalNeeded != nil {
+			return *c.RetrievalNeeded
+		}
+		// Older/invalid query-understanding output must not make an employee
+		// follow-up or missing-condition intent suppress fresh evidence.
+		switch c.Intent {
+		case IntentGreeting, IntentChitchat, IntentImageOnly, IntentDocOnly:
+			return false
+		default:
+			return true
+		}
+	}
 	if c.Intent == IntentWebSearch {
 		return c.WebSearchEnabled
 	}
@@ -248,10 +273,17 @@ func (c *ChatManage) Clone() *ChatManage {
 			WebFetchTopN:             c.WebFetchTopN,
 			Language:                 c.Language,
 			IntentPromptOverrides:    maps.Clone(c.IntentPromptOverrides),
+			EmployeeAssistant:        c.EmployeeAssistant,
 		},
 		PipelineState: PipelineState{
 			RewriteQuery:         c.RewriteQuery,
 			Intent:               c.Intent,
+			RetrievalNeeded:      cloneBool(c.RetrievalNeeded),
+			MissingUserCondition: c.MissingUserCondition,
+			RetrievalExecuted:    c.RetrievalExecuted,
+			RetrievalDegraded:    c.RetrievalDegraded,
+			RerankExecuted:       c.RerankExecuted,
+			RerankFailed:         c.RerankFailed,
 			ImageDescription:     c.ImageDescription,
 			QuotedContext:        c.QuotedContext,
 			SystemPromptOverride: c.SystemPromptOverride,
@@ -263,6 +295,14 @@ func (c *ChatManage) Clone() *ChatManage {
 			EntityKnowledge:      entityKnowledge,
 		},
 	}
+}
+
+func cloneBool(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }
 
 // EventType represents different stages in the RAG (Retrieval Augmented Generation) pipeline

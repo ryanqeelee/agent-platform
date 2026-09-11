@@ -29,6 +29,8 @@ type queryUnderstandOutput struct {
 	RewriteQuery     string            `json:"rewrite_query"`
 	Intent           types.QueryIntent `json:"intent"`
 	ImageDescription string            `json:"image_description"`
+	NeedsRetrieval   *bool             `json:"needs_retrieval"`
+	MissingCondition string            `json:"missing_user_condition"`
 }
 
 // NewPluginQueryUnderstand creates a new query-understanding plugin instance
@@ -111,6 +113,9 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 	}
 
 	maxTokens := 150
+	if chatManage.EmployeeAssistant {
+		maxTokens = 250
+	}
 	if useImages {
 		maxTokens = 500
 	}
@@ -389,6 +394,10 @@ func (p *PluginQueryUnderstand) parseOutput(chatManage *types.ChatManage, raw st
 		}
 		chatManage.Intent = output.Intent
 		chatManage.ImageDescription = strings.TrimSpace(output.ImageDescription)
+		if chatManage.EmployeeAssistant {
+			chatManage.RetrievalNeeded = output.NeedsRetrieval
+			chatManage.MissingUserCondition = strings.TrimSpace(output.MissingCondition)
+		}
 		return
 	}
 
@@ -433,6 +442,14 @@ func parseStructuredQueryOutputJSON(content string) (queryUnderstandOutput, bool
 	if intentStr != "" {
 		out.Intent = types.QueryIntent(intentStr)
 	}
+	if value, ok := obj["needs_retrieval"]; ok {
+		var need *bool
+		if json.Unmarshal(value, &need) == nil {
+			out.NeedsRetrieval = need
+		}
+	}
+	out.MissingCondition = strings.TrimSpace(firstStringField(obj,
+		"missing_user_condition", "missing_condition", "clarification"))
 
 	desc := strings.TrimSpace(firstStringField(obj,
 		"image_description", "image_desc", "image_text", "image_ocr_text", "description"))

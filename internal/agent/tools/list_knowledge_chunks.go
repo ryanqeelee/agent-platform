@@ -226,7 +226,8 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 		}
 	}
 
-	knowledgeTitle := t.lookupKnowledgeTitle(ctx, knowledgeID)
+	knowledgeTitle := strings.TrimSpace(knowledge.Title)
+	knowledgeMetadata := knowledge.CustomMetadataText()
 
 	output := t.buildOutput(knowledgeID, knowledgeTitle, totalChunks, offset, chunks, false)
 
@@ -281,17 +282,18 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 		Success: true,
 		Output:  output,
 		Data: map[string]interface{}{
-			"display_type":    "knowledge_chunks_list",
-			"knowledge_id":    knowledgeID,
-			"knowledge_title": knowledgeTitle,
-			"total_chunks":    totalChunks,
-			"fetched_chunks":  fetched,
-			"page":            pagination.Page,
-			"page_size":       pagination.PageSize,
-			"offset":          offset,
-			"next_offset":     offset + fetched,
-			"has_more":        int64(offset)+int64(fetched) < totalChunks,
-			"chunks":          formattedChunks,
+			"display_type":       "knowledge_chunks_list",
+			"knowledge_id":       knowledgeID,
+			"knowledge_title":    knowledgeTitle,
+			"knowledge_metadata": knowledgeMetadata,
+			"total_chunks":       totalChunks,
+			"fetched_chunks":     fetched,
+			"page":               pagination.Page,
+			"page_size":          pagination.PageSize,
+			"offset":             offset,
+			"next_offset":        offset + fetched,
+			"has_more":           int64(offset)+int64(fetched) < totalChunks,
+			"chunks":             formattedChunks,
 		},
 	}, nil
 }
@@ -319,7 +321,7 @@ func (t *ListKnowledgeChunksTool) executeByChunkID(ctx context.Context, chunkID 
 		}
 	}
 
-	knowledgeTitle := t.lookupKnowledgeTitle(ctx, chunk.KnowledgeID)
+	knowledgeTitle, knowledgeMetadata := t.lookupKnowledgeContext(ctx, chunk.KnowledgeID)
 	output := t.buildOutput(chunk.KnowledgeID, knowledgeTitle, 1, 0, chunks, true)
 
 	formattedChunks := []map[string]interface{}{
@@ -337,16 +339,17 @@ func (t *ListKnowledgeChunksTool) executeByChunkID(ctx context.Context, chunkID 
 	normalizeFAQChunkDataMap(formattedChunks[0], chunk)
 
 	data := map[string]interface{}{
-		"display_type":    "knowledge_chunks_list",
-		"knowledge_id":    chunk.KnowledgeID,
-		"knowledge_title": knowledgeTitle,
-		"total_chunks":    int64(1),
-		"fetched_chunks":  1,
-		"page":            1,
-		"page_size":       1,
-		"chunks":          formattedChunks,
-		"faq_id":          chunk.ID,
-		"single_chunk":    true,
+		"display_type":       "knowledge_chunks_list",
+		"knowledge_id":       chunk.KnowledgeID,
+		"knowledge_title":    knowledgeTitle,
+		"knowledge_metadata": knowledgeMetadata,
+		"total_chunks":       int64(1),
+		"fetched_chunks":     1,
+		"page":               1,
+		"page_size":          1,
+		"chunks":             formattedChunks,
+		"faq_id":             chunk.ID,
+		"single_chunk":       true,
 	}
 	if q := faqStandardQuestion(chunk); q != "" {
 		data["faq_question"] = q
@@ -359,17 +362,18 @@ func (t *ListKnowledgeChunksTool) executeByChunkID(ctx context.Context, chunkID 
 	}, nil
 }
 
-// lookupKnowledgeTitle looks up the title of a knowledge document
+// lookupKnowledgeContext looks up model-safe document context for a single
+// chunk. Document paging reuses its already-authorized Knowledge object.
 // Uses GetKnowledgeByIDOnly to support cross-tenant shared KB
-func (t *ListKnowledgeChunksTool) lookupKnowledgeTitle(ctx context.Context, knowledgeID string) string {
+func (t *ListKnowledgeChunksTool) lookupKnowledgeContext(ctx context.Context, knowledgeID string) (string, string) {
 	if t.knowledgeService == nil {
-		return ""
+		return "", ""
 	}
 	knowledge, err := t.knowledgeService.GetKnowledgeByIDOnly(ctx, knowledgeID)
 	if err != nil || knowledge == nil {
-		return ""
+		return "", ""
 	}
-	return strings.TrimSpace(knowledge.Title)
+	return strings.TrimSpace(knowledge.Title), knowledge.CustomMetadataText()
 }
 
 // buildOutput builds the output as XML for the list knowledge chunks tool

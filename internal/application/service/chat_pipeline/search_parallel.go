@@ -155,6 +155,8 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 	// Merge results from both searches
 	chatManage.SearchResult = append(chunkCM.SearchResult, entityCM.SearchResult...)
 	chatManage.SearchResult = removeDuplicateResults(chatManage.SearchResult)
+	chatManage.RetrievalExecuted = chunkCM.RetrievalExecuted || entityCM.RetrievalExecuted
+	chatManage.RetrievalDegraded = chunkCM.RetrievalDegraded || entityCM.RetrievalDegraded || len(errs) > 0
 
 	for name, err := range errs {
 		logger.Warnf(ctx, "[SearchParallel] %s error: %v", name, err.Err)

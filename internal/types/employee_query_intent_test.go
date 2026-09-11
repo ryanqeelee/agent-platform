@@ -6,13 +6,40 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMissingUserConditionDoesNotTriggerRetrieval(t *testing.T) {
+func TestEmployeeMissingUserConditionCanStillTriggerRetrieval(t *testing.T) {
 	for _, web := range []bool{false, true} {
-		cm := &ChatManage{PipelineRequest: PipelineRequest{WebSearchEnabled: web}, PipelineState: PipelineState{Intent: IntentNeedsUserInput}}
-		require.False(t, cm.NeedsRetrieval())
+		need := true
+		cm := &ChatManage{PipelineRequest: PipelineRequest{EmployeeAssistant: true, WebSearchEnabled: web}, PipelineState: PipelineState{Intent: IntentNeedsUserInput, RetrievalNeeded: &need}}
+		require.True(t, cm.NeedsRetrieval())
 	}
+	legacy := &ChatManage{PipelineState: PipelineState{Intent: IntentNeedsUserInput}}
+	require.False(t, legacy.NeedsRetrieval(), "generic agents preserve intent routing")
 	require.True(t, IntentKBSearch.NeedsKBRetrieval())
 	require.True(t, IntentClarification.NeedsKBRetrieval()) // historical agents unchanged
+}
+
+func TestEmployeeAbsentRetrievalDecisionDoesNotSuppressFreshEvidence(t *testing.T) {
+	for _, intent := range []QueryIntent{IntentNeedsUserInput, IntentFollowUp} {
+		cm := &ChatManage{PipelineRequest: PipelineRequest{EmployeeAssistant: true}, PipelineState: PipelineState{Intent: intent}}
+		require.Truef(t, cm.NeedsRetrieval(), "intent %q", intent)
+	}
+}
+
+func TestChatManageCloneCarriesEmployeeEvidenceDecision(t *testing.T) {
+	need := true
+	original := &ChatManage{
+		PipelineRequest: PipelineRequest{EmployeeAssistant: true},
+		PipelineState:   PipelineState{RetrievalNeeded: &need, MissingUserCondition: "device model", RetrievalExecuted: true, RetrievalDegraded: true, RerankExecuted: true, RerankFailed: true},
+	}
+	clone := original.Clone()
+	require.True(t, clone.EmployeeAssistant)
+	require.NotSame(t, original.RetrievalNeeded, clone.RetrievalNeeded)
+	require.True(t, *clone.RetrievalNeeded)
+	require.Equal(t, "device model", clone.MissingUserCondition)
+	require.True(t, clone.RetrievalExecuted)
+	require.True(t, clone.RetrievalDegraded)
+	require.True(t, clone.RerankExecuted)
+	require.True(t, clone.RerankFailed)
 }
 
 func TestQueryIntentUnknownDefaultsToRetrieval(t *testing.T) {

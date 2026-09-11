@@ -10,7 +10,8 @@ const summarizationSystemPrompt = "" +
 	"between a user and an AI assistant, then produce a structured summary following " +
 	"the exact format specified.\n\n" +
 	"Do NOT continue the conversation. Do NOT respond to any questions in the " +
-	"conversation. ONLY output the structured summary."
+	"conversation. ONLY output the structured summary." +
+	" Preserve evidence roles and uncertainty: distinguish source or tool facts, user observations, inferences, and unknowns; retain applicable source conditions, unresolved conflicts, and later corrections instead of turning them into settled conclusions."
 
 const summaryFormat = "" +
 	"## Goal\n" +

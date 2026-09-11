@@ -62,7 +62,7 @@ func TestListKnowledgeChunksExactWindow(t *testing.T) {
 			for i := 0; i < tc.total; i++ {
 				repo.chunks = append(repo.chunks, &types.Chunk{ID: fmt.Sprintf("chunk-%d", i), KnowledgeID: "doc", KnowledgeBaseID: "kb", ChunkIndex: i * 2, Content: fmt.Sprintf("text-%d", i), ChunkType: types.ChunkTypeText})
 			}
-			tool := NewListKnowledgeChunksTool(&scopeKnowledgeService{knowledge: &types.Knowledge{ID: "doc", KnowledgeBaseID: "kb", TenantID: 1}}, &windowChunkService{repo: repo}, types.SearchTargets{{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb", TenantID: 1}})
+			tool := NewListKnowledgeChunksTool(&scopeKnowledgeService{knowledge: &types.Knowledge{ID: "doc", KnowledgeBaseID: "kb", TenantID: 1, CustomMetadata: types.JSON(`{"region":"North","authority":"draft"}`), Metadata: types.JSON(`{"external_id":"secret"}`)}}, &windowChunkService{repo: repo}, types.SearchTargets{{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb", TenantID: 1}})
 			args, _ := json.Marshal(ListKnowledgeChunksInput{KnowledgeID: "doc", Offset: tc.offset, Limit: tc.limit})
 			result, err := tool.Execute(context.Background(), args)
 			require.NoError(t, err)
@@ -81,6 +81,11 @@ func TestListKnowledgeChunksExactWindow(t *testing.T) {
 			}
 			require.Contains(t, result.Output, fmt.Sprintf(`remaining="%d" has_more="%t"`, tc.total-tc.offset-tc.want, tc.more))
 			modelOutput := modelcontext.NewRegistry(true).ModelToolResultForTool(ToolListKnowledgeChunks, result)
+			if tc.want > 0 {
+				require.Contains(t, modelOutput, "authority: draft")
+				require.Contains(t, modelOutput, "region: North")
+			}
+			require.NotContains(t, modelOutput, "external_id")
 			require.Contains(t, modelOutput, fmt.Sprintf(`next_offset="%d"`, tc.offset+tc.want))
 			require.Contains(t, modelOutput, fmt.Sprintf(`has_more="%t"`, tc.more))
 			require.Contains(t, modelOutput, fmt.Sprintf(`remaining="%d"`, tc.total-tc.offset-tc.want))
@@ -105,6 +110,27 @@ func TestSingleChunkOutputDoesNotClaimDocumentCoverage(t *testing.T) {
 	require.Contains(t, output, `single_chunk="true"`)
 	require.NotContains(t, output, `total=`)
 	require.NotContains(t, output, "pagination")
+}
+
+func TestGetDocumentInfoProjectsOnlyUserAuthoredMetadata(t *testing.T) {
+	knowledge := &types.Knowledge{
+		ID: "doc", KnowledgeBaseID: "kb", TenantID: 1, Title: "Policy",
+		CustomMetadata: types.JSON(`{"authority":"draft","region":"North"}`),
+		Metadata:       types.JSON(`{"external_id":"internal-ingestion-id"}`),
+	}
+	repo := &windowChunkRepo{chunks: []*types.Chunk{{ID: "chunk", KnowledgeID: "doc", ChunkType: types.ChunkTypeText}}}
+	tool := NewGetDocumentInfoTool(
+		&scopeKnowledgeService{knowledge: knowledge},
+		&windowChunkService{repo: repo},
+		types.SearchTargets{{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb", TenantID: 1}},
+	)
+	result, err := tool.Execute(context.Background(), json.RawMessage(`{"knowledge_ids":["doc"]}`))
+	require.NoError(t, err)
+	require.Contains(t, result.Output, "authority: draft")
+	require.NotContains(t, result.Output, "external_id")
+	modelOutput := modelcontext.NewRegistry(true).ModelToolResultForTool(ToolGetDocumentInfo, result)
+	require.Contains(t, modelOutput, "region: North")
+	require.NotContains(t, modelOutput, "internal-ingestion-id")
 }
 
 func TestKnowledgeSearchFormattingDoesNotQueryDocumentTotals(t *testing.T) {

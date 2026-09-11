@@ -22,13 +22,14 @@ var regThinkIndex = regexp.MustCompile(`(?s)<think>.*?</think>`)
 // It reads the chat history knowledge base configuration from the tenant's ChatHistoryConfig,
 // which is managed via the settings UI.
 type messageService struct {
-	messageRepo    interfaces.MessageRepository    // Repository for message storage operations
-	sessionRepo    interfaces.SessionRepository    // Repository for session validation
-	tenantService  interfaces.TenantService        // Service for tenant operations (read ChatHistoryConfig)
-	kbService      interfaces.KnowledgeBaseService // Service for knowledge base operations (search chat history KB)
-	knowService    interfaces.KnowledgeService     // Service for knowledge operations (index/delete passages)
-	modelService   interfaces.ModelService         // Service for model operations (rerank model)
-	suggestionRepo interfaces.MessageSuggestionRepository
+	messageRepo         interfaces.MessageRepository    // Repository for message storage operations
+	sessionRepo         interfaces.SessionRepository    // Repository for session validation
+	tenantService       interfaces.TenantService        // Service for tenant operations (read ChatHistoryConfig)
+	kbService           interfaces.KnowledgeBaseService // Service for knowledge base operations (search chat history KB)
+	knowService         interfaces.KnowledgeService     // Service for knowledge operations (index/delete passages)
+	modelService        interfaces.ModelService         // Service for model operations (rerank model)
+	suggestionRepo      interfaces.MessageSuggestionRepository
+	tenantMemberService interfaces.TenantMemberService
 }
 
 // NewMessageService creates a new message service instance with the required repositories
@@ -39,15 +40,17 @@ func NewMessageService(messageRepo interfaces.MessageRepository,
 	knowService interfaces.KnowledgeService,
 	modelService interfaces.ModelService,
 	suggestionRepo interfaces.MessageSuggestionRepository,
+	tenantMemberService interfaces.TenantMemberService,
 ) interfaces.MessageService {
 	return &messageService{
-		messageRepo:    messageRepo,
-		sessionRepo:    sessionRepo,
-		tenantService:  tenantService,
-		kbService:      kbService,
-		knowService:    knowService,
-		modelService:   modelService,
-		suggestionRepo: suggestionRepo,
+		messageRepo:         messageRepo,
+		sessionRepo:         sessionRepo,
+		tenantService:       tenantService,
+		kbService:           kbService,
+		knowService:         knowService,
+		modelService:        modelService,
+		suggestionRepo:      suggestionRepo,
+		tenantMemberService: tenantMemberService,
 	}
 }
 
@@ -128,6 +131,24 @@ func (s *messageService) GetMessage(ctx context.Context, sessionID string, messa
 	return message, nil
 }
 
+// GetMessageForRead adds governed-history authorization without changing
+// GetMessage, which is also used by stop/delete control paths.
+func (s *messageService) GetMessageForRead(ctx context.Context, sessionID string, messageID string) (*types.Message, error) {
+	message, err := s.GetMessage(ctx, sessionID, messageID)
+	if err != nil {
+		return nil, err
+	}
+	if err := authorizeGovernedAnalysisSessionRead(ctx, s.messageRepo, s.tenantMemberService, sessionID); err != nil {
+		return nil, err
+	}
+	return message, nil
+}
+
+func (s *messageService) IsGovernedAnalysisMessage(ctx context.Context, messageID string) (bool, error) {
+	ids, err := s.messageRepo.GovernedAnalysisMessageIDs(ctx, []string{messageID})
+	return ids[messageID], err
+}
+
 // GetMessagesBySession retrieves paginated messages for a specific session
 func (s *messageService) GetMessagesBySession(ctx context.Context,
 	sessionID string, page int, pageSize int,
@@ -140,6 +161,9 @@ func (s *messageService) GetMessagesBySession(ctx context.Context,
 	_, err := loadSessionForRead(ctx, s.sessionRepo, tenantID, sessionUserIDForLookup(ctx), sessionID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get session: %v", err)
+		return nil, err
+	}
+	if err := authorizeGovernedAnalysisSessionRead(ctx, s.messageRepo, s.tenantMemberService, sessionID); err != nil {
 		return nil, err
 	}
 
@@ -176,6 +200,9 @@ func (s *messageService) GetRecentMessagesBySession(ctx context.Context,
 		logger.Errorf(ctx, "Failed to get session: %v", err)
 		return nil, err
 	}
+	if err := authorizeGovernedAnalysisSessionRead(ctx, s.messageRepo, s.tenantMemberService, sessionID); err != nil {
+		return nil, err
+	}
 
 	logger.Info(ctx, "Session exists, getting recent messages")
 	messages, err := s.messageRepo.GetRecentMessagesBySession(ctx, sessionID, limit)
@@ -207,6 +234,9 @@ func (s *messageService) GetMessagesBySessionBeforeTime(ctx context.Context,
 	_, err := loadSessionForRead(ctx, s.sessionRepo, tenantID, sessionUserIDForLookup(ctx), sessionID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get session: %v", err)
+		return nil, err
+	}
+	if err := authorizeGovernedAnalysisSessionRead(ctx, s.messageRepo, s.tenantMemberService, sessionID); err != nil {
 		return nil, err
 	}
 

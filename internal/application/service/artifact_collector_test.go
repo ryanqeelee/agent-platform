@@ -167,6 +167,9 @@ func (c *fakeCatalog) ResolveTenantPath(_ context.Context, _ uint64, v string) (
 func (c *fakeCatalog) ListKnowledgeBindings(context.Context, string) ([]*types.ResourceBinding, error) {
 	return nil, nil
 }
+func (c *fakeCatalog) ListMessageBindings(context.Context, string) ([]*types.ResourceBinding, error) {
+	return nil, nil
+}
 
 func (c *fakeCatalog) Release(_ context.Context, ref, ownerType, ownerID string) (int64, error) {
 	c.releases = append(c.releases, ref+"|"+ownerType+"|"+ownerID)

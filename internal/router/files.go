@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -45,7 +46,11 @@ type getRouteRegistrar interface {
 // message-scoped file proxy. Keeping it small makes the authorization boundary
 // independently testable.
 type messageFileLookup interface {
-	GetMessage(ctx context.Context, sessionID, messageID string) (*types.Message, error)
+	GetMessageForRead(ctx context.Context, sessionID, messageID string) (*types.Message, error)
+}
+
+type governedMessageLookup interface {
+	IsGovernedAnalysisMessage(ctx context.Context, messageID string) (bool, error)
 }
 
 // sharedAgentFileLookup verifies that a source workspace's agent is still
@@ -253,6 +258,7 @@ func newFileServeHandler(
 	resourceCatalog interfaces.ResourceCatalog,
 	knowledgeService middleware.KnowledgeLookup,
 	kbService middleware.KBLookup,
+	messageLookups ...governedMessageLookup,
 ) gin.HandlerFunc {
 	absDir := localStorageAbsDir()
 	if info, err := os.Stat(absDir); err != nil || !info.IsDir() {
@@ -280,6 +286,19 @@ func newFileServeHandler(
 			c.Request.Context(), resourceCatalog, resource, knowledgeService, kbService,
 		) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: resource not accessible"})
+			return
+		}
+		governed, err := resourceHasGovernedMessageArtifact(
+			c.Request.Context(), resourceCatalog, firstGovernedMessageLookup(messageLookups), resource,
+		)
+		if err != nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		if governed {
+			// Governed artifacts require the authenticated message proxy, which
+			// revalidates the current actor before returning any bytes.
+			c.Status(http.StatusForbidden)
 			return
 		}
 
@@ -317,6 +336,7 @@ func serveFilesWithResources(
 	resourceCatalog interfaces.ResourceCatalog,
 	knowledgeService middleware.KnowledgeLookup,
 	kbService middleware.KBLookup,
+	messageLookups ...governedMessageLookup,
 ) {
 	logger.Infof(context.Background(), "[Router] Serving files from /files")
 	// /files sits outside the /api/v1 APIKeyGate, so it carries its own
@@ -328,8 +348,45 @@ func serveFilesWithResources(
 	r.GET(
 		"/files",
 		middleware.AllowFileServeAPIKey(),
-		newFileServeHandler(globalFileService, storageResolver, resourceCatalog, knowledgeService, kbService),
+		newFileServeHandler(
+			globalFileService, storageResolver, resourceCatalog, knowledgeService, kbService, messageLookups...,
+		),
 	)
+}
+
+func firstGovernedMessageLookup(lookups []governedMessageLookup) governedMessageLookup {
+	if len(lookups) == 0 {
+		return nil
+	}
+	return lookups[0]
+}
+
+func resourceHasGovernedMessageArtifact(
+	ctx context.Context,
+	catalog interfaces.ResourceCatalog,
+	messageLookup governedMessageLookup,
+	resource *types.StoredResource,
+) (bool, error) {
+	bindings, err := catalog.ListMessageBindings(ctx, types.BuildResourcePath(resource.Handle))
+	if err != nil {
+		return false, err
+	}
+	for _, binding := range bindings {
+		if binding == nil || binding.Relation != types.ResourceRelationArtifact {
+			continue
+		}
+		if messageLookup == nil {
+			return false, errors.New("governed message lookup unavailable")
+		}
+		governed, err := messageLookup.IsGovernedAnalysisMessage(ctx, binding.OwnerID)
+		if err != nil {
+			return false, err
+		}
+		if governed {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // serveResourceGrants exposes short, revocable capability URLs for clients
@@ -342,6 +399,7 @@ func serveResourceGrants(
 	storageResolver interfaces.StorageBackendResolver,
 	knowledgeService middleware.KnowledgeLookup,
 	kbService middleware.KBLookup,
+	messageLookups ...governedMessageLookup,
 ) {
 	if resourceCatalog == nil || tenantService == nil {
 		return
@@ -363,6 +421,19 @@ func serveResourceGrants(
 		// grants for non-knowledge assets only; authenticated KB/file routes
 		// perform the live authorization and binding proof instead.
 		if len(bindings) > 0 {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		governed, bindingErr := resourceHasGovernedMessageArtifact(
+			ctx, resourceCatalog, firstGovernedMessageLookup(messageLookups), resource,
+		)
+		if bindingErr != nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		if governed {
+			// Anonymous grants cannot revalidate a current operating-analysis
+			// actor, so governed message artifacts stay authenticated-only.
 			c.Status(http.StatusNotFound)
 			return
 		}
@@ -581,13 +652,12 @@ func newMessageScopedFileServeHandler(
 			return
 		}
 
-		message, err := messageService.GetMessage(ctx, c.Param("id"), c.Param("message_id"))
+		message, err := messageService.GetMessageForRead(ctx, c.Param("id"), c.Param("message_id"))
 		if err != nil || message == nil {
 			// Do not reveal whether a message exists outside the caller's session.
 			c.Status(http.StatusNotFound)
 			return
 		}
-
 		resolvedPath := filePath
 		var resource *types.StoredResource
 		if resourceCatalog != nil {

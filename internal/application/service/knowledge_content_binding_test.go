@@ -54,6 +54,10 @@ func (c *resolvingCatalog) ListKnowledgeBindings(context.Context, string) ([]*ty
 	return nil, nil
 }
 
+func (c *resolvingCatalog) ListMessageBindings(context.Context, string) ([]*types.ResourceBinding, error) {
+	return nil, nil
+}
+
 func (c *resolvingCatalog) Release(context.Context, string, string, string) (int64, error) {
 	return -1, nil
 }

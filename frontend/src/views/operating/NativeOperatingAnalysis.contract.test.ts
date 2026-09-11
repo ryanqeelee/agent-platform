@@ -55,3 +55,10 @@ test('historical reads cannot mount or submit the retired execution chain', () =
   assert.doesNotMatch(history, /startStream|ag-ui|createSessions|sendMsg/)
   assert.doesNotMatch(menu, /operatingController|operating-client/)
 })
+
+test('legacy operating history revalidates the current platform actor', () => {
+  assert.match(history, /localStorage\.getItem\('weknora_token'\)/)
+  assert.match(history, /localStorage\.getItem\('weknora_selected_tenant_id'\)/)
+  assert.match(history, /headers\['x-platform-authorization'\] = `Bearer \$\{platformAuthorization\}`/)
+  assert.match(history, /headers\['x-platform-tenant-id'\] = platformTenantId/)
+})

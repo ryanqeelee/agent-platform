@@ -38,8 +38,15 @@ watch(sessionId, async (id, _, onCleanup) => {
   loading.value = true
   error.value = ''
   try {
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${localStorage.getItem('retail_ai_app_auth_token') || ''}`,
+    }
+    const platformAuthorization = localStorage.getItem('weknora_token')?.trim()
+    const platformTenantId = localStorage.getItem('weknora_selected_tenant_id')?.trim()
+    if (platformAuthorization) headers['x-platform-authorization'] = `Bearer ${platformAuthorization}`
+    if (platformTenantId) headers['x-platform-tenant-id'] = platformTenantId
     const response = await fetch(`/api/agents/data/sessions${id ? `/${encodeURIComponent(id)}/messages` : ''}`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('retail_ai_app_auth_token') || ''}` },
+      headers,
       signal: controller.signal,
     })
     if (!response.ok) throw new Error('history unavailable')

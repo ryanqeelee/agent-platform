@@ -251,6 +251,9 @@ func (s *sessionService) GetSession(ctx context.Context, id string) (*types.Sess
 		})
 		return nil, err
 	}
+	if err := authorizeGovernedAnalysisSessionRead(ctx, s.messageRepo, s.tenantMemberService, id); err != nil {
+		return nil, err
+	}
 
 	// Best-effort IM origin so the Web console can classify the session's
 	// folder on read; a lookup failure must not fail the detail request.
@@ -394,6 +397,38 @@ func (s *sessionService) ListSessions(
 			"agent_id":  query.AgentID,
 		})
 		return nil, err
+	}
+	if len(items) > 0 {
+		ids := make([]string, 0, len(items))
+		for _, item := range items {
+			if item != nil {
+				ids = append(ids, item.ID)
+			}
+		}
+		governed, classifyErr := governedAnalysisSessionIDs(ctx, s.messageRepo, ids)
+		if classifyErr != nil {
+			return nil, classifyErr
+		}
+		if len(governed) > 0 {
+			allowed, accessErr := currentMemberCanReadOperatingAnalysis(ctx, s.tenantMemberService)
+			if accessErr != nil {
+				return nil, accessErr
+			}
+			if !allowed {
+				visible := items[:0]
+				for _, item := range items {
+					if item != nil && governed[item.ID] {
+						total--
+						continue
+					}
+					visible = append(visible, item)
+				}
+				items = visible
+				if total < 0 {
+					total = 0
+				}
+			}
+		}
 	}
 
 	pagination := &types.Pagination{Page: query.Page, PageSize: query.PageSize}

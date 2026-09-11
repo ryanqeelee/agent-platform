@@ -14,6 +14,12 @@ type MessageService interface {
 
 	// GetMessage gets a message
 	GetMessage(ctx context.Context, sessionID string, id string) (*types.Message, error)
+	// GetMessageForRead gets a message after applying live authorization for
+	// governed operating-analysis history. Mutating control paths use GetMessage.
+	GetMessageForRead(ctx context.Context, sessionID string, id string) (*types.Message, error)
+	// IsGovernedAnalysisMessage classifies a server-derived message binding by
+	// its session's persisted evidence, without loading or returning payloads.
+	IsGovernedAnalysisMessage(ctx context.Context, id string) (bool, error)
 
 	// GetMessagesBySession gets all messages of a session
 	GetMessagesBySession(ctx context.Context, sessionID string, page int, pageSize int) ([]*types.Message, error)
@@ -120,4 +126,10 @@ type MessageRepository interface {
 	// GetSessionAttachments returns every user-uploaded attachment recorded in
 	// the session. Implementations should project only the attachments column.
 	GetSessionAttachments(ctx context.Context, sessionID string) (types.MessageAttachments, error)
+	// GovernedAnalysisSessionIDs returns the subset whose persisted assistant
+	// messages identify the operating analyst or record a governed-data tool.
+	GovernedAnalysisSessionIDs(ctx context.Context, sessionIDs []string) (map[string]bool, error)
+	// GovernedAnalysisMessageIDs returns target messages whose containing
+	// session has persisted governed operating-analysis evidence.
+	GovernedAnalysisMessageIDs(ctx context.Context, messageIDs []string) (map[string]bool, error)
 }

@@ -115,7 +115,7 @@ func (h *Handler) ListMessageArtifacts(c *gin.Context) {
 		return
 	}
 
-	msg, err := h.messageService.GetMessage(ctx, sessionID, messageID)
+	msg, err := h.messageService.GetMessageForRead(ctx, sessionID, messageID)
 	if err != nil || msg == nil {
 		c.Error(errors.NewNotFoundError("message not found"))
 		return
@@ -174,7 +174,7 @@ func (h *Handler) DownloadMessageArtifact(c *gin.Context) {
 		return
 	}
 
-	msg, err := h.messageService.GetMessage(ctx, sessionID, messageID)
+	msg, err := h.messageService.GetMessageForRead(ctx, sessionID, messageID)
 	if err != nil || msg == nil {
 		c.Error(errors.NewNotFoundError("message not found"))
 		return

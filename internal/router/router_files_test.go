@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -42,10 +43,20 @@ func (s *stubKnowledgeBaseByID) GetKnowledgeBaseByID(context.Context, string) (*
 }
 
 type stubMessageFileLookup struct {
-	get func(ctx context.Context, sessionID, messageID string) (*types.Message, error)
+	get      func(ctx context.Context, sessionID, messageID string) (*types.Message, error)
+	governed func(ctx context.Context, messageID string) (bool, error)
 }
 
-func (s *stubMessageFileLookup) GetMessage(
+func (s *stubMessageFileLookup) IsGovernedAnalysisMessage(
+	ctx context.Context, messageID string,
+) (bool, error) {
+	if s.governed == nil {
+		return false, nil
+	}
+	return s.governed(ctx, messageID)
+}
+
+func (s *stubMessageFileLookup) GetMessageForRead(
 	ctx context.Context,
 	sessionID, messageID string,
 ) (*types.Message, error) {
@@ -97,7 +108,23 @@ func (s *stubResourceCatalog) ResolveTenantPath(_ context.Context, _ uint64, val
 }
 
 func (s *stubResourceCatalog) ListKnowledgeBindings(context.Context, string) ([]*types.ResourceBinding, error) {
-	return s.bindings, s.bindingErr
+	result := make([]*types.ResourceBinding, 0, len(s.bindings))
+	for _, binding := range s.bindings {
+		if binding != nil && binding.OwnerType == types.ResourceOwnerKnowledge {
+			result = append(result, binding)
+		}
+	}
+	return result, s.bindingErr
+}
+
+func (s *stubResourceCatalog) ListMessageBindings(context.Context, string) ([]*types.ResourceBinding, error) {
+	result := make([]*types.ResourceBinding, 0, len(s.bindings))
+	for _, binding := range s.bindings {
+		if binding != nil && binding.OwnerType == types.ResourceOwnerMessage {
+			result = append(result, binding)
+		}
+	}
+	return result, s.bindingErr
 }
 
 func (s *stubResourceCatalog) Bind(context.Context, string, string, string, string) error {
@@ -206,6 +233,58 @@ func TestServeFilesResolvesShortResourceReference(t *testing.T) {
 	}
 	if requestedPath != physical {
 		t.Fatalf("requested path = %q, want %q", requestedPath, physical)
+	}
+}
+
+func TestGenericFileRoutesRejectGovernedMessageArtifactAndPreserveOrdinary(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("STORAGE_TYPE", "local")
+
+	for _, route := range []string{"/files", "/api/v1/embed/channel-1/files"} {
+		for _, tc := range []struct {
+			name      string
+			governed  bool
+			wantCode  int
+			wantBytes string
+		}{
+			{name: "governed", governed: true, wantCode: http.StatusForbidden},
+			{name: "ordinary", governed: false, wantCode: http.StatusOK, wantBytes: "ordinary-artifact"},
+		} {
+			t.Run(route+" "+tc.name, func(t *testing.T) {
+				const handle = "AbCdEfGhIjKlMnOpQrStUv"
+				engine := gin.New()
+				engine.GET(route, func(c *gin.Context) {
+					ctx := context.WithValue(c.Request.Context(), types.TenantInfoContextKey, &types.Tenant{ID: 42})
+					c.Request = c.Request.WithContext(ctx)
+					c.Next()
+				}, newFileServeHandler(
+					&stubFileService{getFile: func(context.Context, string) (io.ReadCloser, error) {
+						if tc.governed {
+							t.Fatal("governed artifact must not reach storage")
+						}
+						return io.NopCloser(strings.NewReader(tc.wantBytes)), nil
+					}},
+					nil,
+					&stubResourceCatalog{
+						resource: &types.StoredResource{Handle: handle, TenantID: 42, PhysicalPath: "local://42/exports/result.csv"},
+						bindings: []*types.ResourceBinding{{
+							OwnerType: types.ResourceOwnerMessage, OwnerID: "artifact-message", Relation: types.ResourceRelationArtifact,
+						}},
+					},
+					nil,
+					nil,
+					&stubMessageFileLookup{governed: func(context.Context, string) (bool, error) {
+						return tc.governed, nil
+					}},
+				))
+
+				req := httptest.NewRequest(http.MethodGet, route+"?file_path="+url.QueryEscape(types.BuildResourcePath(handle)), nil)
+				w := httptest.NewRecorder()
+				engine.ServeHTTP(w, req)
+				require.Equal(t, tc.wantCode, w.Code)
+				require.Equal(t, tc.wantBytes, w.Body.String())
+			})
+		}
 	}
 }
 
@@ -338,6 +417,56 @@ func TestResourceGrantRejectsKnowledgeBoundResource(t *testing.T) {
 	engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/r/GrantTokenAbCdEfGhIjKlM", nil))
 	if got, want := w.Code, http.StatusNotFound; got != want {
 		t.Fatalf("status = %d, want %d", got, want)
+	}
+}
+
+func TestResourceGrantRejectsGovernedMessageArtifactAndPreservesOrdinary(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name      string
+		governed  bool
+		wantCode  int
+		wantBytes string
+	}{
+		{name: "governed", governed: true, wantCode: http.StatusNotFound},
+		{name: "ordinary", governed: false, wantCode: http.StatusOK, wantBytes: "ordinary-artifact"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const handle = "AbCdEfGhIjKlMnOpQrStUv"
+			engine := gin.New()
+			serveResourceGrants(
+				engine,
+				&stubResourceCatalog{
+					resource: &types.StoredResource{
+						ID: "resource-1", Handle: handle, TenantID: 42,
+						PhysicalPath: "local://42/exports/result.csv", OriginalName: "result.csv",
+					},
+					bindings: []*types.ResourceBinding{{
+						OwnerType: types.ResourceOwnerMessage, OwnerID: "artifact-message", Relation: types.ResourceRelationArtifact,
+					}},
+				},
+				&stubTenantService{get: func(context.Context, uint64) (*types.Tenant, error) {
+					return &types.Tenant{ID: 42}, nil
+				}},
+				&stubFileService{getFile: func(context.Context, string) (io.ReadCloser, error) {
+					if tc.governed {
+						t.Fatal("governed grant must not reach storage")
+					}
+					return io.NopCloser(strings.NewReader(tc.wantBytes)), nil
+				}},
+				nil,
+				nil,
+				nil,
+				&stubMessageFileLookup{governed: func(context.Context, string) (bool, error) {
+					return tc.governed, nil
+				}},
+			)
+
+			w := httptest.NewRecorder()
+			engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/r/GrantTokenAbCdEfGhIjKlM", nil))
+			require.Equal(t, tc.wantCode, w.Code)
+			require.Equal(t, tc.wantBytes, w.Body.String())
+		})
 	}
 }
 

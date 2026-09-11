@@ -48,6 +48,10 @@ func (s *stubMessageServiceForArtifacts) GetMessage(ctx context.Context, session
 	return s.getMessage(ctx, sessionID, id)
 }
 
+func (s *stubMessageServiceForArtifacts) GetMessageForRead(ctx context.Context, sessionID, id string) (*types.Message, error) {
+	return s.getMessage(ctx, sessionID, id)
+}
+
 func (s *stubMessageServiceForArtifacts) GetSessionArtifacts(ctx context.Context, sessionID string) (types.MessageArtifacts, error) {
 	if s.getSessionArtifact == nil {
 		return types.MessageArtifacts{}, nil

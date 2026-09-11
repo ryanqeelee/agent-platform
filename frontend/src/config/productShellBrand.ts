@@ -34,9 +34,7 @@ export type RetailAgentHomeCopy = {
   enterWork: string
   continueWork: string
   employeeRecentWork: string
-  analysisRecentWork: string
   noEmployeeRecentWork: string
-  noAnalysisRecentWork: string
   handoffHint: string
   contactAdmin: string
   serviceUnavailable: string
@@ -99,9 +97,7 @@ const homeCopyByLocale: Record<string, RetailAgentHomeCopy> = {
     enterWork: '进入经营分析',
     continueWork: '继续最近对话',
     employeeRecentWork: '最近对话',
-    analysisRecentWork: '最近分析',
     noEmployeeRecentWork: '还没有员工助理对话',
-    noAnalysisRecentWork: '还没有经营分析',
     handoffHint: '遇到需要经营数据判断的问题，可带着原问题进入经营分析。',
     contactAdmin: '请联系企业管理员开通经营分析权限',
     serviceUnavailable: '经营分析服务暂不可用',
@@ -127,9 +123,7 @@ const homeCopyByLocale: Record<string, RetailAgentHomeCopy> = {
     enterWork: 'Open operating analysis',
     continueWork: 'Continue recent conversation',
     employeeRecentWork: 'Recent conversation',
-    analysisRecentWork: 'Recent analysis',
     noEmployeeRecentWork: 'No Employee Assistant conversations yet',
-    noAnalysisRecentWork: 'No operating analysis yet',
     handoffHint: 'When a question needs operating data, carry the original question into Operating Analysis.',
     contactAdmin: 'Contact an enterprise administrator for operating analysis access',
     serviceUnavailable: 'Operating analysis is temporarily unavailable',
@@ -155,9 +149,7 @@ const homeCopyByLocale: Record<string, RetailAgentHomeCopy> = {
     enterWork: 'Открыть операционный анализ',
     continueWork: 'Продолжить последний диалог',
     employeeRecentWork: 'Последний диалог',
-    analysisRecentWork: 'Последний анализ',
     noEmployeeRecentWork: 'Диалогов с помощником пока нет',
-    noAnalysisRecentWork: 'Операционного анализа пока нет',
     handoffHint: 'Если вопрос требует операционных данных, перенесите его в операционный анализ.',
     contactAdmin: 'Обратитесь к администратору предприятия для получения доступа',
     serviceUnavailable: 'Операционный анализ временно недоступен',
@@ -183,9 +175,7 @@ const homeCopyByLocale: Record<string, RetailAgentHomeCopy> = {
     enterWork: '운영 분석 열기',
     continueWork: '최근 대화 계속하기',
     employeeRecentWork: '최근 대화',
-    analysisRecentWork: '최근 분석',
     noEmployeeRecentWork: '직원 도우미 대화가 없습니다',
-    noAnalysisRecentWork: '운영 분석이 없습니다',
     handoffHint: '운영 데이터 판단이 필요한 질문은 원래 질문과 함께 운영 분석으로 이어갈 수 있습니다.',
     contactAdmin: '운영 분석 권한은 기업 관리자에게 문의하세요',
     serviceUnavailable: '운영 분석 서비스를 일시적으로 사용할 수 없습니다',

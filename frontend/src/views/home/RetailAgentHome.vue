@@ -113,16 +113,7 @@
               </div>
             </div>
 
-            <div class="recent-work" aria-live="polite">
-              <span class="recent-label">{{ copy.analysisRecentWork }}</span>
-              <template v-if="analysisState === 'enabled' && analysisRecentWork">
-                <RouterLink class="recent-title" to="/platform/operating-analysis">
-                  {{ analysisRecentWork.title }}
-                </RouterLink>
-                <time :datetime="analysisRecentWork.updatedAt">{{ formatTime(analysisRecentWork.updatedAt) }}</time>
-              </template>
-              <span v-else class="recent-empty">{{ analysisStatusText }}</span>
-            </div>
+            <p v-if="analysisState !== 'enabled'" class="recent-empty">{{ analysisStatusText }}</p>
 
             <div v-if="analysisState === 'enabled'" class="card-actions">
               <RouterLink class="primary-action" to="/platform/operating-analysis">{{ copy.enterWork }}</RouterLink>
@@ -158,8 +149,8 @@ import { useI18n } from 'vue-i18n'
 import UserMenu from '@/components/UserMenu.vue'
 import { getSessionsList } from '@/api/chat'
 import {
-  getOperatingAnalysisHistory,
-  type OperatingAnalysisRevocationHistoryV1,
+  getOperatingAnalysisAvailability,
+  type OperatingAnalysisAvailabilityV1,
 } from '@/api/operatingAnalysis'
 import {
   getProductShellLoginCopy,
@@ -180,13 +171,11 @@ const copy = computed(() => getRetailAgentHomeCopy(locale.value))
 const loginCopy = computed(() => getProductShellLoginCopy(locale.value))
 
 const employeeRecentWork = ref<RecentWork | null>(null)
-const analysisRecentWork = ref<OperatingAnalysisRevocationHistoryV1['recentWork']>()
 const analysisState = ref<AnalysisState>('absent')
 const analysisLoading = ref(true)
-const analysisNextAction = ref<OperatingAnalysisRevocationHistoryV1['availability']['nextAction']>('none')
+const analysisNextAction = ref<OperatingAnalysisAvailabilityV1['availability']['nextAction']>('none')
 
 const analysisStatusText = computed(() => {
-  if (analysisState.value === 'enabled') return copy.value.noAnalysisRecentWork
   if (analysisNextAction.value === 'contact_admin') return copy.value.contactAdmin
   return copy.value.serviceUnavailable
 })
@@ -208,12 +197,11 @@ const loadEmployeeRecentWork = async () => {
 
 const loadOperatingAnalysis = async () => {
   try {
-    const response = await getOperatingAnalysisHistory()
+    const response = await getOperatingAnalysisAvailability()
     analysisNextAction.value = response.availability.nextAction
     analysisState.value = response.availability.state === 'hidden'
       ? 'absent'
       : response.availability.state
-    analysisRecentWork.value = response.availability.canReadHistory ? response.recentWork : undefined
   } catch (error: any) {
     analysisState.value = error?.status === 403 ? 'absent' : 'disabled'
   } finally {

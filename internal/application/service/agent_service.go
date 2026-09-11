@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/agent/approval"
@@ -124,6 +126,113 @@ type agentService struct {
 	sandboxResolver       sandbox.TenantSandboxResolver
 	sandboxPinner         *SessionSandboxPinner
 	sandboxPolicy         WorkspaceSandboxPolicy
+}
+
+const employeeQuickShellTimeout = 20 * time.Second
+
+// lazyQuickShellExecutor delays named sandbox resolution until shell_exec is
+// actually invoked. The tenant, session and config are captured from the
+// server-resolved quick-answer request; model arguments cannot select them.
+type lazyQuickShellExecutor struct {
+	service   *agentService
+	tenantID  uint64
+	sessionID string
+	configID  string
+	once      sync.Once
+	executor  sandbox.SessionShellExecutor
+	holder    sandbox.SessionTurnHolder
+	initErr   error
+}
+
+func (e *lazyQuickShellExecutor) ExecShellCommand(
+	ctx context.Context,
+	sessionID, command, workDir string,
+	timeout time.Duration,
+	env map[string]string,
+) (*sandbox.ExecuteResult, error) {
+	if e == nil || e.service == nil || sessionID != e.sessionID {
+		return nil, fmt.Errorf("quick shell session binding mismatch")
+	}
+	runtimeCtx := context.WithValue(ctx, types.TenantIDContextKey, e.tenantID)
+	e.once.Do(func() {
+		mgr, _, err := resolveSandboxForExecution(runtimeCtx, e.service.sandboxResolver,
+			e.service.sandboxMgr, e.service.sandboxPinner, e.tenantID, e.sessionID, e.configID, e.service.sandboxPolicy)
+		if err != nil {
+			e.initErr = err
+			return
+		}
+		e.executor = sessionSandboxShellExecutor(mgr)
+		if e.executor == nil {
+			e.initErr = fmt.Errorf("quick shell is unavailable for the selected workspace sandbox")
+			return
+		}
+		if holder, ok := mgr.(sandbox.SessionTurnHolder); ok {
+			if err := holder.BeginSessionTurn(runtimeCtx, e.sessionID); err != nil {
+				e.initErr = err
+				return
+			}
+			e.holder = holder
+		}
+	})
+	if e.initErr != nil {
+		return nil, e.initErr
+	}
+	if timeout <= 0 || timeout > employeeQuickShellTimeout {
+		timeout = employeeQuickShellTimeout
+	}
+	return e.executor.ExecShellCommand(runtimeCtx, e.sessionID, command, workDir, timeout, env)
+}
+
+func (s *agentService) quickCompletionShellTool(
+	tenantID uint64, sessionID, configID string,
+) types.Tool {
+	if s == nil || tenantID == 0 || strings.TrimSpace(sessionID) == "" || strings.TrimSpace(configID) == "" {
+		return nil
+	}
+	executor := &lazyQuickShellExecutor{
+		service: s, tenantID: tenantID, sessionID: sessionID, configID: strings.TrimSpace(configID),
+	}
+	// Quick computation has no skill-secret authority. A nil env resolver keeps
+	// skill_name from resolving or injecting any stored credential.
+	return &quickCompletionShell{ShellExecTool: tools.NewShellExecTool(executor, nil).WithDefaultTimeout(employeeQuickShellTimeout), executor: executor}
+}
+
+type quickCompletionShell struct {
+	*tools.ShellExecTool
+	executor *lazyQuickShellExecutor
+}
+
+// The general shell help describes skill/file tools that quick mode does not
+// expose. Keep this profile's capability description accurate and small.
+func (t *quickCompletionShell) Description() string {
+	return "Execute a short command in the current session's isolated sandbox to calculate or verify results from supplied data. Use available Python or Node.js for arithmetic, dates, statistics or data transformations. Commands start in /workspace and are limited to 20 seconds. Returns stdout, stderr and exit_code; inspect them before treating a result as verified. Only use file paths actually provided in the conversation."
+}
+
+// Keep the existing shell's structured output and limits, without its skill
+// recovery hints: quick mode has no skill/file-editing tools to follow them.
+func (t *quickCompletionShell) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	result, err := t.ShellExecTool.Execute(ctx, args)
+	if err != nil || result == nil || !result.Success {
+		return result, err
+	}
+	code := result.Data["exit_code"].(int)
+	killed := result.Data["killed"].(bool)
+	result.Output = fmt.Sprintf("exit_code=%d killed=%t truncated=%v\nstdout:\n%s\nstderr:\n%s", code, killed, result.Data["truncated"], result.Data["stdout"], result.Data["stderr"])
+	if code != 0 || killed {
+		result.Success = false
+		result.Error = fmt.Sprintf("sandbox command did not complete successfully (exit_code=%d, killed=%t)", code, killed)
+	}
+	return result, nil
+}
+
+func (t *quickCompletionShell) Cleanup(ctx context.Context) {
+	if t.executor.holder == nil {
+		return
+	}
+	ctx = context.WithValue(context.WithoutCancel(ctx), types.TenantIDContextKey, t.executor.tenantID)
+	if err := t.executor.holder.EndSessionTurn(ctx, t.executor.sessionID); err != nil {
+		logger.Warnf(ctx, "quick sandbox turn release failed: %v", err)
+	}
 }
 
 // NewAgentService creates a new agent service

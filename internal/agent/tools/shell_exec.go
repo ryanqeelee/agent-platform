@@ -354,6 +354,15 @@ func NewShellExecTool(executor SandboxCommandExecutor, envResolver skills.SkillE
 	}
 }
 
+// WithDefaultTimeout narrows the timeout used when the model omits
+// timeout_sec. The shell's existing hard maximum still applies.
+func (t *ShellExecTool) WithDefaultTimeout(timeout time.Duration) *ShellExecTool {
+	if t != nil && timeout > 0 {
+		t.defaultTimeout = timeout
+	}
+	return t
+}
+
 // NewInstallShellExecTool constructs the install-mode variant: commands run as
 // root and may work inside the skills image root. It is registered only for
 // the built-in skill installer agent (see AgentConfig.SkillInstallMode).

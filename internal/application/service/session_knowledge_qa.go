@@ -78,10 +78,12 @@ func (s *sessionService) KnowledgeQA(
 
 	// Resolve chat model vision capability and VLM model ID for image routing
 	var chatModelSupportsVision bool
+	var modelContextWindow int
 	var vlmModelID string
 	if chatModelID != "" {
 		if chatModelInfo, err := s.modelService.GetModelByID(ctx, chatModelID); err == nil && chatModelInfo != nil {
 			chatModelSupportsVision = chatModelInfo.Parameters.SupportsVision
+			modelContextWindow = chatModelInfo.Parameters.ContextWindow
 		}
 	}
 	if req.CustomAgent != nil {
@@ -167,6 +169,10 @@ func (s *sessionService) KnowledgeQA(
 	// Apply custom agent overrides (system prompt, temperature, retrieval params,
 	// rewrite, fallback, FAQ strategy, history turns)
 	s.applyAgentOverridesToChatManage(ctx, req.CustomAgent, chatManage)
+	s.configureEmployeeQuickCompletion(req, chatManage)
+	if chatManage.CompletionConfig != nil {
+		chatManage.CompletionConfig.MaxContextTokens = types.AgentMaxContextTokens(0, modelContextWindow)
+	}
 
 	// An agent may opt out of long-term memory. The preference is per-request
 	// rather than per-user, so it travels in the context that the recall
@@ -234,6 +240,47 @@ func (s *sessionService) KnowledgeQA(
 
 	logger.Info(ctx, "Knowledge base question answering initiated")
 	return nil
+}
+
+type quickCompletionToolProvider interface {
+	quickCompletionShellTool(tenantID uint64, sessionID, configID string) types.Tool
+}
+
+// configureEmployeeQuickCompletion enables tool-capable final synthesis only
+// for the server-resolved employee quick profile with a canonical named
+// sandbox. Custom/deep agents and empty capability state keep their old path.
+func (s *sessionService) configureEmployeeQuickCompletion(
+	req *types.QARequest, chatManage *types.ChatManage,
+) {
+	if req == nil || req.Session == nil || req.CustomAgent == nil || chatManage == nil ||
+		req.CustomAgent.ID != types.BuiltinEmployeeAssistantID || req.CustomAgent.IsAgentMode() {
+		return
+	}
+	configID := strings.TrimSpace(req.CustomAgent.Config.SandboxConfigID)
+	provider, ok := s.agentService.(quickCompletionToolProvider)
+	if configID == "" || !ok {
+		return
+	}
+	tool := provider.quickCompletionShellTool(req.Session.TenantID, req.Session.ID, configID)
+	if tool == nil {
+		return
+	}
+	maxCompletionTokens := chatManage.SummaryConfig.MaxCompletionTokens
+	if maxCompletionTokens <= 0 {
+		maxCompletionTokens = types.DefaultQuickAnswerMaxCompletionTokens
+	}
+	chatManage.CompletionConfig = &types.AgentConfig{
+		EmployeeAssistant:    true,
+		MaxIterations:        4,
+		AllowedTools:         []string{tools.ToolShellExec},
+		Temperature:          chatManage.SummaryConfig.Temperature,
+		Thinking:             chatManage.SummaryConfig.Thinking,
+		CitationEnabled:      chatManage.CitationEnabled,
+		SandboxConfigID:      configID,
+		MaxCompletionTokens:  maxCompletionTokens,
+		ToolExecutionTimeout: employeeQuickShellTimeout + 5*time.Second,
+	}
+	chatManage.CompletionTools = []types.Tool{tool}
 }
 
 // buildKnowledgeQAPipeline assembles the existing retrieval pipeline for requests
@@ -1189,6 +1236,13 @@ func (s *sessionService) handleModelFallback(ctx context.Context, chatManage *ty
 
 	// Start streaming response
 	fallbackMessages, modelContext := prepareFallbackMessages(chatManage, promptContent)
+	if len(chatManage.CompletionTools) > 0 {
+		if err := chatpipeline.StartToolCompletion(ctx, chatManage, chatModel, opt, fallbackMessages, modelContext); err != nil {
+			_ = chatManage.EventBus.Emit(ctx, types.Event{Type: types.EventType(event.EventError), SessionID: chatManage.SessionID,
+				Data: event.ErrorData{Error: err.Error(), Stage: "quick_tool_completion", SessionID: chatManage.SessionID}})
+		}
+		return
+	}
 	responseChan, err := chatModel.ChatStream(ctx, fallbackMessages, opt)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to start streaming fallback response: %v, falling back to fixed response", err)

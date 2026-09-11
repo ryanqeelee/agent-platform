@@ -109,3 +109,14 @@ func TestQuickAnswerReasoningAndTimelineShareOneStep(t *testing.T) {
 	assert.Equal(t, "思考中继续", msg.AgentSteps[0].ReasoningContent)
 	require.Len(t, msg.AgentSteps[0].ToolCalls, 1)
 }
+
+func TestQuickAnswerTimelineKeepsCalculationResult(t *testing.T) {
+	bus := event.NewEventBus()
+	msg := &types.Message{}
+	registerQuickAnswerTimelineRecorder(bus, msg)
+	emitTimelineStage(t, bus, "calc", "shell_exec", map[string]any{"command": "python3 calculation.py"}, event.AgentToolResultData{Success: true, Output: "12.01", Data: map[string]interface{}{"exit_code": 0}})
+	require.Len(t, msg.AgentSteps, 1)
+	require.Len(t, msg.AgentSteps[0].ToolCalls, 1)
+	require.Equal(t, "shell_exec", msg.AgentSteps[0].ToolCalls[0].Name)
+	require.Equal(t, "12.01", msg.AgentSteps[0].ToolCalls[0].Result.Output)
+}

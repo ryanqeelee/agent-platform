@@ -154,6 +154,11 @@ type PipelineContext struct {
 	EventBus      EventBusInterface `json:"-"`
 	MessageID     string            `json:"-"`
 	UserMessageID string            `json:"-"`
+	// CompletionConfig and CompletionTools opt the final quick-answer
+	// synthesis into the existing Agent loop. They are populated only from a
+	// server-resolved built-in runtime and are never request or model input.
+	CompletionConfig *AgentConfig `json:"-"`
+	CompletionTools  []Tool       `json:"-"`
 }
 
 // ChatManage represents the full configuration, state and runtime context

@@ -152,7 +152,7 @@ func EmployeeEvidenceStatus(chatManage *types.ChatManage) string {
 		status = "no_sources_in_scope"
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "<turn_evidence status=\"%s\" attachments_available=\"%t\"", status, len(chatManage.Attachments) > 0)
+	fmt.Fprintf(&b, "<turn_evidence status=\"%s\" attachments_available=\"%t\" retrieval_degraded=\"%t\"", status, len(chatManage.Attachments) > 0, chatManage.RetrievalDegraded)
 	if chatManage.RerankExecuted {
 		b.WriteString(" rerank_executed=\"true\"")
 	}

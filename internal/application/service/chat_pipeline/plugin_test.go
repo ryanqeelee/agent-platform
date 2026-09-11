@@ -23,6 +23,7 @@ func TestEmployeeEvidenceStatusReachesCurrentUserMessage(t *testing.T) {
 		{name: "candidate", scope: types.SearchTargets{{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb"}}, state: types.PipelineState{RetrievalNeeded: boolPtr(true), RetrievalExecuted: true, MergeResult: []*types.SearchResult{{ID: "chunk"}}}, want: `status="candidate_evidence"`},
 		{name: "partial", scope: types.SearchTargets{{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb"}}, state: types.PipelineState{RetrievalNeeded: boolPtr(true), RetrievalExecuted: true, RetrievalDegraded: true, MergeResult: []*types.SearchResult{{ID: "chunk"}}}, want: `status="candidate_evidence_partial_search"`},
 		{name: "rerank failed", scope: types.SearchTargets{{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb"}}, state: types.PipelineState{RetrievalNeeded: boolPtr(true), RetrievalExecuted: true, RerankFailed: true, SearchResult: []*types.SearchResult{{ID: "chunk"}}}, want: `status="candidate_evidence_rerank_failed"`},
+		{name: "partial search and rerank failed", scope: types.SearchTargets{{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb"}}, state: types.PipelineState{RetrievalNeeded: boolPtr(true), RetrievalExecuted: true, RetrievalDegraded: true, RerankFailed: true, SearchResult: []*types.SearchResult{{ID: "chunk"}}}, want: `status="candidate_evidence_rerank_failed" attachments_available="false" retrieval_degraded="true"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

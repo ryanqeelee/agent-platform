@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -140,6 +141,10 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 	}
 
 	if err := h.service.CreateModel(ctx, model); err != nil {
+		if stderrors.Is(err, types.ErrModelCredentialEncryptionUnavailable) {
+			c.Error(errors.NewBadRequestError(types.ErrModelCredentialEncryptionUnavailable.Error()))
+			return
+		}
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(modelRuntimeInternalError(ctx, "model_create_failed", model.Parameters.Provider, model.Name))
 		return
@@ -688,6 +693,10 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	if err := h.service.UpdateModel(ctx, model); err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
 			c.Error(appErr)
+			return
+		}
+		if stderrors.Is(err, types.ErrModelCredentialEncryptionUnavailable) {
+			c.Error(errors.NewBadRequestError(types.ErrModelCredentialEncryptionUnavailable.Error()))
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)

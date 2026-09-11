@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
@@ -54,6 +55,7 @@ func TestListModels_TenantlessSystemAdminUsesPlatformScope(t *testing.T) {
 }
 
 func TestUpdateBuiltinModelCredentials_TenantlessSystemAdminUsesPlatformScope(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", strings.Repeat("k", 32))
 	stored := &types.Model{ID: "builtin-chat", IsBuiltin: true, ManagedBy: types.BuiltinModelManagedBy}
 	newKey := "sk-platform"
 	var saved *types.Model
@@ -134,6 +136,7 @@ func TestUpdateBuiltinModelCredentials_SystemAdminOnly(t *testing.T) {
 	})
 
 	t.Run("system admin saves runtime override", func(t *testing.T) {
+		t.Setenv("SYSTEM_AES_KEY", strings.Repeat("k", 32))
 		stored := &types.Model{
 			ID: "builtin-chat", TenantID: 10000, IsBuiltin: true,
 			ManagedBy: types.BuiltinModelManagedBy,
@@ -156,4 +159,28 @@ func TestUpdateBuiltinModelCredentials_SystemAdminOnly(t *testing.T) {
 		require.NotNil(t, saved)
 		assert.Empty(t, saved.ManagedBy)
 	})
+}
+
+func TestUpdateBuiltinModelCredentials_RejectsPlaintextFallback(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", "invalid")
+	stored := &types.Model{ID: "builtin-chat", IsBuiltin: true}
+	updated := false
+	svc := NewModelService(&stubModelRepoForDelete{
+		model: stored,
+		update: func(*types.Model) error {
+			updated = true
+			return nil
+		},
+	}, nil, nil, nil, nil, nil)
+	newKey := "not-persisted"
+
+	_, err := svc.UpdateModelCredentials(
+		tenantlessSystemAdminModelContext(), stored.ID, &newKey, nil,
+	)
+	require.Error(t, err)
+	appErr, ok := apperrors.IsAppError(err)
+	require.True(t, ok)
+	assert.Equal(t, apperrors.ErrBadRequest, appErr.Code)
+	assert.Contains(t, appErr.Message, "SYSTEM_AES_KEY")
+	assert.False(t, updated)
 }

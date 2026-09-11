@@ -305,7 +305,6 @@ func (s *modelService) UpdateModelCredentials(
 		return nil, apperrors.NewForbiddenError(
 			"only system administrators can modify builtin model credentials")
 	}
-
 	changed := false
 	if apiKey != nil && *apiKey != "" && *apiKey != existing.Parameters.APIKey {
 		existing.Parameters.APIKey = *apiKey
@@ -317,6 +316,9 @@ func (s *modelService) UpdateModelCredentials(
 	}
 	if !changed {
 		return existing, nil
+	}
+	if (existing.Parameters.APIKey != "" || existing.Parameters.AppSecret != "") && utils.GetAESKey() == nil {
+		return nil, apperrors.NewBadRequestError(types.ErrModelCredentialEncryptionUnavailable.Error())
 	}
 	if existing.IsBuiltin {
 		// Credential changes are also runtime overrides of YAML-managed data.
@@ -362,6 +364,9 @@ func (s *modelService) ClearModelCredential(ctx context.Context, id, field strin
 	if !changed {
 		return nil
 	}
+	if (existing.Parameters.APIKey != "" || existing.Parameters.AppSecret != "") && utils.GetAESKey() == nil {
+		return apperrors.NewBadRequestError(types.ErrModelCredentialEncryptionUnavailable.Error())
+	}
 	if existing.IsBuiltin {
 		existing.ManagedBy = ""
 	}
@@ -396,7 +401,14 @@ func (s *modelService) DeleteModel(ctx context.Context, id string) error {
 		return apperrors.NewBadRequestError("YAML-managed builtin models cannot be deleted")
 	}
 
-	usage, err := s.getModelUsageDetails(ctx, tenantID, id)
+	usageTenantID := tenantID
+	if existingModel.IsBuiltin {
+		// Shared models can be referenced by every enterprise. A selected
+		// tenant on a platform-capable request must not narrow the guard to
+		// that one enterprise and allow dangling references elsewhere.
+		usageTenantID = 0
+	}
+	usage, err := s.getModelUsageDetails(ctx, usageTenantID, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id": id,

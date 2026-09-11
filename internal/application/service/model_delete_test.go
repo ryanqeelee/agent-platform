@@ -15,9 +15,11 @@ import (
 )
 
 type stubKBRepoForModelDelete struct {
-	usages   []types.ModelUsageResource
-	count    *int64
-	usageErr error
+	usages     []types.ModelUsageResource
+	count      *int64
+	countScope *uint64
+	listScope  *uint64
+	usageErr   error
 }
 
 func (s *stubKBRepoForModelDelete) CreateKnowledgeBase(context.Context, *types.KnowledgeBase) error {
@@ -45,7 +47,10 @@ func (s *stubKBRepoForModelDelete) DeleteKnowledgeBase(context.Context, string) 
 func (s *stubKBRepoForModelDelete) CountByVectorStoreID(context.Context, *gorm.DB, uint64, string) (int64, error) {
 	return 0, nil
 }
-func (s *stubKBRepoForModelDelete) CountByModelID(context.Context, uint64, string) (int64, error) {
+func (s *stubKBRepoForModelDelete) CountByModelID(_ context.Context, tenantID uint64, _ string) (int64, error) {
+	if s.countScope != nil {
+		*s.countScope = tenantID
+	}
 	if s.count != nil {
 		return *s.count, s.usageErr
 	}
@@ -53,8 +58,11 @@ func (s *stubKBRepoForModelDelete) CountByModelID(context.Context, uint64, strin
 }
 
 func (s *stubKBRepoForModelDelete) ListModelUsages(
-	context.Context, uint64, string,
+	_ context.Context, tenantID uint64, _ string,
 ) ([]types.ModelUsageResource, error) {
+	if s.listScope != nil {
+		*s.listScope = tenantID
+	}
 	return s.usages, s.usageErr
 }
 func (s *stubKBRepoForModelDelete) SetUserKBPin(context.Context, uint64, string, string, bool) (*time.Time, error) {
@@ -65,9 +73,10 @@ func (s *stubKBRepoForModelDelete) ListUserKBPinIDs(context.Context, uint64, str
 }
 
 type stubAgentRepoForModelDelete struct {
-	usages   []types.ModelUsageResource
-	count    *int64
-	usageErr error
+	usages     []types.ModelUsageResource
+	count      *int64
+	countScope *uint64
+	usageErr   error
 }
 
 func (s *stubAgentRepoForModelDelete) CreateAgent(context.Context, *types.CustomAgent) error {
@@ -83,7 +92,10 @@ func (s *stubAgentRepoForModelDelete) UpdateAgent(context.Context, *types.Custom
 	return nil
 }
 func (s *stubAgentRepoForModelDelete) DeleteAgent(context.Context, string, uint64) error { return nil }
-func (s *stubAgentRepoForModelDelete) CountByModelID(context.Context, uint64, string) (int64, error) {
+func (s *stubAgentRepoForModelDelete) CountByModelID(_ context.Context, tenantID uint64, _ string) (int64, error) {
+	if s.countScope != nil {
+		*s.countScope = tenantID
+	}
 	if s.count != nil {
 		return *s.count, s.usageErr
 	}
@@ -371,6 +383,48 @@ func TestDeleteModel_RuntimeOverrideUsesPersistedLegacyTenantScope(t *testing.T)
 
 	require.NoError(t, svc.DeleteModel(tenantlessSystemAdminModelContext(), modelID))
 	assert.Equal(t, uint64(10000), deletedTenantID)
+}
+
+func TestDeleteModel_SelectedTenantCannotNarrowGlobalUsageGuard(t *testing.T) {
+	modelID := "manual-global"
+	kbCount := int64(1)
+	kbCountScope, kbListScope, agentCountScope := uint64(99), uint64(99), uint64(99)
+	deleted := false
+	ctx := builtinModelContext(true)
+	ctx = types.WithTenantAPIKeyScope(ctx, types.TenantAPIKeyScope{
+		KeyID:      9,
+		ScopeType:  types.APIKeyScopePlatform,
+		FullAccess: true,
+	})
+	svc := NewModelService(
+		&stubModelRepoForDelete{
+			model: &types.Model{ID: modelID, TenantID: 10000, IsBuiltin: true},
+			delete: func(string) error {
+				deleted = true
+				return nil
+			},
+		},
+		&stubKBRepoForModelDelete{
+			usages: []types.ModelUsageResource{{
+				ID: "other-enterprise-kb", Name: "Other enterprise", Bindings: []types.ModelUsageBinding{types.ModelUsageBindingEmbeddingModel},
+			}},
+			count:      &kbCount,
+			countScope: &kbCountScope,
+			listScope:  &kbListScope,
+		},
+		&stubAgentRepoForModelDelete{countScope: &agentCountScope},
+		nil, nil, &stubTenantServiceForModelDelete{},
+	)
+
+	err := svc.DeleteModel(ctx, modelID)
+	require.Error(t, err)
+	assert.False(t, deleted)
+	assert.Zero(t, kbCountScope)
+	assert.Zero(t, kbListScope)
+	assert.Zero(t, agentCountScope)
+	appErr, ok := apperrors.IsAppError(err)
+	require.True(t, ok)
+	assert.Equal(t, apperrors.ErrModelInUse, appErr.Code)
 }
 
 func TestDeleteModel_YAMLManagedBuiltinIsProtected(t *testing.T) {

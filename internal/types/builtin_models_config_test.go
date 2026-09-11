@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -84,6 +85,7 @@ func TestLoadBuiltinModelsConfig_ParseError(t *testing.T) {
 }
 
 func TestLoadBuiltinModelsConfig_BasicUpsert(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", strings.Repeat("k", 32))
 	db := setupBuiltinModelsDB(t)
 	dir := writeYAML(t, `builtin_models:
   - id: builtin-llm
@@ -151,6 +153,7 @@ func TestLoadBuiltinModelsConfig_PreservesRuntimeOverride(t *testing.T) {
 }
 
 func TestLoadBuiltinModelsConfig_EnvInterpolation(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", strings.Repeat("k", 32))
 	db := setupBuiltinModelsDB(t)
 	t.Setenv("BUILTIN_TEST_KEY", "sk-from-env")
 	dir := writeYAML(t, `builtin_models:

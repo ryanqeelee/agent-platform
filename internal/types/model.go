@@ -3,12 +3,21 @@ package types
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+)
+
+// ErrModelCredentialEncryptionUnavailable prevents ModelParameters from
+// silently degrading secret storage to plaintext when SYSTEM_AES_KEY is
+// missing or invalid.
+var ErrModelCredentialEncryptionUnavailable = errors.New(
+	"SYSTEM_AES_KEY is not configured correctly; refusing to store model credentials in plaintext",
 )
 
 // ModelType represents the type of AI model
@@ -221,17 +230,26 @@ type Model struct {
 // Value implements the driver.Valuer interface, used to convert ModelParameters to database value.
 // Encrypts APIKey and AppSecret before persisting to database (value receiver = no memory pollution).
 func (c ModelParameters) Value() (driver.Value, error) {
-	if key := utils.GetAESKey(); key != nil {
-		if c.APIKey != "" {
-			if encrypted, err := utils.EncryptAESGCM(c.APIKey, key); err == nil {
-				c.APIKey = encrypted
-			}
+	if c.APIKey == "" && c.AppSecret == "" {
+		return json.Marshal(c)
+	}
+	key := utils.GetAESKey()
+	if key == nil {
+		return nil, ErrModelCredentialEncryptionUnavailable
+	}
+	if c.APIKey != "" {
+		encrypted, err := utils.EncryptAESGCM(c.APIKey, key)
+		if err != nil {
+			return nil, fmt.Errorf("encrypt model api key: %w", err)
 		}
-		if c.AppSecret != "" {
-			if encrypted, err := utils.EncryptAESGCM(c.AppSecret, key); err == nil {
-				c.AppSecret = encrypted
-			}
+		c.APIKey = encrypted
+	}
+	if c.AppSecret != "" {
+		encrypted, err := utils.EncryptAESGCM(c.AppSecret, key)
+		if err != nil {
+			return nil, fmt.Errorf("encrypt model app secret: %w", err)
 		}
+		c.AppSecret = encrypted
 	}
 	return json.Marshal(c)
 }

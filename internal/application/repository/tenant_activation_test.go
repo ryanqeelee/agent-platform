@@ -95,6 +95,124 @@ func TestEnterpriseActivationIdenticalReplayAndConcurrentUniqueness(t *testing.T
 	require.Error(t, db.Create(duplicate).Error)
 }
 
+func TestEnterpriseActivationReplayUsesPersistedReceiptAfterOperationsEdits(t *testing.T) {
+	db := activationTestDB(t)
+	repo := NewTenantRepository(db)
+	createActivationUser(t, db, types.User{ID: "owner-replay", IsActive: true})
+	command := activationCommand("activation-replay", "owner-replay")
+	seats, quota := 3, int64(2048)
+	command.SeatsTotal, command.StorageQuota = &seats, &quota
+	prepared, err := repo.ApplyEnterpriseActivation(context.Background(), command)
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&types.Tenant{}).Where("id = ?", prepared.TenantID).Updates(map[string]any{
+		"name": "Renamed", "description": "Changed", "seats_total": 1, "storage_quota": 4096,
+	}).Error)
+	replayed, err := repo.ApplyEnterpriseActivation(context.Background(), command)
+	require.NoError(t, err)
+	require.Equal(t, prepared.TenantID, replayed.TenantID)
+	require.Equal(t, types.EnterpriseActivationStatePrepared, replayed.State)
+}
+
+func TestEnterpriseActivationChecksSeatBeforeInitialAdministratorBecomesActive(t *testing.T) {
+	db := activationTestDB(t)
+	repo := NewTenantRepository(db)
+	createActivationUser(t, db, types.User{ID: "owner-seat", IsActive: true})
+	command := activationCommand("activation-seat", "owner-seat")
+	seats, quota := 1, int64(0)
+	command.SeatsTotal, command.StorageQuota = &seats, &quota
+	prepared, err := repo.ApplyEnterpriseActivation(context.Background(), command)
+	require.NoError(t, err)
+	var provisioned types.Tenant
+	require.NoError(t, db.First(&provisioned, prepared.TenantID).Error)
+	require.Zero(t, provisioned.StorageQuota)
+	backendID := "backend-1"
+	require.NoError(t, db.Model(&types.Tenant{}).Where("id = ?", prepared.TenantID).
+		Update("default_storage_backend_id", backendID).Error)
+	createActivationUser(t, db, types.User{ID: "viewer-seat", TenantID: prepared.TenantID, IsActive: true})
+	require.NoError(t, db.Create(&types.TenantMember{
+		UserID: "viewer-seat", TenantID: prepared.TenantID, Role: types.TenantRoleViewer,
+		Status: types.TenantMemberStatusActive,
+	}).Error)
+	command.DesiredState = types.EnterpriseActivationStateActive
+	_, err = repo.ApplyEnterpriseActivation(context.Background(), command)
+	require.ErrorIs(t, err, ErrSeatLimitExceeded)
+}
+
+func TestFailedActivationRejectsPlatformMemberRecoveryAndRemainsReplayable(t *testing.T) {
+	db := activationTestDB(t)
+	repo := NewTenantRepository(db)
+	createActivationUser(t, db, types.User{ID: "owner-recovery", IsActive: true})
+	createActivationUser(t, db, types.User{
+		ID: "system-admin-recovery", IsActive: true, IsSystemAdmin: true,
+	})
+	command := activationCommand("activation-recovery", "owner-recovery")
+	seats, quota := 1, int64(0)
+	command.SeatsTotal, command.StorageQuota = &seats, &quota
+	prepared, err := repo.ApplyEnterpriseActivation(context.Background(), command)
+	require.NoError(t, err)
+
+	command.DesiredState = types.EnterpriseActivationStateActive
+	_, err = repo.ApplyEnterpriseActivation(context.Background(), command)
+	require.ErrorIs(t, err, ErrEnterpriseActivationStorageRequired)
+
+	memberRepo := &tenantMemberRepository{db: db}
+	err = memberRepo.UpdateStatus(context.Background(), types.MemberActorAuthority{
+		UserID: "system-admin-recovery", SystemAdministrator: true,
+	}, "owner-recovery", prepared.TenantID, types.TenantMemberStatusActive)
+	require.ErrorIs(t, err, ErrEnterpriseNotActive)
+
+	backendID := "backend-recovery"
+	require.NoError(t, db.Model(&types.Tenant{}).Where("id = ?", prepared.TenantID).
+		Update("default_storage_backend_id", backendID).Error)
+	activated, err := repo.ApplyEnterpriseActivation(context.Background(), command)
+	require.NoError(t, err)
+	require.Equal(t, types.EnterpriseActivationStateActive, activated.State)
+
+	var ownerMembership types.TenantMember
+	require.NoError(t, db.Where("user_id = ? AND tenant_id = ?", "owner-recovery", prepared.TenantID).
+		Take(&ownerMembership).Error)
+	require.Equal(t, types.TenantMemberStatusActive, ownerMembership.Status)
+}
+
+func TestActiveActivationReplaySurvivesLegitimateInitialAdministratorChanges(t *testing.T) {
+	db := activationTestDB(t)
+	repo := NewTenantRepository(db)
+	createActivationUser(t, db, types.User{ID: "owner-completed-replay", IsActive: true})
+	createActivationUser(t, db, types.User{
+		ID: "system-admin-completed-replay", IsActive: true, IsSystemAdmin: true,
+	})
+	command := activationCommand("activation-completed-replay", "owner-completed-replay")
+	seats, quota := 2, int64(0)
+	command.SeatsTotal, command.StorageQuota = &seats, &quota
+	prepared, err := repo.ApplyEnterpriseActivation(context.Background(), command)
+	require.NoError(t, err)
+	backendID := "backend-completed-replay"
+	require.NoError(t, db.Model(&types.Tenant{}).Where("id = ?", prepared.TenantID).
+		Update("default_storage_backend_id", backendID).Error)
+	command.DesiredState = types.EnterpriseActivationStateActive
+	active, err := repo.ApplyEnterpriseActivation(context.Background(), command)
+	require.NoError(t, err)
+
+	createActivationUser(t, db, types.User{
+		ID: "replacement-admin", TenantID: prepared.TenantID, IsActive: true,
+	})
+	require.NoError(t, db.Create(&types.TenantMember{
+		UserID: "replacement-admin", TenantID: prepared.TenantID,
+		Role: types.TenantRoleAdmin, Status: types.TenantMemberStatusActive,
+	}).Error)
+	memberRepo := &tenantMemberRepository{db: db}
+	actor := types.MemberActorAuthority{UserID: "system-admin-completed-replay", SystemAdministrator: true}
+	require.NoError(t, memberRepo.UpdateRole(
+		context.Background(), actor, "owner-completed-replay", prepared.TenantID, types.TenantRoleViewer))
+	require.NoError(t, memberRepo.UpdateStatus(
+		context.Background(), actor, "owner-completed-replay", prepared.TenantID, types.TenantMemberStatusSuspended))
+
+	replayed, err := repo.ApplyEnterpriseActivation(context.Background(), command)
+	require.NoError(t, err)
+	require.Equal(t, types.EnterpriseActivationStateActive, replayed.State)
+	require.Equal(t, active.OwnerMembershipID, replayed.OwnerMembershipID)
+}
+
 func TestEnterpriseActivationConcurrentPostgres(t *testing.T) {
 	newDatabase := func(t *testing.T) *gorm.DB {
 		t.Helper()
@@ -201,8 +319,6 @@ func TestEnterpriseActivationReceiptConflictsDoNotMutate(t *testing.T) {
 	}{
 		{name: "digest", mutate: func(c *interfaces.EnterpriseActivationCommand) { c.RequestSHA256 = strings.Repeat("b", 64) }},
 		{name: "owner", mutate: func(c *interfaces.EnterpriseActivationCommand) { c.FirstOwnerUserID = "owner-2" }},
-		{name: "tenant name", mutate: func(c *interfaces.EnterpriseActivationCommand) { c.TenantName = "Other" }},
-		{name: "tenant description", mutate: func(c *interfaces.EnterpriseActivationCommand) { c.TenantDescription = "Other" }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

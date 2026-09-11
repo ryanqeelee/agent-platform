@@ -49,6 +49,8 @@ var (
 	// ErrMembershipAlreadyExists is returned by AddMember when the
 	// (user, tenant) pair already has an active membership.
 	ErrMembershipAlreadyExists = errors.New("tenant membership already exists")
+	ErrSeatLimitExceeded       = errors.New("企业席位已满")
+	ErrEnterpriseNotActive     = errors.New("企业未处于可用状态")
 
 	// ErrUserBoundToAnotherEnterprise keeps one account bound to one company.
 	ErrUserBoundToAnotherEnterprise = errors.New("user already belongs to another enterprise")
@@ -133,6 +135,10 @@ func actorRole(ctx context.Context) types.TenantRole {
 }
 
 func managedActor(ctx context.Context) types.MemberActorAuthority {
+	if types.IsSystemAdminFromContext(ctx) {
+		id, _ := types.UserIDFromContext(ctx)
+		return types.MemberActorAuthority{UserID: id, SystemAdministrator: true}
+	}
 	if scope, ok := types.TenantAPIKeyScopeFromContext(ctx); ok &&
 		(scope.FullAccess || scope.HasCapability(types.APIKeyCapabilityManageMembers)) {
 		return types.MemberActorAuthority{ServicePrincipal: true}
@@ -152,6 +158,10 @@ func managedActor(ctx context.Context) types.MemberActorAuthority {
 
 func mapMemberMutationError(err error) error {
 	switch {
+	case errors.Is(err, apprepo.ErrSeatLimitExceeded):
+		return ErrSeatLimitExceeded
+	case errors.Is(err, apprepo.ErrEnterpriseNotActive):
+		return ErrEnterpriseNotActive
 	case errors.Is(err, apprepo.ErrLastAdministrator):
 		return ErrLastAdministrator
 	case errors.Is(err, apprepo.ErrCannotManageSelf):
@@ -213,6 +223,12 @@ func (s *tenantMemberService) AddMember(
 		JoinedAt:  time.Now(),
 	}
 	if err := s.repo.CreateManaged(ctx, managedActor(ctx), member); err != nil {
+		if errors.Is(err, apprepo.ErrMemberActionForbidden) {
+			return nil, ErrMemberActionForbidden
+		}
+		if errors.Is(err, apprepo.ErrSeatLimitExceeded) {
+			return nil, ErrSeatLimitExceeded
+		}
 		if errors.Is(err, apprepo.ErrUserBoundToAnotherEnterprise) {
 			return nil, ErrUserBoundToAnotherEnterprise
 		}

@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -21,23 +23,24 @@ var versionedSQLiteTables = []string{
 	"knowledge_tag_relations",
 	"memory_command_receipts",
 	"memory_expressions",
+	"platform_initial_administrator_receipts",
 }
 
 // versionedSQLiteColumns maps each existing table to the columns that the
 // versioned migrations add and the SQLite baseline was missing.
 var versionedSQLiteColumns = map[string][]string{
-	"tenants":            {"api_principal_config", "memory_generation"}, // 000064, 000101
-	"users":              {"is_system_admin"},                           // 000053
-	"knowledges":         {"pending_subtasks_count"},                    // 000056
-	"messages":           {"attachments", "usage"},                      // 000034, 000085
-	"tenant_invitations": {"token", "accepted_count"},                   // 000054
-	"embed_channels":     {"allow_memory"},                              // 000060
-	"mcp_oauth_tokens":   {"principal_type", "principal_id"},            // 000064
-	"memory_subjects":    {"generation", "revision"},                    // 000101
-	"memory_items":       {"scope"},                                     // 000101
+	"tenants":            {"api_principal_config", "memory_generation", "seats_total"}, // 000064, 000101, 000023
+	"users":              {"is_system_admin"},                                          // 000053
+	"knowledges":         {"pending_subtasks_count"},                                   // 000056
+	"messages":           {"attachments", "usage"},                                     // 000034, 000085
+	"tenant_invitations": {"token", "accepted_count"},                                  // 000054
+	"embed_channels":     {"allow_memory"},                                             // 000060
+	"mcp_oauth_tokens":   {"principal_type", "principal_id"},                           // 000064
+	"memory_subjects":    {"generation", "revision"},                                   // 000101
+	"memory_items":       {"scope"},                                                    // 000101
 }
 
-const expectedSQLiteMigrationVersion = 22
+const expectedSQLiteMigrationVersion = 25
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
@@ -132,6 +135,41 @@ func TestSQLiteMigrationsUpgradeV4PreservesData(t *testing.T) {
 	).Scan(&relationCount))
 	require.Equal(t, 1, relationCount)
 	require.False(t, sqliteColumnExists(t, db, "knowledges", "tag_id"))
+}
+
+func TestSQLitePlatformIdentityMigrationNormalizesLegacyMixedIdentity(t *testing.T) {
+	repoRoot := sqliteRepoRoot(t)
+	legacyRoot := copySQLiteMigrationsThrough(t, repoRoot, 24)
+	chdirAndRestore(t, legacyRoot)
+
+	dbPath := filepath.Join(t.TempDir(), "platform-identity.db")
+	require.NoError(t, RunMigrationsWithOptions("sqlite3://unused", MigrationOptions{SQLiteDBPath: dbPath}))
+	db := openSQLiteDB(t, dbPath)
+	_, err := db.Exec("INSERT INTO tenants (name, business) VALUES (?, ?)", "Acme", "migration-test")
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO users
+		(id, username, email, password_hash, tenant_id, is_active, can_access_all_tenants, is_system_admin)
+		VALUES ('legacy-platform', 'legacy-platform', 'legacy@example.invalid', 'unused', 1, 1, 1, 1)`)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO tenant_members (user_id, tenant_id, role, status)
+		VALUES ('legacy-platform', 1, 'admin', 'active')`)
+	require.NoError(t, err)
+
+	chdirAndRestore(t, repoRoot)
+	require.NoError(t, RunMigrationsWithOptions("sqlite3://unused", MigrationOptions{SQLiteDBPath: dbPath}))
+
+	var tenantID sql.NullInt64
+	var crossTenant bool
+	require.NoError(t, db.QueryRow(
+		"SELECT tenant_id, can_access_all_tenants FROM users WHERE id = 'legacy-platform'",
+	).Scan(&tenantID, &crossTenant))
+	require.False(t, tenantID.Valid)
+	require.False(t, crossTenant)
+	var deletedAt sql.NullString
+	require.NoError(t, db.QueryRow(
+		"SELECT deleted_at FROM tenant_members WHERE user_id = 'legacy-platform'",
+	).Scan(&deletedAt))
+	require.True(t, deletedAt.Valid)
 }
 
 func sqliteRepoRoot(t *testing.T) string {
@@ -259,6 +297,30 @@ func copySQLiteMigrationsV4(t *testing.T, repoRoot string) string {
 		"000004_knowledge_access_roles.up.sql",
 	}
 	for _, name := range legacy {
+		data, err := os.ReadFile(filepath.Join(srcDir, name))
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(destDir, name), data, 0o600))
+	}
+	return dest
+}
+
+func copySQLiteMigrationsThrough(t *testing.T, repoRoot string, maxVersion int) string {
+	t.Helper()
+	dest := t.TempDir()
+	srcDir := filepath.Join(repoRoot, "migrations", "sqlite")
+	destDir := filepath.Join(dest, "migrations", "sqlite")
+	require.NoError(t, os.MkdirAll(destDir, 0o755))
+	entries, err := os.ReadDir(srcDir)
+	require.NoError(t, err)
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".up.sql") || len(name) < 6 {
+			continue
+		}
+		version, err := strconv.Atoi(name[:6])
+		if err != nil || version > maxVersion {
+			continue
+		}
 		data, err := os.ReadFile(filepath.Join(srcDir, name))
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(filepath.Join(destDir, name), data, 0o600))

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -23,9 +24,11 @@ func (s *oldTenantlessTokenUserService) ValidateToken(context.Context, string) (
 type activationStatusTenantService struct {
 	interfaces.TenantService
 	tenant *types.Tenant
+	calls  int
 }
 
 func (s *activationStatusTenantService) GetTenantByID(context.Context, uint64) (*types.Tenant, error) {
+	s.calls++
 	return s.tenant, nil
 }
 
@@ -110,6 +113,96 @@ func TestTenantlessSystemAdminControlPlaneAdmission(t *testing.T) {
 	}
 }
 
+func TestPlatformOperationsSystemAdminUsesIdentityOnlyContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	user := &types.User{ID: "operator", TenantID: 7, IsActive: true, IsSystemAdmin: true}
+	tenantService := &activationStatusTenantService{tenant: &types.Tenant{
+		ID: user.TenantID, Status: types.TenantStatusSuspended,
+	}}
+
+	for _, tc := range []struct {
+		path       string
+		wantStatus int
+	}{
+		{path: "/api/v1/system/admin/operations/enterprises", wantStatus: http.StatusNoContent},
+		{path: "/api/v1/system/admin/api-keys", wantStatus: http.StatusNoContent},
+		{path: "/api/v1/system/admin/operations-legacy/enterprises", wantStatus: http.StatusNoContent},
+		{path: "/api/v1/knowledge-bases", wantStatus: http.StatusConflict},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			router := gin.New()
+			router.Use(Auth(tenantService, &oldTenantlessTokenUserService{user: user}, nil, nil, nil))
+			router.GET(tc.path, RequireSystemAdmin(nil), func(c *gin.Context) {
+				if _, ok := types.TenantIDFromContext(c.Request.Context()); ok {
+					t.Fatal("platform operations request gained tenant context")
+				}
+				c.Status(http.StatusNoContent)
+			})
+			request := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			request.Header.Set("Authorization", "Bearer system-admin-token")
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			if response.Code != tc.wantStatus {
+				t.Fatalf("status=%d want=%d body=%s", response.Code, tc.wantStatus, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestLegacySystemAdminIgnoresEnterpriseContextBeforeTenantResolution(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	user := &types.User{ID: "operator", TenantID: 7, IsActive: true, IsSystemAdmin: true}
+	tenantService := &activationStatusTenantService{tenant: &types.Tenant{
+		ID: user.TenantID, Status: types.TenantStatusSuspended,
+	}}
+	router := gin.New()
+	router.Use(Auth(tenantService, &oldTenantlessTokenUserService{user: user}, nil, nil, nil))
+	router.GET("/api/v1/auth/me", func(c *gin.Context) {
+		if _, ok := types.TenantIDFromContext(c.Request.Context()); ok {
+			t.Fatal("auth/me gained tenant context from legacy identity")
+		}
+		if !types.IsSystemAdminFromContext(c.Request.Context()) {
+			t.Fatal("auth/me lost platform authority")
+		}
+		c.Status(http.StatusNoContent)
+	})
+	enterpriseHandlerCalled := false
+	router.GET("/api/v1/knowledge-bases", func(c *gin.Context) {
+		enterpriseHandlerCalled = true
+		if _, ok := types.TenantIDFromContext(c.Request.Context()); ok {
+			t.Fatal("enterprise API gained tenant context")
+		}
+		c.Status(http.StatusNoContent)
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+	request.Header.Set("Authorization", "Bearer legacy-system-admin-token")
+	request.Header.Set("X-Tenant-ID", "7")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("auth/me status=%d body=%s", response.Code, response.Body.String())
+	}
+	if tenantService.calls != 0 {
+		t.Fatalf("auth/me resolved tenant %d time(s), want 0", tenantService.calls)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/knowledge-bases", nil)
+	request.Header.Set("Authorization", "Bearer legacy-system-admin-token")
+	request.Header.Set("X-Tenant-ID", "7")
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "TENANT_REQUIRED") {
+		t.Fatalf("enterprise API status=%d body=%s", response.Code, response.Body.String())
+	}
+	if enterpriseHandlerCalled {
+		t.Fatal("tenant-required enterprise handler was reached")
+	}
+	if tenantService.calls != 0 {
+		t.Fatalf("enterprise API resolved tenant %d time(s), want 0", tenantService.calls)
+	}
+}
+
 func TestAuthRejectsOldTenantlessJWTAfterActivationBinding(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, status := range []string{
@@ -121,7 +214,7 @@ func TestAuthRejectsOldTenantlessJWTAfterActivationBinding(t *testing.T) {
 			user := &types.User{ID: "owner", TenantID: 7, IsActive: true}
 			members := newFakeMemberService()
 			// Keep membership usable so tenant status alone decides this old-token path.
-			members.seedActive(user.ID, user.TenantID, types.TenantRoleOwner)
+			members.seedActive(user.ID, user.TenantID, types.TenantRoleAdmin)
 			router := gin.New()
 			router.Use(Auth(
 				&activationStatusTenantService{tenant: &types.Tenant{ID: user.TenantID, Status: status}},

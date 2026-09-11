@@ -36,7 +36,7 @@ func TestEnterpriseEmployeePostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Exec("CREATE TABLE tenants (id bigint primary key, deleted_at timestamptz)").Error; err != nil {
+	if err := db.Exec("CREATE TABLE tenants (id bigint primary key, status text NOT NULL DEFAULT 'active', seats_total integer, deleted_at timestamptz)").Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.AutoMigrate(&types.User{}, &types.TenantMember{}); err != nil {

@@ -10,7 +10,14 @@ import {
   OPERATING_ANALYSIS_HANDOFF_REF_KEY,
 } from '@/api/operatingAnalysis'
 import { employeeSurfaceMinRoleForPath, SETTINGS_SECTION_MIN_ROLE } from '@/config/settingsAccess'
-import { DEFAULT_EMPLOYEE_WORKSPACE_PATH, loginDestination, safeReturnTo } from './safeReturnTo'
+import {
+  DEFAULT_EMPLOYEE_WORKSPACE_PATH,
+  loginDestination,
+  PLATFORM_OPERATIONS_PATH,
+  postLoginDestination,
+  safeReturnTo,
+  tenantRequiredRouteFallback,
+} from './safeReturnTo'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import type { DeploymentCapabilityKey } from '@/config/deploymentCapabilities'
 import { MessagePlugin } from 'tdesign-vue-next'
@@ -138,6 +145,16 @@ const router = createRouter({
       name: "workspaceOnboarding",
       component: () => import("../views/auth/WorkspaceOnboarding.vue"),
       meta: { requiresAuth: true, requiresInit: false, requiresTenant: false }
+    },
+    {
+      path: "/ops",
+      redirect: PLATFORM_OPERATIONS_PATH,
+    },
+    {
+      path: PLATFORM_OPERATIONS_PATH,
+      name: "platformOperations",
+      component: () => import("../views/operations/PlatformOperations.vue"),
+      meta: { requiresAuth: true, requiresTenant: false, requiresSystemAdmin: true },
     },
     {
       path: "/join",
@@ -461,7 +478,9 @@ router.beforeEach(async (to, from, next) => {
         return
       }
     }
-    if (authStore.hasValidTenant) {
+    if (authStore.isSystemAdmin) {
+      next(PLATFORM_OPERATIONS_PATH)
+    } else if (authStore.hasValidTenant) {
       next(DEFAULT_EMPLOYEE_WORKSPACE_PATH)
     } else {
       next()
@@ -480,7 +499,7 @@ router.beforeEach(async (to, from, next) => {
         return
       }
       const returnTo = safeReturnTo(router, to.query.returnTo)
-      next(returnTo || (authStore.hasValidTenant ? DEFAULT_EMPLOYEE_WORKSPACE_PATH : '/onboarding/workspace'))
+      next(postLoginDestination(router, returnTo, authStore.hasValidTenant, authStore.isSystemAdmin))
       return
     }
     next()
@@ -492,11 +511,13 @@ router.beforeEach(async (to, from, next) => {
     if (!authStore.isLoggedIn) {
       const restored = await hydrateSessionFromToken(authStore)
       if (restored) {
-        next(
-          !authStore.hasValidTenant && to.meta.requiresTenant !== false
-            ? '/onboarding/workspace'
-            : to.fullPath,
-        )
+        const fallback = to.meta.requiresTenant === false
+          ? null
+          : tenantRequiredRouteFallback(
+              authStore.hasValidTenant,
+              authStore.isSystemAdmin,
+            )
+        next(fallback || to.fullPath)
         return
       }
 
@@ -521,9 +542,15 @@ router.beforeEach(async (to, from, next) => {
     }
   }
 
-  if (to.meta.requiresTenant !== false && !authStore.hasValidTenant) {
-    next('/onboarding/workspace')
-    return
+  if (to.meta.requiresTenant !== false) {
+    const fallback = tenantRequiredRouteFallback(
+      authStore.hasValidTenant,
+      authStore.isSystemAdmin,
+    )
+    if (fallback) {
+      next(fallback)
+      return
+    }
   }
 
   // This only keeps the employee UI coherent with the product-surface policy.

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -11,12 +12,13 @@ import (
 )
 
 var (
-	ErrUserNotFound       = errors.New("user not found")
-	ErrUserAlreadyExists  = errors.New("user already exists")
-	ErrTokenNotFound      = errors.New("token not found")
-	ErrCannotRevokeSelf   = errors.New("cannot revoke your own system admin privileges")
-	ErrLastSystemAdmin    = errors.New("cannot revoke the last remaining system administrator")
-	ErrUserNotSystemAdmin = errors.New("user is not a system administrator")
+	ErrUserNotFound                  = errors.New("user not found")
+	ErrUserAlreadyExists             = errors.New("user already exists")
+	ErrTokenNotFound                 = errors.New("token not found")
+	ErrCannotRevokeSelf              = errors.New("cannot revoke your own system admin privileges")
+	ErrLastSystemAdmin               = errors.New("cannot revoke the last remaining system administrator")
+	ErrUserNotSystemAdmin            = errors.New("user is not a system administrator")
+	ErrSystemAdminEnterpriseIdentity = errors.New("system administrator must be a tenantless platform identity")
 )
 
 // userRepository implements user repository interface
@@ -31,12 +33,20 @@ func NewUserRepository(db *gorm.DB) interfaces.UserRepository {
 
 // CreateUser creates a user
 func (r *userRepository) CreateUser(ctx context.Context, user *types.User) error {
+	if user == nil {
+		return errors.New("user is required")
+	}
+	if user.IsSystemAdmin {
+		if user.TenantID != 0 || user.CanAccessAllTenants || isSpecialEnterpriseUserID(user.ID) {
+			return ErrSystemAdminEnterpriseIdentity
+		}
+	}
 	// users.tenant_id is nullable in both PostgreSQL and SQLite. GORM would
 	// otherwise serialise the uint64 zero value as 0, which violates the
 	// PostgreSQL FK and loses the distinction between "not provisioned yet"
 	// and a real tenant. Omitting the column stores SQL NULL; reads hydrate it
 	// back as zero, the domain sentinel used by tenantless auth flows.
-	if user != nil && user.TenantID == 0 {
+	if user.TenantID == 0 {
 		return r.db.WithContext(ctx).Omit("tenant_id").Create(user).Error
 	}
 	return r.db.WithContext(ctx).Create(user).Error
@@ -112,8 +122,30 @@ func (r *userRepository) GetUserByTenantID(ctx context.Context, tenantID uint64)
 
 // UpdateUser updates a user
 func (r *userRepository) UpdateUser(ctx context.Context, user *types.User) error {
-	if user != nil && user.TenantID == 0 {
-		return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	if user == nil {
+		return errors.New("user is required")
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current types.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", user.ID).Take(&current).Error; err != nil {
+			return err
+		}
+		// Identity authority and enterprise binding have dedicated transactional
+		// commands. A stale profile/preferences object must never grant, revoke,
+		// or move those fields through this general update path.
+		user.IsSystemAdmin = current.IsSystemAdmin
+		user.CanAccessAllTenants = current.CanAccessAllTenants
+		user.IsActive = current.IsActive
+		user.PasswordHash = current.PasswordHash
+		if current.IsSystemAdmin {
+			// Platform identities are always tenantless. This also normalizes a
+			// legacy mixed row when it passes through the general profile path.
+			user.TenantID = 0
+			user.CanAccessAllTenants = false
+		} else if current.TenantID != 0 {
+			user.TenantID = current.TenantID
+		}
+		if user.TenantID == 0 {
 			// Preserve Save's all-fields behaviour while keeping the nullable
 			// tenant column out of the struct write, then explicitly store NULL.
 			// Writing uint64(0) would violate the PostgreSQL tenant FK.
@@ -123,9 +155,78 @@ func (r *userRepository) UpdateUser(ctx context.Context, user *types.User) error
 			return tx.Model(&types.User{}).
 				Where("id = ?", user.ID).
 				UpdateColumn("tenant_id", nil).Error
-		})
-	}
-	return r.db.WithContext(ctx).Save(user).Error
+		}
+		return tx.Save(user).Error
+	})
+}
+
+func (r *userRepository) UpdateCredential(
+	ctx context.Context,
+	userID, passwordHash string,
+	preferences *types.UserPreferences,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current types.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").
+			Where("id = ?", userID).Take(&current).Error; err != nil {
+			return err
+		}
+		updates := map[string]any{"password_hash": passwordHash, "updated_at": time.Now()}
+		if preferences != nil {
+			updates["preferences"] = *preferences
+		}
+		res := tx.Model(&types.User{}).Where("id = ?", userID).Updates(updates)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected != 1 {
+			return ErrUserNotFound
+		}
+		return nil
+	})
+}
+
+func (r *userRepository) PromoteSystemAdmin(ctx context.Context, userID string) (*types.User, error) {
+	var promoted types.User
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", userID).Take(&promoted).Error; err != nil {
+			return err
+		}
+		if promoted.IsSystemAdmin {
+			if promoted.TenantID != 0 || promoted.CanAccessAllTenants || isSpecialEnterpriseUserID(promoted.ID) {
+				return ErrSystemAdminEnterpriseIdentity
+			}
+			return nil
+		}
+		if !promoted.IsActive || promoted.TenantID != 0 || promoted.CanAccessAllTenants || isSpecialEnterpriseUserID(promoted.ID) {
+			return ErrSystemAdminEnterpriseIdentity
+		}
+		var memberships int64
+		if err := tx.Model(&types.TenantMember{}).Where("user_id = ?", promoted.ID).Count(&memberships).Error; err != nil {
+			return err
+		}
+		if memberships != 0 {
+			return ErrSystemAdminEnterpriseIdentity
+		}
+		res := tx.Model(&types.User{}).Where("id = ? AND is_system_admin = ?", promoted.ID, false).
+			Updates(map[string]any{
+				"is_system_admin":        true,
+				"tenant_id":              nil,
+				"can_access_all_tenants": false,
+				"updated_at":             time.Now(),
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected != 1 {
+			return ErrSystemAdminEnterpriseIdentity
+		}
+		promoted.IsSystemAdmin = true
+		promoted.TenantID = 0
+		promoted.CanAccessAllTenants = false
+		return nil
+	})
+	return &promoted, err
 }
 
 // DeleteUser deletes a user
@@ -249,10 +350,23 @@ func (r *userRepository) RevokeSystemAdmin(ctx context.Context, userID, actorID 
 			return ErrLastSystemAdmin
 		}
 
-		user.IsSystemAdmin = false
-		if err := tx.Save(&user).Error; err != nil {
-			return err
+		now := time.Now()
+		res := tx.Model(&types.User{}).
+			Where("id = ? AND is_system_admin = ? AND (tenant_id IS NULL OR tenant_id = 0)", user.ID, true).
+			Updates(map[string]any{
+				"is_system_admin":        false,
+				"can_access_all_tenants": false,
+				"updated_at":             now,
+			})
+		if res.Error != nil {
+			return res.Error
 		}
+		if res.RowsAffected != 1 {
+			return ErrSystemAdminEnterpriseIdentity
+		}
+		user.IsSystemAdmin = false
+		user.CanAccessAllTenants = false
+		user.UpdatedAt = now
 		revoked = &user
 		return nil
 	})

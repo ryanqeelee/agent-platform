@@ -31,9 +31,15 @@ func (s *userService) CreateEnterpriseEmployee(ctx context.Context, tenantID uin
 
 func (s *tenantMemberService) CreateEmployee(ctx context.Context, user *types.User) (*types.TenantMember, error) {
 	actorID, _ := types.UserIDFromContext(ctx)
-	actor := types.MemberActorAuthority{UserID: actorID}
+	actor := managedActor(ctx)
 	member := &types.TenantMember{UserID: user.ID, TenantID: user.TenantID, Role: types.TenantRoleViewer, Status: types.TenantMemberStatusActive, InvitedBy: &actorID, JoinedAt: time.Now()}
 	if err := s.repo.CreateEmployee(ctx, actor, user, member); err != nil {
+		if errors.Is(err, apprepo.ErrSeatLimitExceeded) {
+			return nil, ErrSeatLimitExceeded
+		}
+		if errors.Is(err, apprepo.ErrEnterpriseNotActive) {
+			return nil, ErrEnterpriseNotActive
+		}
 		if isDuplicateMembership(err) {
 			return nil, ErrUserIdentityConflict
 		}

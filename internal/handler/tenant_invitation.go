@@ -341,6 +341,8 @@ func (h *TenantInvitationHandler) CreateInvitation(c *gin.Context) {
 			c.Error(apperrors.NewConflictError(err.Error()))
 		case errors.Is(err, service.ErrAlreadyMember):
 			c.Error(apperrors.NewConflictError(err.Error()))
+		case errors.Is(err, service.ErrSeatLimitExceeded):
+			c.Error(apperrors.NewConflictError(err.Error()))
 		default:
 			logger.Errorf(ctx, "CreateInvitation failed: user=%s tenant=%d err=%v",
 				user.ID, tenantID, err)
@@ -650,6 +652,10 @@ func (h *TenantInvitationHandler) AcceptMyInvitationByToken(c *gin.Context) {
 				Message:  "invitation link is invalid or has been revoked",
 				HTTPCode: http.StatusGone,
 			})
+		case errors.Is(err, service.ErrSeatLimitExceeded), errors.Is(err, service.ErrUserBoundToAnotherEnterprise), errors.Is(err, service.ErrAlreadyMember):
+			c.Error(apperrors.NewConflictError(err.Error()))
+		case errors.Is(err, service.ErrInvitationForbidden):
+			c.Error(apperrors.NewForbiddenError(err.Error()))
 		default:
 			logger.Errorf(ctx, "AcceptMyInvitationByToken failed: user=%s err=%v", caller, err)
 			c.Error(apperrors.NewInternalServerError("failed to accept invitation").WithDetails(err.Error()))

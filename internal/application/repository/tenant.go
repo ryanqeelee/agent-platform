@@ -19,6 +19,8 @@ var (
 	ErrTenantHasKnowledgeBase              = errors.New("tenant has associated knowledge bases")
 	ErrEnterpriseActivationConflict        = errors.New("repository: enterprise activation conflict")
 	ErrEnterpriseActivationStorageRequired = errors.New("repository: enterprise activation default storage required")
+	ErrSeatLimitBelowUsage                 = errors.New("repository: seat limit is below active usage")
+	ErrEnterpriseStatusImmutable           = errors.New("repository: enterprise lifecycle status is not mutable")
 )
 
 // tenantRepository implements tenant repository interface
@@ -28,6 +30,10 @@ type tenantRepository struct {
 
 // NewTenantRepository creates a new tenant repository
 func NewTenantRepository(db *gorm.DB) interfaces.TenantRepository {
+	return &tenantRepository{db: db}
+}
+
+func NewPlatformOperationsTenantRepository(db *gorm.DB) interfaces.PlatformOperationsTenantRepository {
 	return &tenantRepository{db: db}
 }
 
@@ -57,6 +63,8 @@ func activationStateFromTenantStatus(status string) (types.EnterpriseActivationS
 	case types.TenantStatusProvisioning:
 		return types.EnterpriseActivationStatePrepared, true
 	case types.TenantStatusActive:
+		return types.EnterpriseActivationStateActive, true
+	case types.TenantStatusSuspended:
 		return types.EnterpriseActivationStateActive, true
 	case types.TenantStatusActivationAbandoned:
 		return types.EnterpriseActivationStateAbandoned, true
@@ -92,14 +100,33 @@ func applyExistingActivation(
 	if tenant.DeletedAt.Valid || tenant.RingxunActivationRequestSHA256 == nil ||
 		*tenant.RingxunActivationRequestSHA256 != command.RequestSHA256 ||
 		tenant.RingxunInitialOwnerUserID == nil ||
-		*tenant.RingxunInitialOwnerUserID != command.FirstOwnerUserID ||
-		tenant.Name != command.TenantName || tenant.Description != command.TenantDescription {
+		*tenant.RingxunInitialOwnerUserID != command.FirstOwnerUserID {
 		return nil, enterpriseActivationConflict("activation receipt does not match the request")
 	}
 
 	state, ok := activationStateFromTenantStatus(tenant.Status)
 	if !ok {
 		return nil, enterpriseActivationConflict("activation receipt has an invalid tenant status")
+	}
+	if state == types.EnterpriseActivationStateActive {
+		var member types.TenantMember
+		if err := tx.WithContext(ctx).Unscoped().Select("id").
+			Where("user_id = ? AND tenant_id = ?", command.FirstOwnerUserID, tenant.ID).
+			Order("created_at ASC, id ASC").Take(&member).Error; err != nil {
+			return nil, enterpriseActivationConflict("initial owner receipt is unavailable")
+		}
+		current := &interfaces.EnterpriseActivationResult{
+			ActivationID: command.ActivationID, TenantID: tenant.ID, OwnerMembershipID: member.ID,
+			RequestSHA256: command.RequestSHA256, State: state,
+		}
+		switch command.DesiredState {
+		case types.EnterpriseActivationStatePrepared, types.EnterpriseActivationStateActive:
+			return current, nil
+		case types.EnterpriseActivationStateAbandoned:
+			return nil, enterpriseActivationConflict("active activation cannot be abandoned")
+		default:
+			return nil, enterpriseActivationConflict("invalid desired activation state")
+		}
 	}
 
 	var user types.User
@@ -120,11 +147,7 @@ func applyExistingActivation(
 	if member.Role != types.TenantRoleAdmin {
 		return nil, enterpriseActivationConflict("initial owner membership is not owner")
 	}
-	expectedMemberStatus := types.TenantMemberStatusSuspended
-	if state == types.EnterpriseActivationStateActive {
-		expectedMemberStatus = types.TenantMemberStatusActive
-	}
-	if member.Status != expectedMemberStatus {
+	if member.Status != types.TenantMemberStatusSuspended {
 		return nil, enterpriseActivationConflict("tenant and owner membership states disagree")
 	}
 	current := &interfaces.EnterpriseActivationResult{
@@ -149,6 +172,9 @@ func applyExistingActivation(
 		case types.EnterpriseActivationStatePrepared:
 			if tenant.DefaultStorageBackendID == nil || strings.TrimSpace(*tenant.DefaultStorageBackendID) == "" {
 				return current, ErrEnterpriseActivationStorageRequired
+			}
+			if err := lockTenantAndCheckSeat(ctx, tx, tenant.ID); err != nil {
+				return nil, err
 			}
 			memberUpdate := tx.WithContext(ctx).Model(&types.TenantMember{}).
 				Where("id = ? AND role = ? AND status = ?", member.ID, types.TenantRoleAdmin, types.TenantMemberStatusSuspended).
@@ -259,6 +285,10 @@ func (r *tenantRepository) ApplyEnterpriseActivation(
 			RingxunActivationID:            &activationID,
 			RingxunActivationRequestSHA256: &requestSHA,
 			RingxunInitialOwnerUserID:      &ownerID,
+			SeatsTotal:                     command.SeatsTotal,
+		}
+		if command.StorageQuota != nil {
+			tenant.StorageQuota = *command.StorageQuota
 		}
 		created := tx.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(tenant)
 		if created.Error != nil {
@@ -276,6 +306,13 @@ func (r *tenantRepository) ApplyEnterpriseActivation(
 			}
 			result, err = applyExistingActivation(ctx, tx, command, tenant)
 			return err
+		}
+		if command.StorageQuota != nil {
+			if err := tx.WithContext(ctx).Model(&types.Tenant{}).Where("id = ?", tenant.ID).
+				UpdateColumn("storage_quota", *command.StorageQuota).Error; err != nil {
+				return err
+			}
+			tenant.StorageQuota = *command.StorageQuota
 		}
 
 		bound := tx.WithContext(ctx).Model(&types.User{}).
@@ -315,6 +352,61 @@ func (r *tenantRepository) ApplyEnterpriseActivation(
 		return result, err
 	}
 	return result, nil
+}
+
+func (r *tenantRepository) UpdateForPlatformOperations(
+	ctx context.Context,
+	actorUserID string,
+	id uint64,
+	name, description, status string,
+	seatsTotal *int,
+	storageQuota int64,
+) (*types.Tenant, int64, error) {
+	var tenant types.Tenant
+	var used int64
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.WithContext(ctx).Clauses(forUpdateClause()).Where("id = ?", id).Take(&tenant).Error; err != nil {
+			return err
+		}
+		if tenant.Status != types.TenantStatusActive && tenant.Status != types.TenantStatusSuspended {
+			return ErrEnterpriseStatusImmutable
+		}
+		var actor types.User
+		if actorUserID == "" {
+			return ErrMemberActionForbidden
+		}
+		if err := tx.WithContext(ctx).Clauses(forUpdateClause()).Select("id").
+			Where("id = ? AND is_active = ? AND is_system_admin = ? AND (tenant_id IS NULL OR tenant_id = 0) AND can_access_all_tenants = ?",
+				actorUserID, true, true, false).
+			Take(&actor).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrMemberActionForbidden
+			}
+			return err
+		}
+		if err := tx.WithContext(ctx).Model(&types.TenantMember{}).
+			Where(boundEnterpriseMembership).
+			Where("tenant_id = ? AND status = ?", id, types.TenantMemberStatusActive).
+			Count(&used).Error; err != nil {
+			return err
+		}
+		if seatsTotal != nil && int64(*seatsTotal) < used {
+			return ErrSeatLimitBelowUsage
+		}
+		if err := tx.WithContext(ctx).Model(&types.Tenant{}).Where("id = ?", id).Updates(map[string]any{
+			"name": name, "description": description, "status": status, "seats_total": seatsTotal,
+			"storage_quota": storageQuota, "updated_at": time.Now(),
+		}).Error; err != nil {
+			return err
+		}
+		tenant.Name = name
+		tenant.Description = description
+		tenant.Status = status
+		tenant.SeatsTotal = seatsTotal
+		tenant.StorageQuota = storageQuota
+		return nil
+	})
+	return &tenant, used, err
 }
 
 // CreateTenant creates tenant
@@ -407,7 +499,29 @@ func (r *tenantRepository) SearchTenants(ctx context.Context, keyword string, te
 // UpdateTenant updates tenant.
 func (r *tenantRepository) UpdateTenant(ctx context.Context, tenant *types.Tenant) error {
 	return r.db.WithContext(ctx).Model(&types.Tenant{}).Where("id = ?", tenant.ID).
-		Omit("memory_config", "memory_generation").Updates(tenant).Error
+		Select(
+			"retriever_engines", "business", "context_config",
+			"web_search_config", "parser_engine_config", "credentials", "storage_engine_config",
+			"chat_history_config", "retrieval_config", "api_principal_config", "updated_at",
+		).Updates(tenant).Error
+}
+
+func (r *tenantRepository) UpdateTenantProfile(ctx context.Context, id uint64, name, description *string) error {
+	updates := map[string]any{"updated_at": time.Now()}
+	if name != nil {
+		updates["name"] = *name
+	}
+	if description != nil {
+		updates["description"] = *description
+	}
+	result := r.db.WithContext(ctx).Model(&types.Tenant{}).Where("id = ?", id).Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 func (r *tenantRepository) SetDefaultStorageBackend(ctx context.Context, tenantID uint64, backendID string) error {

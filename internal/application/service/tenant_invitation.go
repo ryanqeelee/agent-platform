@@ -236,12 +236,16 @@ func (s *tenantInvitationService) Accept(
 			return nil, ErrInvitationExpired
 		case errors.Is(err, apprepo.ErrInvitationForbidden):
 			return nil, ErrInvitationForbidden
+		case errors.Is(err, apprepo.ErrMemberActionForbidden):
+			return nil, ErrInvitationForbidden
 		case errors.Is(err, apprepo.ErrInvitationOwnerRole):
 			return nil, ErrOwnerRoleReserved
 		case errors.Is(err, apprepo.ErrInvitationMemberExists):
 			return nil, ErrAlreadyMember
 		case errors.Is(err, apprepo.ErrUserBoundToAnotherEnterprise):
 			return nil, ErrUserBoundToAnotherEnterprise
+		case errors.Is(err, apprepo.ErrSeatLimitExceeded):
+			return nil, ErrSeatLimitExceeded
 		default:
 			return nil, err
 		}
@@ -603,6 +607,9 @@ func (s *tenantInvitationService) AcceptByToken(
 		if errors.Is(err, apprepo.ErrUserBoundToAnotherEnterprise) {
 			return nil, ErrUserBoundToAnotherEnterprise
 		}
+		if errors.Is(err, apprepo.ErrMemberActionForbidden) {
+			return nil, ErrInvitationForbidden
+		}
 		if errors.Is(err, apprepo.ErrInvitationOwnerRole) {
 			return nil, ErrOwnerRoleReserved
 		}
@@ -616,6 +623,9 @@ func (s *tenantInvitationService) AcceptByToken(
 				return existing, nil
 			}
 			return nil, ErrAlreadyMember
+		}
+		if errors.Is(err, apprepo.ErrSeatLimitExceeded) {
+			return nil, ErrSeatLimitExceeded
 		}
 		logger.Errorf(ctx,
 			"share-link %d accept failed for user %s: %v",

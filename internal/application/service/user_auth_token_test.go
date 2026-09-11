@@ -53,8 +53,9 @@ func (s *stubAuthTokenRepo) RevokeTokensByUserID(_ context.Context, userID strin
 }
 
 type stubUserRepoForAuth struct {
-	users       map[string]*types.User
-	updateCalls int
+	users             map[string]*types.User
+	updateCalls       int
+	credentialUpdates int
 }
 
 func (s *stubUserRepoForAuth) CreateUser(context.Context, *types.User) error { return nil }
@@ -84,6 +85,21 @@ func (s *stubUserRepoForAuth) GetUserByTenantID(context.Context, uint64) (*types
 }
 func (s *stubUserRepoForAuth) UpdateUser(context.Context, *types.User) error {
 	s.updateCalls++
+	return nil
+}
+func (s *stubUserRepoForAuth) PromoteSystemAdmin(context.Context, string) (*types.User, error) {
+	return nil, errors.New("not implemented")
+}
+func (s *stubUserRepoForAuth) UpdateCredential(_ context.Context, userID, passwordHash string, preferences *types.UserPreferences) error {
+	user, ok := s.users[userID]
+	if !ok {
+		return errors.New("user not found")
+	}
+	user.PasswordHash = passwordHash
+	if preferences != nil {
+		user.Preferences = *preferences
+	}
+	s.credentialUpdates++
 	return nil
 }
 func (s *stubUserRepoForAuth) DeleteUser(context.Context, string) error { return nil }
@@ -263,6 +279,55 @@ func TestTokenIssuanceRejectsSuspendedMembershipAcrossEntryPoints(t *testing.T) 
 	})
 }
 
+func TestLegacySystemAdminAuthenticatesAsTenantlessPlatformIdentity(t *testing.T) {
+	svc, tokenRepo := suspendedAuthTestService(t)
+	user := svc.userRepo.(*stubUserRepoForAuth).users["user-1"]
+	user.IsSystemAdmin = true
+	user.CanAccessAllTenants = true
+	svc.tenantService = &authTenantService{status: types.TenantStatusSuspended}
+
+	login, err := svc.Login(context.Background(), &types.LoginRequest{
+		Email: user.Email, Password: "CorrectHorse9",
+	})
+	require.NoError(t, err)
+	require.True(t, login.Success)
+	require.Equal(t, uint64(0), login.User.TenantID)
+	require.False(t, login.User.CanAccessAllTenants)
+	require.Nil(t, login.ActiveTenant)
+	require.Empty(t, login.Memberships)
+	parsed, err := jwt.Parse(login.Token, func(*jwt.Token) (interface{}, error) {
+		return []byte(getJwtSecret()), nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, float64(0), parsed.Claims.(jwt.MapClaims)["tenant_id"])
+
+	refreshJWT := signTestJWT(jwt.MapClaims{
+		"user_id": user.ID, "type": "refresh", "exp": time.Now().Add(time.Hour).Unix(),
+	})
+	tokenRepo.tokens[refreshJWT] = &types.AuthToken{
+		UserID: user.ID, Token: refreshJWT, TokenType: "refresh_token",
+	}
+	access, _, err := svc.RefreshToken(context.Background(), refreshJWT)
+	require.NoError(t, err)
+	parsed, err = jwt.Parse(access, func(*jwt.Token) (interface{}, error) {
+		return []byte(getJwtSecret()), nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, float64(0), parsed.Claims.(jwt.MapClaims)["tenant_id"])
+
+	legacyAccess := signTestJWT(jwt.MapClaims{
+		"user_id": user.ID, "tenant_id": user.TenantID, "type": "access", "exp": time.Now().Add(time.Hour).Unix(),
+	})
+	tokenRepo.tokens[legacyAccess] = &types.AuthToken{
+		UserID: user.ID, Token: legacyAccess, TokenType: "access_token",
+	}
+	validated, tenantID, err := svc.ValidateToken(context.Background(), legacyAccess)
+	require.NoError(t, err)
+	require.Equal(t, uint64(0), tenantID)
+	require.Equal(t, uint64(0), validated.TenantID)
+	require.False(t, validated.CanAccessAllTenants)
+}
+
 func TestActivationTenantStatusGatesLoginRefreshAndJWTValidation(t *testing.T) {
 	for _, status := range []string{
 		types.TenantStatusProvisioning,
@@ -358,8 +423,8 @@ func TestAdminResetPasswordHashesPasswordAndRevokesSessions(t *testing.T) {
 	if err := svc.AdminResetPassword(ctx, "user-1", "NewSecure9"); err != nil {
 		t.Fatalf("AdminResetPassword() err = %v", err)
 	}
-	if repo.updateCalls != 1 {
-		t.Fatalf("UpdateUser calls = %d, want 1", repo.updateCalls)
+	if repo.credentialUpdates != 1 || repo.updateCalls != 0 {
+		t.Fatalf("credential/general updates = %d/%d, want 1/0", repo.credentialUpdates, repo.updateCalls)
 	}
 	user := repo.users["user-1"]
 	if user.PasswordHash == "NewSecure9" || user.PasswordHash == "" {
@@ -382,7 +447,7 @@ func TestAdminResetPasswordRejectsWeakPasswordBeforeWrite(t *testing.T) {
 	if !errors.Is(err, ErrPasswordPolicy) {
 		t.Fatalf("AdminResetPassword() err = %v, want ErrPasswordPolicy", err)
 	}
-	if repo.updateCalls != 0 || len(tokenRepo.revokedUserIDs) != 0 {
+	if repo.credentialUpdates != 0 || repo.updateCalls != 0 || len(tokenRepo.revokedUserIDs) != 0 {
 		t.Fatalf("weak password caused side effects: updates=%d revocations=%v",
 			repo.updateCalls, tokenRepo.revokedUserIDs)
 	}
@@ -403,7 +468,7 @@ func TestChangePasswordRequiresPolicyAndRevokesSessions(t *testing.T) {
 	if err := svc.ChangePassword(ctx, "user-1", "OldSecure9", "weak"); !errors.Is(err, ErrPasswordPolicy) {
 		t.Fatalf("ChangePassword(weak) err = %v, want ErrPasswordPolicy", err)
 	}
-	if repo.updateCalls != 0 || len(tokenRepo.revokedUserIDs) != 0 {
+	if repo.credentialUpdates != 0 || repo.updateCalls != 0 || len(tokenRepo.revokedUserIDs) != 0 {
 		t.Fatalf("weak password caused side effects: updates=%d revocations=%v",
 			repo.updateCalls, tokenRepo.revokedUserIDs)
 	}
@@ -438,7 +503,7 @@ func TestChangePasswordRejectsSamePassword(t *testing.T) {
 	if err := svc.ChangePassword(ctx, "user-1", "OldSecure9", "OldSecure9"); !errors.Is(err, ErrSamePassword) {
 		t.Fatalf("ChangePassword(same) err = %v, want ErrSamePassword", err)
 	}
-	if repo.updateCalls != 0 || len(tokenRepo.revokedUserIDs) != 0 {
+	if repo.credentialUpdates != 0 || repo.updateCalls != 0 || len(tokenRepo.revokedUserIDs) != 0 {
 		t.Fatalf("same password caused side effects: updates=%d revocations=%v", repo.updateCalls, tokenRepo.revokedUserIDs)
 	}
 }
@@ -462,7 +527,7 @@ func TestChangePasswordHonoursRuntimeComplexPolicy(t *testing.T) {
 	if err := svc.ChangePassword(ctx, "user-1", "OldSecure9", "NewSecure9"); !errors.Is(err, ErrComplexPasswordPolicy) {
 		t.Fatalf("ChangePassword(simple new) err = %v, want ErrComplexPasswordPolicy", err)
 	}
-	if repo.updateCalls != 0 || len(tokenRepo.revokedUserIDs) != 0 {
+	if repo.credentialUpdates != 0 || repo.updateCalls != 0 || len(tokenRepo.revokedUserIDs) != 0 {
 		t.Fatalf("complex-policy reject caused side effects: updates=%d revocations=%v",
 			repo.updateCalls, tokenRepo.revokedUserIDs)
 	}

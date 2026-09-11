@@ -157,6 +157,10 @@ func (f *fakeTenantService) UpdateTenant(ctx context.Context, tenant *types.Tena
 	return nil, nil
 }
 
+func (f *fakeTenantService) UpdateTenantProfile(context.Context, uint64, *string, *string) (*types.Tenant, error) {
+	return nil, nil
+}
+
 func (f *fakeTenantService) DeleteTenant(ctx context.Context, id uint64) error {
 	return nil
 }

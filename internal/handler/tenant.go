@@ -95,8 +95,10 @@ type createTenantRequest struct {
 }
 
 type enterpriseActivationTenantRequest struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	SeatsTotal   *int   `json:"seatsTotal,omitempty"`
+	StorageQuota *int64 `json:"storageQuota,omitempty"`
 }
 
 type productBaseTenantOwnerActivationRequestV1 struct {
@@ -132,8 +134,16 @@ func (h *TenantHandler) PutEnterpriseActivation(c *gin.Context) {
 		c.Error(errors.NewValidationError("Invalid enterprise activation request"))
 		return
 	}
-	if request.Schema != "ProductBaseTenantOwnerActivationV1" {
-		c.Error(errors.NewValidationError("schema must be ProductBaseTenantOwnerActivationV1"))
+	if request.Schema != "ProductBaseTenantOwnerActivationV1" && request.Schema != "ProductBaseTenantOwnerActivationV2" {
+		c.Error(errors.NewValidationError("schema must be ProductBaseTenantOwnerActivationV1 or ProductBaseTenantOwnerActivationV2"))
+		return
+	}
+	if request.Schema == "ProductBaseTenantOwnerActivationV2" && (request.Tenant.SeatsTotal == nil || *request.Tenant.SeatsTotal < 1) {
+		c.Error(errors.NewValidationError("seatsTotal must be a positive integer"))
+		return
+	}
+	if request.Schema == "ProductBaseTenantOwnerActivationV2" && (request.Tenant.StorageQuota == nil || *request.Tenant.StorageQuota < 0) {
+		c.Error(errors.NewValidationError("storageQuota must be non-negative"))
 		return
 	}
 
@@ -144,6 +154,8 @@ func (h *TenantHandler) PutEnterpriseActivation(c *gin.Context) {
 		TenantDescription: request.Tenant.Description,
 		FirstOwnerUserID:  request.FirstOwnerUserID,
 		DesiredState:      request.DesiredState,
+		SeatsTotal:        request.Tenant.SeatsTotal,
+		StorageQuota:      request.Tenant.StorageQuota,
 	})
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
@@ -155,7 +167,7 @@ func (h *TenantHandler) PutEnterpriseActivation(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, productBaseTenantOwnerActivationResponseV1{
-		Schema:            "ProductBaseTenantOwnerActivationV1",
+		Schema:            request.Schema,
 		ActivationID:      result.ActivationID,
 		TenantID:          result.TenantID,
 		OwnerMembershipID: result.OwnerMembershipID,
@@ -680,35 +692,22 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 		return
 	}
 
-	// Load the persisted tenant so any column the request omits keeps
-	// its current value through the GORM `Updates(struct)` zero-skip
-	// behaviour (we always pass back the full struct).
-	existing, err := h.service.GetTenantByID(ctx, id)
-	if err != nil {
-		if appErr, ok := errors.IsAppError(err); ok {
-			c.Error(appErr)
-		} else {
-			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to load workspace").WithDetails(err.Error()))
-		}
-		return
-	}
-
 	if req.Name != nil {
 		trimmed := strings.TrimSpace(*req.Name)
 		if trimmed == "" {
 			c.Error(errors.NewValidationError("name cannot be blank"))
 			return
 		}
-		existing.Name = trimmed
+		req.Name = &trimmed
 	}
 	if req.Description != nil {
-		existing.Description = strings.TrimSpace(*req.Description)
+		trimmed := strings.TrimSpace(*req.Description)
+		req.Description = &trimmed
 	}
 
-	logger.Infof(ctx, "Updating tenant, ID: %d, Name: %s", id, secutils.SanitizeForLog(existing.Name))
+	logger.Infof(ctx, "Updating tenant profile, ID: %d", id)
 
-	updatedTenant, err := h.service.UpdateTenant(ctx, existing)
+	updatedTenant, err := h.service.UpdateTenantProfile(ctx, id, req.Name, req.Description)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
 			logger.Error(ctx, "Failed to update workspace: application error", appErr)

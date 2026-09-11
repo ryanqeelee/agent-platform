@@ -23,7 +23,7 @@ func TestProductBaseDescriptorRequiresSystemAdmin(t *testing.T) {
 		c.Next()
 	})
 	v1 := r.Group("/api/v1")
-	RegisterSystemAdminRoutes(v1, &handler.SystemHandler{}, nil, &rbacGuards{})
+	RegisterSystemAdminRoutes(v1, &handler.SystemHandler{}, nil, nil, &rbacGuards{})
 
 	denied := httptest.NewRecorder()
 	r.ServeHTTP(denied, httptest.NewRequest(http.MethodGet, "/api/v1/system/admin/product-base", nil))

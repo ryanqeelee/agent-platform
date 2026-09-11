@@ -58,8 +58,9 @@ type TenantMemberStatus string
 // mutations. ServicePrincipal is an already route-authorized machine or
 // cross-tenant operator and is still barred from Owner operations.
 type MemberActorAuthority struct {
-	UserID           string
-	ServicePrincipal bool
+	UserID              string
+	ServicePrincipal    bool
+	SystemAdministrator bool
 }
 
 const (

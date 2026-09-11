@@ -274,6 +274,7 @@ func (s *userService) Login(ctx context.Context, req *types.LoginRequest) (*type
 		}, nil
 	}
 	logger.Info(ctx, "Password verification successful")
+	user = platformIdentityProjection(user)
 
 	// Generate tokens. Resolve the target tenant once so the JWT claim
 	// and the tenant we return below agree — otherwise an honoured
@@ -345,7 +346,7 @@ func (s *userService) buildMembershipsForUser(
 	user *types.User,
 	activeTenant *types.Tenant,
 ) []types.Membership {
-	if user == nil {
+	if user == nil || user.IsSystemAdmin {
 		return []types.Membership{}
 	}
 	// Only synthesise a membership from User.TenantID when the membership
@@ -549,6 +550,7 @@ func (s *userService) LoginWithOIDC(
 	if !user.IsActive {
 		return &types.OIDCCallbackResponse{Success: false, Message: "Account is disabled"}, nil
 	}
+	user = platformIdentityProjection(user)
 
 	// Resolve target tenant once so the JWT claim and the tenant we
 	// return below stay in sync; see Login for the rationale.
@@ -613,6 +615,10 @@ func (s *userService) GetUserByTenantID(ctx context.Context, tenantID uint64) (*
 func (s *userService) UpdateUser(ctx context.Context, user *types.User) error {
 	user.UpdatedAt = time.Now()
 	return s.userRepo.UpdateUser(ctx, user)
+}
+
+func (s *userService) PromoteSystemAdmin(ctx context.Context, userID string) (*types.User, error) {
+	return s.userRepo.PromoteSystemAdmin(ctx, userID)
 }
 
 // ListSystemAdmins lists users with IsSystemAdmin=true. Thin pass-through
@@ -714,14 +720,12 @@ func (s *userService) ChangePassword(ctx context.Context, userID, oldPassword, n
 		return err
 	}
 
-	user.PasswordHash = string(hashedPassword)
-	user.UpdatedAt = time.Now()
 	if user.Preferences.OidcOnlyLogin != nil && *user.Preferences.OidcOnlyLogin {
 		cleared := false
 		user.Preferences.OidcOnlyLogin = &cleared
 	}
 
-	if err := s.userRepo.UpdateUser(ctx, user); err != nil {
+	if err := s.userRepo.UpdateCredential(ctx, userID, string(hashedPassword), &user.Preferences); err != nil {
 		return err
 	}
 
@@ -739,18 +743,12 @@ func (s *userService) AdminResetPassword(ctx context.Context, userID, newPasswor
 		return err
 	}
 
-	user, err := s.userRepo.GetUserByID(ctx, userID)
-	if err != nil {
-		return err
-	}
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
 
-	user.PasswordHash = string(hashedPassword)
-	user.UpdatedAt = time.Now()
-	if err := s.userRepo.UpdateUser(ctx, user); err != nil {
+	if err := s.userRepo.UpdateCredential(ctx, userID, string(hashedPassword), nil); err != nil {
 		return err
 	}
 
@@ -900,6 +898,9 @@ func (s *userService) resolveLoginTenantID(ctx context.Context, user *types.User
 	if user == nil {
 		return 0
 	}
+	if user.IsSystemAdmin {
+		return 0
+	}
 	pref := user.Preferences.LastActiveTenantID
 	crossTenantEnabled := s.config != nil && s.config.Tenant != nil &&
 		s.config.Tenant.EnableCrossTenantAccess && user.CanAccessAllTenants
@@ -972,6 +973,12 @@ func (s *userService) generateTokensForTenant(
 	user *types.User,
 	activeTenantID uint64,
 ) (accessToken, refreshToken string, err error) {
+	if user == nil || !user.IsActive {
+		return "", "", errors.New("account is disabled")
+	}
+	if user != nil && user.IsSystemAdmin {
+		activeTenantID = 0
+	}
 	if err := s.requireAuthenticatableMembership(ctx, user); err != nil {
 		return "", "", err
 	}
@@ -1044,7 +1051,7 @@ func (s *userService) requireAuthenticatableMembership(ctx context.Context, user
 	if user == nil {
 		return errors.New("user is required")
 	}
-	if user.TenantID == 0 || s.memberService == nil {
+	if user.IsSystemAdmin || user.TenantID == 0 || s.memberService == nil {
 		return nil
 	}
 	member, err := s.memberService.GetMembership(ctx, user.ID, user.TenantID)
@@ -1098,6 +1105,9 @@ func (s *userService) SwitchTenant(
 ) (*types.LoginResponse, error) {
 	if user == nil {
 		return nil, errors.New("user is required")
+	}
+	if user.IsSystemAdmin {
+		return nil, ErrMembershipNotFound
 	}
 	if targetTenantID == 0 {
 		return nil, errors.New("target workspace ID is required")
@@ -1230,6 +1240,9 @@ func (s *userService) ValidateToken(ctx context.Context, tokenString string) (*t
 	if user == nil || !user.IsActive {
 		return nil, 0, errors.New("account is disabled")
 	}
+	if user.IsSystemAdmin {
+		return platformIdentityProjection(user), 0, nil
+	}
 
 	// Extract active tenant from the JWT. Anything missing or unparseable
 	// falls back to the user's home tenant so old tokens (and tokens issued
@@ -1240,6 +1253,20 @@ func (s *userService) ValidateToken(ctx context.Context, tokenString string) (*t
 	}
 
 	return user, activeTenantID, nil
+}
+
+// platformIdentityProjection prevents legacy enterprise bindings from leaking
+// into platform sessions. The persisted row is normalized by migration, while
+// this projection keeps login and existing tokens correct during rollout.
+func platformIdentityProjection(user *types.User) *types.User {
+	if user == nil || !user.IsSystemAdmin {
+		return user
+	}
+	projected := *user
+	projected.TenantID = 0
+	projected.CanAccessAllTenants = false
+	projected.Preferences.LastActiveTenantID = nil
+	return &projected
 }
 
 func isRefreshTokenClaims(claims jwt.MapClaims) bool {

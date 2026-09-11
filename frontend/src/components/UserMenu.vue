@@ -88,6 +88,10 @@
           <t-icon name="dashboard" class="menu-icon" />
           <span>{{ enterpriseAdministrationCopy.eyebrow }}</span>
         </div>
+        <div v-if="authStore.isSystemAdmin" class="menu-item" @click="handlePlatformOperations">
+          <t-icon name="control-platform" class="menu-icon" />
+          <span>平台运营</span>
+        </div>
         <!--
           System administration entry — visible only to users with the
           platform-wide is_system_admin flag. Hidden for everyone else,
@@ -257,6 +261,11 @@ const handleQuickNav = (section: string) => {
 const handleEnterpriseAdministration = () => {
   menuVisible.value = false
   router.push('/platform/enterprise')
+}
+
+const handlePlatformOperations = () => {
+  menuVisible.value = false
+  router.push('/platform/operations')
 }
 
 // Open the platform administration group inside the standard Settings

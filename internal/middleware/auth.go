@@ -214,6 +214,24 @@ func authenticateJWTUser(
 	jwtTenantID uint64,
 ) bool {
 	ctx := c.Request.Context()
+	if user.IsSystemAdmin {
+		// Platform browser identities never inherit an enterprise scope from a
+		// legacy JWT claim, users.tenant_id value, membership, or X-Tenant-ID.
+		// Identity endpoints and the system-admin control plane are meaningful
+		// tenantless; every enterprise endpoint keeps the normal TENANT_REQUIRED
+		// contract without consulting tenant or membership state.
+		if isTenantOptionalAPI(c.Request.URL.Path, c.Request.Method) ||
+			isTenantlessSystemAdminAPI(c.Request.URL.Path) {
+			attachTenantlessUserContext(c, user)
+			return true
+		}
+		c.JSON(http.StatusConflict, gin.H{
+			"error": "Workspace required",
+			"code":  "TENANT_REQUIRED",
+		})
+		c.Abort()
+		return false
+	}
 
 	targetTenantID, tenant, crossTenantSwitch, ok := resolveTargetTenant(c, tenantService, memberService, cfg, user, jwtTenantID)
 	if !ok {

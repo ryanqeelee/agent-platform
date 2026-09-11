@@ -284,6 +284,8 @@ func writeAddMemberError(
 		// 409 reads better than 400 here: the request was syntactically
 		// fine, the conflict is semantic ("already a member").
 		c.Error(apperrors.NewConflictError(err.Error()))
+	case errors.Is(err, service.ErrSeatLimitExceeded):
+		c.Error(apperrors.NewConflictError(err.Error()))
 	case errors.Is(err, service.ErrUserBoundToAnotherEnterprise):
 		c.Error(apperrors.NewConflictError(err.Error()))
 	default:
@@ -375,6 +377,8 @@ func (h *TenantMemberHandler) UpdateMemberStatus(c *gin.Context) {
 		case errors.Is(err, service.ErrMembershipNotFound):
 			c.Error(apperrors.NewNotFoundError("membership not found"))
 		case errors.Is(err, service.ErrLastAdministrator):
+			c.Error(apperrors.NewConflictError(err.Error()))
+		case errors.Is(err, service.ErrSeatLimitExceeded):
 			c.Error(apperrors.NewConflictError(err.Error()))
 		case errors.Is(err, service.ErrInvalidMemberStatus):
 			c.Error(apperrors.NewValidationError(err.Error()))

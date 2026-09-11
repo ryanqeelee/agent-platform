@@ -65,6 +65,12 @@ func (s *tenantService) ApplyEnterpriseActivation(
 	if command.FirstOwnerUserID == "" || command.FirstOwnerUserID != strings.TrimSpace(command.FirstOwnerUserID) || len(command.FirstOwnerUserID) > 36 {
 		return nil, werrors.NewBadRequestError("firstOwnerUserId is invalid")
 	}
+	if command.SeatsTotal != nil && *command.SeatsTotal < 1 {
+		return nil, werrors.NewBadRequestError("seatsTotal must be a positive integer")
+	}
+	if command.StorageQuota != nil && *command.StorageQuota < 0 {
+		return nil, werrors.NewBadRequestError("storageQuota must be non-negative")
+	}
 	switch command.DesiredState {
 	case types.EnterpriseActivationStatePrepared,
 		types.EnterpriseActivationStateActive,
@@ -85,6 +91,9 @@ func (s *tenantService) ApplyEnterpriseActivation(
 	}
 	if errors.Is(err, apprepo.ErrEnterpriseActivationConflict) {
 		return nil, werrors.NewConflictError("enterprise activation conflicts with the durable receipt").WithDetails(err.Error())
+	}
+	if errors.Is(err, apprepo.ErrSeatLimitExceeded) {
+		return nil, werrors.NewConflictError("enterprise seat limit exceeded")
 	}
 	if err != nil {
 		return nil, err
@@ -281,6 +290,18 @@ func (s *tenantService) UpdateTenant(ctx context.Context, tenant *types.Tenant) 
 
 	logger.Infof(ctx, "Tenant updated successfully, ID: %d", tenant.ID)
 	return tenant, nil
+}
+
+func (s *tenantService) UpdateTenantProfile(
+	ctx context.Context, id uint64, name, description *string,
+) (*types.Tenant, error) {
+	if id == 0 {
+		return nil, errors.New("tenant ID cannot be 0")
+	}
+	if err := s.repo.UpdateTenantProfile(ctx, id, name, description); err != nil {
+		return nil, err
+	}
+	return s.repo.GetTenantByID(ctx, id)
 }
 
 // DeleteTenant removes a tenant by their ID

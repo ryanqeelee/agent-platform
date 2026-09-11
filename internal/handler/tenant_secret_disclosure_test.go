@@ -29,6 +29,16 @@ func (s *stubTenantService) UpdateTenant(_ context.Context, tenant *types.Tenant
 	return tenant, nil
 }
 
+func (s *stubTenantService) UpdateTenantProfile(_ context.Context, _ uint64, name, description *string) (*types.Tenant, error) {
+	if name != nil {
+		s.tenant.Name = *name
+	}
+	if description != nil {
+		s.tenant.Description = *description
+	}
+	return s.tenant, nil
+}
+
 func (s *stubTenantService) CreateTenant(context.Context, *types.Tenant) (*types.Tenant, error) {
 	return nil, nil
 }

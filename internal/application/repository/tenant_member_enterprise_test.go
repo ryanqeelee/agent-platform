@@ -268,6 +268,75 @@ func TestEnterpriseManagedTenantBindingConcurrent(t *testing.T) {
 	}
 }
 
+func TestEnterpriseMembershipRejectsPlatformIdentityAndExcludesLegacyRows(t *testing.T) {
+	db := activationTestDB(t)
+	tenant := &types.Tenant{Name: "Acme", Status: types.TenantStatusActive}
+	if err := db.Create(tenant).Error; err != nil {
+		t.Fatal(err)
+	}
+	platform := &types.User{
+		ID: "platform-admin", Username: "platform-admin", Email: "platform@example.invalid",
+		PasswordHash: "unused", IsActive: true, IsSystemAdmin: true,
+	}
+	if err := db.Omit("TenantID").Create(platform).Error; err != nil {
+		t.Fatal(err)
+	}
+	repo := &tenantMemberRepository{db: db}
+	err := repo.Create(context.Background(), &types.TenantMember{
+		UserID: platform.ID, TenantID: tenant.ID, Role: types.TenantRoleViewer,
+		Status: types.TenantMemberStatusActive,
+	})
+	if !errors.Is(err, ErrMemberActionForbidden) {
+		t.Fatalf("platform identity membership error = %v, want forbidden", err)
+	}
+	var stored types.User
+	if err := db.First(&stored, "id = ?", platform.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.TenantID != 0 {
+		t.Fatalf("platform identity tenant_id = %d, want 0", stored.TenantID)
+	}
+
+	// A historical mixed row is ignored by member and seat projections until
+	// migration 000104/000025 removes it.
+	if err := db.Model(&types.User{}).Where("id = ?", platform.ID).Update("tenant_id", tenant.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&types.TenantMember{
+		UserID: platform.ID, TenantID: tenant.ID, Role: types.TenantRoleAdmin,
+		Status: types.TenantMemberStatusActive,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	ordinary := &types.User{
+		ID: "ordinary", Username: "ordinary", Email: "ordinary@example.invalid",
+		PasswordHash: "unused", TenantID: tenant.ID, IsActive: true,
+	}
+	if err := db.Create(ordinary).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&types.TenantMember{
+		UserID: ordinary.ID, TenantID: tenant.ID, Role: types.TenantRoleViewer,
+		Status: types.TenantMemberStatusActive,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	members, err := repo.ListByTenant(context.Background(), tenant.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(members) != 1 || members[0].UserID != ordinary.ID {
+		t.Fatalf("enterprise projection = %+v, want only ordinary user", members)
+	}
+	total, err := repo.CountFilteredByTenant(context.Background(), tenant.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 {
+		t.Fatalf("enterprise member count = %d, want 1", total)
+	}
+}
+
 func TestTenantMemberRepository_AdministratorLifecyclePostgres(t *testing.T) {
 	dsn := os.Getenv("WEKNORA_TEST_POSTGRES_DSN")
 	if dsn == "" {

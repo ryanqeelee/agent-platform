@@ -288,6 +288,7 @@ func RegisterSystemRoutes(
 func RegisterSystemAdminRoutes(
 	r *gin.RouterGroup,
 	handler *handler.SystemHandler,
+	operations *handler.PlatformOperationsHandler,
 	auditLogHandler *handler.AuditLogHandler,
 	g *rbacGuards,
 ) {
@@ -295,6 +296,24 @@ func RegisterSystemAdminRoutes(
 	// the guard, so adding new endpoints can't accidentally drop the gate.
 	adminRoutes := r.Group("/system/admin", g.SystemAdmin())
 	{
+		// Browser-only platform operations. These routes intentionally do not
+		// opt into apiKeyRoute, so every API key remains default-denied.
+		if operations != nil {
+			ops := adminRoutes.Group("/operations")
+			ops.POST("/initial-administrators", operations.CreateInitialAdministrator)
+			ops.GET("/initial-administrators/:command_id", operations.GetInitialAdministrator)
+			ops.PUT("/enterprise-activations/:activation_id", operations.ProxyEnterpriseActivation)
+			ops.GET("/enterprise-activations/:activation_id", operations.GetEnterpriseActivation)
+			ops.GET("/enterprises", operations.ListEnterprises)
+			ops.GET("/enterprises/:tenant_id", operations.GetEnterprise)
+			ops.PATCH("/enterprises/:tenant_id", operations.UpdateEnterprise)
+			ops.GET("/enterprises/:tenant_id/members", operations.ListMembers)
+			ops.POST("/enterprises/:tenant_id/employees", operations.CreateEmployee)
+			ops.PUT("/enterprises/:tenant_id/members/:user_id/role", operations.UpdateMemberRole)
+			ops.PUT("/enterprises/:tenant_id/members/:user_id/status", operations.UpdateMemberStatus)
+			ops.POST("/enterprises/:tenant_id/members/:user_id/password-reset", operations.ResetMemberPassword)
+		}
+
 		// Product-base identity is an operator diagnostic, never tenant UI state.
 		adminRoutes.GET("/product-base", handler.GetProductBaseDescriptor)
 

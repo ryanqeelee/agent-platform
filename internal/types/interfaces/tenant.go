@@ -18,6 +18,8 @@ type EnterpriseActivationCommand struct {
 	TenantDescription string
 	FirstOwnerUserID  string
 	DesiredState      types.EnterpriseActivationState
+	SeatsTotal        *int
+	StorageQuota      *int64
 }
 
 // EnterpriseActivationResult is the stable internal projection returned by
@@ -47,6 +49,8 @@ type TenantService interface {
 	ListTenants(ctx context.Context) ([]*types.Tenant, error)
 	// UpdateTenant updates a tenant
 	UpdateTenant(ctx context.Context, tenant *types.Tenant) (*types.Tenant, error)
+	// UpdateTenantProfile updates only the profile fields explicitly present in the request.
+	UpdateTenantProfile(ctx context.Context, id uint64, name, description *string) (*types.Tenant, error)
 	// DeleteTenant deletes a tenant
 	DeleteTenant(ctx context.Context, id uint64) error
 	// ListAllTenants lists all tenants (for users with cross-tenant access permission)
@@ -83,6 +87,8 @@ type TenantRepository interface {
 	SearchTenants(ctx context.Context, keyword string, tenantID uint64, page, pageSize int) ([]*types.Tenant, int64, error)
 	// UpdateTenant updates a tenant
 	UpdateTenant(ctx context.Context, tenant *types.Tenant) error
+	// UpdateTenantProfile updates only name/description fields owned by the tenant profile command.
+	UpdateTenantProfile(ctx context.Context, id uint64, name, description *string) error
 	// SetDefaultStorageBackend updates only the activation-critical default
 	// backend reference, avoiding stale full-row writes during lifecycle races.
 	SetDefaultStorageBackend(ctx context.Context, tenantID uint64, backendID string) error

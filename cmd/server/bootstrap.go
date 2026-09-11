@@ -99,6 +99,12 @@ func bootstrapSystemAdmin(ctx context.Context, userSvc interfaces.UserService, e
 			bootstrapEnvVar, email, user.ID)
 		return
 	}
+	if user.TenantID != 0 || user.CanAccessAllTenants {
+		logger.Warnf(ctx,
+			"[bootstrap] %s=%s: user %s is an enterprise identity; refusing platform promotion",
+			bootstrapEnvVar, email, user.ID)
+		return
+	}
 	_, total, err := userSvc.ListSystemAdmins(ctx, 0, 1)
 	if err != nil {
 		logger.Warnf(ctx,
@@ -112,8 +118,8 @@ func bootstrapSystemAdmin(ctx context.Context, userSvc interfaces.UserService, e
 			bootstrapEnvVar, email, total, user.ID)
 		return
 	}
-	user.IsSystemAdmin = true
-	if err := userSvc.UpdateUser(ctx, user); err != nil {
+	promoted, err := userSvc.PromoteSystemAdmin(ctx, user.ID)
+	if err != nil {
 		logger.Warnf(ctx,
 			"[bootstrap] %s=%s: failed to promote user %s: %v",
 			bootstrapEnvVar, email, user.ID, err)
@@ -121,5 +127,5 @@ func bootstrapSystemAdmin(ctx context.Context, userSvc interfaces.UserService, e
 	}
 	logger.Infof(ctx,
 		"[bootstrap] promoted user %s (%s) to system admin via %s",
-		user.ID, email, bootstrapEnvVar)
+		promoted.ID, email, bootstrapEnvVar)
 }

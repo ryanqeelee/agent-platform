@@ -85,6 +85,7 @@ func GetDefaultRetrieverEngines() []RetrieverEngineParams {
 const (
 	TenantStatusProvisioning        = "provisioning"
 	TenantStatusActive              = "active"
+	TenantStatusSuspended           = "suspended"
 	TenantStatusActivationAbandoned = "activation_abandoned"
 )
 
@@ -109,6 +110,10 @@ type Tenant struct {
 	Description string `yaml:"description"         json:"description"`
 	// Status
 	Status string `yaml:"status"              json:"status"              gorm:"default:'active'"`
+	// SeatsTotal limits active, non-deleted enterprise memberships. Nil keeps
+	// legacy tenants unlimited; newly provisioned enterprises set a positive
+	// value through the platform-operations activation contract.
+	SeatsTotal *int `yaml:"seats_total" json:"seats_total" gorm:"column:seats_total"`
 	// Ringxun activation receipt. These fields are private persistence state
 	// for the platform adapter and must never leak through general tenant APIs.
 	RingxunActivationID            *string `yaml:"-" json:"-" gorm:"column:ringxun_activation_id;type:varchar(128);uniqueIndex:idx_tenants_ringxun_activation_id_unique"`

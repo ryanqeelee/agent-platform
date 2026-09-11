@@ -78,6 +78,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/im/yunzhijia"
 	"github.com/Tencent/WeKnora/internal/infrastructure/capabilityplan"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
+	"github.com/Tencent/WeKnora/internal/infrastructure/operations"
 	infra_web_search "github.com/Tencent/WeKnora/internal/infrastructure/web_search"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
@@ -140,6 +141,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(capabilityplan.NewPlatformRetrievalProcessingSettingsResolverFromEnv))
 	must(container.Provide(capabilityplan.NewAssistantScenarioCapabilityResolverFromEnv))
 	must(container.Provide(capabilityplan.NewEnterpriseAdministrationQueueResolverFromEnv))
+	must(container.Provide(operations.NewClientFromEnv))
 	must(container.Provide(docparser.NewImageResolver))
 	must(container.Provide(initOllamaService))
 	must(container.Provide(initNeo4jClient))
@@ -151,6 +153,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// Data repositories layer
 	logger.Debugf(ctx, "[Container] Registering repositories...")
 	must(container.Provide(repository.NewTenantRepository))
+	must(container.Provide(repository.NewPlatformOperationsTenantRepository))
+	must(container.Provide(repository.NewPlatformOperationsIdentityRepository))
 	must(container.Provide(repository.NewTenantAPIKeyRepository))
 	must(container.Provide(repository.NewTenantMemberRepository))
 	must(container.Provide(repository.NewKnowledgeGovernanceService))
@@ -208,6 +212,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// Business service layer
 	logger.Debugf(ctx, "[Container] Registering business services...")
 	must(container.Provide(service.NewTenantService))
+	must(container.Provide(service.NewPlatformOperationsIdentityService))
 	must(container.Provide(service.NewTenantAPIKeyService))
 	must(container.Provide(service.NewTenantMemberService))
 	must(container.Provide(service.NewTenantInvitationService))
@@ -431,6 +436,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewInitializationHandler))
 	must(container.Provide(handler.NewAuthHandler))
 	must(container.Provide(handler.NewSystemHandler))
+	must(container.Provide(handler.NewPlatformOperationsHandler))
 	must(container.Provide(handler.NewMCPServiceHandler))
 	must(container.Provide(handler.NewMCPCredentialsHandler))
 	must(container.Provide(handler.NewMCPOAuthHandler))

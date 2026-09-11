@@ -22,7 +22,11 @@ func TestInvitationAcceptanceRejectsExistingSuspendedMembershipAtomically(t *tes
 	}
 	for _, statement := range []string{
 		`CREATE TABLE users (
-			id varchar(36) PRIMARY KEY, tenant_id integer, deleted_at datetime
+			id varchar(36) PRIMARY KEY, tenant_id integer,
+			is_active boolean NOT NULL DEFAULT true,
+			is_system_admin boolean NOT NULL DEFAULT false,
+			can_access_all_tenants boolean NOT NULL DEFAULT false,
+			deleted_at datetime
 		)`,
 		`CREATE TABLE tenant_members (
 			id integer PRIMARY KEY AUTOINCREMENT, user_id varchar(36) NOT NULL,
@@ -90,5 +94,49 @@ func TestInvitationAcceptanceRejectsExistingSuspendedMembershipAtomically(t *tes
 	}
 	if member.Status != types.TenantMemberStatusSuspended || member.Role != types.TenantRoleViewer {
 		t.Fatalf("suspended membership was altered: %+v", member)
+	}
+}
+
+func TestInvitationAcceptanceRejectsPlatformIdentityAtomically(t *testing.T) {
+	db := activationTestDB(t)
+	if err := db.AutoMigrate(&types.TenantInvitation{}); err != nil {
+		t.Fatal(err)
+	}
+	tenant := &types.Tenant{Name: "Acme", Status: types.TenantStatusActive}
+	if err := db.Create(tenant).Error; err != nil {
+		t.Fatal(err)
+	}
+	platform := &types.User{
+		ID: "platform-admin", Username: "platform-admin", Email: "platform@example.invalid",
+		PasswordHash: "unused", IsActive: true, IsSystemAdmin: true,
+	}
+	if err := db.Omit("TenantID").Create(platform).Error; err != nil {
+		t.Fatal(err)
+	}
+	invitation := &types.TenantInvitation{
+		TenantID: tenant.ID, InviteeUserID: platform.ID, Role: types.TenantRoleViewer,
+		Status: types.TenantInvitationStatusPending, ExpiresAt: time.Now().Add(time.Hour),
+	}
+	if err := db.Create(invitation).Error; err != nil {
+		t.Fatal(err)
+	}
+	_, err := (&tenantInvitationRepository{db: db}).AcceptInvitation(
+		context.Background(), invitation.ID, platform.ID, time.Now())
+	if !errors.Is(err, ErrMemberActionForbidden) {
+		t.Fatalf("accept platform identity error = %v, want forbidden", err)
+	}
+	var stored types.TenantInvitation
+	if err := db.First(&stored, invitation.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != types.TenantInvitationStatusPending || stored.AcceptedCount != 0 {
+		t.Fatalf("rejected invitation mutated: %+v", stored)
+	}
+	var memberships int64
+	if err := db.Model(&types.TenantMember{}).Where("user_id = ?", platform.ID).Count(&memberships).Error; err != nil {
+		t.Fatal(err)
+	}
+	if memberships != 0 {
+		t.Fatalf("platform identity gained %d memberships", memberships)
 	}
 }

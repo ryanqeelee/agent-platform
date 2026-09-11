@@ -1395,12 +1395,17 @@ func (h *SystemHandler) PromoteUserToSystemAdmin(c *gin.Context) {
 		c.JSON(http.StatusOK, user.ToUserInfo())
 		return
 	}
-	user.IsSystemAdmin = true
-	if err := h.userSvc.UpdateUser(ctx, user); err != nil {
+	promoted, err := h.userSvc.PromoteSystemAdmin(ctx, user.ID)
+	if err != nil {
 		logger.Errorf(ctx, "Error promoting user %s to system admin: %v", req.UserID, err)
+		if errors.Is(err, repository.ErrSystemAdminEnterpriseIdentity) {
+			c.JSON(http.StatusConflict, gin.H{"error": "Enterprise members cannot be promoted to platform administrator"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to promote user"})
 		return
 	}
+	user = promoted
 
 	logger.Infof(ctx, "User %s (ID: %s) promoted to system admin", user.Username, user.ID)
 	h.emitAdminAudit(ctx, types.AuditActionSystemAdminPromoted, user, map[string]any{

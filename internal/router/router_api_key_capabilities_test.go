@@ -51,7 +51,7 @@ func TestPlatformControlPlaneRoutesDeclarePlatformCapabilities(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	g := &rbacGuards{}
 	v1 := gin.New().Group("/api/v1")
-	RegisterSystemAdminRoutes(v1, &handler.SystemHandler{}, nil, g)
+	RegisterSystemAdminRoutes(v1, &handler.SystemHandler{}, &handler.PlatformOperationsHandler{}, nil, g)
 
 	cases := []struct {
 		method     string
@@ -75,6 +75,9 @@ func TestPlatformControlPlaneRoutesDeclarePlatformCapabilities(t *testing.T) {
 	}
 	if _, ok := g.apiKeyAuthorizer.Lookup(http.MethodPost, "/api/v1/system/admin/api-keys"); ok {
 		t.Fatal("platform API keys must not create other platform API keys")
+	}
+	if _, ok := g.apiKeyAuthorizer.Lookup(http.MethodGet, "/api/v1/system/admin/operations/enterprises"); ok {
+		t.Fatal("platform API keys must not access browser platform operations")
 	}
 }
 

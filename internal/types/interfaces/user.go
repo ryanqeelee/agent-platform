@@ -34,6 +34,9 @@ type UserService interface {
 	GetUserByTenantID(ctx context.Context, tenantID uint64) (*types.User, error)
 	// UpdateUser updates user information
 	UpdateUser(ctx context.Context, user *types.User) error
+	// PromoteSystemAdmin atomically grants platform authority only to an
+	// active tenantless identity without enterprise memberships.
+	PromoteSystemAdmin(ctx context.Context, userID string) (*types.User, error)
 	// DeleteUser deletes a user
 	DeleteUser(ctx context.Context, id string) error
 	// DeleteTenantlessUser permanently removes an incomplete, unbound identity.
@@ -118,6 +121,11 @@ type UserRepository interface {
 	GetUserByTenantID(ctx context.Context, tenantID uint64) (*types.User, error)
 	// UpdateUser updates a user
 	UpdateUser(ctx context.Context, user *types.User) error
+	// PromoteSystemAdmin atomically grants platform authority only to an
+	// active tenantless identity without enterprise memberships.
+	PromoteSystemAdmin(ctx context.Context, userID string) (*types.User, error)
+	// UpdateCredential atomically updates only password-related state.
+	UpdateCredential(ctx context.Context, userID, passwordHash string, preferences *types.UserPreferences) error
 	// DeleteUser deletes a user
 	DeleteUser(ctx context.Context, id string) error
 	// ListUsers lists users with pagination

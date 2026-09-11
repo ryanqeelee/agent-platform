@@ -193,7 +193,11 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
 import { getProductShellLoginCopy, productShellBrand } from '@/config/productShellBrand'
-import { DEFAULT_EMPLOYEE_WORKSPACE_PATH, safeReturnTo } from '@/router/safeReturnTo'
+import {
+  defaultAuthenticatedDestination,
+  postLoginDestination,
+  safeReturnTo,
+} from '@/router/safeReturnTo'
 
 const router = useRouter()
 const route = useRoute()
@@ -392,7 +396,7 @@ const persistLoginResponse = async (response: any, skipRedirect = false) => {
   await nextTick()
   if (skipRedirect) return
   const returnTo = safeReturnTo(router, route.query.returnTo)
-  router.replace(returnTo || (authStore.hasValidTenant ? DEFAULT_EMPLOYEE_WORKSPACE_PATH : '/onboarding/workspace'))
+  router.replace(postLoginDestination(router, returnTo, authStore.hasValidTenant, authStore.isSystemAdmin))
 }
 
 const getBackendOIDCRedirectURI = () => `${window.location.origin}/api/v1/auth/oidc/callback`
@@ -461,7 +465,7 @@ const acceptAndEnter = async (token: string) => {
   } finally {
     loading.value = false
     await nextTick()
-    router.replace(DEFAULT_EMPLOYEE_WORKSPACE_PATH)
+    router.replace(defaultAuthenticatedDestination(authStore.hasValidTenant, authStore.isSystemAdmin))
   }
 }
 
@@ -609,7 +613,7 @@ onMounted(async () => {
     const confirmed = await authStore.refreshFromAuthMe()
     if (confirmed) {
       const returnTo = safeReturnTo(router, route.query.returnTo)
-      router.replace(returnTo || DEFAULT_EMPLOYEE_WORKSPACE_PATH)
+      router.replace(postLoginDestination(router, returnTo, authStore.hasValidTenant, authStore.isSystemAdmin))
       return
     }
     authStore.logout()

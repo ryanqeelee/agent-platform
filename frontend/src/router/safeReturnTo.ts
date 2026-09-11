@@ -1,9 +1,25 @@
 import type { Router } from 'vue-router'
 
 export const DEFAULT_EMPLOYEE_WORKSPACE_PATH = '/home'
+export const PLATFORM_OPERATIONS_PATH = '/platform/operations'
+export const WORKSPACE_ONBOARDING_PATH = '/onboarding/workspace'
+
+export function defaultAuthenticatedDestination(hasValidTenant: boolean, isSystemAdmin: boolean): string {
+  if (isSystemAdmin) return PLATFORM_OPERATIONS_PATH
+  return hasValidTenant ? DEFAULT_EMPLOYEE_WORKSPACE_PATH : WORKSPACE_ONBOARDING_PATH
+}
+
+export function tenantRequiredRouteFallback(
+  hasValidTenant: boolean,
+  isSystemAdmin: boolean,
+): string | null {
+  if (isSystemAdmin) return PLATFORM_OPERATIONS_PATH
+  if (!hasValidTenant) return WORKSPACE_ONBOARDING_PATH
+  return null
+}
 
 /**
- * Accept only a route the current SPA can resolve inside the employee product.
+ * Accept only an authenticated route the current SPA can resolve.
  * The destination remains in the URL for one login round-trip only; callers
  * must not persist it in browser storage.
  */
@@ -38,6 +54,12 @@ export function loginDestination(router: Pick<Router, 'resolve'>, raw: unknown) 
     : { path: '/login' }
 }
 
-export function postLoginDestination(router: Pick<Router, 'resolve'>, raw: unknown, hasValidTenant: boolean) {
-  return safeReturnTo(router, raw) || (hasValidTenant ? DEFAULT_EMPLOYEE_WORKSPACE_PATH : '/onboarding/workspace')
+export function postLoginDestination(
+  router: Pick<Router, 'resolve'>,
+  raw: unknown,
+  hasValidTenant: boolean,
+  isSystemAdmin: boolean,
+) {
+  if (isSystemAdmin) return PLATFORM_OPERATIONS_PATH
+  return safeReturnTo(router, raw) || defaultAuthenticatedDestination(hasValidTenant, isSystemAdmin)
 }

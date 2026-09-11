@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
@@ -68,6 +69,29 @@ func TestPutEnterpriseActivationReturnsStableProjection(t *testing.T) {
 	require.Equal(t, uint64(10001), got.TenantID)
 	require.Equal(t, uint64(23), got.OwnerMembershipID)
 	require.Equal(t, types.EnterpriseActivationStatePrepared, got.State)
+}
+
+func TestPutEnterpriseActivationV2ReadsQuotaFromTenantObject(t *testing.T) {
+	service := &activationHandlerTenantService{result: &interfaces.EnterpriseActivationResult{
+		ActivationID: "activation-v2", TenantID: 10002, OwnerMembershipID: 24,
+		RequestSHA256: strings.Repeat("b", 64), State: types.EnterpriseActivationStatePrepared,
+	}}
+	body := `{
+		"schema":"ProductBaseTenantOwnerActivationV2",
+		"requestSha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		"tenant":{"name":"Acme","description":"Acme workspace","seatsTotal":3,"storageQuota":0},
+		"firstOwnerUserId":"owner-2",
+		"desiredState":"prepared"
+	}`
+	request := httptest.NewRequest(http.MethodPut, "/system/enterprise-activations/activation-v2", bytes.NewBufferString(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	activationHandlerRouter(service).ServeHTTP(response, request)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.NotNil(t, service.command.SeatsTotal)
+	require.Equal(t, 3, *service.command.SeatsTotal)
+	require.NotNil(t, service.command.StorageQuota)
+	require.Equal(t, int64(0), *service.command.StorageQuota)
 }
 
 func TestPutEnterpriseActivationRejectsUnknownFieldsAndPreservesTypedConflict(t *testing.T) {

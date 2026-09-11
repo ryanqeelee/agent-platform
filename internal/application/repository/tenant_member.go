@@ -18,10 +18,33 @@ import (
 // semantic; just kept separate so the repo doesn't import service).
 var (
 	ErrLastAdministrator            = errors.New("repository: last active administrator")
+	ErrSeatLimitExceeded            = errors.New("repository: enterprise seat limit exceeded")
 	ErrUserBoundToAnotherEnterprise = errors.New("repository: user is bound to another enterprise")
 	ErrMemberActionForbidden        = errors.New("repository: member action forbidden")
 	ErrCannotManageSelf             = errors.New("repository: cannot manage self")
 )
+
+func lockTenantAndCheckSeat(ctx context.Context, tx *gorm.DB, tenantID uint64) error {
+	var tenant types.Tenant
+	if err := tx.WithContext(ctx).Clauses(forUpdateClause()).Select("id", "seats_total").
+		Where("id = ?", tenantID).Take(&tenant).Error; err != nil {
+		return err
+	}
+	if tenant.SeatsTotal == nil {
+		return nil
+	}
+	var used int64
+	if err := tx.WithContext(ctx).Model(&types.TenantMember{}).
+		Where(boundEnterpriseMembership).
+		Where("tenant_id = ? AND status = ?", tenantID, types.TenantMemberStatusActive).
+		Count(&used).Error; err != nil {
+		return err
+	}
+	if used >= int64(*tenant.SeatsTotal) {
+		return ErrSeatLimitExceeded
+	}
+	return nil
+}
 
 // forUpdateClause returns the gorm SELECT ... FOR UPDATE clause. Kept
 // in one place so we can swap it out for `clause.Locking{Strength: "UPDATE"}`
@@ -45,6 +68,13 @@ const boundEnterpriseMembership = `EXISTS (
 	SELECT 1 FROM users
 	WHERE users.id = tenant_members.user_id
 	  AND users.tenant_id = tenant_members.tenant_id
+	  AND users.is_active = TRUE
+	  AND users.is_system_admin = FALSE
+	  AND users.can_access_all_tenants = FALSE
+	  AND users.id NOT LIKE 'system-%'
+	  AND users.id NOT LIKE 'api_tenant:%'
+	  AND users.id NOT LIKE 'api_platform:%'
+	  AND users.id NOT LIKE 'api_external_user:%'
 	  AND users.deleted_at IS NULL
 )`
 
@@ -55,13 +85,34 @@ func createTenantMember(ctx context.Context, tx *gorm.DB, member *types.TenantMe
 	if member.JoinedAt.IsZero() {
 		member.JoinedAt = time.Now()
 	}
+	var tenant types.Tenant
+	if err := tx.WithContext(ctx).Clauses(forUpdateClause()).Select("id", "seats_total").
+		Where("id = ?", member.TenantID).Take(&tenant).Error; err != nil {
+		return err
+	}
 	var user types.User
-	if err := tx.WithContext(ctx).Clauses(forUpdateClause()).Select("id", "tenant_id").
+	if err := tx.WithContext(ctx).Clauses(forUpdateClause()).
+		Select("id", "tenant_id", "is_active", "is_system_admin", "can_access_all_tenants").
 		Where("id = ?", member.UserID).Take(&user).Error; err != nil {
 		return err
 	}
+	if !user.IsActive || user.IsSystemAdmin || user.CanAccessAllTenants || isSpecialEnterpriseUserID(user.ID) {
+		return ErrMemberActionForbidden
+	}
 	if user.TenantID != 0 && user.TenantID != member.TenantID {
 		return ErrUserBoundToAnotherEnterprise
+	}
+	if member.Status == types.TenantMemberStatusActive && tenant.SeatsTotal != nil {
+		var used int64
+		if err := tx.WithContext(ctx).Model(&types.TenantMember{}).
+			Where(boundEnterpriseMembership).
+			Where("tenant_id = ? AND status = ?", member.TenantID, types.TenantMemberStatusActive).
+			Count(&used).Error; err != nil {
+			return err
+		}
+		if used >= int64(*tenant.SeatsTotal) {
+			return ErrSeatLimitExceeded
+		}
 	}
 	if user.TenantID == 0 {
 		if err := tx.WithContext(ctx).Model(&types.User{}).Where("id = ?", member.UserID).
@@ -76,10 +127,30 @@ func createTenantMember(ctx context.Context, tx *gorm.DB, member *types.TenantMe
 // locked. Under PostgreSQL READ COMMITTED, an EXISTS/JOIN inside the original
 // SELECT ... FOR UPDATE can retain a stale third-table snapshot; a fresh
 // statement makes the user row itself participate in lock recheck.
+func isSpecialEnterpriseUserID(userID string) bool {
+	if types.IsSyntheticUserID(userID) {
+		return true
+	}
+	for _, prefix := range []string{types.PrincipalAPITenant + ":", types.PrincipalAPIPlatform + ":", types.PrincipalAPIExternalUser + ":"} {
+		if strings.HasPrefix(userID, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func lockBoundEnterpriseUser(ctx context.Context, tx *gorm.DB, userID string, tenantID uint64) error {
+	if isSpecialEnterpriseUserID(userID) {
+		return ErrMemberActionForbidden
+	}
 	var user types.User
-	return tx.WithContext(ctx).Clauses(forUpdateClause()).Select("id").
-		Where("id = ? AND tenant_id = ?", userID, tenantID).Take(&user).Error
+	err := tx.WithContext(ctx).Clauses(forUpdateClause()).Select("id").
+		Where("id = ? AND tenant_id = ? AND is_active = ? AND is_system_admin = ? AND can_access_all_tenants = ?",
+			userID, tenantID, true, false, false).Take(&user).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ErrMemberActionForbidden
+	}
+	return err
 }
 
 // Create binds a tenantless user to the target enterprise and inserts the
@@ -146,6 +217,7 @@ func (r *tenantMemberRepository) CountFilteredByTenant(
 	search = strings.TrimSpace(search)
 	q := r.db.WithContext(ctx).Model(&types.TenantMember{}).
 		Joins(`INNER JOIN users ON users.id = tenant_members.user_id AND users.tenant_id = tenant_members.tenant_id AND users.deleted_at IS NULL`).
+		Where(boundEnterpriseMembership).
 		Where("tenant_members.tenant_id = ?", tenantID)
 	var total int64
 	var err error
@@ -167,6 +239,7 @@ func (r *tenantMemberRepository) ListPagedByTenant(
 	var members []*types.TenantMember
 	q := r.db.WithContext(ctx).Model(&types.TenantMember{}).
 		Joins(`INNER JOIN users ON users.id = tenant_members.user_id AND users.tenant_id = tenant_members.tenant_id AND users.deleted_at IS NULL`).
+		Where(boundEnterpriseMembership).
 		Where("tenant_members.tenant_id = ?", tenantID).
 		Order("tenant_members.joined_at ASC, tenant_members.id ASC").
 		Offset(offset).
@@ -192,8 +265,27 @@ func (r *tenantMemberRepository) ListPagedByTenant(
 // ordered operation rather than two stale preflight checks.
 func lockTenantAuthority(ctx context.Context, tx *gorm.DB, actor types.MemberActorAuthority, tenantID uint64) (types.TenantRole, error) {
 	var tenant types.Tenant
-	if err := tx.WithContext(ctx).Clauses(forUpdateClause()).Select("id").Where("id = ?", tenantID).Take(&tenant).Error; err != nil {
+	if err := tx.WithContext(ctx).Clauses(forUpdateClause()).Select("id", "status").Where("id = ?", tenantID).Take(&tenant).Error; err != nil {
 		return "", err
+	}
+	if tenant.Status != types.TenantStatusActive {
+		return "", ErrEnterpriseNotActive
+	}
+	if actor.SystemAdministrator {
+		if actor.UserID == "" {
+			return "", ErrMemberActionForbidden
+		}
+		var user types.User
+		if err := tx.WithContext(ctx).Clauses(forUpdateClause()).Select("id").
+			Where("id = ? AND is_active = ? AND is_system_admin = ? AND (tenant_id IS NULL OR tenant_id = 0) AND can_access_all_tenants = ?",
+				actor.UserID, true, true, false).
+			Take(&user).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return "", ErrMemberActionForbidden
+			}
+			return "", err
+		}
+		return "", nil
 	}
 	if actor.ServicePrincipal {
 		return "", nil
@@ -222,7 +314,7 @@ func lockTenantAuthority(ctx context.Context, tx *gorm.DB, actor types.MemberAct
 }
 
 func canManage(actor types.MemberActorAuthority, role, target types.TenantRole) bool {
-	if actor.ServicePrincipal {
+	if actor.ServicePrincipal || actor.SystemAdministrator {
 		return target.IsValid()
 	}
 	return types.CanManageMemberRole(role, target)
@@ -306,6 +398,11 @@ func (r *tenantMemberRepository) UpdateStatus(ctx context.Context, actor types.M
 		target, err := lockManagedMember(ctx, tx, actor, userID, tenantID, nil)
 		if err != nil {
 			return err
+		}
+		if target.Status != types.TenantMemberStatusActive && status == types.TenantMemberStatusActive {
+			if err := lockTenantAndCheckSeat(ctx, tx, tenantID); err != nil {
+				return err
+			}
 		}
 		if target.Role == types.TenantRoleAdmin && target.Status == types.TenantMemberStatusActive && status != types.TenantMemberStatusActive {
 			count, err := activeAdministratorCount(ctx, tx, tenantID)

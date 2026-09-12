@@ -59,8 +59,8 @@ type SkillInfoResponse struct {
 // @Param        sandbox_config_id  query     string  false  "Sandbox config ID"
 // @Success      200  {object}  map[string]interface{}  "Skills列表"
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /skills [get]
+// @Param        tenant_id  path  int  true  "Enterprise ID"
+// @Router       /system/admin/tenants/{tenant_id}/skills [get]
 func (h *SkillHandler) ListSkills(c *gin.Context) {
 	configID := c.Query("sandbox_config_id")
 	if configID == "" || h.usableSkills == nil {

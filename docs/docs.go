@@ -11491,14 +11491,11 @@ const docTemplate = `{
                 }
             }
         },
-        "/sandbox-configs": {
+        "/system/admin/tenants/{tenant_id}/sandbox-configs": {
             "get": {
                 "security": [
                     {
                         "Bearer": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "List workspace sandbox backend configs with credentials masked.",
@@ -11509,6 +11506,15 @@ const docTemplate = `{
                     "SandboxConfig"
                 ],
                 "summary": "List sandbox configs",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Enterprise ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "Sandbox configs and defaults",
@@ -11530,9 +11536,6 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Create a named workspace sandbox backend config. Credentials are masked in the response.",
@@ -11547,6 +11550,13 @@ const docTemplate = `{
                 ],
                 "summary": "Create sandbox config",
                 "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Enterprise ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "description": "Sandbox backend config",
                         "name": "request",
@@ -11581,14 +11591,11 @@ const docTemplate = `{
                 }
             }
         },
-        "/sandbox-configs/{id}": {
+        "/system/admin/tenants/{tenant_id}/sandbox-configs/{id}": {
             "get": {
                 "security": [
                     {
                         "Bearer": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Retrieve a workspace sandbox backend config with credentials masked.",
@@ -11600,6 +11607,13 @@ const docTemplate = `{
                 ],
                 "summary": "Get sandbox config",
                 "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Enterprise ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "type": "string",
                         "description": "Sandbox config ID",
@@ -11635,9 +11649,6 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Update a sandbox backend config. Identity-field changes are refused while the config owns live or paused sandboxes.",
@@ -11652,6 +11663,13 @@ const docTemplate = `{
                 ],
                 "summary": "Update sandbox config",
                 "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Enterprise ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "type": "string",
                         "description": "Sandbox config ID",
@@ -11716,9 +11734,6 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Soft-delete a sandbox backend config. force=true only overrides unverifiable provider inventory, never confirmed live sandboxes.",
@@ -11730,6 +11745,13 @@ const docTemplate = `{
                 ],
                 "summary": "Delete sandbox config",
                 "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Enterprise ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "type": "string",
                         "description": "Sandbox config ID",
@@ -11769,14 +11791,11 @@ const docTemplate = `{
                 }
             }
         },
-        "/sandbox-configs/{id}/sandboxes": {
+        "/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/sandboxes": {
             "get": {
                 "security": [
                     {
                         "Bearer": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Return live/paused sandbox inventory and affected agent names for one config.",
@@ -11788,6 +11807,13 @@ const docTemplate = `{
                 ],
                 "summary": "Inspect sandbox config inventory",
                 "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Enterprise ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "type": "string",
                         "description": "Sandbox config ID",
@@ -11814,14 +11840,11 @@ const docTemplate = `{
                 }
             }
         },
-        "/sandbox-configs/{id}/skills": {
+        "/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills": {
             "get": {
                 "security": [
                     {
                         "Bearer": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "List the agent skills installed onto one sandbox config's image.",
@@ -11833,6 +11856,13 @@ const docTemplate = `{
                 ],
                 "summary": "List installed skills",
                 "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Enterprise ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "type": "string",
                         "description": "Sandbox config ID",
@@ -11868,9 +11898,6 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Install a skill onto this sandbox config's image. Send a zip\nas multipart form field \"file\", or JSON {\"source\":\"...\"} to\npull a public skill. source is one of: \"@owner/slug\" or a\nslash-free slug (ClawHub), a github.com / gitlab.com /\nskills.sh / clawhub / skillhub URL, a ClawHub skills-sh\ncatalog page (https://clawhub.ai/skills-sh/owner/repo/slug),\na skills-sh:owner/repo/slug locator, or a direct zip/SKILL.md\nURL. Bare \"owner/slug\" is rejected as ambiguous. The source\nmust be readable anonymously. The install boots a sandbox and\nruns for minutes, so the request is only accepted; follow it\nvia the install-events stream.",
@@ -11886,6 +11913,13 @@ const docTemplate = `{
                 ],
                 "summary": "Install a skill",
                 "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Enterprise ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "type": "string",
                         "description": "Sandbox config ID",
@@ -11938,14 +11972,11 @@ const docTemplate = `{
                 }
             }
         },
-        "/sandbox-configs/{id}/skills/{skillId}": {
+        "/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}": {
             "get": {
                 "security": [
                     {
                         "Bearer": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Retrieve one installed skill of a sandbox config.",
@@ -11957,6 +11988,13 @@ const docTemplate = `{
                 ],
                 "summary": "Get an installed skill",
                 "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Enterprise ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "type": "string",
                         "description": "Sandbox config ID",
@@ -11999,9 +12037,6 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Remove a skill from the config's image. The removal rebuilds\nthe image and runs for minutes, so it is only accepted; follow\nit via the install-events stream.",
@@ -12013,6 +12048,13 @@ const docTemplate = `{
                 ],
                 "summary": "Remove an installed skill",
                 "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Enterprise ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "type": "string",
                         "description": "Sandbox config ID",
@@ -12055,9 +12097,6 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Show or hide an installed skill and set the workspace-wide values of the environment variables it declared. Either field may be sent, or both. The files stay in the image either way; removal is a separate flow.",
@@ -12072,6 +12111,13 @@ const docTemplate = `{
                 ],
                 "summary": "Update an installed skill",
                 "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Enterprise ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "type": "string",
                         "description": "Sandbox config ID",
@@ -12126,14 +12172,11 @@ const docTemplate = `{
                 }
             }
         },
-        "/sandbox-configs/{id}/skills/{skillId}/files": {
+        "/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/files": {
             "get": {
                 "security": [
                     {
                         "Bearer": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "List files in the stored skill bundle without starting a sandbox.",
@@ -12145,6 +12188,13 @@ const docTemplate = `{
                 ],
                 "summary": "List files of an installed skill",
                 "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Enterprise ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "type": "string",
                         "description": "Sandbox config ID",
@@ -12184,14 +12234,11 @@ const docTemplate = `{
                 }
             }
         },
-        "/sandbox-configs/{id}/skills/{skillId}/files/content": {
+        "/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/files/content": {
             "get": {
                 "security": [
                     {
                         "Bearer": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Read one skill file as UTF-8, a small base64 image, or binary.",
@@ -12203,6 +12250,13 @@ const docTemplate = `{
                 ],
                 "summary": "Read one file of an installed skill",
                 "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Enterprise ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "type": "string",
                         "description": "Sandbox config ID",
@@ -12255,14 +12309,11 @@ const docTemplate = `{
                 }
             }
         },
-        "/sandbox-configs/{id}/skills/{skillId}/install-events": {
+        "/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/install-events": {
             "get": {
                 "security": [
                     {
                         "Bearer": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Server-sent progress for one install or removal. The stream\nalways terminates: with the run's own terminal event, with one\nderived from the durable status, or with a \"detached\" frame\nwhen it stops following a run that is still going.",
@@ -12274,6 +12325,13 @@ const docTemplate = `{
                 ],
                 "summary": "Follow an install or removal",
                 "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Enterprise ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "type": "string",
                         "description": "Sandbox config ID",
@@ -12312,14 +12370,11 @@ const docTemplate = `{
                 }
             }
         },
-        "/sandbox-configs/{id}/skills/{skillId}/reinstall": {
+        "/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/reinstall": {
             "post": {
                 "security": [
                     {
                         "Bearer": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Retry a failed install from the stored archive; does not re-upload.",
@@ -12331,6 +12386,13 @@ const docTemplate = `{
                 ],
                 "summary": "Retry a skill install",
                 "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Enterprise ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "type": "string",
                         "description": "Sandbox config ID",
@@ -12376,14 +12438,11 @@ const docTemplate = `{
                 }
             }
         },
-        "/sandbox-configs/{id}/skills/{skillId}/stop": {
+        "/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/stop": {
             "post": {
                 "security": [
                     {
                         "Bearer": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Abort an in-flight install so the operator can retry or uninstall. After a process restart the row may still say installing with no live process; this rewrites it immediately instead of waiting for the stuck-run reaper. Removal is not stopped.",
@@ -12395,6 +12454,13 @@ const docTemplate = `{
                 ],
                 "summary": "Stop a skill install",
                 "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Enterprise ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "type": "string",
                         "description": "Sandbox config ID",
@@ -12440,14 +12506,11 @@ const docTemplate = `{
                 }
             }
         },
-        "/sandbox-configs/{id}/skills/{skillId}/transcript": {
+        "/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/transcript": {
             "get": {
                 "security": [
                     {
                         "Bearer": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Server-sent replay of everything the installer agent did — the\nprompt it was given, its thinking, the commands it ran and\ntheir output — followed live while the install is still\nrunning. Frames are the same shape the chat stream uses, so a\nconsole renders an install with the components it renders a\nchat turn with. 404 once the event log has expired; the\ndurable message history is the fallback.",
@@ -12459,6 +12522,13 @@ const docTemplate = `{
                 ],
                 "summary": "Follow an install's agent transcript",
                 "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Enterprise ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "type": "string",
                         "description": "Sandbox config ID",
@@ -13393,14 +13463,11 @@ const docTemplate = `{
                 }
             }
         },
-        "/skills": {
+        "/system/admin/tenants/{tenant_id}/skills": {
             "get": {
                 "security": [
                     {
                         "Bearer": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "返回指定沙箱配置镜像内、智能体实际能调用的已安装技能（ready 且启用）。不传 sandbox_config_id 时列表为空。",
@@ -13415,6 +13482,13 @@ const docTemplate = `{
                 ],
                 "summary": "获取当前沙箱配置上可执行的 Skills",
                 "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Enterprise ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "type": "string",
                         "description": "Sandbox config ID",
@@ -13433,14 +13507,11 @@ const docTemplate = `{
                 }
             }
         },
-        "/skills/catalog": {
+        "/system/admin/tenants/{tenant_id}/skills/catalog": {
             "get": {
                 "security": [
                     {
                         "Bearer": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "Returns every skill definition in this workspace and which sandbox configs it is installed on.",
@@ -13451,6 +13522,15 @@ const docTemplate = `{
                     "Skills"
                 ],
                 "summary": "List workspace skills",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Enterprise ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -13462,6 +13542,11 @@ const docTemplate = `{
                 }
             },
             "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
                 "description": "Records a skill without installing it. Send a zip as multipart field \"file\", or JSON {\"source\":\"...\"}.",
                 "consumes": [
                     "application/json",
@@ -13474,6 +13559,15 @@ const docTemplate = `{
                     "Skills"
                 ],
                 "summary": "Add a skill to the workspace catalog",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Enterprise ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "201": {
                         "description": "Created",
@@ -13485,14 +13579,26 @@ const docTemplate = `{
                 }
             }
         },
-        "/skills/catalog/{id}": {
+        "/system/admin/tenants/{tenant_id}/skills/catalog/{id}": {
             "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
                 "description": "Refused while any sandbox still has an installation of this skill.",
                 "tags": [
                     "Skills"
                 ],
                 "summary": "Delete a catalog skill",
                 "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Enterprise ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "type": "string",
                         "description": "Catalog skill ID",
@@ -13512,8 +13618,13 @@ const docTemplate = `{
                 }
             }
         },
-        "/skills/catalog/{id}/files": {
+        "/system/admin/tenants/{tenant_id}/skills/catalog/{id}/files": {
             "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
                 "description": "Lists the stored catalog bundle. Files belong to the skill definition, not a sandbox install.",
                 "produces": [
                     "application/json"
@@ -13524,6 +13635,13 @@ const docTemplate = `{
                 "summary": "List files of a catalog skill",
                 "parameters": [
                     {
+                        "type": "integer",
+                        "description": "Enterprise ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
                         "type": "string",
                         "description": "Catalog skill ID",
                         "name": "id",
@@ -13542,8 +13660,13 @@ const docTemplate = `{
                 }
             }
         },
-        "/skills/catalog/{id}/files/content": {
+        "/system/admin/tenants/{tenant_id}/skills/catalog/{id}/files/content": {
             "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -13552,6 +13675,13 @@ const docTemplate = `{
                 ],
                 "summary": "Read one file of a catalog skill",
                 "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Enterprise ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "type": "string",
                         "description": "Catalog skill ID",
@@ -13578,8 +13708,13 @@ const docTemplate = `{
                 }
             }
         },
-        "/skills/catalog/{id}/install": {
+        "/system/admin/tenants/{tenant_id}/skills/catalog/{id}/install": {
             "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
                 "description": "Runs the existing snapshot install onto each named sandbox config.",
                 "consumes": [
                     "application/json"
@@ -13592,6 +13727,13 @@ const docTemplate = `{
                 ],
                 "summary": "Install a catalog skill onto sandboxes",
                 "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Enterprise ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "type": "string",
                         "description": "Catalog skill ID",
@@ -14957,8 +15099,13 @@ const docTemplate = `{
                 }
             }
         },
-        "/system/sandbox-check": {
+        "/system/admin/tenants/{tenant_id}/sandbox-configs/check": {
             "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
                 "description": "使用当前填写的参数测试沙箱后端，不保存配置；deep=true 会执行临时脚本，远端后端还会创建并销毁一个沙箱",
                 "consumes": [
                     "application/json"
@@ -14971,6 +15118,13 @@ const docTemplate = `{
                 ],
                 "summary": "测试沙箱连通性",
                 "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Enterprise ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "description": "沙箱配置",
                         "name": "body",

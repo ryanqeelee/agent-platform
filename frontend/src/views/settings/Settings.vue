@@ -226,7 +226,7 @@
 
 <script setup lang="ts">
 import AgentList from '@/views/agent/AgentList.vue'
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, provide, toRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { LocationQueryRaw } from 'vue-router'
 import { useUIStore } from '@/stores/ui'
@@ -272,6 +272,7 @@ import {
 import { SETTINGS_SECTION_CAPABILITY } from '@/config/deploymentCapabilities'
 import { getEnterpriseAdministrationCopy } from '@/config/productShellBrand'
 import { SKILL_ICON } from '@/types/mention'
+import { platformTenantControlIDKey } from '@/composables/platformTenantControl'
 import {
   buildSettingsRouteQuery,
   integrationSectionKey,
@@ -287,6 +288,9 @@ const uiStore = useUIStore()
 const authStore = useAuthStore()
 const deploymentCapabilities = useDeploymentCapabilitiesStore()
 const { t, locale } = useI18n()
+
+const props = defineProps<{ tenantControlId?: number }>()
+provide(platformTenantControlIDKey, toRef(props, 'tenantControlId'))
 
 const currentSection = ref<string>('general')
 const currentSubSection = ref<string>('')
@@ -347,6 +351,7 @@ const canSeeSection = (key: string): boolean => {
     return authStore.hasRole(min)
   }
   if (SYSTEM_ADMIN_SECTIONS.has(key)) {
+    if ((key === 'sandbox' || key === 'skills') && !props.tenantControlId) return false
     return authStore.isSystemAdmin
   }
   const min = SETTINGS_SECTION_MIN_ROLE[key]

@@ -25,8 +25,8 @@
 import { onUnmounted, reactive, ref, watch } from 'vue'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import { useChatStreamHandler } from '@/composables/useChatStreamHandler'
-import { getMessageList } from '@/api/chat'
 import { configSkillTranscriptUrl } from '@/api/system'
+import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 import { getApiBaseUrl } from '@/utils/api-base'
 import { generateRandomString } from '@/utils/index'
 import AgentStreamDisplay from '@/views/chat/components/AgentStreamDisplay.vue'
@@ -46,6 +46,7 @@ const props = defineProps<{
 }>()
 
 const messages = reactive<any[]>([])
+const platformTenantID = usePlatformTenantControlID()
 const loading = ref(false)
 const isReplying = ref(false)
 const currentAssistantMessageId = ref('')
@@ -62,7 +63,7 @@ let openRun = 0
 // an earlier command. The stream handler requires the hook, so it is a no-op.
 function scrollToBottom() {}
 
-const { handleMsgList, processStreamChunk } = useChatStreamHandler({
+const { processStreamChunk } = useChatStreamHandler({
   messagesList: messages,
   loading,
   isReplying,
@@ -81,16 +82,6 @@ function applyPrompt(content: string) {
   messages.unshift({ id: `${props.messageId}-prompt`, role: 'user', content })
 }
 
-async function loadPersisted(run: number) {
-  const res: any = await getMessageList({
-    session_id: props.sessionId,
-    limit: 100,
-    created_at: '',
-  })
-  if (run !== openRun) return
-  handleMsgList(res?.data || [])
-}
-
 function stop() {
   openRun += 1
   closed = true
@@ -104,9 +95,10 @@ function stop() {
 // reports whether it ever produced anything: a 404 means the event log has
 // expired and the durable history is the only remaining source.
 async function follow(run: number): Promise<boolean> {
-  const url = `${getApiBaseUrl()}${configSkillTranscriptUrl(props.configId, props.skillId)}`
+  const tenantId = platformTenantID.value
+  if (!tenantId) return false
+  const url = `${getApiBaseUrl()}${configSkillTranscriptUrl(tenantId, props.configId, props.skillId)}`
   const token = localStorage.getItem('weknora_token')
-  const tenantId = localStorage.getItem('weknora_selected_tenant_id')
   const ac = new AbortController()
   controller = ac
   if (run !== openRun) {
@@ -121,7 +113,6 @@ async function follow(run: number): Promise<boolean> {
       Authorization: token ? `Bearer ${token}` : '',
       'Accept-Language': i18n.global.locale?.value || localStorage.getItem('locale') || 'zh-CN',
       'X-Request-ID': generateRandomString(12),
-      ...(tenantId ? { 'X-Tenant-ID': tenantId } : {}),
     },
     signal: ac.signal,
     openWhenHidden: true,
@@ -173,20 +164,12 @@ async function open() {
   messages.splice(0, messages.length)
   const stale = () => run !== openRun || closed
   try {
-    // A finished install already has durable rows. Replaying the event log
-    // through processStreamChunk would animate every tool call again, which
-    // is what "view the run" must not do. If the durable history is empty
-    // (which happens for maintenance sessions the chat message endpoint
-    // filters out), fall back to a one-shot transcript replay so the popup
-    // shows something on a refresh instead of the empty state.
+    // Platform operators are tenantless, so the enterprise chat-history API
+    // is intentionally unavailable here. The scoped transcript endpoint is
+    // the sole source for both live and completed installer runs.
     if (!props.live) {
       loading.value = true
-      if (props.sessionId) {
-        await loadPersisted(run)
-        if (!stale() && messages.length === 0 && props.messageId) {
-          await follow(run).catch(() => false)
-        }
-      }
+      if (props.messageId) await follow(run).catch(() => false)
       return
     }
 
@@ -205,10 +188,6 @@ async function open() {
       if (stale() || !props.live) return
       const served = await follow(run).catch(() => false)
       if (stale() || !props.live || served) return
-      if (props.sessionId && props.messageId) {
-        await loadPersisted(run)
-        if (stale() || messages.length > 0) return
-      }
       if (stale() || !props.live) return
       await wait(1000)
       if (stale() || !props.live) return

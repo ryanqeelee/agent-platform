@@ -112,7 +112,7 @@ func newChatSkillRouter(h *SkillHandler) *gin.Engine {
 		c.Set(types.TenantIDContextKey.String(), testSkillTenantID)
 		c.Next()
 	})
-	r.GET("/skills", h.ListSkills)
+	r.GET("/system/admin/tenants/42/skills", h.ListSkills)
 	return r
 }
 
@@ -123,7 +123,7 @@ func TestListSkillsHidesThePickerWhenNoSandboxConfigIsSelected(t *testing.T) {
 	router := newChatSkillRouter(NewSkillHandler(lister, nil))
 
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/skills", nil))
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/system/admin/tenants/42/skills", nil))
 
 	require.Equal(t, http.StatusOK, w.Code)
 	var body struct {
@@ -148,7 +148,7 @@ func TestListSkillsReturnsUsableInstalledSkillsForTheSelectedConfig(t *testing.T
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(
-		http.MethodGet, "/skills?sandbox_config_id=cfg-1", nil,
+		http.MethodGet, "/system/admin/tenants/42/skills?sandbox_config_id=cfg-1", nil,
 	))
 
 	require.Equal(t, http.StatusOK, w.Code)

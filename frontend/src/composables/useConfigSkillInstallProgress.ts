@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, type Ref } from 'vue'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import {
   configSkillInstallEventsUrl,
@@ -21,8 +21,9 @@ export {
   progressKey,
 } from './skillInstallProgress'
 
-export function useConfigSkillInstallProgress(options?: {
+export function useConfigSkillInstallProgress(options: {
   onDone?: (target: SkillInstallProgressTarget, event: ConfigSkillInstallEvent) => void
+  tenantId: Readonly<Ref<number | undefined>>
 }) {
   const progressByKey = ref<Record<string, ConfigSkillInstallEvent>>({})
   const abortByKey = new Map<string, AbortController>()
@@ -56,6 +57,8 @@ export function useConfigSkillInstallProgress(options?: {
   function follow(configId: string, skillId: string) {
     const key = progressKey(configId, skillId)
     if (!configId || !skillId || abortByKey.has(key)) return
+    const tenantId = options.tenantId.value
+    if (!tenantId) return
     // abortByKey is the in-flight guard. A finished event for this key is
     // either status lag or a new run of the same skill id (retry); skipping
     // reconnect would leave the drawer showing the previous 100%.
@@ -64,8 +67,7 @@ export function useConfigSkillInstallProgress(options?: {
     abortByKey.set(key, controller)
 
     const token = localStorage.getItem('weknora_token')
-    const tenantId = localStorage.getItem('weknora_selected_tenant_id')
-    const url = `${getApiBaseUrl()}${configSkillInstallEventsUrl(configId, skillId)}`
+    const url = `${getApiBaseUrl()}${configSkillInstallEventsUrl(tenantId, configId, skillId)}`
 
     void fetchEventSource(url, {
       method: 'GET',
@@ -73,7 +75,6 @@ export function useConfigSkillInstallProgress(options?: {
         Authorization: token ? `Bearer ${token}` : '',
         'Accept-Language': i18n.global.locale?.value || localStorage.getItem('locale') || 'zh-CN',
         'X-Request-ID': generateRandomString(12),
-        ...(tenantId ? { 'X-Tenant-ID': tenantId } : {}),
       },
       signal: controller.signal,
       openWhenHidden: true,
@@ -88,7 +89,7 @@ export function useConfigSkillInstallProgress(options?: {
         progressByKey.value = { ...progressByKey.value, [key]: parsed }
         if (parsed.done) {
           stop(key)
-          options?.onDone?.({ configId, skillId }, parsed)
+          options.onDone?.({ configId, skillId }, parsed)
         }
       },
       onerror() {

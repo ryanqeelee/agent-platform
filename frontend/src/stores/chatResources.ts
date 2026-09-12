@@ -4,7 +4,6 @@ import { listKnowledgeBases, getKnowledgeBaseById } from '@/api/knowledge-base'
 import { listAgents, type CustomAgent } from '@/api/agent'
 import { listModels, type ModelConfig } from '@/api/model'
 import { listWebSearchProviders, type WebSearchProviderEntity } from '@/api/web-search-provider'
-import { isNamedSandboxBackend, listSandboxConfigs, type SandboxConfigRecord } from '@/api/system'
 import { useAuthStore } from '@/stores/auth'
 import { useOrganizationStore } from '@/stores/organization'
 import { getCurrentLanguage } from '@/utils/request'
@@ -17,7 +16,7 @@ import {
 /** 空间级资源缓存 TTL */
 const CACHE_TTL_MS = 60_000
 
-type ResourceKey = 'knowledgeBases' | 'agents' | 'models' | 'webSearchProviders' | 'sandboxConfigs'
+type ResourceKey = 'knowledgeBases' | 'agents' | 'models' | 'webSearchProviders'
 
 export type ListCreatorFilter = 'all' | 'mine' | 'others'
 
@@ -27,7 +26,6 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
   const disabledOwnAgentIds = ref<string[]>([])
   const allModels = ref<ModelConfig[]>([])
   const webSearchProviders = ref<WebSearchProviderEntity[]>([])
-  const sandboxConfigs = ref<SandboxConfigRecord[]>([])
 
   const loadedAt = ref<Partial<Record<ResourceKey, number>>>({})
   const inflight = new Map<ResourceKey, Promise<void>>()
@@ -235,30 +233,6 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
     })
   }
 
-  /**
-   * 沙箱后端配置，供智能体编辑器的后端选择器使用。
-   *
-   * 不进 prefetchChatInput：只有编辑智能体时才需要，而对话输入栏用不到，
-   * 没必要让每次首屏都多打一次请求。
-   *
-   * 失败只吞掉不抛：这是可选资源——拿不到就只剩「不启用沙箱」一项，
-   * 智能体照样能编辑保存。调用方通常把它和一堆必需资源放在同一个
-   * Promise.all 里，若在这里抛出，整个编辑器的依赖加载都会连坐
-   * （技能可用性拿不到 ⇒ 技能配置分组直接消失）。
-   */
-  async function ensureSandboxConfigs(force = false): Promise<void> {
-    return runOnce('sandboxConfigs', force, async () => {
-      try {
-        const res = await listSandboxConfigs()
-        const rows = Array.isArray(res?.data) ? res.data : []
-        sandboxConfigs.value = rows.filter((cfg) => isNamedSandboxBackend(cfg.sandbox_type))
-      } catch {
-        sandboxConfigs.value = []
-      }
-      loadedAt.value.sandboxConfigs = Date.now()
-    })
-  }
-
   /** 并行预取员工对话输入栏需要的空间级资源。 */
   async function prefetchChatInput(force = false): Promise<void> {
     const orgStore = useOrganizationStore()
@@ -342,7 +316,6 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
       disabledOwnAgentIds.value = []
       allModels.value = []
       webSearchProviders.value = []
-      sandboxConfigs.value = []
       agentKbCache.clear()
       // 同时丢弃所有 inflight 句柄，否则失效后仍在飞行的请求会把旧数据写回缓存。
       inflight.clear()
@@ -381,7 +354,6 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
     allModels,
     chatModels,
     webSearchProviders,
-    sandboxConfigs,
     isFresh,
     fetchKnowledgeBasesForList,
     fetchAgentsForList,
@@ -391,7 +363,6 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
     replaceModels,
     ensureChatModels,
     ensureWebSearchProviders,
-    ensureSandboxConfigs,
     ensureAgentKnowledgeBases,
     prefetchChatInput,
     fetchKnowledgeBaseById,

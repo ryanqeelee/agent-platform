@@ -339,6 +339,7 @@ import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useConfigSkillInstallProgress } from '@/composables/useConfigSkillInstallProgress'
 import { SKILL_ICON } from '@/types/mention'
 import { useUIStore } from '@/stores/ui'
+import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 import { MAX_SKILL_BUNDLE_SIZE_BYTES, MAX_SKILL_BUNDLE_SIZE_MB } from '@/utils'
 import {
   deleteSkillCatalog,
@@ -367,6 +368,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const uiStore = useUIStore()
+const platformTenantID = usePlatformTenantControlID()
 const confirmDelete = useConfirmDelete()
 
 const loading = ref(false)
@@ -410,6 +412,7 @@ const {
   sync: syncInstallProgress,
   stopAll: stopInstallProgress,
 } = useConfigSkillInstallProgress({
+  tenantId: platformTenantID,
   onDone() {
     void loadCatalog(true)
   },
@@ -992,13 +995,13 @@ async function registerThenAdvance() {
     if (pendingFile.value) {
       uploading.value = true
       uploadPercent.value = 0
-      const res = await registerSkillCatalogFromFile(pendingFile.value, (percent) => {
+      const res = await registerSkillCatalogFromFile(platformTenantID.value!, pendingFile.value, (percent) => {
         uploadPercent.value = percent
       })
       registered = catalogFromRegister(res?.data, pendingFile.value.name)
     } else {
       addingFromSource.value = true
-      const res = await registerSkillCatalogFromSource(source)
+      const res = await registerSkillCatalogFromSource(platformTenantID.value!, source)
       registered = catalogFromRegister(res?.data, source)
     }
     if (!registered) {
@@ -1042,7 +1045,7 @@ async function handleAddPrimary() {
   installing.value = true
   try {
     await ensureInstallerModelIfNeeded(targets)
-    const res = await installSkillCatalog(catalogId, targets)
+    const res = await installSkillCatalog(platformTenantID.value!, catalogId, targets)
     const failed = catalogInstallFailedCount(res)
     if (failed > 0) {
       MessagePlugin.warning(t('settings.skills.installPartial', { failed }))
@@ -1086,7 +1089,7 @@ async function confirmInstall() {
   installing.value = true
   try {
     await ensureInstallerModelIfNeeded(targets)
-    const res = await installSkillCatalog(item.id, targets)
+    const res = await installSkillCatalog(platformTenantID.value!, item.id, targets)
     const failed = catalogInstallFailedCount(res)
     if (failed > 0) {
       MessagePlugin.warning(t('settings.skills.installPartial', { failed }))
@@ -1110,7 +1113,7 @@ async function removeCatalog(item: SkillCatalogItem) {
   }
   deletingId.value = item.id
   try {
-    await deleteSkillCatalog(item.id)
+    await deleteSkillCatalog(platformTenantID.value!, item.id)
     MessagePlugin.success(t('settings.skills.deleteSuccess'))
     await loadCatalog()
   } catch (e: any) {
@@ -1146,7 +1149,7 @@ function ensurePoll() {
 
 async function loadCatalog(silent = false) {
   try {
-    const res = await listSkillCatalog()
+    const res = await listSkillCatalog(platformTenantID.value!)
     catalog.value = res?.data || []
   } catch (e: any) {
     if (!silent) MessagePlugin.error(e?.message || t('settings.skills.loadFailed'))
@@ -1158,7 +1161,7 @@ async function loadCatalog(silent = false) {
 async function load() {
   loading.value = true
   try {
-    const [configRes] = await Promise.all([listSandboxConfigs(), loadCatalog()])
+    const [configRes] = await Promise.all([listSandboxConfigs(platformTenantID.value!), loadCatalog()])
     records.value = configRes?.data || []
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('settings.skills.loadFailed'))

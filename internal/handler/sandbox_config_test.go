@@ -50,7 +50,7 @@ func TestSandboxConfigResponseMasksSecrets(t *testing.T) {
 func TestSandboxesStillLiveMapsTo409WithCounts(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.PUT("/sandbox-configs/:id", func(c *gin.Context) {
+	router.PUT("/system/admin/tenants/42/sandbox-configs/:id", func(c *gin.Context) {
 		respondSandboxesStillLive(c, service.SandboxInventory{
 			SandboxCount: 3,
 			SessionIDs:   []string{"s-1", "s-2"},
@@ -59,7 +59,7 @@ func TestSandboxesStillLiveMapsTo409WithCounts(t *testing.T) {
 	})
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/sandbox-configs/cfg-a",
+	req := httptest.NewRequest(http.MethodPut, "/system/admin/tenants/42/sandbox-configs/cfg-a",
 		strings.NewReader(`{}`))
 	router.ServeHTTP(w, req)
 
@@ -85,12 +85,12 @@ func TestSandboxesStillLiveMapsTo409WithCounts(t *testing.T) {
 func TestSandboxInventoryUnverifiableMapsToDistinct409(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.DELETE("/sandbox-configs/:id", func(c *gin.Context) {
+	router.DELETE("/system/admin/tenants/42/sandbox-configs/:id", func(c *gin.Context) {
 		respondSandboxInventoryUnverifiable(c)
 	})
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/sandbox-configs/cfg-a", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/system/admin/tenants/42/sandbox-configs/cfg-a", nil)
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusConflict, w.Code)
@@ -109,7 +109,7 @@ func TestSandboxInventoryUnverifiableMapsToDistinct409(t *testing.T) {
 func TestSkillSnapshotReleaseFailedMapsTo409WithRemaining(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.DELETE("/sandbox-configs/:id", func(c *gin.Context) {
+	router.DELETE("/system/admin/tenants/42/sandbox-configs/:id", func(c *gin.Context) {
 		if !respondSandboxConfigRefusal(c, &service.SkillSnapshotReleaseFailedError{
 			Remaining: []string{"snap-2"},
 		}) {
@@ -118,7 +118,7 @@ func TestSkillSnapshotReleaseFailedMapsTo409WithRemaining(t *testing.T) {
 	})
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/sandbox-configs/cfg-a", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/system/admin/tenants/42/sandbox-configs/cfg-a", nil)
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusConflict, w.Code)
@@ -139,14 +139,14 @@ func TestSkillSnapshotReleaseFailedMapsTo409WithRemaining(t *testing.T) {
 func TestSkillSnapshotBlocksTemplateMapsTo409(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.POST("/sandbox-configs/templates/query", func(c *gin.Context) {
+	router.POST("/system/admin/tenants/42/sandbox-configs/templates/query", func(c *gin.Context) {
 		if !respondSandboxConfigRefusal(c, service.ErrSkillSnapshotBlocksTemplateChange) {
 			t.Fatal("expected skill snapshot template lock to map as a refusal")
 		}
 	})
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/sandbox-configs/templates/query", nil)
+	req := httptest.NewRequest(http.MethodPost, "/system/admin/tenants/42/sandbox-configs/templates/query", nil)
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusConflict, w.Code)
@@ -172,10 +172,10 @@ func TestSandboxConfigDeletePassesForceQuery(t *testing.T) {
 		c.Set(types.TenantIDContextKey.String(), uint64(42))
 		c.Next()
 	})
-	router.DELETE("/sandbox-configs/:id", h.Delete)
+	router.DELETE("/system/admin/tenants/42/sandbox-configs/:id", h.Delete)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/sandbox-configs/cfg-a?force=true", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/system/admin/tenants/42/sandbox-configs/cfg-a?force=true", nil)
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -184,7 +184,7 @@ func TestSandboxConfigDeletePassesForceQuery(t *testing.T) {
 	require.True(t, svc.deleteForce)
 
 	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodDelete, "/sandbox-configs/cfg-b", nil)
+	req = httptest.NewRequest(http.MethodDelete, "/system/admin/tenants/42/sandbox-configs/cfg-b", nil)
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)

@@ -741,6 +741,7 @@ import { useI18n } from 'vue-i18n'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import SandboxBackendBadge from '@/components/settings/SandboxBackendBadge.vue'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
+import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 import {
   checkSandboxConfig,
   createSandboxConfig,
@@ -777,6 +778,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const deploymentCapabilities = useDeploymentCapabilitiesStore()
+const platformTenantID = usePlatformTenantControlID()
 const dockerBackendEnabled = computed(() =>
   deploymentCapabilities.isSupported('settings.sandbox.docker'),
 )
@@ -1206,7 +1208,7 @@ async function refreshInFlightSkill() {
     return
   }
   try {
-    const res = await listConfigSkills(id)
+    const res = await listConfigSkills(platformTenantID.value!, id)
     inFlightFromSkills.value = (res?.data || []).some(
       (skill) => skill.status === 'installing' || skill.status === 'removing',
     )
@@ -1387,7 +1389,7 @@ async function loadTemplates(ensureStandard = false, silent = false, replaceStan
   if (!silent) templatesLoading.value = true
   templatesError.value = ''
   try {
-    const res = await querySandboxTemplates({
+    const res = await querySandboxTemplates(platformTenantID.value!, {
       config: collectPayload(),
       config_id: effectiveRecord.value?.id,
       ensure_standard: ensureStandard,
@@ -1615,8 +1617,8 @@ async function save() {
     const payload = { name: trimmed, description: description.value, config: collectPayload() }
     const existing = effectiveRecord.value
     const res = existing
-      ? await updateSandboxConfigById(existing.id, payload)
-      : await createSandboxConfig(payload)
+      ? await updateSandboxConfigById(platformTenantID.value!, existing.id, payload)
+      : await createSandboxConfig(platformTenantID.value!, payload)
     MessagePlugin.success(t('common.saveSuccess'))
     // The list behind the drawer refreshes either way, so closing here is only
     // about whether the wizard has anything left to offer.
@@ -1649,7 +1651,7 @@ async function runCheck(deep: boolean): Promise<boolean> {
   try {
     // config_id lets the backend resolve masked secrets against the stored row,
     // so an edited form can be probed without retyping the API key.
-    const res = await checkSandboxConfig({
+    const res = await checkSandboxConfig(platformTenantID.value!, {
       config: collectPayload(),
       config_id: effectiveRecord.value?.id,
       deep,

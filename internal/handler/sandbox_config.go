@@ -217,8 +217,8 @@ func respondSandboxConfigServiceError(c *gin.Context, err error) {
 // @Success      200  {object}  map[string]interface{}   "Sandbox configs and defaults"
 // @Failure      401  {object}  map[string]interface{}   "Unauthorized"
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /sandbox-configs [get]
+// @Param        tenant_id  path  int  true  "Enterprise ID"
+// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs [get]
 func (h *SandboxConfigHandler) List(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenantID := sandboxConfigTenantID(c)
@@ -273,8 +273,8 @@ func (h *SandboxConfigHandler) SetWorkspacePolicy(c *gin.Context) {
 // @Failure      400      {object}  apperrors.AppError      "Invalid request or validation failure"
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /sandbox-configs [post]
+// @Param        tenant_id  path  int  true  "Enterprise ID"
+// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs [post]
 func (h *SandboxConfigHandler) Create(c *gin.Context) {
 	var req sandboxConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -304,8 +304,8 @@ func (h *SandboxConfigHandler) Create(c *gin.Context) {
 // @Failure      401  {object}  map[string]interface{}   "Unauthorized"
 // @Failure      404  {object}  apperrors.AppError       "Sandbox config not found"
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /sandbox-configs/{id} [get]
+// @Param        tenant_id  path  int  true  "Enterprise ID"
+// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id} [get]
 func (h *SandboxConfigHandler) Get(c *gin.Context) {
 	cfg, err := h.service.Get(c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"))
 	if err != nil {
@@ -334,8 +334,8 @@ func (h *SandboxConfigHandler) Get(c *gin.Context) {
 // @Failure      409      {object}  map[string]interface{}  "Live sandboxes or unverifiable inventory"
 // @Failure      423      {object}  map[string]interface{}  "Sandbox config is being modified by another request"
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /sandbox-configs/{id} [put]
+// @Param        tenant_id  path  int  true  "Enterprise ID"
+// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id} [put]
 func (h *SandboxConfigHandler) Update(c *gin.Context) {
 	var req sandboxConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -373,8 +373,8 @@ func (h *SandboxConfigHandler) Update(c *gin.Context) {
 // @Failure      401    {object}  map[string]interface{}  "Unauthorized"
 // @Failure      409    {object}  map[string]interface{}  "Live sandboxes or unverifiable inventory"
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /sandbox-configs/{id} [delete]
+// @Param        tenant_id  path  int  true  "Enterprise ID"
+// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id} [delete]
 func (h *SandboxConfigHandler) Delete(c *gin.Context) {
 	force := c.Query("force") == "true"
 	if err := h.service.Delete(c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"), force); err != nil {
@@ -396,8 +396,8 @@ func (h *SandboxConfigHandler) Delete(c *gin.Context) {
 // @Success      200  {object}  map[string]interface{}  "Sandbox inventory"
 // @Failure      401  {object}  map[string]interface{}  "Unauthorized"
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /sandbox-configs/{id}/sandboxes [get]
+// @Param        tenant_id  path  int  true  "Enterprise ID"
+// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/sandboxes [get]
 func (h *SandboxConfigHandler) Inventory(c *gin.Context) {
 	inv, err := h.service.Inventory(c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"))
 	if err != nil {

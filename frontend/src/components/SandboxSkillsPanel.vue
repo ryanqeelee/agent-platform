@@ -607,6 +607,7 @@ import { fetchEventSource } from '@microsoft/fetch-event-source'
 import ModelSelector from '@/components/ModelSelector.vue'
 import SkillInstallTimeline from '@/components/SkillInstallTimeline.vue'
 import { SETTING_DRAWER_HEADER_ACTIONS_ID } from '@/components/settings/SettingDrawer.vue'
+import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 import { SKILL_ICON } from '@/types/mention'
 import {
   getAgentById,
@@ -667,6 +668,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const platformTenantID = usePlatformTenantControlID()
 const headerActionsTarget = inject(SETTING_DRAWER_HEADER_ACTIONS_ID, '')
 
 const loading = ref(false)
@@ -988,7 +990,7 @@ async function submitEnvs(
     skill.id,
   )
   try {
-    const res = await patchConfigSkill(configId, skill.id, { envs })
+    const res = await patchConfigSkill(platformTenantID.value!, configId, skill.id, { envs })
     if (!isCurrent()) return
     const updated = res?.data
     if (updated) {
@@ -1128,12 +1130,13 @@ function followBusySkills() {
 function followProgress(skillId: string) {
   if (!props.record || abortBySkill.has(skillId)) return
   const configId = props.record.id
+  const tenantId = platformTenantID.value
+  if (!tenantId) return
   const controller = new AbortController()
   abortBySkill.set(skillId, controller)
 
   const token = localStorage.getItem('weknora_token')
-  const tenantId = localStorage.getItem('weknora_selected_tenant_id')
-  const url = `${getApiBaseUrl()}${configSkillInstallEventsUrl(configId, skillId)}`
+  const url = `${getApiBaseUrl()}${configSkillInstallEventsUrl(tenantId, configId, skillId)}`
 
   void fetchEventSource(url, {
     method: 'GET',
@@ -1141,7 +1144,6 @@ function followProgress(skillId: string) {
       Authorization: token ? `Bearer ${token}` : '',
       'Accept-Language': i18n.global.locale?.value || localStorage.getItem('locale') || 'zh-CN',
       'X-Request-ID': generateRandomString(12),
-      ...(tenantId ? { 'X-Tenant-ID': tenantId } : {}),
     },
     signal: controller.signal,
     openWhenHidden: true,
@@ -1172,7 +1174,7 @@ function followProgress(skillId: string) {
 async function refreshImage() {
   if (!props.record) return
   try {
-    const res = await getSandboxConfigById(props.record.id)
+    const res = await getSandboxConfigById(platformTenantID.value!, props.record.id)
     if (res?.data) emit('updated', res.data)
   } catch {
     emit('skillsChanged')
@@ -1202,7 +1204,7 @@ async function loadSkills(silent = false) {
   const previous = skillsSignature(skills.value)
   const wasBusy = skills.value.some(isBusy)
   try {
-    const res = await listConfigSkills(props.record.id)
+    const res = await listConfigSkills(platformTenantID.value!, props.record.id)
     skills.value = overlayUninstallStatus(res?.data || [])
     followBusySkills()
     ensurePoll()
@@ -1317,7 +1319,7 @@ async function uploadFile(file: File) {
   uploadPercent.value = 0
   try {
     await persistInstallerModel(installerModelId.value)
-    const res = await uploadConfigSkill(props.record.id, file, (percent) => {
+    const res = await uploadConfigSkill(platformTenantID.value!, props.record.id, file, (percent) => {
       uploadPercent.value = percent
     })
     MessagePlugin.success(t('settings.sandbox.skillUploadAccepted'))
@@ -1343,7 +1345,7 @@ async function installFromSource() {
   installingFromSource.value = true
   try {
     await persistInstallerModel(installerModelId.value)
-    const res = await installConfigSkillFromSource(props.record.id, { source })
+    const res = await installConfigSkillFromSource(platformTenantID.value!, props.record.id, { source })
     MessagePlugin.success(t('settings.sandbox.skillUploadAccepted'))
     sourceInput.value = ''
     const skillId = res?.data?.skill_id || ''
@@ -1371,7 +1373,7 @@ async function toggleEnabled(skill: ConfigSkill, enabled: boolean) {
   if (!props.record) return
   togglingId.value = skill.id
   try {
-    const res = await patchConfigSkill(props.record.id, skill.id, { enabled })
+    const res = await patchConfigSkill(platformTenantID.value!, props.record.id, skill.id, { enabled })
     const updated = res?.data
     skills.value = skills.value.map((item) => (item.id === skill.id ? (updated || { ...item, enabled }) : item))
     MessagePlugin.success(
@@ -1392,7 +1394,7 @@ async function retrySkill(skill: ConfigSkill) {
   retryingId.value = skill.id
   forgetProgress(skill.id)
   try {
-    await reinstallConfigSkill(props.record.id, skill.id)
+    await reinstallConfigSkill(platformTenantID.value!, props.record.id, skill.id)
     MessagePlugin.success(t('settings.sandbox.skillRetryAccepted'))
     await loadSkills()
     followProgress(skill.id)
@@ -1408,7 +1410,7 @@ async function stopSkill(skill: ConfigSkill) {
   stoppingId.value = skill.id
   forgetProgress(skill.id)
   try {
-    const res = await stopConfigSkill(props.record.id, skill.id)
+    const res = await stopConfigSkill(platformTenantID.value!, props.record.id, skill.id)
     const updated = res?.data
     if (updated) {
       skills.value = skills.value.map((item) => (item.id === skill.id ? { ...item, ...updated } : item))
@@ -1430,7 +1432,7 @@ async function removeSkill(skill: ConfigSkill) {
   uninstallDone.value = false
   forgetProgress(skill.id)
   try {
-    await deleteConfigSkill(props.record.id, skill.id)
+    await deleteConfigSkill(platformTenantID.value!, props.record.id, skill.id)
     MessagePlugin.success(t('settings.sandbox.skillDeleteAccepted'))
     skills.value = skills.value.map((item) => (
       item.id === skill.id ? { ...item, status: 'removing' } : item

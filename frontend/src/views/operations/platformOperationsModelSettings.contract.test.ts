@@ -9,7 +9,10 @@ test('platform operations opens the existing model settings overlay', () => {
   assert.match(source, /import Settings from '@\/views\/settings\/Settings\.vue'/)
   assert.match(source, /const uiStore = useUIStore\(\)/)
   assert.match(source, /@click="uiStore\.openSettings\('models'\)"[^>]*>模型配置<\/t-button>/)
-  assert.match(source, /<Settings\s*\/>/)
+  assert.match(source, /:disabled="!selected" @click="openTenantSettings\('sandbox'\)"[^>]*>沙箱配置<\/t-button>/)
+  assert.match(source, /:disabled="!selected" @click="openTenantSettings\('skills'\)"[^>]*>技能管理<\/t-button>/)
+  assert.match(source, /选择企业后可配置沙箱和技能/)
+  assert.match(source, /<Settings :tenant-control-id="selected\?\.id" \/>/)
 })
 
 test('model settings protects YAML lifecycle while allowing manual global cleanup', () => {

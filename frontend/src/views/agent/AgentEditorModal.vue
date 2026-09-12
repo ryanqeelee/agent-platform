@@ -1285,177 +1285,6 @@
                   </div>
                 </div>
 
-                <!-- 技能：脚本跑在所选沙箱里，可用列表也来自这份配置；仅平台管理员配置。 -->
-                <div v-if="authStore.isSystemAdmin" v-show="currentSection === 'skills' && isAgentMode" class="section">
-                  <div class="section-header">
-                    <h2>{{ $t('agent.editor.skillsConfig') }}</h2>
-                    <p class="section-description">{{ $t('agent.editor.skillsConfigDesc') }}</p>
-                  </div>
-
-                  <div class="settings-group">
-                    <div class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.sandboxBackend') }}</label>
-                        <p class="desc">{{ $t('agent.editor.sandboxBackendHint') }}</p>
-                      </div>
-                      <div class="setting-control sandbox-select-control">
-                        <t-select
-                          v-model="formData.config.sandbox_config_id"
-                          :placeholder="$t('agent.editor.sandboxBackendDefault')"
-                          class="sandbox-config-select"
-                          filterable
-                          :popup-props="{ overlayClassName: 'sandbox-config-select-popup' }"
-                        >
-                          <t-option value="" :label="$t('agent.editor.sandboxBackendDefault')" />
-                          <t-option
-                            v-for="cfg in sandboxConfigOptions"
-                            :key="cfg.id"
-                            :value="cfg.id"
-                            :label="cfg.name"
-                          >
-                            <div class="sandbox-option">
-                              <div class="sandbox-option__row">
-                                <span class="sandbox-option__name">{{ cfg.name }}</span>
-                                <span v-if="cfg.sandbox_type" class="sandbox-option__type">{{ backendLabel(cfg.sandbox_type) }}</span>
-                              </div>
-                              <div v-if="sandboxTargetLine(cfg)" class="sandbox-option__target">{{ sandboxTargetLine(cfg) }}</div>
-                            </div>
-                          </t-option>
-                        </t-select>
-                        <p v-if="selectedSandboxSummary" class="sandbox-selected-meta">{{ selectedSandboxSummary }}</p>
-                        <div class="sandbox-select-links">
-                          <a href="javascript:void(0)" class="go-settings-link"
-                            @click.prevent="uiStore.openSettings('sandbox')">
-                            {{ $t('agent.editor.goSandboxSettings') }}
-                          </a>
-                          <template v-if="hasSandboxSelected && canInstallSkills">
-                            <span class="sandbox-select-links__sep" aria-hidden="true">·</span>
-                            <a
-                              href="javascript:void(0)"
-                              class="go-settings-link"
-                              @click.prevent="openSkillSettings"
-                            >
-                              {{ $t('agent.editor.goSkillSettings') }}
-                            </a>
-                          </template>
-                        </div>
-                        <p v-if="sandboxConfigOptions.length === 0" class="desc empty-hint">
-                          {{ $t('agent.editor.sandboxNoConfigs') }}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.skillsSelection') }}</label>
-                        <p class="desc">{{ skillsSelectionHint }}</p>
-                      </div>
-                      <div class="setting-control sandbox-select-control">
-                        <t-radio-group v-model="skillsSelectionMode">
-                          <t-radio-button value="all" :disabled="!canEnableSkills">{{ $t('agent.editor.skillsAll') }}</t-radio-button>
-                          <t-radio-button value="selected" :disabled="!canEnableSkills">{{ $t('agent.editor.skillsSelected') }}</t-radio-button>
-                          <t-radio-button value="none">{{ $t('agent.editor.skillsNone') }}</t-radio-button>
-                        </t-radio-group>
-                        <p v-if="!hasSandboxSelected && sandboxConfigOptions.length > 1" class="desc empty-hint">
-                          {{ $t('agent.editor.skillsNeedSandbox') }}
-                        </p>
-                        <p v-else-if="hasSandboxSelected && skillCatalog.length === 0" class="desc empty-hint">
-                          <span>{{ $t('agent.editor.noSkillsAvailable') }}</span>
-                          <a
-                            v-if="canInstallSkills"
-                            href="javascript:void(0)"
-                            class="go-settings-link"
-                            @click.prevent="openSkillSettings"
-                          >
-                            {{ $t('agent.editor.goSkillSettings') }}
-                          </a>
-                        </p>
-                      </div>
-                    </div>
-
-                    <div v-if="showCatalogSkillList" class="setting-row setting-row-vertical">
-                      <div class="setting-control setting-control-full">
-                        <t-checkbox-group
-                          v-model="formData.config.selected_skills"
-                          class="skill-pick-list"
-                        >
-                          <section
-                            v-for="group in catalogSkillGroups"
-                            :key="group.key"
-                            class="skill-pick-group"
-                            :class="`skill-pick-group--${group.key}`"
-                          >
-                            <header class="skill-pick-group__header">
-                              <span class="skill-pick-group__bar" />
-                              <span class="skill-pick-group__title">{{ group.label }}</span>
-                              <span class="skill-pick-group__count">{{ group.skills.length }}</span>
-                            </header>
-                            <article
-                              v-for="skill in group.skills"
-                              :key="skill.name"
-                              class="skill-pick"
-                              :class="{
-                                'skill-pick--ready': skill.selectable,
-                                'skill-pick--pending': !skill.selectable,
-                                'skill-pick--busy': isSkillBusy(skill),
-                              }"
-                            >
-                              <t-checkbox
-                                v-if="skillsSelectionMode === 'selected'"
-                                :value="skill.name"
-                                :disabled="!skill.selectable"
-                                class="skill-pick__check"
-                              />
-                              <div class="skill-pick__badge" aria-hidden="true">
-                                <t-icon :name="SKILL_ICON" size="16px" />
-                              </div>
-                              <div class="skill-pick__body">
-                                <div class="skill-pick__title-row">
-                                  <span class="skill-name" :title="skill.name">{{ skill.name }}</span>
-                                  <span
-                                    v-if="!skill.selectable"
-                                    class="skill-pick__hint"
-                                    :class="{ 'skill-pick__hint--busy': isSkillBusy(skill) }"
-                                  >
-                                    <t-icon :name="skillStatusIcon(skill)" size="14px" />
-                                    {{ skillStatusHint(skill) }}
-                                  </span>
-                                </div>
-                                <p
-                                  v-if="skill.description"
-                                  class="skill-desc"
-                                  :title="skill.description"
-                                >{{ skill.description }}</p>
-                              </div>
-                              <t-button
-                                v-if="canInstallSkillRow(skill)"
-                                size="small"
-                                variant="text"
-                                theme="primary"
-                                :loading="installingCatalogId === skill.id"
-                                :title="$t('agent.editor.installToThisSandbox')"
-                                @click.stop="installCatalogToCurrent(skill)"
-                              >
-                                {{ $t('agent.editor.installShort') }}
-                              </t-button>
-                              <t-button
-                                v-else-if="isSkillBusy(skill)"
-                                size="small"
-                                variant="text"
-                                theme="primary"
-                                :title="$t('agent.editor.viewInstallProgress')"
-                                @click.stop="openSkillInstallProgress(skill)"
-                              >
-                                {{ $t('agent.editor.viewInstallProgress') }}
-                              </t-button>
-                            </article>
-                          </section>
-                        </t-checkbox-group>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
                 <!-- 知识库配置 -->
                 <div v-show="currentSection === 'knowledge'" class="section">
                   <div class="section-header">
@@ -1804,27 +1633,6 @@
     </Transition>
   </Teleport>
 
-  <SettingDrawer
-    v-model:visible="showSkillProgress"
-    :title="skillProgressTitle"
-    :description="skillProgressDesc"
-    :icon="SKILL_ICON"
-    width="680px"
-    :min-width="560"
-    :max-width="920"
-    storage-key="setting-drawer:width:skill-catalog-manage"
-    :hide-footer="true"
-  >
-    <SandboxSkillsPanel
-      v-if="showSkillProgress && skillProgressRecord && skillProgressId"
-      :record="skillProgressRecord"
-      mode="list"
-      hide-add
-      :focus-skill-id="skillProgressId"
-      @updated="onSkillProgressUpdated"
-      @skills-changed="onSkillProgressChanged"
-    />
-  </SettingDrawer>
 
   <AgentCreateContextualGuide :when="visible && editorMode === 'create'" :is-agent-mode="isAgentMode" />
 </template>
@@ -1856,11 +1664,8 @@ import {
 } from '@/api/agent';
 import { type ModelConfig } from '@/api/model';
 import { type AgentNotReadyReasonKey, agentRequiresRerankModel } from '@/utils/agent-readiness';
-import { installSkillCatalog, type SkillCatalogItem } from '@/api/skill';
 import { type WebSearchProviderEntity } from '@/api/web-search-provider';
 import {
-  isNamedSandboxBackend,
-  type SandboxConfigRecord,
   type StorageEngineStatusItem,
   type PromptTemplate,
   type PromptTemplatesConfig,
@@ -1873,11 +1678,8 @@ import { useEditorResourcesStore } from '@/stores/editorResources';
 import AgentAvatar from '@/components/AgentAvatar.vue';
 import PromptTemplateSelector from '@/components/PromptTemplateSelector.vue';
 import ModelSelector from '@/components/ModelSelector.vue';
-import SandboxSkillsPanel from '@/components/SandboxSkillsPanel.vue';
-import SettingDrawer from '@/components/settings/SettingDrawer.vue';
 import KBParserSettings, { type ParserEngineRule } from '@/views/knowledge/settings/KBParserSettings.vue';
 import AgentShareSettings from '@/components/AgentShareSettings.vue';
-import { SKILL_ICON } from '@/types/mention';
 import { listEmbedChannels } from '@/api/embed';
 import { getRootZoom, rectToCssPx } from '@/utils/zoom';
 import { integrationSectionKey } from '@/config/settingsRoute';
@@ -1958,14 +1760,8 @@ const copyAgentId = async () => {
   await copyWithToast(editorAgent.value?.id, 'common.copied');
 };
 
-// 旧入口把技能沙箱拆成独立 tab；合并后仍接受 section=sandbox。
-const AGENT_EDITOR_SECTION_ALIASES: Record<string, string> = {
-  sandbox: 'skills',
-};
-
 function resolveEditorSection(section?: string | null): string {
-  const key = section || 'basic';
-  return AGENT_EDITOR_SECTION_ALIASES[key] || key;
+  return section || 'basic';
 }
 
 const currentSection = ref(resolveEditorSection(props.initialSection));
@@ -2098,244 +1894,6 @@ const showMcpServiceSelect = computed(() =>
   mcpOptions.value.length > 0 || (formData.value.config.mcp_services?.length ?? 0) > 0,
 );
 const webSearchProviderList = ref<WebSearchProviderEntity[]>([]);
-const skillCatalog = ref<SkillCatalogItem[]>([]);
-const catalogReady = ref(false);
-const installingCatalogId = ref('');
-const skillsSelectionMode = ref<'all' | 'selected' | 'none'>('none');
-const hasSandboxSelected = computed(() => !!formData.value.config.sandbox_config_id);
-const canEnableSkills = computed(() =>
-  hasSandboxSelected.value || namedSandboxConfigs().length === 1,
-);
-const canInstallSkills = computed(() => authStore.hasRole('admin'));
-
-type CatalogSkillRow = SkillCatalogItem & {
-  installed: boolean
-  selectable: boolean
-  installStatus: string
-  installEnabled: boolean
-}
-
-const catalogSkillRows = computed<CatalogSkillRow[]>(() => {
-  const sandboxId = formData.value.config.sandbox_config_id || ''
-  return skillCatalog.value.map((item) => {
-    const inst = sandboxId
-      ? (item.installations || []).find((row) => row.sandbox_config_id === sandboxId)
-      : undefined
-    const installStatus = inst?.status || ''
-    const installEnabled = Boolean(inst?.enabled)
-    const installed = Boolean(inst) && installStatus !== 'removed'
-    const selectable = installStatus === 'ready' && installEnabled
-    return { ...item, installed, selectable, installStatus, installEnabled }
-  })
-})
-
-const showCatalogSkillList = computed(() =>
-  skillsSelectionMode.value !== 'none'
-  && hasSandboxSelected.value
-  && catalogSkillRows.value.length > 0,
-)
-
-const skillsSelectionHint = computed(() => {
-  if (skillsSelectionMode.value === 'all') return t('agent.editor.skillsAllListHint')
-  if (skillsSelectionMode.value === 'selected') return t('agent.editor.selectSkillsDesc')
-  return t('agent.editor.skillsSelectionDesc')
-})
-
-const catalogSkillGroups = computed(() => {
-  const ready = catalogSkillRows.value.filter((skill) => skill.selectable)
-  const pending = catalogSkillRows.value.filter((skill) => !skill.selectable)
-  const groups: { key: 'ready' | 'pending'; label: string; skills: CatalogSkillRow[] }[] = []
-  if (ready.length) {
-    groups.push({
-      key: 'ready',
-      label: t('agent.editor.skillsGroupAvailable'),
-      skills: ready,
-    })
-  }
-  if (pending.length) {
-    groups.push({
-      key: 'pending',
-      label: t('agent.editor.skillsGroupUnavailable'),
-      skills: pending,
-    })
-  }
-  return groups
-})
-
-function skillStatusHint(skill: CatalogSkillRow): string {
-  if (!skill.installed) return t('agent.editor.skillNotInstalled')
-  if (skill.installStatus === 'installing') return t('settings.sandbox.skillStatusInstalling')
-  if (skill.installStatus === 'failed') return t('settings.sandbox.skillStatusFailed')
-  if (skill.installStatus === 'removing') return t('settings.sandbox.skillStatusRemoving')
-  if (skill.installStatus === 'ready' && !skill.installEnabled) {
-    return t('agent.editor.skillDisabledOnSandbox')
-  }
-  return t('agent.editor.skillNotReady')
-}
-
-function skillStatusIcon(skill: CatalogSkillRow): string {
-  if (!skill.installed || skill.installStatus === 'failed') return 'download'
-  if (skill.installStatus === 'installing' || skill.installStatus === 'removing') return 'refresh'
-  if (skill.installStatus === 'ready' && !skill.installEnabled) return 'close-circle'
-  return 'time'
-}
-
-function isSkillBusy(skill: CatalogSkillRow): boolean {
-  return skill.installStatus === 'installing' || skill.installStatus === 'removing'
-}
-
-function canInstallSkillRow(skill: CatalogSkillRow): boolean {
-  if (!canInstallSkills.value || !hasSandboxSelected.value) return false
-  return !skill.installed || skill.installStatus === 'failed'
-}
-
-function namedSandboxConfigs(): SandboxConfigRecord[] {
-  return chatResources.sandboxConfigs.filter((cfg) => isNamedSandboxBackend(cfg.sandbox_type))
-}
-
-function autoBindSoleSandbox() {
-  if (skillsSelectionMode.value === 'none') return
-  if (formData.value.config.sandbox_config_id) return
-  const configs = namedSandboxConfigs()
-  if (configs.length === 1) {
-    formData.value.config.sandbox_config_id = configs[0].id
-  }
-}
-
-function openSkillSettings() {
-  const configId = formData.value.config.sandbox_config_id || ''
-  uiStore.openSettings('skills', configId || undefined)
-}
-
-const showSkillProgress = ref(false)
-const skillProgressRecord = ref<SandboxConfigRecord | null>(null)
-const skillProgressId = ref('')
-const skillProgressTitle = ref('')
-const skillProgressDesc = computed(() => {
-  const record = skillProgressRecord.value
-  if (!record) return ''
-  return t('settings.skills.manageDrawerDesc', { name: record.name })
-})
-
-function sandboxRecordById(configId: string): SandboxConfigRecord | undefined {
-  return chatResources.sandboxConfigs.find((cfg) => cfg.id === configId)
-}
-
-function installOnCurrentSandbox(skill: CatalogSkillRow, configId: string) {
-  return (skill.installations || []).find((row) => row.sandbox_config_id === configId)
-}
-
-async function openSkillInstallProgress(skill: CatalogSkillRow) {
-  const configId = formData.value.config.sandbox_config_id || ''
-  const record = sandboxRecordById(configId)
-  if (!record) {
-    openSkillSettings()
-    return
-  }
-  let inst = installOnCurrentSandbox(skill, configId)
-  if (!inst?.skill_id) {
-    await syncInstalledSkills(true)
-    const latest = catalogSkillRows.value.find((row) => row.id === skill.id)
-    inst = latest ? installOnCurrentSandbox(latest, configId) : undefined
-  }
-  if (!inst?.skill_id) {
-    openSkillSettings()
-    return
-  }
-  skillProgressRecord.value = record
-  skillProgressId.value = inst.skill_id
-  skillProgressTitle.value = skill.name
-  showSkillProgress.value = true
-}
-
-function onSkillProgressUpdated() {
-  void syncInstalledSkills(true)
-}
-
-function onSkillProgressChanged() {
-  void syncInstalledSkills(true)
-}
-
-function pruneSelectedSkills() {
-  if (!catalogReady.value) return
-  const names = new Set(catalogSkillRows.value.filter((skill) => skill.selectable).map((skill) => skill.name))
-  const selected: string[] = formData.value.config.selected_skills || []
-  const kept = selected.filter((name: string) => names.has(name))
-  if (kept.length !== selected.length) {
-    formData.value.config.selected_skills = kept
-  }
-}
-
-async function syncInstalledSkills(force = false) {
-  autoBindSoleSandbox()
-  const configId = formData.value.config.sandbox_config_id || ''
-  await editorResources.ensureSkills(configId, force)
-  try {
-    await editorResources.ensureSkillCatalog(force)
-    skillCatalog.value = [...editorResources.skillCatalog]
-    catalogReady.value = true
-  } catch {
-    catalogReady.value = false
-  }
-  pruneSelectedSkills()
-}
-
-async function installCatalogToCurrent(skill: CatalogSkillRow) {
-  const configId = formData.value.config.sandbox_config_id || ''
-  if (!configId || installingCatalogId.value) return
-  installingCatalogId.value = skill.id
-  try {
-    const res = await installSkillCatalog(skill.id, [configId])
-    const failed = Object.keys(res?.data?.errors || {}).length
-    if (failed > 0) {
-      MessagePlugin.warning(t('settings.skills.installPartial', { failed }))
-    } else {
-      MessagePlugin.success(t('settings.skills.installAccepted'))
-    }
-    await syncInstalledSkills(true)
-  } catch (e: any) {
-    MessagePlugin.error(e?.message || t('settings.sandbox.skillUploadFailed'))
-  } finally {
-    installingCatalogId.value = ''
-  }
-}
-// 空间内的具名沙箱后端配置。始终包含当前已选中的那份，即使它已被删除——
-// 否则下拉会静默显示为“不启用沙箱”，看不出该智能体其实指着一份不存在的配置。
-const sandboxConfigOptions = computed(() => {
-  const configs = chatResources.sandboxConfigs.filter((cfg) => isNamedSandboxBackend(cfg.sandbox_type));
-  const selected = formData.value.config.sandbox_config_id;
-  if (!selected || configs.some((cfg) => cfg.id === selected)) return configs;
-  return [
-    ...configs,
-    { id: selected, name: t('agent.editor.sandboxBackendMissing'), sandbox_type: '' } as SandboxConfigRecord,
-  ];
-});
-const backendLabel = (type: string) =>
-  type ? t(`settings.sandbox.backends.${type}`) : t('common.error');
-
-function sandboxTargetLine(cfg: SandboxConfigRecord): string {
-  if (cfg.sandbox_type === 'docker') {
-    return cfg.config?.docker?.image?.trim() || ''
-  }
-  const remote = cfg.config?.e2b || cfg.config?.cube
-  const raw = remote?.api_url?.trim() || ''
-  if (!raw) return ''
-  try {
-    return new URL(raw).host
-  } catch {
-    return raw
-  }
-}
-
-const selectedSandboxSummary = computed(() => {
-  const id = formData.value.config.sandbox_config_id
-  const cfg = sandboxConfigOptions.value.find((item) => item.id === id)
-  if (!cfg?.sandbox_type) return ''
-  const parts = [backendLabel(cfg.sandbox_type), sandboxTargetLine(cfg)]
-  const desc = cfg.description?.trim()
-  if (desc) parts.push(desc)
-  return parts.filter(Boolean).join(' · ')
-})
 // 存储引擎可用状态（用于图片存储 provider 选择）
 const storageEngineStatus = ref<StorageEngineStatusItem[]>([]);
 const imageStorageOptions = computed(() => {
@@ -2701,9 +2259,6 @@ const navItems = computed(() => {
       items.push({ key: 'retrieval', icon: 'search', label: t('agent.editor.retrievalStrategy') });
     }
     items.push({ key: 'multimodal', icon: 'attach', label: t('agentEditor.imageUpload.navLabel') });
-    if (isAgentMode.value && editorResources.skillsAvailable) {
-      items.push({ key: 'skills', icon: SKILL_ICON, label: t('agent.editor.skillsConfig') });
-    }
   }
   if (canConfigureExternalSearch.value) {
     items.push({ key: 'websearch', icon: 'internet', label: t('agent.editor.webSearchConfig') });
@@ -2740,7 +2295,7 @@ const navGroups = computed(() => {
     {
       key: 'capability',
       label: t('agentEditor.navGroups.capability'),
-      items: pickItems(['multimodal', 'tools', 'mcp', 'skills']),
+      items: pickItems(['multimodal', 'tools', 'mcp']),
     },
     {
       key: 'integration',
@@ -3505,7 +3060,6 @@ watch(() => props.visible, async (val) => {
       // 初始化知识库选择模式
       initKbSelectionMode();
       initMcpSelectionMode();
-      initSkillsSelectionMode();
       // 初始化完成后重置标志
       nextTick(() => {
         isInitializing.value = false;
@@ -3558,10 +3112,9 @@ watch(() => props.visible, async (val) => {
         }
       }
       formData.value = newFormData;
-      // 新建智能体：知识库默认 "全部"，MCP / Skills 仍默认 "不使用"。
+      // 新建智能体：知识库默认 "全部"，MCP 默认 "不使用"。
       kbSelectionMode.value = 'all';
       mcpSelectionMode.value = 'none';
-      skillsSelectionMode.value = 'none';
 
       // 新建智能推理 agent 时，立即应用默认的 agent_type 预设
       // （补齐 system_prompt / allowed_tools / kb_selection_mode 等），
@@ -3584,7 +3137,6 @@ watch(() => props.visible, async (val) => {
       applyDefaultModelsIfEmpty()
     }
 
-    await syncInstalledSkills()
     if (generation !== editorInitializationGeneration || !props.visible) return;
 
     if (props.initialHighlightField) {
@@ -3603,9 +3155,6 @@ watch(() => props.visible, async (val) => {
     clearFieldHighlight();
     agentIMChannelCount.value = 0;
     agentEmbedChannelCount.value = 0;
-    showSkillProgress.value = false;
-    skillProgressRecord.value = null;
-    skillProgressId.value = '';
   }
 });
 
@@ -3633,20 +3182,6 @@ const initMcpSelectionMode = () => {
   } else {
     mcpSelectionMode.value = 'none';
   }
-};
-
-// 初始化 Skills 选择模式
-const initSkillsSelectionMode = () => {
-  if (formData.value.config.skills_selection_mode) {
-    // 如果有保存的模式，直接使用
-    skillsSelectionMode.value = formData.value.config.skills_selection_mode;
-  } else if (formData.value.config.selected_skills?.length > 0) {
-    // 有指定 Skills
-    skillsSelectionMode.value = 'selected';
-  } else {
-    skillsSelectionMode.value = 'none';
-  }
-  autoBindSoleSandbox();
 };
 
 // 内置智能体：填入系统默认值
@@ -3708,54 +3243,6 @@ watch(mcpSelectionMode, (mode) => {
     formData.value.config.mcp_services = [];
   }
   // selected 模式保持 mcp_services 不变
-});
-
-watch(() => formData.value.config.sandbox_config_id, async () => {
-  if (!props.visible) return
-  await syncInstalledSkills()
-})
-
-let catalogPollTimer: number | null = null
-
-function stopCatalogPoll() {
-  if (catalogPollTimer != null) {
-    window.clearInterval(catalogPollTimer)
-    catalogPollTimer = null
-  }
-}
-
-watch(
-  [() => props.visible, catalogSkillRows],
-  () => {
-    const busy = catalogSkillRows.value.some((skill) =>
-      skill.installStatus === 'installing' || skill.installStatus === 'removing',
-    )
-    if (!props.visible || !busy) {
-      stopCatalogPoll()
-      return
-    }
-    if (catalogPollTimer != null) return
-    catalogPollTimer = window.setInterval(() => {
-      void syncInstalledSkills(true)
-    }, 2500)
-  },
-  { flush: 'post' },
-)
-
-// 监听 Skills 选择模式变化
-watch(skillsSelectionMode, (mode) => {
-  formData.value.config.skills_selection_mode = mode;
-  if (mode === 'none') {
-    // 不使用 Skills，清空相关配置
-    formData.value.config.selected_skills = [];
-  } else if (mode === 'all') {
-    // 全部 Skills，清空指定列表
-    formData.value.config.selected_skills = [];
-    autoBindSoleSandbox()
-  } else {
-    autoBindSoleSandbox()
-  }
-  // selected 模式保持 selected_skills 不变
 });
 
 // 监听模式变化，自动调整配置
@@ -3852,9 +3339,6 @@ watch(isAgentMode, (isAgent) => {
   if (isAgent && currentSection.value === 'advanced') {
     currentSection.value = 'basic';
   }
-  if (!isAgent && (currentSection.value === 'skills' || currentSection.value === 'sandbox')) {
-    currentSection.value = 'basic';
-  }
 });
 
 // 监听设置弹窗关闭，刷新模型列表
@@ -3864,7 +3348,6 @@ watch(() => uiStore.showSettingsModal, async (visible, prevVisible) => {
       await Promise.all([
         chatResources.ensureModels(true),
         editorResources.ensureStorageEngine(true),
-        chatResources.ensureSandboxConfigs(true),
       ]);
       if (chatResources.allModels.length > 0) {
         allModels.value = chatResources.allModels;
@@ -3872,7 +3355,6 @@ watch(() => uiStore.showSettingsModal, async (visible, prevVisible) => {
       if (editorResources.storageStatus.length > 0) {
         storageEngineStatus.value = editorResources.storageStatus;
       }
-      await syncInstalledSkills(true);
     } catch (e) {
       console.warn('Failed to refresh data after settings closed', e);
     }
@@ -3955,7 +3437,6 @@ const loadDependencies = async () => {
       dependencies.push(
         chatResources.ensureModels(),
         chatResources.ensureWebSearchProviders(),
-        chatResources.ensureSandboxConfigs(),
         editorResources.ensureStorageEngine(),
       );
     }
@@ -4884,8 +4365,6 @@ const handleSave = async () => {
     delete formData.value.config.intent_prompts;
   }
 
-  pruneSelectedSkills()
-
   saving.value = true;
   try {
     if (editorMode.value === 'create') {
@@ -5529,76 +5008,6 @@ const handleSave = async () => {
   }
 }
 
-.sandbox-select-links {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 4px;
-}
-
-.sandbox-select-links__sep {
-  color: var(--td-text-color-placeholder);
-  font-size: 12px;
-}
-
-.sandbox-select-control {
-  flex-direction: column;
-  align-items: flex-end;
-}
-
-.sandbox-config-select {
-  width: 280px;
-}
-
-.sandbox-option {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  width: 100%;
-  min-width: 0;
-}
-
-.sandbox-option__row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-width: 0;
-}
-
-.sandbox-option__name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sandbox-option__type {
-  flex-shrink: 0;
-  color: var(--td-text-color-placeholder);
-  font-size: 12px;
-}
-
-.sandbox-option__target {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--td-text-color-placeholder);
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-.sandbox-selected-meta {
-  margin: 6px 0 0;
-  max-width: 280px;
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--td-text-color-secondary);
-  word-break: break-word;
-}
-
 // 名称输入框带头像预览
 .name-input-wrapper {
   display: flex;
@@ -6208,159 +5617,6 @@ const handleSave = async () => {
   font-style: italic;
 }
 
-.skill-pick-list {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  width: 100%;
-}
-
-.skill-pick-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.skill-pick-group__header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-bottom: 2px;
-}
-
-.skill-pick-group__bar {
-  display: inline-block;
-  width: 3px;
-  height: 14px;
-  border-radius: 2px;
-  background: var(--td-brand-color);
-}
-
-.skill-pick-group--pending .skill-pick-group__bar {
-  background: var(--td-text-color-placeholder);
-}
-
-.skill-pick-group__title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--td-text-color-primary);
-  letter-spacing: 0.2px;
-}
-
-.skill-pick-group__count {
-  min-width: 20px;
-  padding: 0 6px;
-  font-size: 11px;
-  color: var(--td-text-color-secondary);
-  background: var(--td-bg-color-secondarycontainer);
-  border-radius: 999px;
-  text-align: center;
-  line-height: 18px;
-}
-
-.skill-pick {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  padding: 8px 10px;
-  background: var(--td-bg-color-container);
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
-}
-
-.skill-pick--pending {
-  background: var(--td-bg-color-secondarycontainer);
-}
-
-.skill-pick__check {
-  flex-shrink: 0;
-}
-
-.skill-pick__badge {
-  flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  border-radius: 7px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--td-bg-color-secondarycontainer);
-  color: var(--td-text-color-secondary);
-}
-
-.skill-pick--ready .skill-pick__badge {
-  background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
-  color: var(--td-brand-color);
-}
-
-.skill-pick--pending .skill-pick__badge {
-  background: var(--td-bg-color-container);
-  color: var(--td-text-color-placeholder);
-}
-
-.skill-pick__body {
-  flex: 1;
-  min-width: 0;
-}
-
-.skill-pick__title-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.skill-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--td-text-color-primary);
-}
-
-.skill-pick__hint {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-  font-size: 12px;
-  color: var(--td-text-color-placeholder);
-
-  .t-icon {
-    flex-shrink: 0;
-  }
-}
-
-.skill-pick__hint--busy {
-  color: var(--td-brand-color);
-
-  .t-icon {
-    animation: skill-pick-spin 1s linear infinite;
-  }
-}
-
-@keyframes skill-pick-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.skill-desc {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  margin: 2px 0 0;
-  overflow: hidden;
-  font-size: 12px;
-  color: var(--td-text-color-secondary);
-  line-height: 1.45;
-  white-space: pre-line;
-  word-break: break-word;
-}
-
 .hint-trigger {
   display: inline-flex;
   align-items: center;
@@ -6400,17 +5656,6 @@ const handleSave = async () => {
   font-size: 12px;
   line-height: 1.55;
 }
-
-.empty-hint {
-  color: var(--td-text-color-placeholder);
-  font-style: italic;
-
-  .go-settings-link {
-    display: inline-block;
-    font-style: normal;
-  }
-}
-
 
 // textarea 与模板选择器容器
 .textarea-with-template {
@@ -6789,13 +6034,6 @@ const handleSave = async () => {
     line-height: 1.4;
     padding: 8px 12px;
     white-space: normal;
-  }
-}
-
-.sandbox-config-select-popup {
-  .t-select-option {
-    height: auto;
-    padding: 6px 10px;
   }
 }
 

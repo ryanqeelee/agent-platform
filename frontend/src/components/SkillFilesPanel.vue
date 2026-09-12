@@ -116,6 +116,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 import hljs from 'highlight.js'
 import 'katex/dist/katex.min.css'
 import { copyWithToast } from '@/utils/clipboard'
@@ -168,6 +169,7 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const platformTenantID = usePlatformTenantControlID()
 
 const NAV_WIDTH_KEY = 'skill-files-panel:nav-width'
 const DEFAULT_NAV_WIDTH = 208
@@ -500,8 +502,8 @@ async function selectFile(path: string) {
   markdownMode.value = 'preview'
   try {
     const res = props.catalogId
-      ? await getCatalogSkillFile(props.catalogId, path)
-      : await getConfigSkillFile(props.configId || '', props.skillId || '', path)
+      ? await getCatalogSkillFile(platformTenantID.value!, props.catalogId, path)
+      : await getConfigSkillFile(platformTenantID.value!, props.configId || '', props.skillId || '', path)
     const data = res?.data
     file.value = data || null
     if (!data) {
@@ -535,8 +537,8 @@ async function loadFiles() {
   fileError.value = ''
   try {
     const res = props.catalogId
-      ? await listCatalogSkillFiles(props.catalogId)
-      : await listConfigSkillFiles(props.configId || '', props.skillId || '')
+      ? await listCatalogSkillFiles(platformTenantID.value!, props.catalogId)
+      : await listConfigSkillFiles(platformTenantID.value!, props.configId || '', props.skillId || '')
     const list = res?.data || []
     const tree = buildTree(list)
     nodes.value = tree

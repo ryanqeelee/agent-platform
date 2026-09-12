@@ -194,6 +194,7 @@ const platformSkillSemanticAgentIds = new Set([
   BUILTIN_OPERATING_ANALYST_ID,
 ]);
 const selectedAgentId = computed(() => props.agentId || BUILTIN_EMPLOYEE_ASSISTANT_ID);
+const usesEmployeeSkillCatalog = computed(() => platformSkillSemanticAgentIds.has(selectedAgentId.value));
 const fixedAgent = ref<CustomAgent>();
 const selectedAgent = computed(() => {
   if (fixedAgent.value?.id === selectedAgentId.value) return fixedAgent.value;
@@ -335,7 +336,7 @@ const agentSelectedSkills = computed<string[]>(() => {
 });
 
 const isSkillAllowedByAgent = (skillName: string) => {
-  if (!isAgentStreamMode.value || !editorResources.skillsAvailable) return false;
+  if (!isAgentStreamMode.value || !usesEmployeeSkillCatalog.value || !editorResources.skillsAvailable) return false;
   const mode = agentSkillsSelectionMode.value;
   if (mode === 'none') return false;
   if (mode === 'selected') return agentSelectedSkills.value.includes(skillName);
@@ -358,7 +359,7 @@ watch([selectedAgentId, agentMCPSelectionMode, agentSkillsSelectionMode], ([newA
   }
 
   const skillsMode = agentSkillsSelectionMode.value;
-  if (skillsMode === 'none') {
+  if (!usesEmployeeSkillCatalog.value || skillsMode === 'none') {
     settingsStore.settings.selectedSkills = [];
   } else if (skillsMode === 'selected') {
     const allowed = new Set(agentSelectedSkills.value);
@@ -1159,9 +1160,8 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     }
 
     const skillsMode = agentSkillsSelectionMode.value;
-    if (skillsMode !== 'none') {
-      await editorResources.ensureSkills(platformSkillSemanticAgentIds.has(selectedAgentId.value)
-        ? BUILTIN_EMPLOYEE_ASSISTANT_ID : currentAgentConfig.value?.sandbox_config_id);
+    if (usesEmployeeSkillCatalog.value && skillsMode !== 'none') {
+      await editorResources.ensureEmployeeSkills();
       skillItems = editorResources.skills
         .filter(skill => isSkillAllowedByAgent(skill.name))
         .map(skill => ({

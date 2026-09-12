@@ -181,8 +181,8 @@ func respondSkillServiceError(c *gin.Context, err error) {
 // @Failure      401  {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404  {object}  apperrors.AppError      "Sandbox config not found"
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /sandbox-configs/{id}/skills [get]
+// @Param        tenant_id  path  int  true  "Enterprise ID"
+// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills [get]
 func (h *SandboxSkillHandler) List(c *gin.Context) {
 	skills, err := h.service.ListSkills(c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"))
 	if err != nil {
@@ -207,8 +207,8 @@ func (h *SandboxSkillHandler) List(c *gin.Context) {
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404      {object}  apperrors.AppError      "Skill not found"
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /sandbox-configs/{id}/skills/{skillId} [get]
+// @Param        tenant_id  path  int  true  "Enterprise ID"
+// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId} [get]
 func (h *SandboxSkillHandler) Get(c *gin.Context) {
 	skill, err := h.resolveSkill(c)
 	if err != nil {
@@ -229,8 +229,8 @@ func (h *SandboxSkillHandler) Get(c *gin.Context) {
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404      {object}  apperrors.AppError      "Skill or files not found"
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /sandbox-configs/{id}/skills/{skillId}/files [get]
+// @Param        tenant_id  path  int  true  "Enterprise ID"
+// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/files [get]
 func (h *SandboxSkillHandler) ListFiles(c *gin.Context) {
 	files, err := h.service.ListSkillFiles(
 		c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"), c.Param("skillId"),
@@ -255,8 +255,8 @@ func (h *SandboxSkillHandler) ListFiles(c *gin.Context) {
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404      {object}  apperrors.AppError      "Skill or file not found"
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /sandbox-configs/{id}/skills/{skillId}/files/content [get]
+// @Param        tenant_id  path  int  true  "Enterprise ID"
+// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/files/content [get]
 func (h *SandboxSkillHandler) GetFile(c *gin.Context) {
 	file, err := h.service.ReadSkillFile(
 		c.Request.Context(), sandboxConfigTenantID(c),
@@ -294,8 +294,8 @@ func (h *SandboxSkillHandler) GetFile(c *gin.Context) {
 // @Failure      401   {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404   {object}  apperrors.AppError      "Sandbox config not found"
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /sandbox-configs/{id}/skills [post]
+// @Param        tenant_id  path  int  true  "Enterprise ID"
+// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills [post]
 func (h *SandboxSkillHandler) Upload(c *gin.Context) {
 	maxBytes := secutils.GetMaxSkillBundleSize()
 	limitSkillUploadBody(c, maxBytes)
@@ -389,8 +389,8 @@ func (h *SandboxSkillHandler) installFromSource(c *gin.Context) {
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404      {object}  apperrors.AppError      "Skill not found"
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /sandbox-configs/{id}/skills/{skillId}/reinstall [post]
+// @Param        tenant_id  path  int  true  "Enterprise ID"
+// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/reinstall [post]
 func (h *SandboxSkillHandler) Reinstall(c *gin.Context) {
 	skillID, err := h.service.ReinstallSkill(
 		c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"), c.Param("skillId"),
@@ -414,8 +414,8 @@ func (h *SandboxSkillHandler) Reinstall(c *gin.Context) {
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404      {object}  apperrors.AppError      "Skill not found"
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /sandbox-configs/{id}/skills/{skillId}/stop [post]
+// @Param        tenant_id  path  int  true  "Enterprise ID"
+// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/stop [post]
 func (h *SandboxSkillHandler) Stop(c *gin.Context) {
 	skill, err := h.service.StopSkill(
 		c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"), c.Param("skillId"),
@@ -468,8 +468,8 @@ type skillPatchRequest struct {
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404      {object}  apperrors.AppError      "Skill not found"
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /sandbox-configs/{id}/skills/{skillId} [patch]
+// @Param        tenant_id  path  int  true  "Enterprise ID"
+// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId} [patch]
 func (h *SandboxSkillHandler) Patch(c *gin.Context) {
 	limitJSONBody(c, skillSourceJSONMaxBytes)
 	var req skillPatchRequest
@@ -522,8 +522,8 @@ func (h *SandboxSkillHandler) Patch(c *gin.Context) {
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404      {object}  apperrors.AppError      "Skill not found"
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /sandbox-configs/{id}/skills/{skillId} [delete]
+// @Param        tenant_id  path  int  true  "Enterprise ID"
+// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId} [delete]
 func (h *SandboxSkillHandler) Delete(c *gin.Context) {
 	skillID := c.Param("skillId")
 	err := h.service.RemoveSkill(
@@ -610,8 +610,8 @@ func terminalSkillEvent(skill *types.TenantSkillEntity) (skillInstallEvent, bool
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404      {object}  apperrors.AppError      "Skill not found"
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /sandbox-configs/{id}/skills/{skillId}/install-events [get]
+// @Param        tenant_id  path  int  true  "Enterprise ID"
+// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/install-events [get]
 func (h *SandboxSkillHandler) InstallEvents(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenantID := sandboxConfigTenantID(c)
@@ -736,8 +736,8 @@ func (h *SandboxSkillHandler) InstallEvents(c *gin.Context) {
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404      {object}  apperrors.AppError      "Skill or transcript not found"
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /sandbox-configs/{id}/skills/{skillId}/transcript [get]
+// @Param        tenant_id  path  int  true  "Enterprise ID"
+// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/transcript [get]
 //
 // The transcript deliberately does not reuse /sessions/continue-stream. That
 // endpoint authorizes by "does this chat session belong to you", while an

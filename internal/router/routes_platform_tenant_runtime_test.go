@@ -23,6 +23,7 @@ func TestSystemAdminTenantRuntimeRouteSurfaceAndAPIKeyDefaultDeny(t *testing.T) 
 		&handler.SystemHandler{},
 		guards,
 	)
+	RegisterSystemRoutes(v1, &handler.SystemHandler{}, guards)
 
 	routes := make(map[string]struct{})
 	for _, route := range router.Routes() {
@@ -74,6 +75,7 @@ func TestSystemAdminTenantRuntimeRouteSurfaceAndAPIKeyDefaultDeny(t *testing.T) 
 		http.MethodGet + " /api/v1/skills",
 		http.MethodGet + " /api/v1/skills/catalog",
 		http.MethodPost + " /api/v1/skills/catalog",
+		http.MethodPost + " /api/v1/system/sandbox-check",
 	} {
 		if _, ok := routes[oldRoute]; ok {
 			t.Errorf("legacy platform route is still registered: %s", oldRoute)

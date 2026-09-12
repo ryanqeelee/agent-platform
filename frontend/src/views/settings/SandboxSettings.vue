@@ -218,6 +218,7 @@ import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { getSession } from '@/api/chat/index'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
+import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 import {
   deleteSandboxConfig,
   getSandboxConfigInventory,
@@ -234,6 +235,7 @@ const { t } = useI18n()
 const router = useRouter()
 const confirmDelete = useConfirmDelete()
 const deploymentCapabilities = useDeploymentCapabilitiesStore()
+const platformTenantID = usePlatformTenantControlID()
 const dockerBackendEnabled = computed(() =>
   deploymentCapabilities.isSupported('settings.sandbox.docker'),
 )
@@ -373,7 +375,7 @@ function deleteConfirmText(record: SandboxConfigRecord): string {
 async function onDeleteConfirmOpen(visible: boolean, record: SandboxConfigRecord) {
   if (!visible || deleteAgents.value[record.id]) return
   try {
-    const res = await getSandboxConfigInventory(record.id)
+    const res = await getSandboxConfigInventory(platformTenantID.value!, record.id)
     deleteAgents.value = { ...deleteAgents.value, [record.id]: res?.data?.agent_names || [] }
   } catch {
     // An unreachable backend must not stop the admin from trying to delete.
@@ -461,7 +463,7 @@ function buildCardWarnings(record: SandboxConfigRecord): CardWarning[] {
 async function load() {
   loading.value = true
   try {
-    const res = await listSandboxConfigs()
+    const res = await listSandboxConfigs(platformTenantID.value!)
     records.value = res?.data || []
     workspaceScriptsDisabled.value = res?.workspace_scripts_disabled === true
   } catch (e: any) {
@@ -474,7 +476,7 @@ async function load() {
 async function setScriptsDisabled(disabled: boolean) {
   policySaving.value = true
   try {
-    const res = await setSandboxWorkspacePolicy(disabled)
+    const res = await setSandboxWorkspacePolicy(platformTenantID.value!, disabled)
     workspaceScriptsDisabled.value = res?.workspace_scripts_disabled === true
     MessagePlugin.success(
       disabled ? t('settings.sandbox.scriptsDisabled') : t('settings.sandbox.scriptsEnabled'),
@@ -516,7 +518,7 @@ async function openInventory(record: SandboxConfigRecord) {
   inventory.value = null
   sessionTitles.value = {}
   try {
-    const res = await getSandboxConfigInventory(record.id)
+    const res = await getSandboxConfigInventory(platformTenantID.value!, record.id)
     inventory.value = res?.data || null
     await loadSessionTitles(inventory.value?.session_ids || [])
   } catch (e: any) {
@@ -529,7 +531,7 @@ async function openInventory(record: SandboxConfigRecord) {
 
 async function removeRecord(record: SandboxConfigRecord, force = false) {
   try {
-    await deleteSandboxConfig(record.id, force)
+    await deleteSandboxConfig(platformTenantID.value!, record.id, force)
     MessagePlugin.success(t('settings.sandbox.deleted'))
     showInventory.value = false
     await load()

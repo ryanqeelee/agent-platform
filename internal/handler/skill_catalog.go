@@ -21,8 +21,8 @@ import (
 // @Produce      json
 // @Success      200  {object}  map[string]interface{}
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /skills/catalog [get]
+// @Param        tenant_id  path  int  true  "Enterprise ID"
+// @Router       /system/admin/tenants/{tenant_id}/skills/catalog [get]
 func (h *SkillHandler) ListCatalog(c *gin.Context) {
 	if h.catalog == nil {
 		c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
@@ -44,7 +44,9 @@ func (h *SkillHandler) ListCatalog(c *gin.Context) {
 // @Accept       multipart/form-data
 // @Produce      json
 // @Success      201  {object}  map[string]interface{}
-// @Router       /skills/catalog [post]
+// @Security     Bearer
+// @Param        tenant_id  path  int  true  "Enterprise ID"
+// @Router       /system/admin/tenants/{tenant_id}/skills/catalog [post]
 func (h *SkillHandler) RegisterCatalog(c *gin.Context) {
 	if h.catalog == nil {
 		_ = c.Error(apperrors.NewInternalServerError("skill catalog is not configured"))
@@ -130,7 +132,9 @@ type catalogInstallRequest struct {
 // @Produce      json
 // @Param        id   path  string  true  "Catalog skill ID"
 // @Success      202  {object}  map[string]interface{}
-// @Router       /skills/catalog/{id}/install [post]
+// @Security     Bearer
+// @Param        tenant_id  path  int  true  "Enterprise ID"
+// @Router       /system/admin/tenants/{tenant_id}/skills/catalog/{id}/install [post]
 func (h *SkillHandler) InstallCatalog(c *gin.Context) {
 	if h.catalog == nil {
 		_ = c.Error(apperrors.NewInternalServerError("skill catalog is not configured"))
@@ -172,7 +176,9 @@ func (h *SkillHandler) InstallCatalog(c *gin.Context) {
 // @Tags         Skills
 // @Param        id   path  string  true  "Catalog skill ID"
 // @Success      200  {object}  map[string]interface{}
-// @Router       /skills/catalog/{id} [delete]
+// @Security     Bearer
+// @Param        tenant_id  path  int  true  "Enterprise ID"
+// @Router       /system/admin/tenants/{tenant_id}/skills/catalog/{id} [delete]
 func (h *SkillHandler) DeleteCatalog(c *gin.Context) {
 	if h.catalog == nil {
 		_ = c.Error(apperrors.NewInternalServerError("skill catalog is not configured"))
@@ -194,7 +200,9 @@ func (h *SkillHandler) DeleteCatalog(c *gin.Context) {
 // @Produce      json
 // @Param        id   path  string  true  "Catalog skill ID"
 // @Success      200  {object}  map[string]interface{}
-// @Router       /skills/catalog/{id}/files [get]
+// @Security     Bearer
+// @Param        tenant_id  path  int  true  "Enterprise ID"
+// @Router       /system/admin/tenants/{tenant_id}/skills/catalog/{id}/files [get]
 func (h *SkillHandler) ListCatalogFiles(c *gin.Context) {
 	if h.catalog == nil {
 		_ = c.Error(apperrors.NewInternalServerError("skill catalog is not configured"))
@@ -217,7 +225,9 @@ func (h *SkillHandler) ListCatalogFiles(c *gin.Context) {
 // @Param        id    path   string  true  "Catalog skill ID"
 // @Param        path  query  string  true  "Skill-root-relative file path"
 // @Success      200   {object}  map[string]interface{}
-// @Router       /skills/catalog/{id}/files/content [get]
+// @Security     Bearer
+// @Param        tenant_id  path  int  true  "Enterprise ID"
+// @Router       /system/admin/tenants/{tenant_id}/skills/catalog/{id}/files/content [get]
 func (h *SkillHandler) GetCatalogFile(c *gin.Context) {
 	if h.catalog == nil {
 		_ = c.Error(apperrors.NewInternalServerError("skill catalog is not configured"))

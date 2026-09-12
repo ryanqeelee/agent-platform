@@ -196,10 +196,10 @@ func RegisterMyInvitationRoutes(r *gin.RouterGroup, invitationHandler *handler.T
 // is added on purpose: these are the caller's own values, and the service
 // derives whose they are from the context rather than the request.
 //
-// This deliberately does not reuse /sandbox-configs/:id/skills*, which is
-// Admin+ even for reads (see routes_infra.go): an upload there drives a root
-// shell whose output is baked into the image, and the listing names what that
-// image carries. This endpoint returns declarations and set/unset status only.
+// This deliberately does not reuse the SystemAdmin-only tenant control plane
+// for sandbox skills: an upload there drives a root shell whose output is baked
+// into the image, and the listing names what that image carries. This endpoint
+// returns declarations and set/unset status only.
 //
 // h may be nil in environments built without the dependency wired; a no-op
 // registration is preferable to a startup crash, as with the invitation inbox.
@@ -271,7 +271,6 @@ func RegisterSystemRoutes(
 		systemRoutes.POST("/docreader/reconnect", g.SystemAdmin(), handler.ReconnectDocReader)
 		systemRoutes.GET("/storage-engine-status", g.SystemAdmin(), handler.GetStorageEngineStatus)
 		systemRoutes.POST("/storage-engine-check", g.SystemAdmin(), handler.CheckStorageEngine)
-		systemRoutes.POST("/sandbox-check", g.SystemAdmin(), handler.CheckSandboxConfig)
 	}
 }
 

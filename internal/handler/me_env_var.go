@@ -25,11 +25,10 @@ type meEnvVarService interface {
 
 // MeEnvVarHandler serves the /me/env-vars endpoints.
 //
-// These exist instead of relaxing /sandbox-configs/:id/skills*, which is Admin+
-// even for reads on purpose: an upload there drives a root shell whose output is
-// baked into the image every session of that config boots, and the listing names
-// what that image carries. This handler returns declarations and set/unset
-// status only — never a value.
+// These exist instead of relaxing the SystemAdmin-only tenant control plane for
+// sandbox skills. An upload there drives a root shell whose output is baked into
+// the image every session of that config boots. This handler returns declarations
+// and set/unset status only — never a value.
 type MeEnvVarHandler struct {
 	service meEnvVarService
 }

@@ -13761,8 +13761,14 @@ paths:
       summary: 搜索可加入的空间
       tags:
       - 组织管理
-  /sandbox-configs:
+  /system/admin/tenants/{tenant_id}/sandbox-configs:
     get:
+      parameters:
+      - description: Enterprise ID
+        in: path
+        name: tenant_id
+        required: true
+        type: integer
       description: List workspace sandbox backend configs with credentials masked.
       produces:
       - application/json
@@ -13779,7 +13785,6 @@ paths:
             type: object
       security:
       - Bearer: []
-      - ApiKeyAuth: []
       summary: List sandbox configs
       tags:
       - SandboxConfig
@@ -13789,6 +13794,11 @@ paths:
       description: Create a named workspace sandbox backend config. Credentials are
         masked in the response.
       parameters:
+      - description: Enterprise ID
+        in: path
+        name: tenant_id
+        required: true
+        type: integer
       - description: Sandbox backend config
         in: body
         name: request
@@ -13814,15 +13824,19 @@ paths:
             type: object
       security:
       - Bearer: []
-      - ApiKeyAuth: []
       summary: Create sandbox config
       tags:
       - SandboxConfig
-  /sandbox-configs/{id}:
+  /system/admin/tenants/{tenant_id}/sandbox-configs/{id}:
     delete:
       description: Soft-delete a sandbox backend config. force=true only overrides
         unverifiable provider inventory, never confirmed live sandboxes.
       parameters:
+      - description: Enterprise ID
+        in: path
+        name: tenant_id
+        required: true
+        type: integer
       - description: Sandbox config ID
         in: path
         name: id
@@ -13852,13 +13866,17 @@ paths:
             type: object
       security:
       - Bearer: []
-      - ApiKeyAuth: []
       summary: Delete sandbox config
       tags:
       - SandboxConfig
     get:
       description: Retrieve a workspace sandbox backend config with credentials masked.
       parameters:
+      - description: Enterprise ID
+        in: path
+        name: tenant_id
+        required: true
+        type: integer
       - description: Sandbox config ID
         in: path
         name: id
@@ -13883,7 +13901,6 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
-      - ApiKeyAuth: []
       summary: Get sandbox config
       tags:
       - SandboxConfig
@@ -13893,6 +13910,11 @@ paths:
       description: Update a sandbox backend config. Identity-field changes are refused
         while the config owns live or paused sandboxes.
       parameters:
+      - description: Enterprise ID
+        in: path
+        name: tenant_id
+        required: true
+        type: integer
       - description: Sandbox config ID
         in: path
         name: id
@@ -13937,15 +13959,19 @@ paths:
             type: object
       security:
       - Bearer: []
-      - ApiKeyAuth: []
       summary: Update sandbox config
       tags:
       - SandboxConfig
-  /sandbox-configs/{id}/sandboxes:
+  /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/sandboxes:
     get:
       description: Return live/paused sandbox inventory and affected agent names for
         one config.
       parameters:
+      - description: Enterprise ID
+        in: path
+        name: tenant_id
+        required: true
+        type: integer
       - description: Sandbox config ID
         in: path
         name: id
@@ -13966,14 +13992,18 @@ paths:
             type: object
       security:
       - Bearer: []
-      - ApiKeyAuth: []
       summary: Inspect sandbox config inventory
       tags:
       - SandboxConfig
-  /sandbox-configs/{id}/skills:
+  /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills:
     get:
       description: List the agent skills installed onto one sandbox config's image.
       parameters:
+      - description: Enterprise ID
+        in: path
+        name: tenant_id
+        required: true
+        type: integer
       - description: Sandbox config ID
         in: path
         name: id
@@ -13998,7 +14028,6 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
-      - ApiKeyAuth: []
       summary: List installed skills
       tags:
       - SandboxConfig
@@ -14019,6 +14048,11 @@ paths:
         runs for minutes, so the request is only accepted; follow it
         via the install-events stream.
       parameters:
+      - description: Enterprise ID
+        in: path
+        name: tenant_id
+        required: true
+        type: integer
       - description: Sandbox config ID
         in: path
         name: id
@@ -14056,17 +14090,21 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
-      - ApiKeyAuth: []
       summary: Install a skill
       tags:
       - SandboxConfig
-  /sandbox-configs/{id}/skills/{skillId}:
+  /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}:
     delete:
       description: |-
         Remove a skill from the config's image. The removal rebuilds
         the image and runs for minutes, so it is only accepted; follow
         it via the install-events stream.
       parameters:
+      - description: Enterprise ID
+        in: path
+        name: tenant_id
+        required: true
+        type: integer
       - description: Sandbox config ID
         in: path
         name: id
@@ -14096,13 +14134,17 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
-      - ApiKeyAuth: []
       summary: Remove an installed skill
       tags:
       - SandboxConfig
     get:
       description: Retrieve one installed skill of a sandbox config.
       parameters:
+      - description: Enterprise ID
+        in: path
+        name: tenant_id
+        required: true
+        type: integer
       - description: Sandbox config ID
         in: path
         name: id
@@ -14132,7 +14174,6 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
-      - ApiKeyAuth: []
       summary: Get an installed skill
       tags:
       - SandboxConfig
@@ -14143,6 +14184,11 @@ paths:
         of the environment variables it declared. Either field may be sent, or both.
         The files stay in the image either way; removal is a separate flow.
       parameters:
+      - description: Enterprise ID
+        in: path
+        name: tenant_id
+        required: true
+        type: integer
       - description: Sandbox config ID
         in: path
         name: id
@@ -14182,14 +14228,18 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
-      - ApiKeyAuth: []
       summary: Update an installed skill
       tags:
       - SandboxConfig
-  /sandbox-configs/{id}/skills/{skillId}/files:
+  /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/files:
     get:
       description: List files in the stored skill bundle without starting a sandbox.
       parameters:
+      - description: Enterprise ID
+        in: path
+        name: tenant_id
+        required: true
+        type: integer
       - description: Sandbox config ID
         in: path
         name: id
@@ -14219,14 +14269,18 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
-      - ApiKeyAuth: []
       summary: List files of an installed skill
       tags:
       - SandboxConfig
-  /sandbox-configs/{id}/skills/{skillId}/files/content:
+  /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/files/content:
     get:
       description: Read one skill file as UTF-8, a small base64 image, or binary.
       parameters:
+      - description: Enterprise ID
+        in: path
+        name: tenant_id
+        required: true
+        type: integer
       - description: Sandbox config ID
         in: path
         name: id
@@ -14265,11 +14319,10 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
-      - ApiKeyAuth: []
       summary: Read one file of an installed skill
       tags:
       - SandboxConfig
-  /sandbox-configs/{id}/skills/{skillId}/install-events:
+  /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/install-events:
     get:
       description: |-
         Server-sent progress for one install or removal. The stream
@@ -14277,6 +14330,11 @@ paths:
         derived from the durable status, or with a "detached" frame
         when it stops following a run that is still going.
       parameters:
+      - description: Enterprise ID
+        in: path
+        name: tenant_id
+        required: true
+        type: integer
       - description: Sandbox config ID
         in: path
         name: id
@@ -14305,14 +14363,18 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
-      - ApiKeyAuth: []
       summary: Follow an install or removal
       tags:
       - SandboxConfig
-  /sandbox-configs/{id}/skills/{skillId}/reinstall:
+  /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/reinstall:
     post:
       description: Retry a failed install from the stored archive; does not re-upload.
       parameters:
+      - description: Enterprise ID
+        in: path
+        name: tenant_id
+        required: true
+        type: integer
       - description: Sandbox config ID
         in: path
         name: id
@@ -14346,17 +14408,21 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
-      - ApiKeyAuth: []
       summary: Retry a skill install
       tags:
       - SandboxConfig
-  /sandbox-configs/{id}/skills/{skillId}/stop:
+  /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/stop:
     post:
       description: Abort an in-flight install so the operator can retry or uninstall.
         After a process restart the row may still say installing with no live process;
         this rewrites it immediately instead of waiting for the stuck-run reaper.
         Removal is not stopped.
       parameters:
+      - description: Enterprise ID
+        in: path
+        name: tenant_id
+        required: true
+        type: integer
       - description: Sandbox config ID
         in: path
         name: id
@@ -14390,11 +14456,10 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
-      - ApiKeyAuth: []
       summary: Stop a skill install
       tags:
       - SandboxConfig
-  /sandbox-configs/{id}/skills/{skillId}/transcript:
+  /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/transcript:
     get:
       description: |-
         Server-sent replay of everything the installer agent did — the
@@ -14405,6 +14470,11 @@ paths:
         chat turn with. 404 once the event log has expired; the
         durable message history is the fallback.
       parameters:
+      - description: Enterprise ID
+        in: path
+        name: tenant_id
+        required: true
+        type: integer
       - description: Sandbox config ID
         in: path
         name: id
@@ -14437,7 +14507,6 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
-      - ApiKeyAuth: []
       summary: Follow an install's agent transcript
       tags:
       - SandboxConfig
@@ -14996,12 +15065,17 @@ paths:
       summary: 获取共享给我的知识库列表
       tags:
       - 知识库共享
-  /skills:
+  /system/admin/tenants/{tenant_id}/skills:
     get:
       consumes:
       - application/json
       description: 返回指定沙箱配置镜像内、智能体实际能调用的已安装技能（ready 且启用）。不传 sandbox_config_id 时列表为空。
       parameters:
+      - description: Enterprise ID
+        in: path
+        name: tenant_id
+        required: true
+        type: integer
       - description: Sandbox config ID
         in: query
         name: sandbox_config_id
@@ -15016,12 +15090,17 @@ paths:
             type: object
       security:
       - Bearer: []
-      - ApiKeyAuth: []
       summary: 获取当前沙箱配置上可执行的 Skills
       tags:
       - Skills
-  /skills/catalog:
+  /system/admin/tenants/{tenant_id}/skills/catalog:
     get:
+      parameters:
+      - description: Enterprise ID
+        in: path
+        name: tenant_id
+        required: true
+        type: integer
       description: Returns every skill definition in this workspace and which sandbox
         configs it is installed on.
       produces:
@@ -15034,11 +15113,18 @@ paths:
             type: object
       security:
       - Bearer: []
-      - ApiKeyAuth: []
       summary: List workspace skills
       tags:
       - Skills
     post:
+      security:
+      - Bearer: []
+      parameters:
+      - description: Enterprise ID
+        in: path
+        name: tenant_id
+        required: true
+        type: integer
       consumes:
       - application/json
       - multipart/form-data
@@ -15055,10 +15141,17 @@ paths:
       summary: Add a skill to the workspace catalog
       tags:
       - Skills
-  /skills/catalog/{id}:
+  /system/admin/tenants/{tenant_id}/skills/catalog/{id}:
     delete:
+      security:
+      - Bearer: []
       description: Refused while any sandbox still has an installation of this skill.
       parameters:
+      - description: Enterprise ID
+        in: path
+        name: tenant_id
+        required: true
+        type: integer
       - description: Catalog skill ID
         in: path
         name: id
@@ -15073,11 +15166,18 @@ paths:
       summary: Delete a catalog skill
       tags:
       - Skills
-  /skills/catalog/{id}/files:
+  /system/admin/tenants/{tenant_id}/skills/catalog/{id}/files:
     get:
+      security:
+      - Bearer: []
       description: Lists the stored catalog bundle. Files belong to the skill definition,
         not a sandbox install.
       parameters:
+      - description: Enterprise ID
+        in: path
+        name: tenant_id
+        required: true
+        type: integer
       - description: Catalog skill ID
         in: path
         name: id
@@ -15094,9 +15194,16 @@ paths:
       summary: List files of a catalog skill
       tags:
       - Skills
-  /skills/catalog/{id}/files/content:
+  /system/admin/tenants/{tenant_id}/skills/catalog/{id}/files/content:
     get:
+      security:
+      - Bearer: []
       parameters:
+      - description: Enterprise ID
+        in: path
+        name: tenant_id
+        required: true
+        type: integer
       - description: Catalog skill ID
         in: path
         name: id
@@ -15118,12 +15225,19 @@ paths:
       summary: Read one file of a catalog skill
       tags:
       - Skills
-  /skills/catalog/{id}/install:
+  /system/admin/tenants/{tenant_id}/skills/catalog/{id}/install:
     post:
+      security:
+      - Bearer: []
       consumes:
       - application/json
       description: Runs the existing snapshot install onto each named sandbox config.
       parameters:
+      - description: Enterprise ID
+        in: path
+        name: tenant_id
+        required: true
+        type: integer
       - description: Catalog skill ID
         in: path
         name: id
@@ -16073,12 +16187,19 @@ paths:
       summary: 使用当前参数检测解析引擎可用性
       tags:
       - 系统
-  /system/sandbox-check:
+  /system/admin/tenants/{tenant_id}/sandbox-configs/check:
     post:
+      security:
+      - Bearer: []
       consumes:
       - application/json
       description: 使用当前填写的参数测试沙箱后端，不保存配置；deep=true 会执行临时脚本，远端后端还会创建并销毁一个沙箱
       parameters:
+      - description: Enterprise ID
+        in: path
+        name: tenant_id
+        required: true
+        type: integer
       - description: 沙箱配置
         in: body
         name: body

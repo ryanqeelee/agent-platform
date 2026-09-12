@@ -18,7 +18,7 @@ import (
 
 // --- Sandbox connectivity check ---
 
-// SandboxCheckRequest is the body for POST /system/sandbox-check. Secrets may
+// SandboxCheckRequest is the body for the tenant-scoped platform sandbox check. Secrets may
 // arrive redacted; they are resolved against the workspace's stored config so
 // an admin can test without retyping an API key.
 type SandboxCheckRequest struct {
@@ -93,7 +93,9 @@ func (r *SandboxCheckResponse) skip(name, reason string) {
 // @Produce      json
 // @Param        body  body  SandboxCheckRequest  true  "沙箱配置"
 // @Success      200   {object}  SandboxCheckResponse
-// @Router       /system/sandbox-check [post]
+// @Security     Bearer
+// @Param        tenant_id  path  int  true  "Enterprise ID"
+// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/check [post]
 func (h *SystemHandler) CheckSandboxConfig(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
 

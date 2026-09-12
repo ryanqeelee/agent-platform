@@ -1,12 +1,17 @@
 import type { Router } from 'vue-router'
 
 export const DEFAULT_EMPLOYEE_WORKSPACE_PATH = '/home'
+export const ENTERPRISE_KNOWLEDGE_BASE_PATH = '/platform/knowledge-bases'
 export const PLATFORM_OPERATIONS_PATH = '/platform/operations'
 export const WORKSPACE_ONBOARDING_PATH = '/onboarding/workspace'
 
 export function defaultAuthenticatedDestination(hasValidTenant: boolean, isSystemAdmin: boolean): string {
   if (isSystemAdmin) return PLATFORM_OPERATIONS_PATH
   return hasValidTenant ? DEFAULT_EMPLOYEE_WORKSPACE_PATH : WORKSPACE_ONBOARDING_PATH
+}
+
+export function oidcInvitationDestination(isSystemAdmin: boolean): string {
+  return isSystemAdmin ? PLATFORM_OPERATIONS_PATH : ENTERPRISE_KNOWLEDGE_BASE_PATH
 }
 
 export function tenantRequiredRouteFallback(

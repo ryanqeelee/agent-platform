@@ -72,6 +72,12 @@ type UserService interface {
 	// non-home tenant. Falls back to user.TenantID when the claim is
 	// missing (old tokens issued before tenant-level RBAC).
 	ValidateToken(ctx context.Context, token string) (*types.User, uint64, error)
+	// ValidateIdentityToken validates the same access-token signature, expiry,
+	// token record, and active user as ValidateToken, but does not require the
+	// token's enterprise to remain active. It is reserved for narrow identity
+	// actions whose repository transaction makes the enterprise admission
+	// decision, such as accepting an invitation.
+	ValidateIdentityToken(ctx context.Context, token string) (*types.User, uint64, error)
 	// RefreshToken refreshes access token using refresh token
 	RefreshToken(ctx context.Context, refreshToken string) (accessToken, newRefreshToken string, err error)
 	// RevokeToken revokes a token

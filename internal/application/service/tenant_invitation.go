@@ -246,6 +246,8 @@ func (s *tenantInvitationService) Accept(
 			return nil, ErrUserBoundToAnotherEnterprise
 		case errors.Is(err, apprepo.ErrSeatLimitExceeded):
 			return nil, ErrSeatLimitExceeded
+		case errors.Is(err, apprepo.ErrEnterpriseNotActive):
+			return nil, ErrEnterpriseNotActive
 		default:
 			return nil, err
 		}
@@ -626,6 +628,9 @@ func (s *tenantInvitationService) AcceptByToken(
 		}
 		if errors.Is(err, apprepo.ErrSeatLimitExceeded) {
 			return nil, ErrSeatLimitExceeded
+		}
+		if errors.Is(err, apprepo.ErrEnterpriseNotActive) {
+			return nil, ErrEnterpriseNotActive
 		}
 		logger.Errorf(ctx,
 			"share-link %d accept failed for user %s: %v",

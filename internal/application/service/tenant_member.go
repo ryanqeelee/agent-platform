@@ -223,6 +223,9 @@ func (s *tenantMemberService) AddMember(
 		JoinedAt:  time.Now(),
 	}
 	if err := s.repo.CreateManaged(ctx, managedActor(ctx), member); err != nil {
+		if errors.Is(err, apprepo.ErrEnterpriseNotActive) {
+			return nil, ErrEnterpriseNotActive
+		}
 		if errors.Is(err, apprepo.ErrMemberActionForbidden) {
 			return nil, ErrMemberActionForbidden
 		}

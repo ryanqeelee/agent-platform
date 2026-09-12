@@ -167,6 +167,24 @@ func DenyAPIKeyPrincipal() gin.HandlerFunc {
 	}
 }
 
+// RequirePlatformAPIKeyCapability admits only platform API-key principals
+// carrying the requested capability. Unlike APIKeyRouteAuthorizer, which
+// intentionally lets JWT requests continue to their role guards, this guard
+// rejects JWT principals too. Keep it on machine-only control-plane endpoints
+// whose human-facing workflow must pass through another service.
+func RequirePlatformAPIKeyCapability(capability types.APIKeyCapability) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		scope, ok := types.TenantAPIKeyScopeFromContext(c.Request.Context())
+		if !ok || !scope.IsPlatform() || !scope.HasCapability(capability) {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error": "Forbidden: platform API key capability is required",
+			})
+			return
+		}
+		c.Next()
+	}
+}
+
 // AllowFileServeAPIKey guards the tenant-scoped file-proxy routes (/files and
 // the KB-scoped image proxy) for X-API-Key callers. Those routes serve an
 // arbitrary storage path that only carries a tenant segment — there is no KB

@@ -30,6 +30,7 @@ type stubMemberService struct {
 	listTenant                    func(ctx context.Context, tenantID uint64) ([]*types.TenantMember, error)
 	listMembersPage               func(ctx context.Context, tenantID uint64, query string, page, pageSize int) ([]*types.TenantMember, int64, error)
 	updateRole                    func(ctx context.Context, userID string, tenantID uint64, newRole types.TenantRole) error
+	updateStatus                  func(ctx context.Context, userID string, tenantID uint64, status types.TenantMemberStatus) error
 	updateOperatingAnalysisAccess func(ctx context.Context, userID string, tenantID uint64, enabled bool) error
 	remove                        func(ctx context.Context, userID string, tenantID uint64) error
 }
@@ -91,6 +92,10 @@ func (s *stubMemberService) ListByTenant(ctx context.Context, tenantID uint64) (
 
 func (s *stubMemberService) UpdateRole(ctx context.Context, userID string, tenantID uint64, newRole types.TenantRole) error {
 	return s.updateRole(ctx, userID, tenantID, newRole)
+}
+
+func (s *stubMemberService) UpdateStatus(ctx context.Context, userID string, tenantID uint64, status types.TenantMemberStatus) error {
+	return s.updateStatus(ctx, userID, tenantID, status)
 }
 
 func (s *stubMemberService) UpdateOperatingAnalysisAccess(ctx context.Context, userID string, tenantID uint64, enabled bool) error {
@@ -173,6 +178,7 @@ func memberTestRouterWithCfg(h *TenantMemberHandler, cfg *config.Config) *gin.En
 	tenantByID.GET("/members", h.ListMembers)
 	tenantByID.POST("/members", h.AddMember)
 	tenantByID.PUT("/members/:user_id", h.UpdateMemberRole)
+	tenantByID.PUT("/members/:user_id/status", h.UpdateMemberStatus)
 	tenantByID.PUT("/members/:user_id/operating-analysis-access", h.UpdateOperatingAnalysisAccess)
 	tenantByID.DELETE("/members/:user_id", h.RemoveMember)
 	tenantByID.POST("/leave", h.LeaveTenant)
@@ -510,6 +516,44 @@ func TestTenantMember_UpdateRole_UnknownMembershipMaps404(t *testing.T) {
 	w := doJSON(t, memberTestRouter(h), http.MethodPut, "/tenants/1/members/u-ghost", body, "u-owner")
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("missing membership must 404, got %d", w.Code)
+	}
+}
+
+func TestTenantMember_EnterpriseInactiveMaps409(t *testing.T) {
+	inactive := service.ErrEnterpriseNotActive
+	ms := &stubMemberService{
+		add: func(context.Context, string, uint64, types.TenantRole, *string) (*types.TenantMember, error) {
+			return nil, inactive
+		},
+		updateRole: func(context.Context, string, uint64, types.TenantRole) error { return inactive },
+		updateStatus: func(context.Context, string, uint64, types.TenantMemberStatus) error {
+			return inactive
+		},
+		updateOperatingAnalysisAccess: func(context.Context, string, uint64, bool) error { return inactive },
+		remove:                        func(context.Context, string, uint64) error { return inactive },
+	}
+	users := &stubMemberUserService{getByEmail: func(context.Context, string) (*types.User, error) {
+		return &types.User{ID: "u-bob", Email: "bob@example.invalid"}, nil
+	}}
+	router := memberTestRouter(newTestMemberHandler(ms, users))
+
+	for _, tc := range []struct {
+		name, method, path string
+		body               any
+	}{
+		{"add", http.MethodPost, "/tenants/1/members", map[string]any{"email": "bob@example.invalid", "role": "viewer"}},
+		{"role", http.MethodPut, "/tenants/1/members/u-bob", map[string]any{"role": "admin"}},
+		{"status", http.MethodPut, "/tenants/1/members/u-bob/status", map[string]any{"status": "suspended"}},
+		{"operating analysis", http.MethodPut, "/tenants/1/members/u-bob/operating-analysis-access", map[string]any{"enabled": true}},
+		{"remove", http.MethodDelete, "/tenants/1/members/u-bob", nil},
+		{"leave", http.MethodPost, "/tenants/1/leave", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			response := doJSON(t, router, tc.method, tc.path, tc.body, "u-admin")
+			if response.Code != http.StatusConflict {
+				t.Fatalf("status=%d want=%d body=%s", response.Code, http.StatusConflict, response.Body.String())
+			}
+		})
 	}
 }
 

@@ -121,7 +121,7 @@ func (c *GovernedDataClient) request(ctx context.Context, operation string, body
 			Detail string `json:"detail"`
 		}
 		_ = json.Unmarshal(data, &failure)
-		return nil, fmt.Errorf("Edge request failed (HTTP %d): %s", response.StatusCode, failure.Detail)
+		return nil, newGovernedRequestError(response.StatusCode, failure.Detail)
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err

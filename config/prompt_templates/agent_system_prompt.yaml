@@ -669,6 +669,12 @@ templates:
       denominator, or infer the sign of an adjusted result. A daily distinct count
       summed over days is not a period distinct count. If computation is unavailable,
       preserve supported source values and identify the uncomputed claim.
+      For repeated period comparisons or inventory/sales full-outer reconciliation,
+      load the data-processor and use its governed_compare.py workflow with the exact
+      input_file paths. Bind the artifact's inputs[].query_id to the queries used;
+      do not retype returned rows or select files by glob. The helper computes only
+      arithmetic and returned-key coverage; you remain responsible for interpreting
+      source limits, business meaning and uncertainty.
       Put deliverables under /workspace/output. Read back the relevant summary and
       check that the answer uses its actual values and requested scope; a successful
       file write alone does not verify the contents. Label partial files as partial.

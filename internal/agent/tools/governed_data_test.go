@@ -223,7 +223,22 @@ func TestGovernedDataLargeOutputIsValidPreviewAndKeepsFullReturnedFile(t *testin
 			for i := range rows {
 				rows[i] = map[string]any{"amount": "9007199254740993.12345678", "description": strings.Repeat("业务", 200)}
 			}
-			raw, err := json.Marshal(map[string]any{"contract_version": governedEdgeContract, "enterprise_id": "tenant", "edge_node_id": "edge", "catalog": map[string]any{"version": "cat-1", "freshness_token": "catalog-digest"}, "evidence": map[string]any{"receipt_sha256": "query-digest"}, "query": map[string]any{"id": "query-1", "rows_returned": 20, "truncated": true, "applied_limit": 20}, "rows": rows})
+			raw, err := json.Marshal(map[string]any{
+				"contract_version": governedEdgeContract, "enterprise_id": "tenant", "edge_node_id": "edge",
+				"catalog":  map[string]any{"version": "cat-1", "freshness_token": "catalog-digest"},
+				"evidence": map[string]any{"receipt_sha256": "query-digest"},
+				"query": map[string]any{
+					"id": "query-1", "sql": strings.Repeat("SELECT amount, description FROM v_sales ", 40),
+					"rows_returned": 20, "truncated": true, "applied_limit": 20,
+				},
+				"columns": []any{map[string]any{"name": "amount", "type": "Decimal(30,8)"}, map[string]any{"name": "description", "type": "String"}},
+				"limits": map[string]any{
+					"coverage":         map[string]any{"retail.v_sales": map[string]any{"status": "ready", "row_count": 999999, "watermark": map[string]any{"day": "2026-09-11"}, "grain": strings.Repeat("one source object observation ", 20)}},
+					"read_consistency": "live query; Catalog freshness is provenance, not a database snapshot",
+					"quality_flags":    []any{}, "assumption_notes": []any{"source object coverage is not query population coverage"}, "missing_dependencies": []any{},
+				},
+				"rows": rows,
+			})
 			require.NoError(t, err)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(raw) }))
 			defer server.Close()
@@ -251,6 +266,9 @@ func TestGovernedDataLargeOutputIsValidPreviewAndKeepsFullReturnedFile(t *testin
 			require.NoError(t, json.Unmarshal([]byte(result.Output), &preview))
 			require.Equal(t, true, preview["rows_preview_only"])
 			require.Equal(t, "query-digest", preview["evidence"].(map[string]any)["receipt_sha256"])
+			encodedData, err := json.Marshal(result.Data)
+			require.NoError(t, err)
+			require.JSONEq(t, result.Output, string(encodedData), "Output and Data must describe the same bounded envelope")
 			q := preview["query"].(map[string]any)
 			require.Equal(t, "query-1", q["id"])
 			require.Equal(t, float64(20), q["rows_returned"])
@@ -258,14 +276,76 @@ func TestGovernedDataLargeOutputIsValidPreviewAndKeepsFullReturnedFile(t *testin
 			require.Less(t, len(preview["rows"].([]any)), 20)
 			require.Equal(t, float64(len(preview["rows"].([]any))), preview["preview_row_count"])
 			require.Equal(t, stage == "file", result.Success)
+			metadata := preview["bounded_metadata"].(map[string]any)
+			require.Equal(t, false, metadata["complete"])
+			require.Equal(t, stage == "file", metadata["limits_in_file"])
+			require.Equal(t, stage == "file", metadata["columns_in_file"])
+			require.Equal(t, stage == "file", metadata["query_sql_in_file"])
+			require.Contains(t, metadata["limits_coverage_semantics"], "source object observations")
+			var complete map[string]any
+			require.NoError(t, json.Unmarshal(raw, &complete))
+			if metadata["limits_in_output"] == true {
+				require.Equal(t, complete["limits"], preview["limits"], "source limits must be preserved whole")
+			} else {
+				require.NotContains(t, preview, "limits")
+				require.NotContains(t, result.Output, strings.Repeat("one source object observation ", 10), "source strings must be complete or omitted")
+			}
 			if stage == "file" {
 				require.Equal(t, string(raw), string(files.data))
 				require.NotEmpty(t, preview["input_file"])
+				require.Contains(t, preview["next_step"], "exact input_file")
 			} else {
 				require.NotEmpty(t, result.Error)
 			}
 		})
 	}
+}
+
+func TestGovernedDataQueryFailsWhenBudgetCannotHoldProvenance(t *testing.T) {
+	var result map[string]any
+	require.NoError(t, json.Unmarshal([]byte(externalQuery), &result))
+	result["input_file"] = "/workspace/data/governed-query-exact.json"
+	result["input_sha256"] = strings.Repeat("a", 64)
+	bounded, err := boundedGovernedQueryResult(WithOutputBudget(context.Background(), 32), result)
+	require.NoError(t, err)
+	require.False(t, bounded.Success)
+	require.Equal(t, "{}", bounded.Output)
+	require.Empty(t, bounded.Data)
+	require.Contains(t, bounded.Error, "cannot hold query provenance")
+}
+
+func TestGovernedDataBoundedQueryKeepsCompleteMetadataWhenItFits(t *testing.T) {
+	rows := []any{
+		map[string]any{"amount": "1.25", "description": strings.Repeat("业务", 400)},
+		map[string]any{"amount": "2.75", "description": strings.Repeat("经营", 400)},
+	}
+	result := map[string]any{
+		"contract_version": governedEdgeContract, "enterprise_id": "tenant", "edge_node_id": "edge",
+		"catalog": map[string]any{"version": "cat-1", "freshness_token": "digest-1"},
+		"query": map[string]any{
+			"id": "query-1", "sql": "SELECT amount, description FROM v_sales", "executed_at": "2026-09-12T00:00:00Z",
+			"duration_ms": 1, "rows_returned": 2, "applied_limit": 1000, "truncated": false,
+		},
+		"columns": []any{map[string]any{"name": "amount", "type": "Decimal(30,8)"}, map[string]any{"name": "description", "type": "String"}},
+		"limits": map[string]any{
+			"coverage":         map[string]any{"retail.v_sales": map[string]any{"status": "ready", "row_count": 2}},
+			"read_consistency": "live query; not a snapshot", "quality_flags": []any{}, "assumption_notes": []any{}, "missing_dependencies": []any{},
+		},
+		"evidence": map[string]any{"receipt_sha256": "sha256:receipt"}, "rows": rows,
+		"input_file": "/workspace/data/governed-query-exact.json", "input_sha256": strings.Repeat("a", 64),
+	}
+	bounded, err := boundedGovernedQueryResult(WithOutputBudget(context.Background(), 1600), result)
+	require.NoError(t, err)
+	require.True(t, bounded.Success)
+	require.LessOrEqual(t, utf8.RuneCountInString(bounded.Output), 1600)
+	require.Equal(t, true, bounded.Data["bounded_metadata"].(map[string]any)["complete"])
+	require.Equal(t, "SELECT amount, description FROM v_sales", bounded.Data["query"].(map[string]any)["sql"])
+	require.Contains(t, bounded.Data, "limits")
+	require.Contains(t, bounded.Data, "columns")
+	require.Less(t, len(bounded.Data["rows"].([]any)), len(rows))
+	encoded, err := json.Marshal(bounded.Data)
+	require.NoError(t, err)
+	require.JSONEq(t, bounded.Output, string(encoded))
 }
 
 func TestGovernedSchemaRegistryBudgetPreservesCompleteFile(t *testing.T) {

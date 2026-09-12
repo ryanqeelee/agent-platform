@@ -104,6 +104,28 @@ func isTenantOptionalAPI(path, method string) bool {
 	}
 }
 
+// isInvitationAcceptanceIdentityAPI is intentionally method- and path-exact.
+// These two handlers only need a verified web-user identity; their repository
+// transaction locks the invitation and target enterprise and returns the
+// lifecycle admission result. Inbox reads, declines, and every tenant route
+// retain normal active-enterprise authentication.
+func isInvitationAcceptanceIdentityAPI(path, method string) bool {
+	if method != http.MethodPost {
+		return false
+	}
+	if path == "/api/v1/me/invitations/accept-by-token" {
+		return true
+	}
+	const prefix = "/api/v1/me/invitations/"
+	const suffix = "/accept"
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		return false
+	}
+	invitationID := strings.TrimSuffix(strings.TrimPrefix(path, prefix), suffix)
+	id, err := strconv.ParseUint(invitationID, 10, 64)
+	return err == nil && id > 0
+}
+
 // isTenantlessSystemAdminAPI identifies the platform control-plane namespace
 // that a human SystemAdmin may use before belonging to any workspace. Route
 // registration and RequireSystemAdmin still decide whether the concrete
@@ -204,7 +226,14 @@ func Auth(
 		bearerPresented := false
 		if token, ok := bearerToken(c); ok {
 			bearerPresented = true
-			user, jwtTenantID, err := userService.ValidateToken(c.Request.Context(), token)
+			var user *types.User
+			var jwtTenantID uint64
+			var err error
+			if isInvitationAcceptanceIdentityAPI(c.Request.URL.Path, c.Request.Method) {
+				user, jwtTenantID, err = userService.ValidateIdentityToken(c.Request.Context(), token)
+			} else {
+				user, jwtTenantID, err = userService.ValidateToken(c.Request.Context(), token)
+			}
 			if err == nil && user != nil {
 				if authenticateJWTUser(c, tenantService, memberService, cfg, user, jwtTenantID) {
 					c.Request = c.Request.WithContext(types.WithGovernedDataUserCredential(c.Request.Context(), token))
@@ -261,6 +290,10 @@ func authenticateJWTUser(
 	jwtTenantID uint64,
 ) bool {
 	ctx := c.Request.Context()
+	if isInvitationAcceptanceIdentityAPI(c.Request.URL.Path, c.Request.Method) {
+		attachTenantlessUserContext(c, user)
+		return true
+	}
 	if user.IsSystemAdmin {
 		// Platform browser identities never inherit an enterprise scope from a
 		// legacy JWT claim, users.tenant_id value, membership, or X-Tenant-ID.

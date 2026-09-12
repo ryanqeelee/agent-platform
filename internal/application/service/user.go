@@ -1199,6 +1199,24 @@ func (s *userService) recordLastActiveTenant(ctx context.Context, user *types.Us
 // call. Tokens minted before tenant-level RBAC don't carry the claim;
 // in that case we fall back to user.TenantID for backward compatibility.
 func (s *userService) ValidateToken(ctx context.Context, tokenString string) (*types.User, uint64, error) {
+	user, activeTenantID, err := s.ValidateIdentityToken(ctx, tokenString)
+	if err != nil {
+		return nil, 0, err
+	}
+	if user.IsSystemAdmin {
+		return user, 0, nil
+	}
+	if err := s.requireActiveTenant(ctx, activeTenantID); err != nil {
+		return nil, 0, err
+	}
+	return user, activeTenantID, nil
+}
+
+// ValidateIdentityToken applies the access-token and account checks shared by
+// every JWT request without deciding whether the token's enterprise may be
+// used. Auth invokes this only for invitation acceptance, where the locked
+// repository transaction is the authoritative lifecycle admission boundary.
+func (s *userService) ValidateIdentityToken(ctx context.Context, tokenString string) (*types.User, uint64, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -1248,10 +1266,6 @@ func (s *userService) ValidateToken(ctx context.Context, tokenString string) (*t
 	// falls back to the user's home tenant so old tokens (and tokens issued
 	// by code paths that don't yet set the claim) keep working.
 	activeTenantID := tenantIDFromClaims(claims, user.TenantID)
-	if err := s.requireActiveTenant(ctx, activeTenantID); err != nil {
-		return nil, 0, err
-	}
-
 	return user, activeTenantID, nil
 }
 

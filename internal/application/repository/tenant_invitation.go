@@ -367,7 +367,7 @@ func (r *tenantInvitationRepository) acceptWithMembership(
 		} else if !errors.Is(existingErr, gorm.ErrRecordNotFound) {
 			return existingErr
 		} else {
-			if err := lockTenantAndCheckSeat(ctx, tx, inv.TenantID); err != nil {
+			if err := lockActiveTenantAndCheckSeat(ctx, tx, inv.TenantID); err != nil {
 				return err
 			}
 			member := &types.TenantMember{

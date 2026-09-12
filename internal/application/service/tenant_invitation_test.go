@@ -411,6 +411,27 @@ func TestInvitationService_Accept_HappyPath_CreatesMembership(t *testing.T) {
 	}
 }
 
+func TestInvitationService_Accept_MapsEnterpriseAdmissionConflicts(t *testing.T) {
+	for _, repoErr := range []error{apprepo.ErrEnterpriseNotActive, apprepo.ErrSeatLimitExceeded} {
+		svc, repo, _ := newInvitationSvc()
+		invitation, err := svc.Create(context.Background(), 1, "u-alice", types.TenantRoleViewer, nil, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		repo.acceptMember = func(context.Context, string, uint64, types.TenantRole, *string) (*types.TenantMember, error) {
+			return nil, repoErr
+		}
+		_, err = svc.Accept(context.Background(), invitation.ID, "u-alice")
+		want := ErrSeatLimitExceeded
+		if errors.Is(repoErr, apprepo.ErrEnterpriseNotActive) {
+			want = ErrEnterpriseNotActive
+		}
+		if !errors.Is(err, want) {
+			t.Fatalf("repository error %v mapped to %v, want %v", repoErr, err, want)
+		}
+	}
+}
+
 func TestInvitationService_Accept_IdempotentWhenAlreadyActiveMember(t *testing.T) {
 	svc, invRepo, memberSvc := newInvitationSvc()
 	ctx := context.Background()
@@ -674,6 +695,21 @@ func TestInvitationService_AcceptByToken_HappyPath(t *testing.T) {
 	}
 	if rows[0].AcceptedCount != 1 {
 		t.Fatalf("one accepted member must count once, got %d", rows[0].AcceptedCount)
+	}
+}
+
+func TestInvitationService_AcceptByToken_MapsInactiveEnterprise(t *testing.T) {
+	svc, repo, _ := newInvitationSvc()
+	_, token, err := svc.CreateShareLink(context.Background(), 1, types.TenantRoleViewer, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo.acceptMember = func(context.Context, string, uint64, types.TenantRole, *string) (*types.TenantMember, error) {
+		return nil, apprepo.ErrEnterpriseNotActive
+	}
+	_, err = svc.AcceptByToken(context.Background(), token, "u-alice")
+	if !errors.Is(err, ErrEnterpriseNotActive) {
+		t.Fatalf("error=%v want ErrEnterpriseNotActive", err)
 	}
 }
 

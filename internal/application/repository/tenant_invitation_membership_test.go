@@ -140,3 +140,88 @@ func TestInvitationAcceptanceRejectsPlatformIdentityAtomically(t *testing.T) {
 		t.Fatalf("platform identity gained %d memberships", memberships)
 	}
 }
+
+func TestInvitationAcceptanceRequiresActiveEnterpriseAtomically(t *testing.T) {
+	for _, status := range []string{
+		types.TenantStatusSuspended,
+		types.TenantStatusProvisioning,
+		types.TenantStatusActivationAbandoned,
+		types.TenantStatusActive,
+	} {
+		t.Run(status, func(t *testing.T) {
+			db := activationTestDB(t)
+			if err := db.AutoMigrate(&types.TenantInvitation{}); err != nil {
+				t.Fatal(err)
+			}
+			tenant := &types.Tenant{Name: "Acme", Status: status}
+			if err := db.Create(tenant).Error; err != nil {
+				t.Fatal(err)
+			}
+			for _, id := range []string{"direct-user", "share-user"} {
+				user := &types.User{
+					ID: id, Username: id, Email: id + "@example.invalid",
+					PasswordHash: "unused", IsActive: true,
+				}
+				if err := db.Omit("TenantID").Create(user).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			expiresAt := time.Now().Add(time.Hour)
+			direct := &types.TenantInvitation{
+				TenantID: tenant.ID, InviteeUserID: "direct-user", Role: types.TenantRoleViewer,
+				Status: types.TenantInvitationStatusPending, ExpiresAt: expiresAt,
+			}
+			share := &types.TenantInvitation{
+				TenantID: tenant.ID, Token: "share-token", Role: types.TenantRoleViewer,
+				Status: types.TenantInvitationStatusPending, ExpiresAt: expiresAt,
+			}
+			if err := db.Create(direct).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(share).Error; err != nil {
+				t.Fatal(err)
+			}
+
+			repo := &tenantInvitationRepository{db: db}
+			directMember, directErr := repo.AcceptInvitation(context.Background(), direct.ID, "direct-user", time.Now())
+			shareMember, shareErr := repo.AcceptShareLink(context.Background(), share.ID, "share-user", time.Now())
+			if status == types.TenantStatusActive {
+				if directErr != nil || shareErr != nil || directMember == nil || shareMember == nil {
+					t.Fatalf("active acceptance: direct=(%+v,%v) share=(%+v,%v)", directMember, directErr, shareMember, shareErr)
+				}
+				return
+			}
+			if !errors.Is(directErr, ErrEnterpriseNotActive) || !errors.Is(shareErr, ErrEnterpriseNotActive) {
+				t.Fatalf("inactive acceptance errors: direct=%v share=%v", directErr, shareErr)
+			}
+			if directMember != nil || shareMember != nil {
+				t.Fatalf("inactive acceptance returned membership: direct=%+v share=%+v", directMember, shareMember)
+			}
+			var memberships int64
+			if err := db.Model(&types.TenantMember{}).Where("tenant_id = ?", tenant.ID).Count(&memberships).Error; err != nil {
+				t.Fatal(err)
+			}
+			if memberships != 0 {
+				t.Fatalf("inactive enterprise gained %d memberships", memberships)
+			}
+			for _, id := range []string{"direct-user", "share-user"} {
+				var user types.User
+				if err := db.First(&user, "id = ?", id).Error; err != nil {
+					t.Fatal(err)
+				}
+				if user.TenantID != 0 {
+					t.Fatalf("user %s bound to inactive tenant %d", id, user.TenantID)
+				}
+			}
+			for _, invitationID := range []uint64{direct.ID, share.ID} {
+				var invitation types.TenantInvitation
+				if err := db.First(&invitation, invitationID).Error; err != nil {
+					t.Fatal(err)
+				}
+				if invitation.Status != types.TenantInvitationStatusPending || invitation.AcceptedCount != 0 || invitation.RespondedAt != nil {
+					t.Fatalf("rejected invitation %d mutated: %+v", invitationID, invitation)
+				}
+			}
+		})
+	}
+}

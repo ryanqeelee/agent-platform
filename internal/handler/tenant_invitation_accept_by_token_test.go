@@ -33,6 +33,16 @@ func (s *acceptByTokenInvitationSvc) AcceptByToken(_ context.Context, _ string, 
 	return &types.TenantMember{TenantID: 42, Role: types.TenantRoleViewer, Status: types.TenantMemberStatusActive}, nil
 }
 
+func (s *acceptByTokenInvitationSvc) Accept(_ context.Context, _ uint64, _ string) (*types.TenantMember, error) {
+	if s.acceptErr != nil {
+		return nil, s.acceptErr
+	}
+	if s.member != nil {
+		return s.member, nil
+	}
+	return &types.TenantMember{TenantID: 42, Role: types.TenantRoleViewer, Status: types.TenantMemberStatusActive}, nil
+}
+
 // acceptByTokenUserSvc returns a user with the configured home tenant so
 // the handler's tenantless-adoption branch can be exercised.
 type acceptByTokenUserSvc struct {
@@ -71,6 +81,7 @@ func newAcceptByTokenTestRouter(h *TenantInvitationHandler) *gin.Engine {
 		c.Next()
 	}, errorCapture())
 	r.POST("/me/invitations/accept-by-token", h.AcceptMyInvitationByToken)
+	r.POST("/me/invitations/:inv_id/accept", h.AcceptMyInvitation)
 	return r
 }
 
@@ -234,5 +245,36 @@ func TestAcceptMyInvitationByTokenUnexpectedErrorIs500(t *testing.T) {
 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status=%d body=%s, want 500 for unexpected error", w.Code, w.Body.String())
+	}
+}
+
+func TestInvitationAcceptanceAdmissionConflictsAre409(t *testing.T) {
+	for _, serviceErr := range []error{service.ErrSeatLimitExceeded, service.ErrEnterpriseNotActive} {
+		for _, endpoint := range []struct {
+			name, path string
+			body       []byte
+		}{
+			{name: "direct", path: "/me/invitations/7/accept"},
+			{name: "share link", path: "/me/invitations/accept-by-token", body: []byte(`{"token":"invite-token"}`)},
+		} {
+			t.Run(endpoint.name+"/"+serviceErr.Error(), func(t *testing.T) {
+				users := &acceptByTokenUserSvc{}
+				h := &TenantInvitationHandler{
+					invitationService: &acceptByTokenInvitationSvc{acceptErr: serviceErr},
+					userService:       users,
+					tenantService:     &acceptByTokenTenantSvc{},
+				}
+				req := httptest.NewRequest(http.MethodPost, endpoint.path, bytes.NewReader(endpoint.body))
+				req.Header.Set("Content-Type", "application/json")
+				w := httptest.NewRecorder()
+				newAcceptByTokenTestRouter(h).ServeHTTP(w, req)
+				if w.Code != http.StatusConflict {
+					t.Fatalf("status=%d want=%d body=%s", w.Code, http.StatusConflict, w.Body.String())
+				}
+				if users.updateCalled {
+					t.Fatal("rejected acceptance updated the user's home tenant")
+				}
+			})
+		}
 	}
 }

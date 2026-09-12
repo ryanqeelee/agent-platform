@@ -204,7 +204,7 @@ func (h *AuthHandler) RegisterByInvite(c *gin.Context) {
 			c.Error(apperrors.NewInternalServerError("failed to clean up incomplete invited account").WithDetails(deleteErr.Error()))
 			return
 		}
-		if errors.Is(err, service.ErrSeatLimitExceeded) {
+		if errors.Is(err, service.ErrSeatLimitExceeded) || errors.Is(err, service.ErrEnterpriseNotActive) {
 			c.Error(apperrors.NewConflictError(err.Error()))
 			return
 		}

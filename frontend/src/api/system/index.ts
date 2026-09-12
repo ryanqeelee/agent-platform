@@ -1213,6 +1213,16 @@ export function configSkillTranscriptUrl(tenantId: number, configId: string, ski
   return `${platformSandboxConfigPath(tenantId)}/${configId}/skills/${skillId}/transcript`
 }
 
+export function getConfigSkillTranscriptHistory(
+  tenantId: number,
+  configId: string,
+  skillId: string,
+): Promise<{ data: any[] }> {
+  return get(
+    `${platformSandboxConfigPath(tenantId)}/${configId}/skills/${skillId}/transcript/history`,
+  ) as unknown as Promise<{ data: any[] }>
+}
+
 export interface ConfigSkillFileEntry {
   path: string
   size: number

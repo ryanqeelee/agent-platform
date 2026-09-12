@@ -12,6 +12,8 @@
 | POST | `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills` | 安装技能（zip 上传或托管平台 source） |
 | POST | `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/reinstall` | 用已保存的安装包重试安装 |
 | POST | `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/stop` | 停止卡住的安装 |
+| GET  | `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/transcript` | 实时跟随本次安装记录 |
+| GET  | `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/transcript/history` | 读取本次安装的持久化消息 |
 | GET  | `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/files` | 列出已安装技能的文件 |
 | GET  | `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/files/content` | 读取已安装技能中的单个文件 |
 | PATCH | `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}` | 启用/停用技能，或设置空间级环境变量 |
@@ -187,6 +189,30 @@ curl --location --request POST \
 ```
 
 若技能不是 `installing`（且不是已经 `failed`），返回 400。已经 `failed` 的停止是幂等成功。
+
+## GET `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/transcript/history` - 持久化安装记录
+
+根据当前企业、沙箱配置与技能行保存的安装 locator，返回该次安装的用户提示和对应 assistant 消息。客户端不能提交任意 session 或 message ID，因此该接口不能读取普通企业会话。
+
+```curl
+curl --location \
+'http://localhost:8080/api/v1/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/transcript/history' \
+--header 'Authorization: Bearer <system-admin-token>'
+```
+
+成功响应沿用持久化消息结构：
+
+```json
+{
+    "success": true,
+    "data": [
+        { "id": "...", "session_id": "...", "role": "user", "content": "install ..." },
+        { "id": "...", "session_id": "...", "role": "assistant", "content": "installed", "agent_steps": [] }
+    ]
+}
+```
+
+安装中且 locator 尚未产生时返回 `200` 和空数组。安装已结束但 locator 或匹配消息不存在时返回 `404`。进行中的安装仍使用 `/transcript` SSE。
 
 ## GET `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/files` - 列出技能文件
 

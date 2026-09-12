@@ -39,6 +39,9 @@ const (
 type sandboxSkillService interface {
 	ListSkills(ctx context.Context, tenantID uint64, configID string) ([]*types.TenantSkillEntity, error)
 	GetSkill(ctx context.Context, tenantID uint64, configID, skillID string) (*types.TenantSkillEntity, error)
+	GetInstallTranscriptHistory(
+		ctx context.Context, tenantID uint64, configID, skillID string,
+	) ([]*types.Message, error)
 	ListSkillFiles(
 		ctx context.Context, tenantID uint64, configID, skillID string,
 	) ([]service.SkillFileEntry, error)
@@ -725,8 +728,8 @@ func (h *SandboxSkillHandler) InstallEvents(c *gin.Context) {
 // @Description  their output — followed live while the install is still
 // @Description  running. Frames are the same shape the chat stream uses, so a
 // @Description  console renders an install with the components it renders a
-// @Description  chat turn with. 404 once the event log has expired; the
-// @Description  durable message history is the fallback.
+// @Description  chat turn with. Completed installs use the dedicated durable
+// @Description  transcript history endpoint.
 // @Tags         SandboxConfig
 // @Produce      text/event-stream
 // @Param        id       path      string  true  "Sandbox config ID"
@@ -817,6 +820,33 @@ func (h *SandboxSkillHandler) InstallTranscript(c *gin.Context) {
 			}
 		}
 	}
+}
+
+// InstallTranscriptHistory godoc
+// @Summary      Read an install's durable transcript history
+// @Description  Returns only the persisted user prompt and assistant message identified by this tenant-scoped skill installation.
+// @Tags         SandboxConfig
+// @Produce      json
+// @Param        tenant_id  path      int     true  "Enterprise ID"
+// @Param        id         path      string  true  "Sandbox config ID"
+// @Param        skillId    path      string  true  "Skill ID"
+// @Success      200        {object}  map[string]interface{}  "Persisted install messages"
+// @Failure      401        {object}  map[string]interface{}  "Unauthorized"
+// @Failure      404        {object}  apperrors.AppError      "Skill or transcript history not found"
+// @Security     Bearer
+// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/transcript/history [get]
+func (h *SandboxSkillHandler) InstallTranscriptHistory(c *gin.Context) {
+	messages, err := h.service.GetInstallTranscriptHistory(
+		c.Request.Context(),
+		sandboxConfigTenantID(c),
+		c.Param("id"),
+		c.Param("skillId"),
+	)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": messages})
 }
 
 // emitTranscript writes frames and reports whether the stream is over, either

@@ -31,10 +31,12 @@ const testSkillTenantID = uint64(42)
 type fakeSandboxSkillService struct {
 	mu sync.Mutex
 
-	skills   map[string]*types.TenantSkillEntity
-	listErr  error
-	getErr   error
-	patchErr error
+	skills     map[string]*types.TenantSkillEntity
+	listErr    error
+	getErr     error
+	patchErr   error
+	history    []*types.Message
+	historyErr error
 
 	installID     string
 	installErr    error
@@ -60,6 +62,9 @@ type fakeSandboxSkillService struct {
 	listTenant    uint64
 	listConfig    string
 	getCalls      int
+	historyTenant uint64
+	historyConfig string
+	historySkill  string
 	installTenant uint64
 	installConfig string
 	installBytes  []byte
@@ -122,6 +127,23 @@ func (f *fakeSandboxSkillService) GetSkill(
 		return nil, nil
 	}
 	return skill, nil
+}
+
+func (f *fakeSandboxSkillService) GetInstallTranscriptHistory(
+	ctx context.Context, tenantID uint64, configID, skillID string,
+) ([]*types.Message, error) {
+	f.historyTenant, f.historyConfig, f.historySkill = tenantID, configID, skillID
+	if f.historyErr != nil {
+		return nil, f.historyErr
+	}
+	skill, err := f.GetSkill(ctx, tenantID, configID, skillID)
+	if err != nil {
+		return nil, err
+	}
+	if skill == nil {
+		return nil, apperrors.NewNotFoundError("skill not found")
+	}
+	return f.history, nil
 }
 
 // UpdateSkillAdmin mirrors the real service: only declared names are written,
@@ -305,6 +327,7 @@ func newSkillTestRouter(h *SandboxSkillHandler) *gin.Engine {
 	r.DELETE("/system/admin/tenants/42/sandbox-configs/:id/skills/:skillId", h.Delete)
 	r.GET("/system/admin/tenants/42/sandbox-configs/:id/skills/:skillId/install-events", h.InstallEvents)
 	r.GET("/system/admin/tenants/42/sandbox-configs/:id/skills/:skillId/transcript", h.InstallTranscript)
+	r.GET("/system/admin/tenants/42/sandbox-configs/:id/skills/:skillId/transcript/history", h.InstallTranscriptHistory)
 	return r
 }
 
@@ -993,6 +1016,54 @@ func transcriptSkillService() *fakeSandboxSkillService {
 func transcriptRequest(configID, skillID string) *http.Request {
 	return httptest.NewRequest(http.MethodGet,
 		"/system/admin/tenants/42/sandbox-configs/"+configID+"/skills/"+skillID+"/transcript", nil)
+}
+
+func transcriptHistoryRequest(configID, skillID string) *http.Request {
+	return httptest.NewRequest(http.MethodGet,
+		"/system/admin/tenants/42/sandbox-configs/"+configID+"/skills/"+skillID+"/transcript/history", nil)
+}
+
+func TestSandboxSkillTranscriptHistoryReturnsOnlyServiceProjection(t *testing.T) {
+	svc := transcriptSkillService()
+	svc.history = []*types.Message{
+		{ID: "prompt", SessionID: "sess-9", Role: "user", Content: "install pdf"},
+		{ID: "msg-9", SessionID: "sess-9", Role: "assistant", Content: "installed"},
+	}
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, transcriptHistoryRequest("cfg-a", "skill-1"))
+
+	require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+	require.Equal(t, testSkillTenantID, svc.historyTenant)
+	require.Equal(t, "cfg-a", svc.historyConfig)
+	require.Equal(t, "skill-1", svc.historySkill)
+	require.Contains(t, w.Body.String(), `"id":"prompt"`)
+	require.Contains(t, w.Body.String(), `"id":"msg-9"`)
+}
+
+func TestSandboxSkillTranscriptHistoryEnforcesConfigOwnership(t *testing.T) {
+	svc := transcriptSkillService()
+	svc.history = []*types.Message{{ID: "secret", Role: "assistant", Content: "secret output"}}
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, transcriptHistoryRequest("cfg-b", "skill-1"))
+
+	require.Equal(t, http.StatusNotFound, w.Code, "body=%s", w.Body.String())
+	require.NotContains(t, w.Body.String(), "secret output")
+}
+
+func TestSandboxSkillTranscriptHistoryReturnsEmptyListWhilePreparing(t *testing.T) {
+	svc := transcriptSkillService()
+	svc.history = []*types.Message{}
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, transcriptHistoryRequest("cfg-a", "skill-1"))
+
+	require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+	require.JSONEq(t, `{"data":[],"success":true}`, w.Body.String())
 }
 
 // The whole point of the endpoint: everything the installer did, in order,

@@ -12513,7 +12513,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "Server-sent replay of everything the installer agent did — the\nprompt it was given, its thinking, the commands it ran and\ntheir output — followed live while the install is still\nrunning. Frames are the same shape the chat stream uses, so a\nconsole renders an install with the components it renders a\nchat turn with. 404 once the event log has expired; the\ndurable message history is the fallback.",
+                "description": "Server-sent replay of everything the installer agent did — the\nprompt it was given, its thinking, the commands it ran and\ntheir output — followed live while the install is still\nrunning. Frames are the same shape the chat stream uses, so a\nconsole renders an install with the components it renders a\nchat turn with. Completed installs use the dedicated durable\ntranscript history endpoint.",
                 "produces": [
                     "text/event-stream"
                 ],
@@ -12566,6 +12566,68 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Skill or transcript not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/transcript/history": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Returns only the persisted user prompt and assistant message identified by this tenant-scoped skill installation.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Read an install's durable transcript history",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Enterprise ID",
+                        "name": "tenant_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Skill ID",
+                        "name": "skillId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Persisted install messages",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Skill or transcript history not found",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }

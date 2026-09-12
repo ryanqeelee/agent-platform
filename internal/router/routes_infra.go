@@ -63,6 +63,7 @@ func registerSandboxConfigHandlers(
 		configs.DELETE("/:id/skills/:skillId", skills.Delete)
 		configs.GET("/:id/skills/:skillId/install-events", skills.InstallEvents)
 		configs.GET("/:id/skills/:skillId/transcript", skills.InstallTranscript)
+		configs.GET("/:id/skills/:skillId/transcript/history", skills.InstallTranscriptHistory)
 	}
 }
 

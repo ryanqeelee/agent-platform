@@ -54,6 +54,7 @@ func TestSystemAdminTenantRuntimeRouteSurfaceAndAPIKeyDefaultDeny(t *testing.T) 
 		{http.MethodDelete, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs/:id/skills/:skillId"},
 		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs/:id/skills/:skillId/install-events"},
 		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs/:id/skills/:skillId/transcript"},
+		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs/:id/skills/:skillId/transcript/history"},
 		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/skills"},
 		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/skills/installer-agent"},
 		{http.MethodPut, "/api/v1/system/admin/tenants/:tenant_id/skills/installer-agent"},

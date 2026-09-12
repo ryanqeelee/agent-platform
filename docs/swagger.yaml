@@ -14467,8 +14467,8 @@ paths:
         their output — followed live while the install is still
         running. Frames are the same shape the chat stream uses, so a
         console renders an install with the components it renders a
-        chat turn with. 404 once the event log has expired; the
-        durable message history is the fallback.
+        chat turn with. Completed installs use the dedicated durable transcript
+        history endpoint.
       parameters:
       - description: Enterprise ID
         in: path
@@ -14508,6 +14508,48 @@ paths:
       security:
       - Bearer: []
       summary: Follow an install's agent transcript
+      tags:
+      - SandboxConfig
+  /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/transcript/history:
+    get:
+      description: Returns only the persisted user prompt and assistant message identified
+        by this tenant-scoped skill installation.
+      parameters:
+      - description: Enterprise ID
+        in: path
+        name: tenant_id
+        required: true
+        type: integer
+      - description: Sandbox config ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Skill ID
+        in: path
+        name: skillId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Persisted install messages
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Skill or transcript history not found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Read an install's durable transcript history
       tags:
       - SandboxConfig
   /sessions:

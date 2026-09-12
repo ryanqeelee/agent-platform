@@ -25,7 +25,7 @@
 import { onUnmounted, reactive, ref, watch } from 'vue'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import { useChatStreamHandler } from '@/composables/useChatStreamHandler'
-import { configSkillTranscriptUrl } from '@/api/system'
+import { configSkillTranscriptUrl, getConfigSkillTranscriptHistory } from '@/api/system'
 import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 import { getApiBaseUrl } from '@/utils/api-base'
 import { generateRandomString } from '@/utils/index'
@@ -152,6 +152,15 @@ async function follow(run: number): Promise<boolean> {
   return served
 }
 
+async function loadHistory(run: number): Promise<boolean> {
+  const tenantId = platformTenantID.value
+  if (!tenantId) return false
+  const response = await getConfigSkillTranscriptHistory(tenantId, props.configId, props.skillId)
+  if (run !== openRun || closed || !response?.data?.length) return false
+  messages.splice(0, messages.length, ...response.data)
+  return true
+}
+
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms)
@@ -164,12 +173,11 @@ async function open() {
   messages.splice(0, messages.length)
   const stale = () => run !== openRun || closed
   try {
-    // Platform operators are tenantless, so the enterprise chat-history API
-    // is intentionally unavailable here. The scoped transcript endpoint is
-    // the sole source for both live and completed installer runs.
+    // Completed runs come from the durable, skill-scoped history endpoint.
+    // Redis is only the live transport and is never consulted after completion.
     if (!props.live) {
       loading.value = true
-      if (props.messageId) await follow(run).catch(() => false)
+      await loadHistory(run)
       return
     }
 

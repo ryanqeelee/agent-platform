@@ -269,6 +269,13 @@ class GovernedCompareCLITest(unittest.TestCase):
         self.assertEqual(failed.returncode, 2)
         self.assertIn("keys must be non-null", failed.stderr)
 
+        for index, key in enumerate(["", "   ", "\t"]):
+            with self.subTest(blank_key=repr(key)):
+                blank = self.write(f"blank-key-{index}.json", query("blankkey", [{"branch_id": key, "net_value": "1"}], columns))
+                failed = self.run_cli("period", "--baseline", blank, "--current", valid, *common)
+                self.assertEqual(failed.returncode, 2)
+                self.assertIn("keys must be non-empty", failed.stderr)
+
         bool_value = self.write("bool-value.json", query("boolval", [{"branch_id": "A", "net_value": True}], columns))
         failed = self.run_cli("period", "--baseline", bool_value, "--current", valid, *common)
         self.assertEqual(failed.returncode, 2)

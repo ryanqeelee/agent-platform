@@ -142,6 +142,7 @@ def _key_token(value: Any) -> tuple[str, str]:
         _require(value.is_finite(), "comparison keys cannot be non-finite numbers")
         return ("number", str(value))
     if isinstance(value, str):
+        _require(bool(value.strip()), "comparison keys must be non-empty")
         return ("string", value)
     raise ComparisonError(f"comparison keys must be scalar JSON values, got {type(value).__name__}")
 

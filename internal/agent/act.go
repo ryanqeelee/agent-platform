@@ -569,6 +569,7 @@ func (e *AgentEngine) runToolCall(
 		toolCall.Result = &types.ToolResult{
 			Success: false,
 			Error:   err.Error(),
+			Data:    agenttools.GovernedFailureData(err),
 		}
 	} else {
 		success := result != nil && result.Success

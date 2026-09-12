@@ -25,24 +25,10 @@ var (
 )
 
 func lockTenantAndCheckSeat(ctx context.Context, tx *gorm.DB, tenantID uint64) error {
-	return lockTenantAndCheckSeatForStatus(ctx, tx, tenantID, false)
-}
-
-// lockActiveTenantAndCheckSeat is the invitation/member-admission boundary.
-// Enterprise activation uses lockTenantAndCheckSeat while the tenant is still
-// provisioning, so active-state enforcement must remain an explicit variant.
-func lockActiveTenantAndCheckSeat(ctx context.Context, tx *gorm.DB, tenantID uint64) error {
-	return lockTenantAndCheckSeatForStatus(ctx, tx, tenantID, true)
-}
-
-func lockTenantAndCheckSeatForStatus(ctx context.Context, tx *gorm.DB, tenantID uint64, requireActive bool) error {
 	var tenant types.Tenant
-	if err := tx.WithContext(ctx).Clauses(forUpdateClause()).Select("id", "status", "seats_total").
+	if err := tx.WithContext(ctx).Clauses(forUpdateClause()).Select("id", "seats_total").
 		Where("id = ?", tenantID).Take(&tenant).Error; err != nil {
 		return err
-	}
-	if requireActive && tenant.Status != types.TenantStatusActive {
-		return ErrEnterpriseNotActive
 	}
 	if tenant.SeatsTotal == nil {
 		return nil
@@ -56,6 +42,22 @@ func lockTenantAndCheckSeatForStatus(ctx context.Context, tx *gorm.DB, tenantID 
 	}
 	if used >= int64(*tenant.SeatsTotal) {
 		return ErrSeatLimitExceeded
+	}
+	return nil
+}
+
+// lockActiveTenant is the invitation-acceptance lifecycle boundary. It locks
+// before membership inspection so both existing-member and new-member paths
+// are ordered with a concurrent enterprise suspension. Capacity remains a
+// new-member concern enforced by createTenantMember.
+func lockActiveTenant(ctx context.Context, tx *gorm.DB, tenantID uint64) error {
+	var tenant types.Tenant
+	if err := tx.WithContext(ctx).Clauses(forUpdateClause()).Select("id", "status").
+		Where("id = ?", tenantID).Take(&tenant).Error; err != nil {
+		return err
+	}
+	if tenant.Status != types.TenantStatusActive {
+		return ErrEnterpriseNotActive
 	}
 	return nil
 }

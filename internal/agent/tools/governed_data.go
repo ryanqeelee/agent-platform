@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -276,28 +277,137 @@ func (t *GovernedDataTool) Execute(ctx context.Context, args json.RawMessage) (*
 // Preserve a valid bounded model response; the complete Edge result stays in its working file.
 func boundedGovernedQueryResult(ctx context.Context, result map[string]any) (*types.ToolResult, error) {
 	rows, _ := result["rows"].([]any)
+	inputFile, inputSHA256 := result["input_file"], result["input_sha256"]
+	limits, columns := result["limits"], result["columns"]
 	result["rows"] = []any{}
 	result["rows_preview_only"], result["preview_row_count"] = true, 0
 	hasFile := result["input_file"] != nil
 	result["file_contains_all_returned_rows"] = hasFile
-	result["next_step"] = "Read input_file with native sandbox tools for all returned rows. query.truncated describes the database row limit."
+	result["bounded_metadata"] = map[string]any{
+		"complete":                  true,
+		"query_sql_in_output":       true,
+		"columns_in_output":         true,
+		"limits_in_output":          true,
+		"query_sql_in_file":         hasFile,
+		"columns_in_file":           hasFile,
+		"limits_in_file":            hasFile,
+		"limits_coverage_semantics": "source object observations, not measured query population coverage",
+	}
+	result["next_step"] = "Read the exact input_file with native sandbox tools for all returned rows and retained query metadata. query.truncated describes the database row limit; limits.coverage describes source objects, not measured query population coverage."
 	if !hasFile {
-		result["next_step"] = "Complete rows are unavailable within the tool budget. Narrow or aggregate the query; do not treat this preview as the complete result."
+		result["next_step"] = "Complete rows or metadata may be unavailable within the tool budget. Narrow or aggregate the query; do not treat this preview as the complete result or limits.coverage as measured query population coverage."
 	}
 	output, err := json.Marshal(result)
 	if err != nil {
 		return nil, err
 	}
 	if utf8.RuneCount(output) > OutputBudget(ctx) {
-		// Wide SQL/column/limit metadata remains in the complete file.
 		query := result["query"].(map[string]any)
+		querySQL := query["sql"]
+		boundedMetadata := map[string]any{
+			"complete":                   false,
+			"query_sql_in_output":        false,
+			"columns_in_output":          false,
+			"limits_in_output":           false,
+			"read_consistency_in_output": false,
+			"coverage_objects_in_output": false,
+			"query_sql_in_file":          hasFile,
+			"columns_in_file":            hasFile,
+			"limits_in_file":             hasFile,
+			"limits_coverage_semantics":  "source object observations, not measured query population coverage",
+		}
 		result = map[string]any{
-			"contract_version": result["contract_version"], "catalog": result["catalog"],
-			"query":    map[string]any{"id": query["id"], "rows_returned": query["rows_returned"], "truncated": query["truncated"]},
+			"contract_version": result["contract_version"],
+			"enterprise_id":    result["enterprise_id"],
+			"edge_node_id":     result["edge_node_id"],
+			"catalog":          result["catalog"],
+			"query": map[string]any{
+				"id": query["id"], "rows_returned": query["rows_returned"],
+				"applied_limit": query["applied_limit"], "truncated": query["truncated"],
+			},
 			"evidence": result["evidence"], "rows": []any{},
-			"input_file": result["input_file"], "input_sha256": result["input_sha256"],
 			"rows_preview_only": true, "preview_row_count": 0,
-			"file_contains_all_returned_rows": hasFile, "next_step": result["next_step"], "metadata_in_file": hasFile,
+			"file_contains_all_returned_rows": hasFile,
+			"next_step":                       result["next_step"],
+			"bounded_metadata":                boundedMetadata,
+		}
+		if hasFile {
+			result["input_file"], result["input_sha256"] = inputFile, inputSHA256
+		}
+		output, err = json.Marshal(result)
+		if err != nil {
+			return nil, err
+		}
+		for _, field := range []struct {
+			name  string
+			value any
+			flag  string
+		}{
+			{name: "limits", value: limits, flag: "limits_in_output"},
+			{name: "sql", value: querySQL, flag: "query_sql_in_output"},
+			{name: "columns", value: columns, flag: "columns_in_output"},
+		} {
+			if field.value == nil {
+				continue
+			}
+			if field.name == "sql" {
+				result["query"].(map[string]any)["sql"] = field.value
+			} else {
+				result[field.name] = field.value
+			}
+			boundedMetadata[field.flag] = true
+			candidate, marshalErr := json.Marshal(result)
+			if marshalErr != nil {
+				return nil, marshalErr
+			}
+			if utf8.RuneCount(candidate) <= OutputBudget(ctx) {
+				output = candidate
+				continue
+			}
+			boundedMetadata[field.flag] = false
+			if field.name == "sql" {
+				delete(result["query"].(map[string]any), "sql")
+			} else {
+				delete(result, field.name)
+			}
+		}
+		// Reaching this branch means other query metadata was omitted even when
+		// these three useful sections fit, so it must stay explicitly incomplete.
+		boundedMetadata["complete"] = false
+		if boundedMetadata["limits_in_output"] == true {
+			boundedMetadata["read_consistency_in_output"] = true
+			boundedMetadata["coverage_objects_in_output"] = true
+		}
+		if boundedMetadata["limits_in_output"] != true {
+			limitsMap, _ := limits.(map[string]any)
+			limitsSummary := map[string]any{
+				"coverage_semantics": "source object observations, not measured query population coverage",
+			}
+			if readConsistency, ok := limitsMap["read_consistency"].(string); ok && readConsistency != "" {
+				limitsSummary["read_consistency"] = readConsistency
+				boundedMetadata["read_consistency_in_output"] = true
+			}
+			if coverage, ok := limitsMap["coverage"].(map[string]any); ok {
+				objects := make([]string, 0, len(coverage))
+				for object := range coverage {
+					objects = append(objects, object)
+				}
+				slices.Sort(objects)
+				limitsSummary["source_objects"] = objects
+				boundedMetadata["coverage_objects_in_output"] = true
+			}
+			result["limits_summary"] = limitsSummary
+			candidate, marshalErr := json.Marshal(result)
+			if marshalErr != nil {
+				return nil, marshalErr
+			}
+			if utf8.RuneCount(candidate) <= OutputBudget(ctx) {
+				output = candidate
+			} else {
+				delete(result, "limits_summary")
+				boundedMetadata["read_consistency_in_output"] = false
+				boundedMetadata["coverage_objects_in_output"] = false
+			}
 		}
 		output, err = json.Marshal(result)
 		if err != nil {
@@ -318,7 +428,7 @@ func boundedGovernedQueryResult(ctx context.Context, result map[string]any) (*ty
 		}
 	}
 	if utf8.RuneCount(output) > OutputBudget(ctx) {
-		return &types.ToolResult{Success: false, Output: "{}", Error: "Tool budget cannot hold query provenance; narrow the query or increase the configured tool budget."}, nil
+		return &types.ToolResult{Success: false, Output: "{}", Data: map[string]any{}, Error: "Tool budget cannot hold query provenance; narrow the query or increase the configured tool budget."}, nil
 	}
 	response := &types.ToolResult{Success: hasFile, Output: string(output), Data: result}
 	if !hasFile {

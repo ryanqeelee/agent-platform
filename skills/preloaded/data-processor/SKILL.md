@@ -1,6 +1,6 @@
 ---
 name: 数据处理器
-description: 数据处理与分析技能。当用户需要对知识库检索结果进行数据分析、统计计算、格式转换、数据提取或生成报告时使用此技能。支持 Python 脚本执行进行高级数据处理。
+description: 数据处理与分析技能。当用户需要对知识库检索结果进行数据分析、统计计算、格式转换、数据提取或生成报告，或需要比较 governed_data_query 返回的精确结果文件时使用。支持 Python 脚本执行进行高级数据处理。
 ---
 
 # Data Processor
@@ -102,6 +102,38 @@ echo "2024年销售额为100万元，同比增长15%" | python scripts/extract_i
   "amounts": ["100万元"]
 }
 ```
+
+### 4. governed_compare.py - 受治理查询精确比较
+
+仅当输入来自 `governed_data_query` 返回的精确 `input_file` 时使用。不要把工具预览、手工抄写的行、glob 选出的文件或知识库片段传给此脚本。普通 RAG 数据继续使用前述脚本。
+
+周期数值比较：
+
+```bash
+python scripts/governed_compare.py period \
+  --baseline /workspace/data/governed-query-BASE.json \
+  --current /workspace/data/governed-query-CURRENT.json \
+  --key store_id --key product_id \
+  --value sales_amount --unit sales_amount=元 \
+  --baseline-period 2025-08 --current-period 2026-08 \
+  --output /workspace/output/period-comparison.json
+```
+
+库存/销售等两侧覆盖对账：
+
+```bash
+python scripts/governed_compare.py reconcile \
+  --left /workspace/data/governed-query-INVENTORY.json \
+  --right /workspace/data/governed-query-SALES.json \
+  --key store_id --key product_id \
+  --left-value inventory_qty --right-value sales_qty \
+  --unit inventory_qty=公斤 --unit sales_qty=公斤 \
+  --output /workspace/output/inventory-sales-reconciliation.json
+```
+
+只传每个查询文件中已声明的列，并为每个数值列明确传入来源单位；period 还必须明确两个查询实际代表的期间。键必须非空且在各文件内唯一；如脚本报告重复键，应按 Catalog 定义的事实粒度在来源 SQL 中预聚合，不要让脚本猜测聚合方式。周期比较对选定数值执行 Decimal 差额和 38 位有效数字的相对变化；零基期、NULL 和缺少一侧键保持未知，负基期附解释限制。reconcile 执行 full outer 键覆盖，保留左右存在性和 NULL，不计算库存减销售或擅自生成周转/覆盖天数。
+
+输出的 `inputs` 列表保留文件路径、SHA-256、`query_id`、SQL、Catalog、列、`limits` 和 evidence；`coverage` 只统计两个查询返回行的键集合。即使查询未截断，也不能据此声称完整业务总体；`limits.coverage` 是来源对象观测，不是对查询总体的实测覆盖。使用 `--output` 时，stdout 只给摘要，完整产物写入指定路径。读回完整产物并核对 `inputs[].query_id`、期间、范围、单位和所用数值后再回答。用户指出的计算错误应形成经过评审的回归 fixture；不要把它自动写成模型记忆、语义规则或企业指标定义。
 
 ## 处理流程
 

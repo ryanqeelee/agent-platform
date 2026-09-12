@@ -24,7 +24,7 @@ func TestLoadBuiltinAnalysisPromptTemplates(t *testing.T) {
 		want       []string
 	}{
 		{templateID: "data_analysis_base", agentID: types.BuiltinDataAnalysisBaseID, want: []string{"You are 环枢数据分析 Base.", "data_schema", "/workspace/output"}},
-		{templateID: "operating_analyst", agentID: types.BuiltinOperatingAnalystID, want: []string{"You are 环枢经营分析助手.", "governed_data_schema", "/workspace/output"}},
+		{templateID: "operating_analyst", agentID: types.BuiltinOperatingAnalystID, want: []string{"You are 环枢经营分析助手.", "governed_data_schema", "query.truncated", "governed_compare.py", "inputs[].query_id", "/workspace/output"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.templateID, func(t *testing.T) {

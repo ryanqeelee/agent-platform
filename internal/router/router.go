@@ -277,7 +277,15 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterMessageRoutes(v1, params.MessageHandler, rbacGuards)
 		RegisterOperatingAnalysisHandoffRoutes(v1, params.RedisClient, params.SessionService, params.MessageService, rbacGuards)
 		RegisterModelRoutes(v1, params.ModelHandler, params.ModelCredentialsHandler, rbacGuards)
-		RegisterSandboxConfigRoutes(v1, params.SandboxConfigHandler, params.SandboxSkillHandler, rbacGuards)
+		RegisterSystemAdminTenantRuntimeRoutes(
+			v1,
+			params.TenantService,
+			params.SandboxConfigHandler,
+			params.SandboxSkillHandler,
+			params.SkillHandler,
+			params.SystemHandler,
+			rbacGuards,
+		)
 		RegisterMyEnvVarRoutes(v1, params.MeEnvVarHandler)
 		RegisterEvaluationRoutes(v1, params.EvaluationHandler, rbacGuards)
 		RegisterInitializationRoutes(v1, params.InitializationHandler, rbacGuards)

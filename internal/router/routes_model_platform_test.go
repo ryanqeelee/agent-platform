@@ -52,7 +52,6 @@ func TestPlatformInfrastructureRoutesRequireSystemAdmin(t *testing.T) {
 		{http.MethodGet, "/api/v1/system/parser-engines"},
 		{http.MethodGet, "/api/v1/system/storage-engine-status"},
 		{http.MethodGet, "/api/v1/web-search/providers"},
-		{http.MethodGet, "/api/v1/skills"},
 	} {
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, nil))

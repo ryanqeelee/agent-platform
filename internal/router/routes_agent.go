@@ -64,27 +64,29 @@ func RegisterUserFavoriteRoutes(r *gin.RouterGroup, h *handler.UserResourceFavor
 	}
 }
 
-// RegisterSkillRoutes registers skill routes.
-//
-// Installed skill metadata and sandbox state are platform runtime details.
+// RegisterSkillRoutes registers enterprise and employee skill routes. Platform
+// catalog administration is exposed only through the explicit tenant control
+// plane registered by RegisterSystemAdminTenantRuntimeRoutes.
 func RegisterSkillRoutes(r *gin.RouterGroup, skillHandler *handler.SkillHandler, g *rbacGuards) {
 	r.GET("/employee-assistant/skills", g.Viewer(), skillHandler.ListEmployeeSkills)
 	r.GET("/employee-assistant/skills/manage", g.Admin(), skillHandler.ListEnterpriseSkills)
 	r.PATCH("/employee-assistant/skills/manage/:id", g.Admin(), skillHandler.SetEnterpriseSkillEnabled)
-	skills := r.Group("/skills", g.SystemAdmin())
+}
+
+func registerSkillReadHandlers(skills *gin.RouterGroup, skillHandler *handler.SkillHandler) {
 	{
 		skills.GET("", skillHandler.ListSkills)
 		skills.GET("/catalog", skillHandler.ListCatalog)
 	}
-	// Catalog writes bake into sandbox images; scoped API keys cannot hold them,
-	// and tenant roles do not grant platform-runtime administration.
-	catalogWrite := g.apiKeyGroup(r.Group("/skills/catalog", g.SystemAdmin()), apiKeyFullAccess())
+}
+
+func registerSkillCatalogWriteHandlers(catalog *gin.RouterGroup, skillHandler *handler.SkillHandler) {
 	{
-		catalogWrite.POST("", skillHandler.RegisterCatalog)
-		catalogWrite.POST("/:id/install", skillHandler.InstallCatalog)
-		catalogWrite.GET("/:id/files", skillHandler.ListCatalogFiles)
-		catalogWrite.GET("/:id/files/content", skillHandler.GetCatalogFile)
-		catalogWrite.DELETE("/:id", skillHandler.DeleteCatalog)
+		catalog.POST("", skillHandler.RegisterCatalog)
+		catalog.POST("/:id/install", skillHandler.InstallCatalog)
+		catalog.GET("/:id/files", skillHandler.ListCatalogFiles)
+		catalog.GET("/:id/files/content", skillHandler.GetCatalogFile)
+		catalog.DELETE("/:id", skillHandler.DeleteCatalog)
 	}
 }
 

@@ -35,16 +35,11 @@ func RegisterModelRoutes(
 	}
 }
 
-// Sandbox configs are workspace infrastructure that hold provider credentials.
-// Scoped API keys cannot safely receive partial authority over them yet because
-// mutation can strand remote sandboxes.
-func RegisterSandboxConfigRoutes(
-	r *gin.RouterGroup,
+func registerSandboxConfigHandlers(
+	configs *gin.RouterGroup,
 	h *handler.SandboxConfigHandler,
 	skills *handler.SandboxSkillHandler,
-	g *rbacGuards,
 ) {
-	configs := g.apiKeyGroup(r.Group("/sandbox-configs", g.SystemAdmin()), apiKeyFullAccess())
 	{
 		configs.GET("", h.List)
 		configs.PUT("/workspace-policy", h.SetWorkspacePolicy)

@@ -24,7 +24,7 @@ func TestEmployeeSkillRoutesSeparateViewerAndAdminAuthority(t *testing.T) {
 		{types.TenantRoleViewer, "PATCH", "/employee-assistant/skills/manage/skill-1", 403},
 		{types.TenantRoleAdmin, "GET", "/employee-assistant/skills/manage", 503},
 		{types.TenantRoleAdmin, "PATCH", "/employee-assistant/skills/manage/skill-1", 503},
-		{types.TenantRoleAdmin, "GET", "/skills", 403},
+		{types.TenantRoleAdmin, "GET", "/skills", 404},
 	} {
 		t.Run(string(tc.role)+tc.method+tc.path, func(t *testing.T) {
 			r := gin.New()

@@ -18,6 +18,7 @@ import (
 type recordingOperationsBridge struct {
 	method, path, actor, idempotencyKey, body string
 	responseBody                              []byte
+	statusCode                                int
 }
 
 func (b *recordingOperationsBridge) Do(
@@ -39,7 +40,11 @@ func (b *recordingOperationsBridge) Do(
 		"createdAt":"2026-09-11T00:00:00Z","updatedAt":"2026-09-11T00:00:00Z","completedAt":null
 	}`)
 	}
-	return &interfaces.PlatformOperationsResponse{StatusCode: http.StatusOK, ContentType: "application/json", Body: responseBody}, nil
+	statusCode := b.statusCode
+	if statusCode == 0 {
+		statusCode = http.StatusOK
+	}
+	return &interfaces.PlatformOperationsResponse{StatusCode: statusCode, ContentType: "application/json", Body: responseBody}, nil
 }
 
 func operationsActivationRouter(bridge interfaces.PlatformOperationsBridge) *gin.Engine {
@@ -54,6 +59,8 @@ func operationsActivationRouter(bridge interfaces.PlatformOperationsBridge) *gin
 	handler := NewPlatformOperationsHandler(nil, nil, nil, nil, nil, bridge)
 	router.PUT("/api/v1/system/admin/operations/enterprise-activations/:activation_id", handler.ProxyEnterpriseActivation)
 	router.GET("/api/v1/system/admin/operations/enterprise-activations/:activation_id", handler.GetEnterpriseActivation)
+	router.GET("/api/v1/system/admin/operations/enterprises/:tenant_id/edge", handler.GetEnterpriseEdge)
+	router.POST("/api/v1/system/admin/operations/enterprises/:tenant_id/edge-enrollment-token/rotate", handler.RotateEnterpriseEnrollmentToken)
 	return router
 }
 
@@ -115,4 +122,70 @@ func TestPlatformOperationsActivationRejectsCallbackDTO(t *testing.T) {
 	operationsActivationRouter(bridge).ServeHTTP(response, request)
 	require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
 	require.Empty(t, bridge.method)
+}
+
+func TestPlatformOperationsEdgeSummaryUsesBoundTenantBridge(t *testing.T) {
+	bridge := &recordingOperationsBridge{responseBody: []byte(`{
+		"schema":"PlatformEnterpriseEdgeV1","productBaseTenantId":"7",
+		"enterpriseId":"tenant-edge-7","bindingId":"binding-edge-7",
+		"summary":{"connectionStatus":"online","policyStatus":"not_connected","nodeCount":1,"onlineNodeCount":1,"lastSeenAt":"2026-09-12T00:00:00Z"},
+		"nodes":[{"edgeNodeId":"csf-via-rong","displayName":"CSF","version":"v1","status":"online","catalogVersion":"catalog-v1","dataServiceStatus":{"status":"available"},"registeredAt":"2026-09-11T00:00:00Z","lastSeenAt":"2026-09-12T00:00:00Z"}]
+	}`)}
+	request := httptest.NewRequest(http.MethodGet,
+		"/api/v1/system/admin/operations/enterprises/7/edge", nil)
+	response := httptest.NewRecorder()
+
+	operationsActivationRouter(bridge).ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.Equal(t, http.MethodGet, bridge.method)
+	require.Equal(t, "/api/internal/product-base/operations/enterprises/7/edge", bridge.path)
+	require.Equal(t, "system-admin-1", bridge.actor)
+	require.JSONEq(t, `{"success":true,"data":{"schema":"PlatformEnterpriseEdgeV1","productBaseTenantId":"7","enterpriseId":"tenant-edge-7","bindingId":"binding-edge-7","summary":{"connectionStatus":"online","policyStatus":"not_connected","nodeCount":1,"onlineNodeCount":1,"lastSeenAt":"2026-09-12T00:00:00Z"},"nodes":[{"edgeNodeId":"csf-via-rong","displayName":"CSF","version":"v1","status":"online","catalogVersion":"catalog-v1","dataServiceStatus":{"status":"available"},"registeredAt":"2026-09-11T00:00:00Z","lastSeenAt":"2026-09-12T00:00:00Z"}]}}`, response.Body.String())
+}
+
+func TestPlatformOperationsEnrollmentTokenIsBrowserSecretResponse(t *testing.T) {
+	bridge := &recordingOperationsBridge{responseBody: []byte(`{
+		"schema":"PlatformEnterpriseEdgeEnrollmentV1","productBaseTenantId":"7",
+		"enterpriseId":"tenant-edge-7","bindingId":"binding-edge-7",
+		"enrollmentToken":"EDGE-once","rotatedAt":"2026-09-12T00:00:00Z"
+	}`)}
+	request := httptest.NewRequest(http.MethodPost,
+		"/api/v1/system/admin/operations/enterprises/7/edge-enrollment-token/rotate", nil)
+	response := httptest.NewRecorder()
+
+	operationsActivationRouter(bridge).ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.Equal(t, http.MethodPost, bridge.method)
+	require.Equal(t, "/api/internal/product-base/operations/enterprises/7/edge-enrollment-token/rotate", bridge.path)
+	require.Equal(t, "no-store", response.Header().Get("Cache-Control"))
+	require.Equal(t, "no-cache", response.Header().Get("Pragma"))
+}
+
+func TestPlatformOperationsEdgeRejectsInvalidTenantBeforeBridge(t *testing.T) {
+	bridge := &recordingOperationsBridge{}
+	request := httptest.NewRequest(http.MethodGet,
+		"/api/v1/system/admin/operations/enterprises/0/edge", nil)
+	response := httptest.NewRecorder()
+
+	operationsActivationRouter(bridge).ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+	require.Empty(t, bridge.method)
+}
+
+func TestPlatformOperationsEdgeMapsCenterServiceCredentialFailureToUnavailable(t *testing.T) {
+	bridge := &recordingOperationsBridge{
+		statusCode:   http.StatusUnauthorized,
+		responseBody: []byte(`{"detail":"invalid service credential"}`),
+	}
+	request := httptest.NewRequest(http.MethodGet,
+		"/api/v1/system/admin/operations/enterprises/7/edge", nil)
+	response := httptest.NewRecorder()
+
+	operationsActivationRouter(bridge).ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusServiceUnavailable, response.Code, response.Body.String())
+	require.NotContains(t, response.Body.String(), "credential")
 }

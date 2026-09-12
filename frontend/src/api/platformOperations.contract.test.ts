@@ -26,6 +26,14 @@ test('member listing sends search and explicit pagination instead of a fixed fir
   assert.doesNotMatch(source, /page_size=100/)
 })
 
+test('node management stays tenant-scoped and keeps enrollment tokens in memory only', () => {
+  assert.match(source, /getOperationsEnterpriseEdge = \(tenantId: number\)[\s\S]*?\/enterprises\/\$\{tenantId\}\/edge/)
+  assert.match(source, /rotateOperationsEnrollmentToken = \(tenantId: number\)[\s\S]*?\/enterprises\/\$\{tenantId\}\/edge-enrollment-token\/rotate/)
+  assert.match(viewSource, /enrollmentToken\.value = result\.enrollmentToken/)
+  assert.match(viewSource, /接入令牌仅显示这一次/)
+  assert.doesNotMatch(viewSource, /setItem\([^\n]*enrollmentToken/)
+})
+
 test('receipt recovery loses password knowledge and non-active enterprises block member mutations', () => {
   assert.match(viewSource, /admin = await getInitialAdministratorCommand\(command\.commandId\)\s+initialAdminPasswordUnknown\.value = true/)
   assert.match(viewSource, /selected\.value\?\.status !== 'active'/)

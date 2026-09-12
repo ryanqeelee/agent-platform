@@ -312,6 +312,8 @@ func RegisterSystemAdminRoutes(
 			ops.GET("/enterprises", operations.ListEnterprises)
 			ops.GET("/enterprises/:tenant_id", operations.GetEnterprise)
 			ops.PATCH("/enterprises/:tenant_id", operations.UpdateEnterprise)
+			ops.GET("/enterprises/:tenant_id/edge", operations.GetEnterpriseEdge)
+			ops.POST("/enterprises/:tenant_id/edge-enrollment-token/rotate", operations.RotateEnterpriseEnrollmentToken)
 			ops.GET("/enterprises/:tenant_id/members", operations.ListMembers)
 			ops.POST("/enterprises/:tenant_id/employees", operations.CreateEmployee)
 			ops.PUT("/enterprises/:tenant_id/members/:user_id/role", operations.UpdateMemberRole)

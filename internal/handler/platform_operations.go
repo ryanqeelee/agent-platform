@@ -52,6 +52,43 @@ type enterpriseActivationResponse struct {
 	CompletedAt                *string `json:"completedAt"`
 }
 
+type enterpriseEdgeSummaryResponse struct {
+	ConnectionStatus string  `json:"connectionStatus"`
+	PolicyStatus     string  `json:"policyStatus"`
+	NodeCount        int     `json:"nodeCount"`
+	OnlineNodeCount  int     `json:"onlineNodeCount"`
+	LastSeenAt       *string `json:"lastSeenAt"`
+}
+
+type enterpriseEdgeNodeResponse struct {
+	EdgeNodeID        string         `json:"edgeNodeId"`
+	DisplayName       string         `json:"displayName"`
+	Version           string         `json:"version"`
+	Status            string         `json:"status"`
+	CatalogVersion    *string        `json:"catalogVersion"`
+	DataServiceStatus map[string]any `json:"dataServiceStatus"`
+	RegisteredAt      *string        `json:"registeredAt"`
+	LastSeenAt        *string        `json:"lastSeenAt"`
+}
+
+type enterpriseEdgeResponse struct {
+	Schema              string                        `json:"schema"`
+	ProductBaseTenantID string                        `json:"productBaseTenantId"`
+	EnterpriseID        string                        `json:"enterpriseId"`
+	BindingID           string                        `json:"bindingId"`
+	Summary             enterpriseEdgeSummaryResponse `json:"summary"`
+	Nodes               []enterpriseEdgeNodeResponse  `json:"nodes"`
+}
+
+type enterpriseEnrollmentResponse struct {
+	Schema              string  `json:"schema"`
+	ProductBaseTenantID string  `json:"productBaseTenantId"`
+	EnterpriseID        string  `json:"enterpriseId"`
+	BindingID           string  `json:"bindingId"`
+	EnrollmentToken     string  `json:"enrollmentToken"`
+	RotatedAt           *string `json:"rotatedAt"`
+}
+
 func NewPlatformOperationsHandler(
 	tenants interfaces.TenantService,
 	tenantOperations interfaces.PlatformOperationsTenantRepository,
@@ -430,11 +467,24 @@ func (h *PlatformOperationsHandler) proxy(c *gin.Context, method, path, idempote
 		c.Header("Pragma", "no-cache")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		contentType := response.ContentType
-		if contentType == "" {
-			contentType = "application/json"
+		var upstream struct {
+			Detail string `json:"detail"`
 		}
-		c.Data(response.StatusCode, contentType, response.Body)
+		_ = json.Unmarshal(response.Body, &upstream)
+		message := strings.TrimSpace(upstream.Detail)
+		if message == "" {
+			message = "platform operations request failed"
+		}
+		switch response.StatusCode {
+		case http.StatusBadRequest, http.StatusUnprocessableEntity:
+			c.Error(apperrors.NewValidationError(message))
+		case http.StatusNotFound:
+			c.Error(apperrors.NewNotFoundError(message))
+		case http.StatusConflict:
+			c.Error(apperrors.NewConflictError(message))
+		default:
+			c.Error(apperrors.NewServiceUnavailableError("platform operations service unavailable"))
+		}
 		return
 	}
 	if err := json.Unmarshal(response.Body, output); err != nil {
@@ -487,4 +537,38 @@ func (h *PlatformOperationsHandler) GetEnterpriseActivation(c *gin.Context) {
 	}
 	var output enterpriseActivationResponse
 	h.proxy(c, http.MethodGet, "/api/internal/product-base/operations/enterprise-activations/"+url.PathEscape(activationID), "", nil, false, &output)
+}
+
+func (h *PlatformOperationsHandler) GetEnterpriseEdge(c *gin.Context) {
+	tenantID, ok := parseOperationsTenantID(c)
+	if !ok {
+		return
+	}
+	var output enterpriseEdgeResponse
+	h.proxy(
+		c,
+		http.MethodGet,
+		"/api/internal/product-base/operations/enterprises/"+strconv.FormatUint(tenantID, 10)+"/edge",
+		"",
+		nil,
+		false,
+		&output,
+	)
+}
+
+func (h *PlatformOperationsHandler) RotateEnterpriseEnrollmentToken(c *gin.Context) {
+	tenantID, ok := parseOperationsTenantID(c)
+	if !ok {
+		return
+	}
+	var output enterpriseEnrollmentResponse
+	h.proxy(
+		c,
+		http.MethodPost,
+		"/api/internal/product-base/operations/enterprises/"+strconv.FormatUint(tenantID, 10)+"/edge-enrollment-token/rotate",
+		"",
+		nil,
+		true,
+		&output,
+	)
 }

@@ -3,8 +3,8 @@
     <header class="page-header">
       <div>
         <p class="eyebrow">平台运营</p>
-        <h1>企业与成员管理</h1>
-        <p>创建企业，维护企业成员、席位和存储配额。</p>
+        <h1>企业、成员与节点管理</h1>
+        <p>创建企业，维护企业成员、配额和边缘节点接入。</p>
       </div>
       <div class="page-actions">
         <t-button variant="outline" @click="uiStore.openSettings('models')">模型配置</t-button>
@@ -65,6 +65,65 @@
             </div>
             <t-button type="submit" :loading="savingEnterprise">保存企业信息</t-button>
           </t-form>
+        </t-card>
+
+        <t-card title="节点管理">
+          <template #actions>
+            <div class="actions">
+              <t-button variant="outline" size="small" :loading="loadingEdge" @click="loadEnterpriseEdge">刷新</t-button>
+              <t-button theme="primary" size="small" :loading="rotatingEnrollmentToken" @click="rotateEnrollmentToken">
+                {{ enterpriseEdge?.summary.nodeCount ? '轮换接入令牌' : '生成接入令牌' }}
+              </t-button>
+            </div>
+          </template>
+          <t-alert v-if="edgeErrorMessage" theme="warning" :message="edgeErrorMessage" />
+          <t-alert
+            v-if="enrollmentToken"
+            theme="warning"
+            message="接入令牌仅显示这一次，请立即复制并妥善保存。再次轮换后旧令牌失效。"
+            close
+            @close="enrollmentToken = ''"
+          />
+          <div v-if="enrollmentToken" class="secret-row">
+            <div>
+              <small>一次性令牌</small>
+              <pre class="secret">{{ enrollmentToken }}</pre>
+            </div>
+            <div>
+              <small>边缘节点 edge.env</small>
+              <pre class="secret">{{ edgeEnrollmentConfig }}</pre>
+              <small class="hint">保存为 /data/edge-agent/env/edge.env 后执行 register_edge_node.sh 完成注册。</small>
+            </div>
+            <div class="actions">
+              <t-button variant="outline" size="small" @click="copyEnrollmentToken">复制令牌</t-button>
+              <t-button variant="outline" size="small" @click="copyEnrollmentConfig">复制完整配置</t-button>
+            </div>
+          </div>
+          <t-loading :loading="loadingEdge">
+            <template v-if="enterpriseEdge">
+              <div class="edge-summary">
+                <span><small>节点</small><strong>{{ enterpriseEdge.summary.onlineNodeCount }} / {{ enterpriseEdge.summary.nodeCount }} 在线</strong></span>
+                <span><small>连接状态</small><strong>{{ edgeStatusLabel(enterpriseEdge.summary.connectionStatus) }}</strong></span>
+                <span><small>最近心跳</small><strong>{{ formatTimestamp(enterpriseEdge.summary.lastSeenAt) }}</strong></span>
+              </div>
+              <div v-if="enterpriseEdge.nodes.length" class="table-scroll">
+                <table>
+                  <thead><tr><th>节点</th><th>状态</th><th>版本</th><th>Catalog</th><th>数据服务</th><th>最近心跳</th></tr></thead>
+                  <tbody>
+                    <tr v-for="node in enterpriseEdge.nodes" :key="node.edgeNodeId">
+                      <td><strong>{{ node.displayName || node.edgeNodeId }}</strong><small>{{ node.edgeNodeId }}</small></td>
+                      <td><t-tag :theme="edgeStatusTheme(node.status)">{{ edgeStatusLabel(node.status) }}</t-tag></td>
+                      <td>{{ node.version || '—' }}</td>
+                      <td>{{ node.catalogVersion || '未发布' }}</td>
+                      <td>{{ dataServiceStatusLabel(node.dataServiceStatus) }}</td>
+                      <td>{{ formatTimestamp(node.lastSeenAt) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <t-empty v-else description="尚未接入边缘节点，可生成接入令牌开始部署。" />
+            </template>
+          </t-loading>
         </t-card>
 
         <t-card title="企业成员">
@@ -200,10 +259,10 @@ import { useUIStore } from '@/stores/ui'
 import {
   activateEnterprise, createInitialAdministrator, createOperationsEmployee, getEnterpriseActivation,
   getInitialAdministratorCommand,
-  getOperationsEnterprise, listOperationsEnterprises, listOperationsMembers,
-  resetOperationsMemberPassword,
+  getOperationsEnterprise, getOperationsEnterpriseEdge, listOperationsEnterprises, listOperationsMembers,
+  resetOperationsMemberPassword, rotateOperationsEnrollmentToken,
   updateOperationsEnterprise, updateOperationsMemberRole, updateOperationsMemberStatus,
-  type EnterpriseActivation, type OperationsEnterprise, type OperationsMember,
+  type EnterpriseActivation, type OperationsEnterprise, type OperationsEnterpriseEdge, type OperationsMember,
 } from '@/api/platformOperations'
 import {
   activationPayload,
@@ -223,14 +282,30 @@ const uiStore = useUIStore()
 const enterprises = ref<OperationsEnterprise[]>([])
 const selected = ref<OperationsEnterprise>()
 const members = ref<OperationsMember[]>([])
+const enterpriseEdge = ref<OperationsEnterpriseEdge>()
 const memberPage = ref(1), memberPageSize = 20, memberTotal = ref(0)
 const memberQuery = ref(''), memberQueryDraft = ref('')
 const memberPageCount = computed(() => Math.max(1, Math.ceil(memberTotal.value / memberPageSize)))
 const loadingEnterprises = ref(false), loadingMembers = ref(false)
+const loadingEdge = ref(false), rotatingEnrollmentToken = ref(false)
 const savingEnterprise = ref(false), creating = ref(false), creatingEmployee = ref(false)
 const creationOpen = ref(false), employeeOpen = ref(false), passwordOpen = ref(false)
 const passwordTarget = ref<OperationsMember>(), newPassword = ref(''), errorMessage = ref('')
 const passwordResetNotice = ref('')
+const edgeErrorMessage = ref(''), enrollmentToken = ref('')
+const suggestedEdgeNodeID = computed(() => {
+  const source = String(selected.value?.name || selected.value?.id || 'enterprise').trim().toLowerCase()
+  const slug = source.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  return `${slug || `tenant-${selected.value?.id || 'enterprise'}`}-edge-001`
+})
+const edgeEnrollmentConfig = computed(() => [
+  `CENTER_URL=${window.location.origin}`,
+  `TENANT_ID=${enterpriseEdge.value?.enterpriseId || ''}`,
+  `EDGE_NODE_ID=${suggestedEdgeNodeID.value}`,
+  `EDGE_DISPLAY_NAME=${selected.value?.name || suggestedEdgeNodeID.value}`,
+  'EDGE_BASE_DATA_DIR=/data/edge-agent',
+  `EDGE_ENROLLMENT_TOKEN=${enrollmentToken.value}`,
+].join('\n'))
 const initialAdminUserID = ref('')
 const pendingInitialAdminCommand = ref<InitialAdministratorCommand | null>(null)
 const initialAdminPasswordUnknown = ref(false)
@@ -259,6 +334,34 @@ function openTenantSettings(section: 'sandbox' | 'skills') {
   uiStore.openSettings(section)
 }
 function formatStorage(bytes: number) { return `${bytesToGiB(bytes).toFixed(2)} GiB` }
+function formatTimestamp(value: string | null) { return value ? new Date(value).toLocaleString() : '暂无' }
+function edgeStatusLabel(status: string) {
+  return { online: '在线', offline: '离线', disabled: '已停用', not_connected: '未接入' }[status] || '未知'
+}
+function edgeStatusTheme(status: string): 'success' | 'warning' | 'default' {
+  if (status === 'online') return 'success'
+  if (status === 'offline') return 'warning'
+  return 'default'
+}
+function dataServiceStatusLabel(status: Record<string, unknown>) {
+  const value = String(status?.status || '')
+  return { available: '可用', degraded: '异常', unavailable: '不可用' }[value] || '未知'
+}
+function edgeErrorText(error: any) {
+  if (error?.message === 'enterprise_binding_not_found') return '企业尚未完成边缘服务绑定，完成开通后即可接入节点。'
+  if (error?.status === 503) return '节点服务暂不可用，请稍后刷新。'
+  return error?.message || '节点信息暂不可用'
+}
+async function copyEnrollmentToken() {
+  if (!enrollmentToken.value) return
+  await navigator.clipboard.writeText(enrollmentToken.value)
+  MessagePlugin.success('接入令牌已复制')
+}
+async function copyEnrollmentConfig() {
+  if (!enrollmentToken.value) return
+  await navigator.clipboard.writeText(edgeEnrollmentConfig.value)
+  MessagePlugin.success('节点接入配置已复制')
+}
 function enterpriseStatusLabel(status: OperationsEnterprise['status']) {
   return { active: '启用', suspended: '暂停', provisioning: '待开通', activation_abandoned: '已放弃' }[status]
 }
@@ -292,12 +395,51 @@ async function selectEnterprise(enterprise: OperationsEnterprise) {
   memberPage.value = 1
   memberQuery.value = ''
   memberQueryDraft.value = ''
+  enterpriseEdge.value = undefined
+  edgeErrorMessage.value = ''
+  enrollmentToken.value = ''
   const detailPromise = getOperationsEnterprise(selectedID).then((detail) => {
     if (selected.value?.id !== selectedID) return
     selected.value = detail
     applyEnterpriseDraft(detail)
   })
-  await Promise.all([detailPromise, loadMembers()]).catch(showError)
+  await Promise.all([detailPromise, loadMembers(), loadEnterpriseEdge()]).catch(showError)
+}
+
+async function loadEnterpriseEdge() {
+  if (!selected.value) return
+  const tenantID = selected.value.id
+  loadingEdge.value = true
+  edgeErrorMessage.value = ''
+  try {
+    const result = await getOperationsEnterpriseEdge(tenantID)
+    if (selected.value?.id === tenantID) enterpriseEdge.value = result
+  } catch (error: any) {
+    if (selected.value?.id === tenantID) {
+      enterpriseEdge.value = undefined
+      edgeErrorMessage.value = edgeErrorText(error)
+    }
+  } finally {
+    if (selected.value?.id === tenantID) loadingEdge.value = false
+  }
+}
+
+async function rotateEnrollmentToken() {
+  if (!selected.value) return
+  const tenantID = selected.value.id
+  rotatingEnrollmentToken.value = true
+  enrollmentToken.value = ''
+  try {
+    const result = await rotateOperationsEnrollmentToken(tenantID)
+    if (selected.value?.id !== tenantID) return
+    enrollmentToken.value = result.enrollmentToken
+    edgeErrorMessage.value = ''
+    await loadEnterpriseEdge()
+  } catch (error: any) {
+    if (selected.value?.id === tenantID) edgeErrorMessage.value = edgeErrorText(error)
+  } finally {
+    if (selected.value?.id === tenantID) rotatingEnrollmentToken.value = false
+  }
 }
 
 async function saveEnterprise() {
@@ -633,10 +775,14 @@ onMounted(async () => {
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }.table-scroll { overflow-x: auto; }table { width: 100%; border-collapse: collapse; }th, td { padding: 12px; border-bottom: 1px solid var(--td-component-stroke); text-align: left; }.actions { display: flex; flex-wrap: wrap; gap: 8px; }.secret { margin: 16px 0; padding: 14px; border-radius: 8px; background: var(--td-bg-color-secondarycontainer); white-space: pre-wrap; overflow-wrap: anywhere; }
 .member-toolbar { display: grid; grid-template-columns: minmax(0, 320px) auto; gap: 8px; margin-bottom: 12px; }.member-pagination { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-top: 14px; color: var(--td-text-color-secondary); }
 .enterprise-row span.enterprise-row__summary { display: flex; align-items: flex-end; gap: 5px; }
+.edge-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 4px 0 18px; }
+.edge-summary span { display: grid; gap: 5px; padding: 12px; border-radius: 8px; background: var(--td-bg-color-secondarycontainer); }
+.edge-summary small { color: var(--td-text-color-secondary); }
+.secret-row { display: grid; gap: 10px; margin: 16px 0; }.secret-row .secret { margin: 5px 0; }
 .wizard-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0 0 22px; padding: 0; list-style: none; color: var(--td-text-color-placeholder); }
 .wizard-steps li { display: flex; align-items: center; gap: 7px; padding-bottom: 9px; border-bottom: 2px solid var(--td-component-stroke); }
 .wizard-steps li span { display: grid; width: 22px; height: 22px; place-items: center; border-radius: 50%; background: var(--td-bg-color-secondarycontainer); font-size: 12px; }
 .wizard-steps li.active { color: var(--td-text-color-primary); border-color: var(--td-brand-color-4); }.wizard-steps li.current { color: var(--td-brand-color); font-weight: 600; border-color: var(--td-brand-color); }
 .creation-form { min-height: 190px; margin-top: 18px; }.dialog-actions { display: flex; align-items: center; gap: 8px; margin-top: 22px; }.dialog-actions__spacer { flex: 1; }
-@media (max-width: 820px) { .operations-page { width: calc(100% - 28px); }.workspace { grid-template-columns: 1fr; }.form-grid { grid-template-columns: 1fr; } }
+@media (max-width: 820px) { .operations-page { width: calc(100% - 28px); }.workspace { grid-template-columns: 1fr; }.form-grid, .edge-summary { grid-template-columns: 1fr; } }
 </style>

@@ -33,6 +33,41 @@ export interface OperationsMember {
   status: 'active' | 'suspended'
 }
 
+export interface OperationsEdgeNode {
+  edgeNodeId: string
+  displayName: string
+  version: string
+  status: 'online' | 'offline' | 'disabled'
+  catalogVersion: string | null
+  dataServiceStatus: Record<string, unknown>
+  registeredAt: string | null
+  lastSeenAt: string | null
+}
+
+export interface OperationsEnterpriseEdge {
+  schema: 'PlatformEnterpriseEdgeV1'
+  productBaseTenantId: string
+  enterpriseId: string
+  bindingId: string
+  summary: {
+    connectionStatus: 'online' | 'offline' | 'disabled' | 'not_connected'
+    policyStatus: string
+    nodeCount: number
+    onlineNodeCount: number
+    lastSeenAt: string | null
+  }
+  nodes: OperationsEdgeNode[]
+}
+
+export interface OperationsEnrollmentToken {
+  schema: 'PlatformEnterpriseEdgeEnrollmentV1'
+  productBaseTenantId: string
+  enterpriseId: string
+  bindingId: string
+  enrollmentToken: string
+  rotatedAt: string | null
+}
+
 export interface EnterpriseActivationPayload {
   name: string
   description: string
@@ -106,6 +141,12 @@ export const updateOperationsMemberStatus = (tenantId: number, userId: string, s
 
 export const resetOperationsMemberPassword = (tenantId: number, userId: string, newPassword: string) =>
   post<OperationsResponse<unknown>>(`${base}/enterprises/${tenantId}/members/${encodeURIComponent(userId)}/password-reset`, { new_password: newPassword }).then(unwrapOperationsData)
+
+export const getOperationsEnterpriseEdge = (tenantId: number) =>
+  get<OperationsResponse<OperationsEnterpriseEdge>>(`${base}/enterprises/${tenantId}/edge`).then(unwrapOperationsData)
+
+export const rotateOperationsEnrollmentToken = (tenantId: number) =>
+  post<OperationsResponse<OperationsEnrollmentToken>>(`${base}/enterprises/${tenantId}/edge-enrollment-token/rotate`).then(unwrapOperationsData)
 
 export const createInitialAdministrator = (
   commandId: string,

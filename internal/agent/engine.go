@@ -581,6 +581,16 @@ func (e *AgentEngine) executeLoop(
 	}
 	defer emitCompletion()
 
+	// A governed analysis must know the finite budget before tools disappear.
+	// This is a one-time planning cue, not a reserved phase or an extra loop.
+	governedAnalysis := false
+	for _, tool := range tools {
+		if tool.Function.Name == agenttools.ToolGovernedDataQuery {
+			governedAnalysis = true
+			break
+		}
+	}
+	budgetNoticeSent := false
 	emptyRetries := 0
 	consecutiveSameContent := 0
 	lastResponseContent := ""
@@ -600,6 +610,13 @@ loop:
 			}
 			return state, ctx.Err()
 		default:
+		}
+
+		remaining := e.config.MaxIterations - state.CurrentRound
+		if governedAnalysis && !budgetNoticeSent && !e.config.UnlimitedIterations() && remaining > 0 && remaining <= 5 {
+			messages = append(messages, chat.Message{Role: "user", Content: fmt.Sprintf(
+				"Analysis execution budget: %d model iterations remain with tools available. Prioritize reconciling the material findings now: load exact query input_file data rather than copying numbers, recompute subtotals after changed filters, and check source scope and uncertainty. Use further discovery only if it can change the answer or action. Deliver supported findings before the limit; unresolved causes stay hypotheses. This notice does not add iterations or restrict the available tools.", remaining)})
+			budgetNoticeSent = true
 		}
 
 		// Each iteration runs inside an "agent.round.<N>" Langfuse span.

@@ -87,4 +87,6 @@ func TestFileOpsCapsTrackedPaths(t *testing.T) {
 
 	_, modified := extractFileOps("", msgs).resolve()
 	assert.Len(t, modified, maxTrackedFilePaths)
+	assert.Contains(t, modified, "/workspace/output/"+strings.Repeat("a", maxTrackedFilePaths+10)+".txt")
+	assert.NotContains(t, modified, "/workspace/output/a.txt")
 }

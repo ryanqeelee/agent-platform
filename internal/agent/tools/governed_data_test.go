@@ -75,6 +75,7 @@ func TestGovernedDataNativeToolsPreserveIdentityAndExactFile(t *testing.T) {
 	require.Equal(t, "digest-1", requests[1]["freshness_token"])
 	require.Equal(t, "owned-session", files.session)
 	require.Equal(t, externalQuery, string(files.data))
+	require.Contains(t, result.Data["next_step"], "Do not transcribe")
 	require.Equal(t, fmt.Sprintf("%x", sha256.Sum256(files.data)), result.Data["input_sha256"])
 	require.True(t, strings.HasPrefix(files.path, "/workspace/data/governed-query-"))
 	require.Contains(t, result.Output, "9007199254740993.12345678")
@@ -314,6 +315,7 @@ func TestGovernedSchemaRegistryBudgetPreservesCompleteFile(t *testing.T) {
 					require.Equal(t, files.path, envelope["input_file"])
 					require.Contains(t, envelope["next_step"], "shell_exec")
 					require.Contains(t, envelope["next_step"], "query_usage")
+					require.Contains(t, envelope["next_step"], "column-name strings")
 				} else {
 					require.NotEmpty(t, result.Error)
 					require.NotContains(t, result.Output, "input_file")

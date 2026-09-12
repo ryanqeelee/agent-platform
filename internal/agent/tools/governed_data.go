@@ -253,6 +253,7 @@ func (t *GovernedDataTool) Execute(ctx context.Context, args json.RawMessage) (*
 				result["artifact_error"] = "query succeeded but sandbox input staging failed; returned rows remain available"
 			} else {
 				result["input_file"], result["input_sha256"] = filePath, digest
+				result["next_step"] = "For calculations, load this exact input_file as JSON and select its rows by the required keys. Do not transcribe numeric rows into code literals. Keep query.id, query.sql, query.truncated and limits with derived results; distinguish net movements from direction-filtered movements."
 			}
 		}
 	}
@@ -280,7 +281,7 @@ func boundedGovernedQueryResult(ctx context.Context, result map[string]any) (*ty
 	result["rows_preview_only"], result["preview_row_count"] = true, 0
 	hasFile := result["input_file"] != nil
 	result["file_contains_all_returned_rows"] = hasFile
-	result["next_step"] = "Read input_file with native sandbox tools for all returned rows. query.truncated describes the database row limit."
+	result["next_step"] = "Load the exact input_file as JSON for calculations; do not transcribe numeric rows into code literals. Preserve query.sql filters and limits with derived results. query.truncated describes the database row limit, not completeness of SQL Top-N subsets."
 	if !hasFile {
 		result["next_step"] = "Complete rows are unavailable within the tool budget. Narrow or aggregate the query; do not treat this preview as the complete result."
 	}
@@ -359,6 +360,11 @@ func (t *GovernedDataTool) boundedSchemaResult(ctx context.Context, schema map[s
 	hasFile := envelope["file_contains_complete_schema"] == true
 	if hasFile {
 		envelope["next_step"] = "Use shell_exec to load input_file as JSON. The catalog object contains version/freshness only; table definitions are in source.tables (index response), or definition (single-table response). Read the relevant complete columns, query_usage, assumption_notes, data_contract and metric definitions before querying; do not truncate needed sections or guess table names. Reuse definitions already read from this current file. Print only relevant sections. This is a working file, not a durable attachment; request schema again if it expires."
+		if table != nil {
+			envelope["next_step"] = "Single-table file: use d['definition'] at the JSON root, not d['source']. definition.columns is a list of column-name strings; read definition.column_details for column types and semantics. " + envelope["next_step"].(string)
+		} else {
+			envelope["next_step"] = "Catalog index only: source.tables entries use table as the name key and do not contain full columns. Use table_names when present, then request governed_data_schema(table=exact_name) for needed definitions; do not search the index for complete columns. " + envelope["next_step"].(string)
+		}
 	} else {
 		envelope["schema_in_file"] = false
 		envelope["next_step"] = failure + " Restore sandbox file access and request the schema again before querying."

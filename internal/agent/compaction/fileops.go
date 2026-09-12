@@ -43,13 +43,16 @@ type fileOps struct {
 
 func appendUnique(list []string, path string) []string {
 	path = strings.TrimSpace(path)
-	if path == "" || len(list) >= maxTrackedFilePaths {
+	if path == "" {
 		return list
 	}
 	for _, existing := range list {
 		if existing == path {
 			return list
 		}
+	}
+	if len(list) >= maxTrackedFilePaths {
+		list = list[1:]
 	}
 	return append(list, path)
 }
@@ -64,6 +67,15 @@ func extractFileOps(previousSummary string, groups ...[]chat.Message) fileOps {
 	for _, group := range groups {
 		for _, msg := range group {
 			ops.inherit(msg.Content)
+			// Governed tools stage files themselves; there is no write_sandbox_file call.
+			if msg.Role == "tool" && (msg.Name == agenttools.ToolGovernedDataQuery || msg.Name == agenttools.ToolGovernedDataSchema) {
+				var result struct {
+					InputFile string `json:"input_file"`
+				}
+				if json.Unmarshal([]byte(msg.Content), &result) == nil && strings.HasPrefix(result.InputFile, "/workspace/data/") {
+					ops.written = appendUnique(ops.written, result.InputFile)
+				}
+			}
 			for _, tc := range msg.ToolCalls {
 				path := toolCallPath(tc.Function.Arguments)
 				if path == "" {
@@ -146,6 +158,9 @@ func (o fileOps) format() string {
 	var sb strings.Builder
 	writeTagged(&sb, readFilesTag, read)
 	writeTagged(&sb, modifiedFilesTag, modified)
+	if len(read) == maxTrackedFilePaths || len(modified) == maxTrackedFilePaths {
+		sb.WriteString("\nFile inventory reached its limit; older paths may be omitted. Re-query missing evidence rather than reconstructing it from memory.")
+	}
 	return sb.String()
 }
 

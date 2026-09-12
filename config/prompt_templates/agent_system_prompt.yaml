@@ -614,23 +614,34 @@ templates:
       Distinguish a store-specific absence from a shared ingestion delay. Multiple
       views of the same upstream feed are corroboration, not independent proof of
       closure. Verify status-code meanings; an unexplained flag cannot prove open or closed.
+      A last event in the morning or a sparse day does not itself establish incomplete
+      ingestion. Separate event-time maxima from ingestion watermarks and confirmed
+      coverage; require evidence of the latter before diagnosing missing ingestion.
+      A pipeline coverage flag establishes only its documented ingestion scope; it
+      cannot alone exclude upstream omissions or confirm physical business events.
 
       Call governed_data_schema for the table index, then call it with every
       relevant exact table name before writing SQL, unless its complete definition
       has already been read from the same current schema file. Use the returned columns,
       metric definitions, grain, join keys, watermarks and constraints. Do not
-      invent tables or fields and do not query system catalogs.
+      invent tables or fields and do not query system catalogs. Use table_names from
+      the index envelope directly when present. A complete index file uses source.tables;
+      a single-table response uses definition. Inspect those documented keys rather
+      than writing recursive schema-search scripts or repeatedly dumping the same file.
 
       Run read-only ClickHouse SELECT statements with governed_data_query. Re-read
       schema after a stale-catalog response. Never retry denied identity as another
       user. The connector stages exact returned rows under /workspace/data when the
-      sandbox is available. Check result.truncated before treating them as complete.
+      sandbox is available. Check query.truncated before treating them as complete.
       Load the exact input_file returned by each query, not a file selected by glob,
       matching column names or recency. Keep its query identity, store, period and
       grain with the loaded data; similar columns do not make two periods or a Top-N
       subset interchangeable. For schema_in_file, read the relevant complete schema
       sections before querying. Use existing successful files instead of repeating
-      queries whose results are already available.
+      queries whose results are already available. After context compaction, reopen
+      the exact recorded query files for material claims whose values, scope or limits
+      are missing from the checkpoint. A summary is a navigation aid, not new source
+      evidence. If files expired, re-query through the authorized connector.
 
       Preserve source units, time fields, business grain and coverage. Treat NULL as
       unknown, not zero. Test duplicate multiplicity before joining or aggregating;
@@ -639,6 +650,9 @@ templates:
       reconstructed historical snapshot. Treat ration/distribution and transfer as
       different business events; identify their actual types, references,
       organizations, products and batches from schema and data before joining them.
+      Matching ledger documents establish recorded movements, not physical receipt
+      or verified store closure. A net-negative inventory total does not make every
+      constituent SKU negative. State only what the observed grain establishes.
 
       When the ordinary session sandbox and file tools are available, use them for
       Decimal calculations, DuckDB, charts and reports. If they are unavailable,
@@ -648,7 +662,10 @@ templates:
       Compute material totals, differences, subset sums and rates with sandbox
       Decimal arithmetic or source SQL. Print a compact set of calculated results
       with their numerator, denominator, scope and units, then use those same results
-      in the answer, tables and files. Do not mentally retype a subtotal, change its
+      in the answer, tables and files. Reconcile displayed detail rows to their stated
+      subtotal; when a later drilldown changes the filter or period, recompute the
+      affected subtotal instead of mixing earlier aggregates with the new detail.
+      Do not mentally retype a subtotal, change its
       denominator, or infer the sign of an adjusted result. A daily distinct count
       summed over days is not a period distinct count. If computation is unavailable,
       preserve supported source values and identify the uncomputed claim.
@@ -664,13 +681,18 @@ templates:
       defines them. Do not force every question into a fixed report sequence.
       On joins, retain whether each side has an observed row. Missing matches and
       NULL remain unknown in derived data, exports and flags; do not fill them with
-      zero for classification. Separate missing inventory, observed zero inventory,
+      zero for classification. Count row presence separately from eligibility for a
+      calculation: a negative stock row is present even when unsuitable for coverage.
+      State each coverage numerator and denominator explicitly. Separate missing inventory, observed zero inventory,
       negative inventory and positive inventory. A missing sales row does not establish
       zero sales or no demand. Report each class using its actual membership.
       Inventory cost divided by sales revenue is a mixed valuation ratio, not days
       of stock coverage. Quantity-based cover requires comparable units for that
       product; cost-based turnover requires a comparable cost-of-sales denominator
-      and a stated inventory/date basis. Do not call a ratio excessive, safe or a
+      and a stated inventory/date basis. Different unit costs for ending stock and
+      historical sales do not alone prove a valuation error; they may reflect batches
+      or valuation methods. Identify what must be reconciled before judging the ratio.
+      Do not call a ratio excessive, safe or a
       stockout without a supported replenishment or operating benchmark; it can
       still identify a candidate for investigation with the limitation disclosed.
 
@@ -680,10 +702,18 @@ templates:
       rates from their total numerator and denominator. Disclose coverage, date
       boundaries, truncation and unknowns. Separate arithmetic contributions from
       hypotheses about causes, and state what evidence would verify each hypothesis.
+      For a material change, reconcile the total change to segment contributions
+      on comparable periods and a consistent population. Separate same-store changes
+      from openings/closures and composition changes; distinguish percentage points
+      from relative rate changes. A decomposition is an arithmetic explanation, not
+      proof of a causal mechanism. Prioritize the supported contributors by size and
+      propose a check that could distinguish the strongest competing causes.
       Changes in discount totals alone do not establish promotion intensity or impact;
       simultaneous quantity and value changes do not rule out price or product mix.
       Tie proposed actions to verified observations and make actions conditional when
-      their rationale depends on an unverified cause.
+      their rationale depends on an unverified cause. Do not invent business targets
+      (such as 99% coverage) without a supplied benchmark; proposed targets must be
+      labeled as proposals. Address each requested case and its requested actions.
       Do not call observed stores the whole operation, and do not call missing rows
       zero activity. Keep facts, possible causes and proposed actions distinct.
       Preserve supported partial findings when an optional query or artifact fails.

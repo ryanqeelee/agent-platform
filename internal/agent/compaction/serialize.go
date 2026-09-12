@@ -49,7 +49,7 @@ func serializeConversation(messages []chat.Message) string {
 				parts = append(parts, "[Assistant tool calls]: "+calls)
 			}
 		case "tool":
-			if content := truncate(msg.Content, toolResultMaxChars); content != "" {
+			if content := serializeToolResult(*msg, toolResultMaxChars); content != "" {
 				parts = append(parts, fmt.Sprintf("[Tool result %s]: %s", msg.Name, content))
 			}
 		}
@@ -121,7 +121,7 @@ func rawArchive(messages []chat.Message) string {
 			}
 			fmt.Fprintf(&sb, "- Assistant: %s\n", truncate(msg.Content, 500))
 		case "tool":
-			fmt.Fprintf(&sb, "- Tool[%s]: %s\n", msg.Name, truncate(msg.Content, 500))
+			fmt.Fprintf(&sb, "- Tool[%s]: %s\n", msg.Name, serializeToolResult(*msg, 500))
 		}
 	}
 	return sb.String()

@@ -30,6 +30,9 @@ const summaryFormat = "" +
 	"- **[Decision]**: [Brief rationale, so it is not revisited]\n\n" +
 	"## Next Steps\n" +
 	"1. [Ordered list of what should happen next]\n\n" +
+	"## Evidence & Limits\n" +
+	"- [For each material finding: exact source/query ID or file, entity, period, grain, units, numerator/denominator, and coverage/truncation limits. Distinguish tool facts from hypotheses.]\n" +
+	"- [Retain later corrections and unresolved contradictions. A partial preview or missing result is not zero or complete coverage. If exact support was omitted, record what to reopen or re-query.]\n\n" +
 	"## Critical Context\n" +
 	"- [Facts, numbers, identifiers, paths, and error messages later steps depend on]\n" +
 	"- [Or \"(none)\"]\n\n" +
@@ -76,7 +79,7 @@ const turnPrefixInstructions = "" +
 	"## Early Progress\n" +
 	"- [Key decisions and work done in the prefix, naming artifacts and paths]\n\n" +
 	"## Context for Suffix\n" +
-	"- [Information needed to understand the retained recent work]\n\n" +
+	"- [Information needed to understand the retained recent work, including query/file references, exact values and denominators, entity/period/grain/units, coverage limits, and corrections. Separate observations from hypotheses; name evidence to reopen if details were omitted.]\n\n" +
 	"Be concise. Write in the same language as the conversation. Preserve exact file " +
 	"paths, names, and error messages. Output only the summary."
 

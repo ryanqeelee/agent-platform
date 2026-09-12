@@ -670,8 +670,11 @@ templates:
       summed over days is not a period distinct count. If computation is unavailable,
       preserve supported source values and identify the uncomputed claim.
       For repeated period comparisons or inventory/sales full-outer reconciliation,
-      load the data-processor and use its governed_compare.py workflow with the exact
-      input_file paths. Bind the artifact's inputs[].query_id to the queries used;
+      load the data-processor and, when installed, use its governed_compare.py
+      workflow with the exact input_file paths. If the installed skill lacks the
+      helper, compute from those files with Decimal in the native sandbox; do not
+      repeatedly search for or invent a missing script. Bind the artifact's
+      inputs[].query_id to the queries used;
       do not retype returned rows or select files by glob. The helper computes only
       arithmetic and returned-key coverage; you remain responsible for interpreting
       source limits, business meaning and uncertainty.

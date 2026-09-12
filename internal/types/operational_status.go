@@ -24,6 +24,9 @@ const (
 	OperationalStatusStorageUnavailable          OperationalStatusCode = "storage_unavailable"
 	OperationalStatusExternalToolUnavailable     OperationalStatusCode = "external_tool_unavailable"
 	OperationalStatusEnterpriseAttentionRequired OperationalStatusCode = "enterprise_attention_required"
+	OperationalStatusGovernedCatalogChanged      OperationalStatusCode = "governed_catalog_changed"
+	OperationalStatusGovernedQueryInvalid        OperationalStatusCode = "governed_query_invalid"
+	OperationalStatusGovernedRequestFailed       OperationalStatusCode = "governed_request_failed"
 )
 
 type operationalStatusPublicProjection struct {
@@ -44,6 +47,9 @@ var operationalStatusPublic = map[OperationalStatusCode]operationalStatusPublicP
 	OperationalStatusStorageUnavailable:          {"unavailable", "Storage capability is temporarily unavailable.", "retry"},
 	OperationalStatusExternalToolUnavailable:     {"unavailable", "The external tool is temporarily unavailable.", "retry"},
 	OperationalStatusEnterpriseAttentionRequired: {"attention", "Enterprise service requires attention.", "open_admin_surface"},
+	OperationalStatusGovernedCatalogChanged:      {"failed", "数据目录已更新，需要重新读取表定义后再查询。", "refresh_catalog"},
+	OperationalStatusGovernedQueryInvalid:        {"failed", "查询语句的字段或语法有误，需要修正后再查询。", "correct_query"},
+	OperationalStatusGovernedRequestFailed:       {"failed", "经营数据请求失败，暂未确定原因。", "inspect_request"},
 }
 
 type SafePartialResultRefV1 struct {

@@ -252,7 +252,7 @@ func (h *AgentStreamHandler) handleToolResult(ctx context.Context, evt event.Eve
 		responseType = types.ResponseTypeError
 		logger.GetLogger(h.ctx).Warn("Tool execution failed", "tool", data.ToolName, "error", data.Error)
 	}
-	toolStatus := agenttools.ExternalToolOperationalStatus()
+	toolStatus := agenttools.ToolFailureOperationalStatus(data.ToolName, data.Data)
 	clientError := ""
 	if !data.Success {
 		clientError = toolStatus.SafeSummary

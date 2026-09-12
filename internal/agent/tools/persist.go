@@ -106,7 +106,7 @@ func SanitizeToolResultForClient(toolName string, result *types.ToolResult) map[
 		}
 	}
 	if !result.Success {
-		meta["operationalStatus"] = ExternalToolOperationalStatus()
+		meta["operationalStatus"] = ToolFailureOperationalStatus(toolName, result.Data)
 	}
 	if result.Success && !ShouldOmitRawToolOutput("", result.Data) && result.Output != "" {
 		meta["output"] = result.Output
@@ -120,7 +120,7 @@ func StreamContentForToolResult(toolName string, success bool, errMsg string, da
 		if isSandboxContentTool(toolName) {
 			return compactHistoricalSandboxOutput(errMsg)
 		}
-		return ExternalToolOperationalStatus().SafeSummary
+		return ToolFailureOperationalStatus(toolName, data).SafeSummary
 	}
 	if isSandboxContentTool(toolName) {
 		return compactShellExecHeadline(data)
@@ -150,7 +150,7 @@ func SanitizeAgentStepsForStorage(steps []types.AgentStep) []types.AgentStep {
 			}
 			result := *tc.Result
 			if !result.Success {
-				result.Error = ExternalToolOperationalStatus().SafeSummary
+				result.Error = ToolFailureOperationalStatus(tc.Name, result.Data).SafeSummary
 				if isSandboxContentTool(tc.Name) {
 					// Sandbox commands execute inside our own isolated runtime. Their
 					// stdout/stderr is the model's actionable diagnostic and is safe
@@ -192,7 +192,7 @@ func CompactToolOutputForHistory(toolName string, result *types.ToolResult) stri
 		return ""
 	}
 	if !result.Success && !isSandboxContentTool(toolName) {
-		return "Error: " + ExternalToolOperationalStatus().SafeSummary
+		return "Error: " + ToolFailureOperationalStatus(toolName, result.Data).SafeSummary
 	}
 	if isSandboxContentTool(toolName) {
 		if rebuilt := compactSandboxHistory(result); rebuilt != "" {

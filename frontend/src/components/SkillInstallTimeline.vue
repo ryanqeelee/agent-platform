@@ -29,6 +29,7 @@ import { configSkillTranscriptUrl, getConfigSkillTranscriptHistory } from '@/api
 import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 import { getApiBaseUrl } from '@/utils/api-base'
 import { generateRandomString } from '@/utils/index'
+import { reconstructEventStreamFromSteps } from '@/utils/agent-event-history'
 import AgentStreamDisplay from '@/views/chat/components/AgentStreamDisplay.vue'
 import i18n from '@/i18n'
 
@@ -157,7 +158,23 @@ async function loadHistory(run: number): Promise<boolean> {
   if (!tenantId) return false
   const response = await getConfigSkillTranscriptHistory(tenantId, props.configId, props.skillId)
   if (run !== openRun || closed || !response?.data?.length) return false
-  messages.splice(0, messages.length, ...response.data)
+  const history = response.data.map((message: any) => {
+    if (message.role !== 'assistant') return message
+    return {
+      ...message,
+      isAgentMode: true,
+      hideContent: true,
+      agentEventStream: reconstructEventStreamFromSteps(
+        Array.isArray(message.agent_steps) ? message.agent_steps : [],
+        String(message.content || ''),
+        Boolean(message.is_completed),
+        Boolean(message.is_fallback),
+        Number(message.agent_duration_ms) || 0,
+        message.usage,
+      ),
+    }
+  })
+  messages.splice(0, messages.length, ...history)
   return true
 }
 

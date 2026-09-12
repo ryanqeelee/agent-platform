@@ -137,11 +137,7 @@
       :preset-type="createPresetType"
       @saved="load" />
 
-    <!--
-      Same SettingDrawer chrome as the skill editor. The list is chat sessions
-      that still hold a live sandbox for this config — their titles often look
-      like skill names, so the section label has to say "session".
-    -->
+    <!-- Session IDs identify the sandboxes that still occupy this config. -->
     <SettingDrawer
       v-model:visible="showInventory"
       :title="$t('settings.sandbox.inventoryTitle')"
@@ -168,13 +164,12 @@
           <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.inventorySessions') }}</h4>
           <ul v-if="inventorySessions.length" class="inventory-list">
             <li v-for="id in inventorySessions" :key="id">
-              <button type="button" class="inventory-row" @click="openSession(id)">
+              <div class="inventory-row">
                 <span class="inventory-row__text">
-                  <span class="inventory-row__title" :title="id">{{ sessionTitle(id) }}</span>
+                  <span class="inventory-row__title" :title="id">{{ id }}</span>
                   <span class="inventory-row__meta">{{ $t('settings.sandbox.inventorySessionKind') }}</span>
                 </span>
-                <t-icon name="chevron-right" size="16px" />
-              </button>
+              </div>
             </li>
           </ul>
           <p v-else-if="!inventoryLoading" class="inventory-empty">
@@ -211,12 +206,10 @@
 import { computed, onMounted, ref } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
 import SandboxConfigEditorDrawer from '@/components/SandboxConfigEditorDrawer.vue'
 import SandboxBackendBadge from '@/components/settings/SandboxBackendBadge.vue'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
-import { getSession } from '@/api/chat/index'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 import {
@@ -232,7 +225,6 @@ import {
 } from '@/api/system'
 
 const { t } = useI18n()
-const router = useRouter()
 const confirmDelete = useConfirmDelete()
 const deploymentCapabilities = useDeploymentCapabilitiesStore()
 const platformTenantID = usePlatformTenantControlID()
@@ -313,37 +305,6 @@ const inventorySubtitle = computed(() => {
 
 const inventorySessions = computed(() => inventory.value?.session_ids || [])
 const inventoryAgents = computed(() => inventory.value?.agent_names || [])
-
-const sessionTitles = ref<Record<string, string>>({})
-
-function sessionTitle(id: string) {
-  const title = sessionTitles.value[id]
-  if (title) return title
-  return t('settings.sandbox.inventoryUntitledSession')
-}
-
-async function loadSessionTitles(ids: string[]) {
-  const unique = [...new Set(ids.filter(Boolean))]
-  if (!unique.length) {
-    sessionTitles.value = {}
-    return
-  }
-  const next: Record<string, string> = {}
-  await Promise.all(unique.map(async (id) => {
-    try {
-      const res: any = await getSession(id)
-      next[id] = String(res?.data?.title || '').trim()
-    } catch {
-      next[id] = ''
-    }
-  }))
-  sessionTitles.value = next
-}
-
-function openSession(id: string) {
-  showInventory.value = false
-  router.push(`/platform/chat/${encodeURIComponent(id)}`)
-}
 
 // The endpoint host is what tells two configs of the same backend apart at a
 // glance, which is the whole point of allowing several of them.
@@ -516,11 +477,9 @@ async function openInventory(record: SandboxConfigRecord) {
   showInventory.value = true
   inventoryLoading.value = true
   inventory.value = null
-  sessionTitles.value = {}
   try {
     const res = await getSandboxConfigInventory(platformTenantID.value!, record.id)
     inventory.value = res?.data || null
-    await loadSessionTitles(inventory.value?.session_ids || [])
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('settings.sandbox.inventoryFailed'))
     showInventory.value = false
@@ -564,7 +523,6 @@ function showRefusal(
   inventory.value = inv || { sandbox_count: 0, unverifiable: notice === 'unverifiable' }
   inventoryLoading.value = false
   showInventory.value = true
-  void loadSessionTitles(inventory.value.session_ids || [])
 }
 
 async function forceRemove(record: SandboxConfigRecord) {
@@ -995,17 +953,6 @@ onMounted(() => {
   color: inherit;
   font: inherit;
   text-align: left;
-  cursor: pointer;
-
-  &:hover,
-  &:focus-visible {
-    background: var(--td-bg-color-container-hover);
-  }
-
-  &:focus-visible {
-    outline: 2px solid var(--td-brand-color);
-    outline-offset: 2px;
-  }
 }
 
 .inventory-row__text {
@@ -1029,11 +976,6 @@ onMounted(() => {
   color: var(--td-text-color-secondary);
   font-size: 12px;
   line-height: 1.4;
-}
-
-.inventory-row .t-icon {
-  flex-shrink: 0;
-  color: var(--td-text-color-placeholder);
 }
 
 .inventory-empty,

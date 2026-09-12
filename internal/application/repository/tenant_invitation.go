@@ -343,6 +343,9 @@ func (r *tenantInvitationRepository) acceptWithMembership(
 		} else if inv.InviteeUserID != userID {
 			return ErrInvitationForbidden
 		}
+		if err := lockActiveTenant(ctx, tx, inv.TenantID); err != nil {
+			return err
+		}
 		var existing types.TenantMember
 		existingErr := tx.WithContext(ctx).Clauses(forUpdateClause()).
 			Where("user_id = ? AND tenant_id = ?", userID, inv.TenantID).
@@ -367,9 +370,6 @@ func (r *tenantInvitationRepository) acceptWithMembership(
 		} else if !errors.Is(existingErr, gorm.ErrRecordNotFound) {
 			return existingErr
 		} else {
-			if err := lockTenantAndCheckSeat(ctx, tx, inv.TenantID); err != nil {
-				return err
-			}
 			member := &types.TenantMember{
 				UserID: userID, TenantID: inv.TenantID, Role: inv.Role,
 				Status: types.TenantMemberStatusActive, InvitedBy: inv.InvitedBy, JoinedAt: at,

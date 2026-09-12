@@ -12,7 +12,7 @@ import { consumePendingTenantSwitchToast } from '@/utils/tenantSwitch'
 import { useRoleLabel } from '@/composables/useRoleLabel'
 import { notifyLoginSuccess } from '@/utils/loginNotify'
 import { renderWorkspaceNotifyContent } from '@/utils/workspaceNotifyContent'
-import { defaultAuthenticatedDestination, postLoginDestination } from '@/router/safeReturnTo'
+import { oidcInvitationDestination, postLoginDestination } from '@/router/safeReturnTo'
 
 // TDesign locale configs
 import enUSConfig from 'tdesign-vue-next/esm/locale/en_US'
@@ -116,7 +116,7 @@ const persistOIDCLoginResponse = async (response: any, returnTo: unknown) => {
     if (result.ok) MessagePlugin.success(t('inviteRegister.joined'))
     else MessagePlugin.warning(t('inviteRegister.invalidBody'))
     // 会话已有效，无论 token 是否兑换成功都进入应用。
-    router.replace(defaultAuthenticatedDestination(authStore.hasValidTenant, authStore.isSystemAdmin))
+    router.replace(oidcInvitationDestination(authStore.isSystemAdmin))
     return
   }
 

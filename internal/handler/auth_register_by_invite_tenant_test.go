@@ -110,6 +110,35 @@ func TestRegisterByInviteReportsUnexpectedAcceptanceFailure(t *testing.T) {
 	}
 }
 
+func TestRegisterByInviteAdmissionConflictsAre409AndCleanUpUser(t *testing.T) {
+	for _, serviceErr := range []error{service.ErrSeatLimitExceeded, service.ErrEnterpriseNotActive} {
+		t.Run(serviceErr.Error(), func(t *testing.T) {
+			users := &invitedRegistrationUserService{}
+			h := &AuthHandler{
+				userService:   users,
+				tenantService: &invitedRegistrationTenantService{},
+				invitationSvc: &invitedRegistrationInvitationService{acceptErr: serviceErr},
+			}
+			r := gin.New()
+			r.Use(errorCapture())
+			r.POST("/auth/register-by-invite", h.RegisterByInvite)
+
+			body := []byte(`{"token":"invite-token","email":"alice@example.com","username":"alice","password":"supersecret1"}`)
+			req := httptest.NewRequest(http.MethodPost, "/auth/register-by-invite", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+
+			if w.Code != http.StatusConflict {
+				t.Fatalf("status=%d want=%d body=%s", w.Code, http.StatusConflict, w.Body.String())
+			}
+			if users.deleteTenantlessCalls != 1 {
+				t.Fatalf("DeleteTenantlessUser calls=%d want=1", users.deleteTenantlessCalls)
+			}
+		})
+	}
+}
+
 func (s *invitedRegistrationTenantService) GetTenantByID(context.Context, uint64) (*types.Tenant, error) {
 	return &types.Tenant{ID: 42, Name: "Invited Workspace"}, nil
 }

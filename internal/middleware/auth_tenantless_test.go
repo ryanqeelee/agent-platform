@@ -21,6 +21,10 @@ func (s *oldTenantlessTokenUserService) ValidateToken(context.Context, string) (
 	return s.user, 0, nil
 }
 
+func (s *oldTenantlessTokenUserService) ValidateIdentityToken(context.Context, string) (*types.User, uint64, error) {
+	return s.user, 0, nil
+}
+
 type activationStatusTenantService struct {
 	interfaces.TenantService
 	tenant *types.Tenant
@@ -50,6 +54,28 @@ func TestTenantOptionalAPISurface(t *testing.T) {
 	for _, tt := range tests {
 		if got := isTenantOptionalAPI(tt.path, tt.method); got != tt.want {
 			t.Errorf("isTenantOptionalAPI(%s %s) = %v, want %v", tt.method, tt.path, got, tt.want)
+		}
+	}
+}
+
+func TestInvitationAcceptanceIdentityAPISurfaceIsExact(t *testing.T) {
+	tests := []struct {
+		method string
+		path   string
+		want   bool
+	}{
+		{http.MethodPost, "/api/v1/me/invitations/12/accept", true},
+		{http.MethodPost, "/api/v1/me/invitations/accept-by-token", true},
+		{http.MethodGet, "/api/v1/me/invitations/12/accept", false},
+		{http.MethodPost, "/api/v1/me/invitations/12/decline", false},
+		{http.MethodGet, "/api/v1/me/invitations", false},
+		{http.MethodPost, "/api/v1/me/invitations/not-an-id/accept", false},
+		{http.MethodPost, "/api/v1/me/invitations/12/accept/extra", false},
+		{http.MethodPost, "/api/v1/tenants/12/invitations/34/accept", false},
+	}
+	for _, tt := range tests {
+		if got := isInvitationAcceptanceIdentityAPI(tt.path, tt.method); got != tt.want {
+			t.Errorf("isInvitationAcceptanceIdentityAPI(%s %s) = %v, want %v", tt.method, tt.path, got, tt.want)
 		}
 	}
 }

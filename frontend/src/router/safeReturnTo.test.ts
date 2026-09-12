@@ -5,6 +5,7 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import {
   DEFAULT_EMPLOYEE_WORKSPACE_PATH,
   defaultAuthenticatedDestination,
+  oidcInvitationDestination,
   PLATFORM_OPERATIONS_PATH,
   postLoginDestination,
   safeReturnTo,
@@ -55,6 +56,13 @@ test('system administrators default to the tenant-independent operations page', 
     postLoginDestination(router, '/platform/enterprise?section=members', true, true),
     PLATFORM_OPERATIONS_PATH,
   )
+})
+
+test('OIDC invitation acceptance keeps the enterprise landing while routing platform identities to operations', () => {
+  assert.equal(oidcInvitationDestination(false), '/platform/knowledge-bases')
+  assert.equal(oidcInvitationDestination(true), PLATFORM_OPERATIONS_PATH)
+  const app = readFileSync(new URL('../App.vue', import.meta.url), 'utf8')
+  assert.match(app, /router\.replace\(oidcInvitationDestination\(authStore\.isSystemAdmin\)\)/)
 })
 
 test('tenant routes always send a platform identity to operations', () => {

@@ -46,6 +46,22 @@ func lockTenantAndCheckSeat(ctx context.Context, tx *gorm.DB, tenantID uint64) e
 	return nil
 }
 
+// lockActiveTenant is the invitation-acceptance lifecycle boundary. It locks
+// before membership inspection so both existing-member and new-member paths
+// are ordered with a concurrent enterprise suspension. Capacity remains a
+// new-member concern enforced by createTenantMember.
+func lockActiveTenant(ctx context.Context, tx *gorm.DB, tenantID uint64) error {
+	var tenant types.Tenant
+	if err := tx.WithContext(ctx).Clauses(forUpdateClause()).Select("id", "status").
+		Where("id = ?", tenantID).Take(&tenant).Error; err != nil {
+		return err
+	}
+	if tenant.Status != types.TenantStatusActive {
+		return ErrEnterpriseNotActive
+	}
+	return nil
+}
+
 // forUpdateClause returns the gorm SELECT ... FOR UPDATE clause. Kept
 // in one place so we can swap it out for `clause.Locking{Strength: "UPDATE"}`
 // on databases that don't support row-level locking (none in our matrix,

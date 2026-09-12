@@ -196,6 +196,40 @@ func TestValidateTokenRejectsInactiveUser(t *testing.T) {
 	}
 }
 
+func TestValidateIdentityTokenKeepsJWTAndAccountChecksWithoutTenantAdmission(t *testing.T) {
+	ctx := context.Background()
+	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}
+	svc := newAuthTestUserService(tokenRepo)
+	svc.tenantService = &authTenantService{status: types.TenantStatusSuspended}
+	accessJWT := signTestJWT(jwt.MapClaims{
+		"user_id": "user-1", "tenant_id": float64(1), "type": "access",
+		"exp": time.Now().Add(time.Hour).Unix(),
+	})
+	tokenRepo.tokens[accessJWT] = &types.AuthToken{
+		UserID: "user-1", Token: accessJWT, TokenType: "access_token",
+	}
+
+	if _, _, err := svc.ValidateToken(ctx, accessJWT); !errors.Is(err, ErrTenantNotActive) {
+		t.Fatalf("ValidateToken() error = %v, want inactive tenant rejection", err)
+	}
+	user, tenantID, err := svc.ValidateIdentityToken(ctx, accessJWT)
+	if err != nil || user == nil || user.ID != "user-1" || tenantID != 1 {
+		t.Fatalf("ValidateIdentityToken() = (%+v,%d,%v), want verified user and claim", user, tenantID, err)
+	}
+
+	expiredJWT := signTestJWT(jwt.MapClaims{
+		"user_id": "user-1", "tenant_id": float64(1), "type": "access",
+		"exp": time.Now().Add(-time.Hour).Unix(),
+	})
+	if _, _, err := svc.ValidateIdentityToken(ctx, expiredJWT); err == nil {
+		t.Fatal("ValidateIdentityToken accepted an expired JWT")
+	}
+	svc.userRepo.(*stubUserRepoForAuth).users["user-1"].IsActive = false
+	if _, _, err := svc.ValidateIdentityToken(ctx, accessJWT); err == nil || err.Error() != "account is disabled" {
+		t.Fatalf("ValidateIdentityToken inactive-user error = %v", err)
+	}
+}
+
 func TestRefreshTokenRejectsAccessTokenRecord(t *testing.T) {
 	ctx := context.Background()
 	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}

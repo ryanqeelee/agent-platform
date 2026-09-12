@@ -21,6 +21,9 @@ func TestInvitationAcceptanceRejectsExistingSuspendedMembershipAtomically(t *tes
 		t.Fatal(err)
 	}
 	for _, statement := range []string{
+		`CREATE TABLE tenants (
+			id integer PRIMARY KEY, status varchar(32) NOT NULL DEFAULT 'active', deleted_at datetime
+		)`,
 		`CREATE TABLE users (
 			id varchar(36) PRIMARY KEY, tenant_id integer,
 			is_active boolean NOT NULL DEFAULT true,
@@ -42,6 +45,7 @@ func TestInvitationAcceptanceRejectsExistingSuspendedMembershipAtomically(t *tes
 			expires_at datetime, responded_at datetime, created_at datetime,
 			updated_at datetime, deleted_at datetime, accepted_count integer NOT NULL DEFAULT 0
 		)`,
+		`INSERT INTO tenants(id, status) VALUES (42, 'active')`,
 		`INSERT INTO users(id, tenant_id) VALUES ('suspended-user', 42)`,
 		`INSERT INTO tenant_members(user_id, tenant_id, role, status)
 			VALUES ('suspended-user', 42, 'viewer', 'suspended')`,
@@ -138,5 +142,200 @@ func TestInvitationAcceptanceRejectsPlatformIdentityAtomically(t *testing.T) {
 	}
 	if memberships != 0 {
 		t.Fatalf("platform identity gained %d memberships", memberships)
+	}
+}
+
+func TestInvitationAcceptanceRequiresActiveEnterpriseAtomically(t *testing.T) {
+	for _, status := range []string{
+		types.TenantStatusSuspended,
+		types.TenantStatusProvisioning,
+		types.TenantStatusActivationAbandoned,
+		types.TenantStatusActive,
+	} {
+		t.Run(status, func(t *testing.T) {
+			db := activationTestDB(t)
+			if err := db.AutoMigrate(&types.TenantInvitation{}); err != nil {
+				t.Fatal(err)
+			}
+			tenant := &types.Tenant{Name: "Acme", Status: status}
+			if err := db.Create(tenant).Error; err != nil {
+				t.Fatal(err)
+			}
+			for _, id := range []string{"direct-user", "share-user"} {
+				user := &types.User{
+					ID: id, Username: id, Email: id + "@example.invalid",
+					PasswordHash: "unused", IsActive: true,
+				}
+				if err := db.Omit("TenantID").Create(user).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			expiresAt := time.Now().Add(time.Hour)
+			direct := &types.TenantInvitation{
+				TenantID: tenant.ID, InviteeUserID: "direct-user", Role: types.TenantRoleViewer,
+				Status: types.TenantInvitationStatusPending, ExpiresAt: expiresAt,
+			}
+			share := &types.TenantInvitation{
+				TenantID: tenant.ID, Token: "share-token", Role: types.TenantRoleViewer,
+				Status: types.TenantInvitationStatusPending, ExpiresAt: expiresAt,
+			}
+			if err := db.Create(direct).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(share).Error; err != nil {
+				t.Fatal(err)
+			}
+
+			repo := &tenantInvitationRepository{db: db}
+			directMember, directErr := repo.AcceptInvitation(context.Background(), direct.ID, "direct-user", time.Now())
+			shareMember, shareErr := repo.AcceptShareLink(context.Background(), share.ID, "share-user", time.Now())
+			if status == types.TenantStatusActive {
+				if directErr != nil || shareErr != nil || directMember == nil || shareMember == nil {
+					t.Fatalf("active acceptance: direct=(%+v,%v) share=(%+v,%v)", directMember, directErr, shareMember, shareErr)
+				}
+				return
+			}
+			if !errors.Is(directErr, ErrEnterpriseNotActive) || !errors.Is(shareErr, ErrEnterpriseNotActive) {
+				t.Fatalf("inactive acceptance errors: direct=%v share=%v", directErr, shareErr)
+			}
+			if directMember != nil || shareMember != nil {
+				t.Fatalf("inactive acceptance returned membership: direct=%+v share=%+v", directMember, shareMember)
+			}
+			var memberships int64
+			if err := db.Model(&types.TenantMember{}).Where("tenant_id = ?", tenant.ID).Count(&memberships).Error; err != nil {
+				t.Fatal(err)
+			}
+			if memberships != 0 {
+				t.Fatalf("inactive enterprise gained %d memberships", memberships)
+			}
+			for _, id := range []string{"direct-user", "share-user"} {
+				var user types.User
+				if err := db.First(&user, "id = ?", id).Error; err != nil {
+					t.Fatal(err)
+				}
+				if user.TenantID != 0 {
+					t.Fatalf("user %s bound to inactive tenant %d", id, user.TenantID)
+				}
+			}
+			for _, invitationID := range []uint64{direct.ID, share.ID} {
+				var invitation types.TenantInvitation
+				if err := db.First(&invitation, invitationID).Error; err != nil {
+					t.Fatal(err)
+				}
+				if invitation.Status != types.TenantInvitationStatusPending || invitation.AcceptedCount != 0 || invitation.RespondedAt != nil {
+					t.Fatalf("rejected invitation %d mutated: %+v", invitationID, invitation)
+				}
+			}
+		})
+	}
+}
+
+func TestExistingMemberInvitationAcceptanceRequiresActiveEnterpriseAtomically(t *testing.T) {
+	for _, status := range []string{
+		types.TenantStatusSuspended,
+		types.TenantStatusProvisioning,
+		types.TenantStatusActivationAbandoned,
+		types.TenantStatusActive,
+	} {
+		t.Run(status, func(t *testing.T) {
+			db := activationTestDB(t)
+			if err := db.AutoMigrate(&types.TenantInvitation{}); err != nil {
+				t.Fatal(err)
+			}
+			tenant := &types.Tenant{Name: "Acme", Status: status}
+			if err := db.Create(tenant).Error; err != nil {
+				t.Fatal(err)
+			}
+			user := &types.User{
+				ID: "existing-user", Username: "existing-user", Email: "existing@example.invalid",
+				PasswordHash: "unused", TenantID: tenant.ID, IsActive: true,
+			}
+			if err := db.Create(user).Error; err != nil {
+				t.Fatal(err)
+			}
+			member := &types.TenantMember{
+				UserID: user.ID, TenantID: tenant.ID, Role: types.TenantRoleViewer,
+				Status: types.TenantMemberStatusActive, JoinedAt: time.Now(),
+			}
+			if err := db.Create(member).Error; err != nil {
+				t.Fatal(err)
+			}
+			expiresAt := time.Now().Add(time.Hour)
+			direct := &types.TenantInvitation{
+				TenantID: tenant.ID, InviteeUserID: user.ID, Role: types.TenantRoleViewer,
+				Status: types.TenantInvitationStatusPending, ExpiresAt: expiresAt,
+			}
+			share := &types.TenantInvitation{
+				TenantID: tenant.ID, Token: "existing-share-token", Role: types.TenantRoleViewer,
+				Status: types.TenantInvitationStatusPending, ExpiresAt: expiresAt,
+			}
+			if err := db.Create(direct).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(share).Error; err != nil {
+				t.Fatal(err)
+			}
+
+			repo := &tenantInvitationRepository{db: db}
+			directMember, directErr := repo.AcceptInvitation(context.Background(), direct.ID, user.ID, time.Now())
+			shareMember, shareErr := repo.AcceptShareLink(context.Background(), share.ID, user.ID, time.Now())
+			if status == types.TenantStatusActive {
+				if directErr != nil || shareErr != nil || directMember == nil || shareMember == nil {
+					t.Fatalf("active existing-member acceptance: direct=(%+v,%v) share=(%+v,%v)", directMember, directErr, shareMember, shareErr)
+				}
+				replayedShareMember, replayedShareErr := repo.AcceptShareLink(context.Background(), share.ID, user.ID, time.Now())
+				if replayedShareErr != nil || replayedShareMember == nil {
+					t.Fatalf("active existing-member share replay = (%+v,%v), want success", replayedShareMember, replayedShareErr)
+				}
+				var count int64
+				if err := db.Model(&types.TenantMember{}).
+					Where("user_id = ? AND tenant_id = ?", user.ID, tenant.ID).Count(&count).Error; err != nil {
+					t.Fatal(err)
+				}
+				if count != 1 {
+					t.Fatalf("active existing-member acceptance created %d memberships, want 1", count)
+				}
+				var storedDirect, storedShare types.TenantInvitation
+				if err := db.First(&storedDirect, direct.ID).Error; err != nil {
+					t.Fatal(err)
+				}
+				if err := db.First(&storedShare, share.ID).Error; err != nil {
+					t.Fatal(err)
+				}
+				if storedDirect.Status != types.TenantInvitationStatusAccepted || storedDirect.AcceptedCount != 1 {
+					t.Fatalf("active direct invitation = %+v, want accepted once", storedDirect)
+				}
+				if storedShare.Status != types.TenantInvitationStatusPending || storedShare.AcceptedCount != 0 {
+					t.Fatalf("idempotent existing-member share invitation mutated: %+v", storedShare)
+				}
+				return
+			}
+			if !errors.Is(directErr, ErrEnterpriseNotActive) || !errors.Is(shareErr, ErrEnterpriseNotActive) {
+				t.Fatalf("inactive existing-member errors: direct=%v share=%v", directErr, shareErr)
+			}
+			for _, invitationID := range []uint64{direct.ID, share.ID} {
+				var stored types.TenantInvitation
+				if err := db.First(&stored, invitationID).Error; err != nil {
+					t.Fatal(err)
+				}
+				if stored.Status != types.TenantInvitationStatusPending || stored.AcceptedCount != 0 || stored.RespondedAt != nil {
+					t.Fatalf("inactive existing-member invitation %d mutated: %+v", invitationID, stored)
+				}
+			}
+			var storedMember types.TenantMember
+			if err := db.Where("user_id = ? AND tenant_id = ?", user.ID, tenant.ID).First(&storedMember).Error; err != nil {
+				t.Fatal(err)
+			}
+			if storedMember.Status != types.TenantMemberStatusActive || storedMember.Role != types.TenantRoleViewer {
+				t.Fatalf("inactive existing membership mutated: %+v", storedMember)
+			}
+			var storedUser types.User
+			if err := db.First(&storedUser, "id = ?", user.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if storedUser.TenantID != tenant.ID {
+				t.Fatalf("inactive existing user binding = %d, want %d", storedUser.TenantID, tenant.ID)
+			}
+		})
 	}
 }

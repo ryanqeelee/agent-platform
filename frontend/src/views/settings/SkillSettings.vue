@@ -343,19 +343,17 @@ import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 import { MAX_SKILL_BUNDLE_SIZE_BYTES, MAX_SKILL_BUNDLE_SIZE_MB } from '@/utils'
 import {
   deleteSkillCatalog,
+  getSkillInstallerAgent,
   installSkillCatalog,
   listSkillCatalog,
   registerSkillCatalogFromFile,
   registerSkillCatalogFromSource,
+  updateSkillInstallerAgent,
   type SkillCatalogInstall,
   type SkillCatalogItem,
   type SkillCatalogRegisterResult,
 } from '@/api/skill'
-import {
-  getAgentById,
-  updateAgent,
-  type CustomAgent,
-} from '@/api/agent'
+import type { CustomAgent } from '@/api/agent'
 import {
   isNamedSandboxBackend,
   listSandboxConfigs,
@@ -404,7 +402,6 @@ const installerAgent = ref<CustomAgent | null>(null)
 const installerModelId = ref('')
 const savingInstallerModel = ref(false)
 
-const INSTALLER_AGENT_ID = 'builtin-skill-installer'
 const LAST_CHAT_MODEL_KEY = 'weknora_last_chat_model_id'
 
 const {
@@ -893,7 +890,7 @@ function readLastChatModelID(): string {
 
 async function loadInstallerModel() {
   try {
-    const res = await getAgentById(INSTALLER_AGENT_ID)
+    const res = await getSkillInstallerAgent(platformTenantID.value!)
     installerAgent.value = res?.data || null
     const configured = installerAgent.value?.config?.model_id?.trim() || ''
     installerModelId.value = configured || readLastChatModelID()
@@ -910,7 +907,7 @@ async function persistInstallerModel(modelId: string) {
   }
   const current = installerAgent.value
   const config = { ...(current?.config || {}), model_id: id }
-  const res = await updateAgent(INSTALLER_AGENT_ID, {
+  const res = await updateSkillInstallerAgent(platformTenantID.value!, {
     name: current?.name || '',
     description: current?.description || '',
     avatar: current?.avatar || '',

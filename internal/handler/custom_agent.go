@@ -182,10 +182,29 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 // @Security     ApiKeyAuth
 // @Router       /agents/{id} [get]
 func (h *CustomAgentHandler) GetAgent(c *gin.Context) {
-	ctx := c.Request.Context()
+	h.getAgentByID(c, c.Param("id"))
+}
 
-	// Get agent ID from URL parameter
-	id := secutils.SanitizeForLog(c.Param("id"))
+// GetSkillInstallerAgent godoc
+// @Summary      获取企业技能安装器配置
+// @Description  获取指定企业的固定内置技能安装器配置
+// @Tags         Skills
+// @Accept       json
+// @Produce      json
+// @Param        tenant_id  path      int  true  "企业ID"
+// @Success      200        {object}  map[string]interface{}  "技能安装器配置"
+// @Failure      400        {object}  errors.AppError         "请求参数错误"
+// @Failure      403        {object}  errors.AppError         "需要平台管理员权限"
+// @Failure      404        {object}  errors.AppError         "企业或技能安装器不存在"
+// @Security     Bearer
+// @Router       /system/admin/tenants/{tenant_id}/skills/installer-agent [get]
+func (h *CustomAgentHandler) GetSkillInstallerAgent(c *gin.Context) {
+	h.getAgentByID(c, types.BuiltinSkillInstallerID)
+}
+
+func (h *CustomAgentHandler) getAgentByID(c *gin.Context, rawID string) {
+	ctx := c.Request.Context()
+	id := secutils.SanitizeForLog(rawID)
 	if id == "" {
 		logger.Error(ctx, "Agent ID is empty")
 		c.Error(errors.NewBadRequestError("Agent ID cannot be empty"))
@@ -359,12 +378,33 @@ func enrichAgentCreatorNames(ctx context.Context, userSvc interfaces.UserService
 // @Security     Bearer
 // @Router       /agents/{id} [put]
 func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
+	h.updateAgentByID(c, c.Param("id"))
+}
+
+// UpdateSkillInstallerAgent godoc
+// @Summary      更新企业技能安装器配置
+// @Description  更新指定企业的固定内置技能安装器配置
+// @Tags         Skills
+// @Accept       json
+// @Produce      json
+// @Param        tenant_id  path      int                 true  "企业ID"
+// @Param        request    body      UpdateAgentRequest  true  "技能安装器配置"
+// @Success      200        {object}  map[string]interface{}  "更新后的技能安装器配置"
+// @Failure      400        {object}  errors.AppError         "请求参数错误"
+// @Failure      403        {object}  errors.AppError         "需要平台管理员权限"
+// @Failure      404        {object}  errors.AppError         "企业或技能安装器不存在"
+// @Security     Bearer
+// @Router       /system/admin/tenants/{tenant_id}/skills/installer-agent [put]
+func (h *CustomAgentHandler) UpdateSkillInstallerAgent(c *gin.Context) {
+	h.updateAgentByID(c, types.BuiltinSkillInstallerID)
+}
+
+func (h *CustomAgentHandler) updateAgentByID(c *gin.Context, rawID string) {
 	ctx := c.Request.Context()
 
 	logger.Info(ctx, "Start updating custom agent")
 
-	// Get agent ID from URL parameter
-	id := secutils.SanitizeForLog(c.Param("id"))
+	id := secutils.SanitizeForLog(rawID)
 	if id == "" {
 		logger.Error(ctx, "Agent ID is empty")
 		c.Error(errors.NewBadRequestError("Agent ID cannot be empty"))

@@ -609,11 +609,8 @@ import SkillInstallTimeline from '@/components/SkillInstallTimeline.vue'
 import { SETTING_DRAWER_HEADER_ACTIONS_ID } from '@/components/settings/SettingDrawer.vue'
 import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 import { SKILL_ICON } from '@/types/mention'
-import {
-  getAgentById,
-  updateAgent,
-  type CustomAgent,
-} from '@/api/agent'
+import type { CustomAgent } from '@/api/agent'
+import { getSkillInstallerAgent, updateSkillInstallerAgent } from '@/api/skill'
 import {
   configSkillInstallEventsUrl,
   deleteConfigSkill,
@@ -708,7 +705,6 @@ const progressById = ref<Record<string, ConfigSkillInstallEvent>>({})
 const abortBySkill = new Map<string, AbortController>()
 let pollTimer: number | null = null
 
-const INSTALLER_AGENT_ID = 'builtin-skill-installer'
 const LAST_CHAT_MODEL_KEY = 'weknora_last_chat_model_id'
 
 const installerAgent = ref<CustomAgent | null>(null)
@@ -1237,7 +1233,7 @@ defineExpose({
 
 async function loadInstallerModel() {
   try {
-    const res = await getAgentById(INSTALLER_AGENT_ID)
+    const res = await getSkillInstallerAgent(platformTenantID.value!)
     installerAgent.value = res?.data || null
     const configured = installerAgent.value?.config?.model_id?.trim() || ''
     installerModelId.value = configured || readLastChatModelID()
@@ -1254,7 +1250,7 @@ async function persistInstallerModel(modelId: string) {
   }
   const current = installerAgent.value
   const config = { ...(current?.config || {}), model_id: id }
-  const res = await updateAgent(INSTALLER_AGENT_ID, {
+  const res = await updateSkillInstallerAgent(platformTenantID.value!, {
     name: current?.name || '',
     description: current?.description || '',
     avatar: current?.avatar || '',

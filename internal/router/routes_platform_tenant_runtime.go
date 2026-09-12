@@ -18,6 +18,7 @@ func RegisterSystemAdminTenantRuntimeRoutes(
 	sandboxConfigs *handler.SandboxConfigHandler,
 	sandboxSkills *handler.SandboxSkillHandler,
 	skills *handler.SkillHandler,
+	customAgents *handler.CustomAgentHandler,
 	system *handler.SystemHandler,
 	g *rbacGuards,
 ) {
@@ -32,6 +33,8 @@ func RegisterSystemAdminTenantRuntimeRoutes(
 	configs.POST("/check", system.CheckSandboxConfig)
 
 	skillRoutes := tenantRuntime.Group("/skills")
+	skillRoutes.GET("/installer-agent", customAgents.GetSkillInstallerAgent)
+	skillRoutes.PUT("/installer-agent", customAgents.UpdateSkillInstallerAgent)
 	registerSkillReadHandlers(skillRoutes, skills)
 	registerSkillCatalogWriteHandlers(skillRoutes.Group("/catalog"), skills)
 }

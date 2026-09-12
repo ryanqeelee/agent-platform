@@ -15093,6 +15093,83 @@ paths:
       summary: 获取当前沙箱配置上可执行的 Skills
       tags:
       - Skills
+  /system/admin/tenants/{tenant_id}/skills/installer-agent:
+    get:
+      consumes:
+      - application/json
+      description: 获取指定企业的固定内置技能安装器配置
+      parameters:
+      - description: 企业ID
+        in: path
+        name: tenant_id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 技能安装器配置
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 需要平台管理员权限
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 企业或技能安装器不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 获取企业技能安装器配置
+      tags:
+      - Skills
+    put:
+      consumes:
+      - application/json
+      description: 更新指定企业的固定内置技能安装器配置
+      parameters:
+      - description: 企业ID
+        in: path
+        name: tenant_id
+        required: true
+        type: integer
+      - description: 技能安装器配置
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateAgentRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新后的技能安装器配置
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 需要平台管理员权限
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 企业或技能安装器不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 更新企业技能安装器配置
+      tags:
+      - Skills
   /system/admin/tenants/{tenant_id}/skills/catalog:
     get:
       parameters:

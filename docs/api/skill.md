@@ -7,6 +7,8 @@
 | 方法 | 路径      | 描述               |
 | ---- | --------- | ------------------ |
 | GET  | `/system/admin/tenants/{tenant_id}/skills` | 获取预装 Skills 列表 |
+| GET  | `/system/admin/tenants/{tenant_id}/skills/installer-agent` | 获取固定技能安装器的企业配置 |
+| PUT  | `/system/admin/tenants/{tenant_id}/skills/installer-agent` | 更新固定技能安装器的企业配置 |
 | POST | `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills` | 安装技能（zip 上传或托管平台 source） |
 | POST | `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/reinstall` | 用已保存的安装包重试安装 |
 | POST | `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/stop` | 停止卡住的安装 |
@@ -62,6 +64,25 @@ curl --location 'http://localhost:8080/api/v1/system/admin/tenants/{tenant_id}/s
     "skills_available": false,
     "success": true
 }
+```
+
+## GET / PUT `/system/admin/tenants/{tenant_id}/skills/installer-agent` - 技能安装器配置
+
+获取或更新该企业固定内置技能安装器使用的模型。路径不接受任意智能体 ID；平台管理员通过企业路径选择作用域，身份本身保持 tenantless。
+
+```curl
+curl --location 'http://localhost:8080/api/v1/system/admin/tenants/{tenant_id}/skills/installer-agent' \
+--header 'Authorization: Bearer <system-admin-token>'
+```
+
+更新时沿用智能体配置请求体，但服务端始终把请求应用到固定的 `builtin-skill-installer`：
+
+```curl
+curl --location --request PUT \
+'http://localhost:8080/api/v1/system/admin/tenants/{tenant_id}/skills/installer-agent' \
+--header 'Authorization: Bearer <system-admin-token>' \
+--header 'Content-Type: application/json' \
+--data '{"config":{"model_id":"model-id"}}'
 ```
 
 ## POST `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills` - 安装技能

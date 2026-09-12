@@ -283,6 +283,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 			params.SandboxConfigHandler,
 			params.SandboxSkillHandler,
 			params.SkillHandler,
+			params.CustomAgentHandler,
 			params.SystemHandler,
 			rbacGuards,
 		)

@@ -20,6 +20,7 @@ func TestSystemAdminTenantRuntimeRouteSurfaceAndAPIKeyDefaultDeny(t *testing.T) 
 		&handler.SandboxConfigHandler{},
 		&handler.SandboxSkillHandler{},
 		&handler.SkillHandler{},
+		&handler.CustomAgentHandler{},
 		&handler.SystemHandler{},
 		guards,
 	)
@@ -54,6 +55,8 @@ func TestSystemAdminTenantRuntimeRouteSurfaceAndAPIKeyDefaultDeny(t *testing.T) 
 		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs/:id/skills/:skillId/install-events"},
 		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs/:id/skills/:skillId/transcript"},
 		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/skills"},
+		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/skills/installer-agent"},
+		{http.MethodPut, "/api/v1/system/admin/tenants/:tenant_id/skills/installer-agent"},
 		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/skills/catalog"},
 		{http.MethodPost, "/api/v1/system/admin/tenants/:tenant_id/skills/catalog"},
 		{http.MethodPost, "/api/v1/system/admin/tenants/:tenant_id/skills/catalog/:id/install"},

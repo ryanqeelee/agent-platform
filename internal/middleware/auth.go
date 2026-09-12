@@ -126,11 +126,11 @@ func isInvitationAcceptanceIdentityAPI(path, method string) bool {
 	return err == nil && id > 0
 }
 
-// isTenantlessSystemAdminAPI identifies the platform control-plane namespace
-// that a human SystemAdmin may use before belonging to any workspace. Route
-// registration and RequireSystemAdmin still decide whether the concrete
-// method and endpoint exist and whether the authenticated user is allowed;
-// this helper only prevents the earlier tenant resolver from returning 409.
+// isTenantlessSystemAdminAPI identifies routes whose authentication phase only
+// establishes a web-user identity. Route registration and RequireSystemAdmin
+// still decide whether the concrete method exists and return 403 for an
+// ordinary user. Keeping tenant resolution out of this phase prevents tenant
+// state and X-Tenant-ID from changing the platform authorization result.
 func isTenantlessSystemAdminAPI(path, method string) bool {
 	path = strings.TrimSuffix(strings.TrimSpace(path), "/")
 	if path == "/api/v1/system/admin" || strings.HasPrefix(path, "/api/v1/system/admin/") {
@@ -229,7 +229,8 @@ func Auth(
 			var user *types.User
 			var jwtTenantID uint64
 			var err error
-			if isInvitationAcceptanceIdentityAPI(c.Request.URL.Path, c.Request.Method) {
+			if isInvitationAcceptanceIdentityAPI(c.Request.URL.Path, c.Request.Method) ||
+				isTenantlessSystemAdminAPI(c.Request.URL.Path, c.Request.Method) {
 				user, jwtTenantID, err = userService.ValidateIdentityToken(c.Request.Context(), token)
 			} else {
 				user, jwtTenantID, err = userService.ValidateToken(c.Request.Context(), token)
@@ -276,11 +277,10 @@ func bearerToken(c *gin.Context) (string, bool) {
 	return strings.TrimPrefix(authHeader, "Bearer "), true
 }
 
-// authenticateJWTUser finishes authentication for a validated JWT user:
-// it resolves the target tenant (X-Tenant-ID switch / JWT claim / first
-// active membership), resolves the caller's role inside that tenant, and
-// attaches the session context. Returns true when the request may proceed;
-// on false the response has already been written and the request aborted.
+// authenticateJWTUser finishes authentication for a validated JWT user. The
+// invitation-acceptance and platform control-plane surfaces attach identity
+// only; other routes resolve the target tenant and role. Returns true when the
+// request may proceed; on false the response is already written and aborted.
 func authenticateJWTUser(
 	c *gin.Context,
 	tenantService interfaces.TenantService,
@@ -290,7 +290,8 @@ func authenticateJWTUser(
 	jwtTenantID uint64,
 ) bool {
 	ctx := c.Request.Context()
-	if isInvitationAcceptanceIdentityAPI(c.Request.URL.Path, c.Request.Method) {
+	if isInvitationAcceptanceIdentityAPI(c.Request.URL.Path, c.Request.Method) ||
+		isTenantlessSystemAdminAPI(c.Request.URL.Path, c.Request.Method) {
 		attachTenantlessUserContext(c, user)
 		return true
 	}
@@ -300,8 +301,7 @@ func authenticateJWTUser(
 		// Identity endpoints and the system-admin control plane are meaningful
 		// tenantless; every enterprise endpoint keeps the normal TENANT_REQUIRED
 		// contract without consulting tenant or membership state.
-		if isTenantOptionalAPI(c.Request.URL.Path, c.Request.Method) ||
-			isTenantlessSystemAdminAPI(c.Request.URL.Path, c.Request.Method) {
+		if isTenantOptionalAPI(c.Request.URL.Path, c.Request.Method) {
 			attachTenantlessUserContext(c, user)
 			return true
 		}
@@ -321,8 +321,7 @@ func authenticateJWTUser(
 	if targetTenantID == 0 {
 		// 无可用空间：身份级路由（/auth/me 等）放行为 tenantless 会话，
 		// 其余路由返回 TENANT_REQUIRED 让前端引导用户创建/加入空间。
-		if isTenantOptionalAPI(c.Request.URL.Path, c.Request.Method) ||
-			(user.IsSystemAdmin && isTenantlessSystemAdminAPI(c.Request.URL.Path, c.Request.Method)) {
+		if isTenantOptionalAPI(c.Request.URL.Path, c.Request.Method) {
 			attachTenantlessUserContext(c, user)
 			return true
 		}

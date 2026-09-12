@@ -1,4 +1,5 @@
-import { del, get, post, postUpload } from "../../utils/request";
+import { del, get, post, postUpload, put } from "../../utils/request";
+import type { CustomAgent, UpdateAgentRequest } from "../agent";
 import type { ConfigSkillFileContent, ConfigSkillFileEntry } from "../system";
 
 // Skill信息
@@ -54,6 +55,14 @@ export function listSkills(tenantId: number, sandboxConfigId?: string) {
 
 export function listSkillCatalog(tenantId: number) {
   return get<{ data: SkillCatalogItem[] }>(`${platformSkillPath(tenantId)}/catalog`);
+}
+
+export function getSkillInstallerAgent(tenantId: number) {
+  return get<{ data: CustomAgent }>(`${platformSkillPath(tenantId)}/installer-agent`);
+}
+
+export function updateSkillInstallerAgent(tenantId: number, data: UpdateAgentRequest) {
+  return put<{ data: CustomAgent }>(`${platformSkillPath(tenantId)}/installer-agent`, data);
 }
 
 export function registerSkillCatalogFromSource(tenantId: number, source: string) {

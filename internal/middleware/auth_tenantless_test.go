@@ -14,14 +14,18 @@ import (
 
 type oldTenantlessTokenUserService struct {
 	interfaces.UserService
-	user *types.User
+	user                  *types.User
+	validateTokenCalls    int
+	validateIdentityCalls int
 }
 
 func (s *oldTenantlessTokenUserService) ValidateToken(context.Context, string) (*types.User, uint64, error) {
+	s.validateTokenCalls++
 	return s.user, 0, nil
 }
 
 func (s *oldTenantlessTokenUserService) ValidateIdentityToken(context.Context, string) (*types.User, uint64, error) {
+	s.validateIdentityCalls++
 	return s.user, 0, nil
 }
 
@@ -101,7 +105,7 @@ func TestTenantlessSystemAdminControlPlaneAdmission(t *testing.T) {
 			method:      http.MethodPost,
 			path:        "/api/v1/system/admin/api-keys",
 			systemAdmin: false,
-			wantStatus:  http.StatusConflict,
+			wantStatus:  http.StatusForbidden,
 		},
 		{
 			name:        "similar prefix is tenant scoped",
@@ -181,6 +185,92 @@ func TestTenantlessSystemAdminControlPlaneAdmission(t *testing.T) {
 			router.ServeHTTP(response, request)
 			if response.Code != tt.wantStatus {
 				t.Fatalf("status=%d want=%d body=%s", response.Code, tt.wantStatus, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestSystemAdminTenantControlAuthenticatesIdentityBeforeAuthorization(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, test := range []struct {
+		name       string
+		user       *types.User
+		header     string
+		wantStatus int
+		wantLookup int
+	}{
+		{
+			name:       "tenantless ordinary user",
+			user:       &types.User{ID: "ordinary", IsActive: true},
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name: "enterprise ordinary user with malformed tenant header",
+			user: &types.User{
+				ID: "enterprise-user", TenantID: 7, IsActive: true,
+			},
+			header:     "not-a-tenant",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "system admin reaches explicit tenant lookup",
+			user:       &types.User{ID: "operator", IsActive: true, IsSystemAdmin: true},
+			wantStatus: http.StatusNoContent,
+			wantLookup: 1,
+		},
+		{
+			name:       "system admin reaches explicit header validation",
+			user:       &types.User{ID: "operator", IsActive: true, IsSystemAdmin: true},
+			header:     "not-a-tenant",
+			wantStatus: http.StatusBadRequest,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tenantService := &platformTenantScopeService{
+				tenant: &types.Tenant{ID: 42, Name: "enterprise", Status: types.TenantStatusActive},
+			}
+			userService := &oldTenantlessTokenUserService{user: test.user}
+			router := gin.New()
+			router.Use(ErrorHandler())
+			router.Use(Auth(tenantService, userService, nil, nil, nil))
+			reached := false
+			router.GET(
+				"/api/v1/system/admin/tenants/:tenant_id/probe",
+				RequireSystemAdmin(nil),
+				BindSystemAdminTenantScope(tenantService),
+				func(c *gin.Context) {
+					reached = true
+					c.Status(http.StatusNoContent)
+				},
+			)
+
+			request := httptest.NewRequest(
+				http.MethodGet,
+				"/api/v1/system/admin/tenants/42/probe",
+				nil,
+			)
+			request.Header.Set("Authorization", "Bearer identity-token")
+			if test.header != "" {
+				request.Header.Set("X-Tenant-ID", test.header)
+			}
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+
+			if response.Code != test.wantStatus {
+				t.Fatalf("status=%d want=%d body=%s", response.Code, test.wantStatus, response.Body.String())
+			}
+			if userService.validateIdentityCalls != 1 || userService.validateTokenCalls != 0 {
+				t.Fatalf(
+					"identity validation calls=%d full validation calls=%d, want 1/0",
+					userService.validateIdentityCalls,
+					userService.validateTokenCalls,
+				)
+			}
+			if tenantService.calls != test.wantLookup {
+				t.Fatalf("tenant lookups=%d want=%d", tenantService.calls, test.wantLookup)
+			}
+			if reached != (test.wantStatus == http.StatusNoContent) {
+				t.Fatalf("handler reached=%v for status=%d", reached, test.wantStatus)
 			}
 		})
 	}

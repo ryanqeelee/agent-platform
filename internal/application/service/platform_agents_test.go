@@ -219,6 +219,66 @@ func TestPlatformAgentUpdatePersistsGlobalConfig(t *testing.T) {
 	require.Equal(t, uint64(91), observed.TenantID)
 }
 
+func TestPlatformOperatingAnalystModelReferenceValidation(t *testing.T) {
+	installTestBuiltin(t, types.BuiltinOperatingAnalystID, types.CustomAgentConfig{
+		AgentMode: types.AgentModeSmartReasoning,
+	})
+	models := map[string]*types.Model{
+		"native-vlm": {
+			ID: "native-vlm", Type: types.ModelTypeVLLM, Status: types.ModelStatusActive,
+		},
+		"vision-chat": {
+			ID: "vision-chat", Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusActive,
+			Parameters: types.ModelParameters{SupportsVision: true},
+		},
+		"text-chat": {
+			ID: "text-chat", Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusActive,
+		},
+		"vision-embedding": {
+			ID: "vision-embedding", Type: types.ModelTypeEmbedding, Status: types.ModelStatusActive,
+			Parameters: types.ModelParameters{SupportsVision: true},
+		},
+		"tenant-vision-chat": {
+			ID: "tenant-vision-chat", TenantID: 7, Type: types.ModelTypeKnowledgeQA,
+			Status: types.ModelStatusActive, Parameters: types.ModelParameters{SupportsVision: true},
+		},
+		"inactive-vision-chat": {
+			ID: "inactive-vision-chat", Type: types.ModelTypeKnowledgeQA,
+			Status: types.ModelStatusDownloadFailed, Parameters: types.ModelParameters{SupportsVision: true},
+		},
+	}
+	for _, tc := range []struct {
+		name    string
+		config  types.CustomAgentConfig
+		accepts bool
+	}{
+		{name: "native VLM", config: types.CustomAgentConfig{VLMModelID: "native-vlm"}, accepts: true},
+		{name: "vision chat", config: types.CustomAgentConfig{VLMModelID: "vision-chat"}, accepts: true},
+		{name: "text chat", config: types.CustomAgentConfig{VLMModelID: "text-chat"}},
+		{name: "embedding with vision flag", config: types.CustomAgentConfig{VLMModelID: "vision-embedding"}},
+		{name: "tenant vision chat", config: types.CustomAgentConfig{VLMModelID: "tenant-vision-chat"}},
+		{name: "inactive vision chat", config: types.CustomAgentConfig{VLMModelID: "inactive-vision-chat"}},
+		{name: "rerank remains exact type", config: types.CustomAgentConfig{RerankModelID: "vision-chat"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &platformAgentRepoStub{rows: map[uint64]map[string]*types.CustomAgent{}}
+			svc := NewPlatformAgentService(repo, platformModelRepoStub{models: models})
+
+			updated, err := svc.Update(platformAdminContext(), types.BuiltinOperatingAnalystID, tc.config)
+			if !tc.accepts {
+				require.ErrorIs(t, err, ErrPlatformAgentInvalidConfig)
+				require.Nil(t, repo.created)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.config.VLMModelID, updated.Config.VLMModelID)
+			observed, err := svc.Get(platformAdminContext(), types.BuiltinOperatingAnalystID)
+			require.NoError(t, err)
+			require.Equal(t, tc.config.VLMModelID, observed.Config.VLMModelID)
+		})
+	}
+}
+
 func TestRuntimeUsesGlobalBuiltinAndIgnoresTenantOverride(t *testing.T) {
 	installTestBuiltins(t, map[string]types.CustomAgentConfig{
 		types.BuiltinQuickAnswerID:       {AgentMode: types.AgentModeQuickAnswer},

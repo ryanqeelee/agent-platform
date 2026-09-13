@@ -215,7 +215,12 @@ func (s *PlatformAgentService) validateConfig(ctx context.Context, config types.
 		if model == nil || (!model.IsBuiltin && model.TenantID != platformAgentTenantID) {
 			return fmt.Errorf("%w: %s must reference a global model", ErrPlatformAgentInvalidConfig, field)
 		}
-		if model.Type != ref.type_ {
+		validType := model.Type == ref.type_
+		if field == "vlm_model_id" {
+			validType = model.Type == types.ModelTypeVLLM ||
+				(model.Type == types.ModelTypeKnowledgeQA && model.Parameters.SupportsVision)
+		}
+		if !validType {
 			return fmt.Errorf("%w: %s must reference a %s model", ErrPlatformAgentInvalidConfig, field, ref.type_)
 		}
 		if model.Status != types.ModelStatusActive {

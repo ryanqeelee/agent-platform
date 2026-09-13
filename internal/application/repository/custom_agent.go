@@ -53,7 +53,26 @@ func (r *customAgentRepository) ListAgentsByTenantID(ctx context.Context, tenant
 
 // UpdateAgent updates an agent
 func (r *customAgentRepository) UpdateAgent(ctx context.Context, agent *types.CustomAgent) error {
-	return r.db.WithContext(ctx).Save(agent).Error
+	result := r.db.WithContext(ctx).
+		Model(&types.CustomAgent{}).
+		Where("id = ? AND tenant_id = ?", agent.ID, agent.TenantID).
+		Select(
+			"name",
+			"description",
+			"avatar",
+			"is_builtin",
+			"created_by",
+			"config",
+			"updated_at",
+		).
+		Updates(agent)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrCustomAgentNotFound
+	}
+	return nil
 }
 
 // DeleteAgent deletes an agent (soft delete)

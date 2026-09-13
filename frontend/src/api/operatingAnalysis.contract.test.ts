@@ -14,7 +14,7 @@ test('employee-assistant handoff carries only an opaque reference across routes'
   const message = readFileSync(new URL('../views/chat/components/usermsg.vue', import.meta.url), 'utf8')
 
   assert.match(api, /post\('\/api\/v1\/operating-analysis-handoffs', \{\s*sourceSessionId,\s*sourceMessageId,\s*\}\)/)
-  assert.match(api, /\/api\/auth\/operating-analysis-handoffs\/\$\{encodeURIComponent\(handoffRef\)\}\/consume/)
+	assert.match(api, /\/api\/v1\/operating-analysis-handoffs\/\$\{encodeURIComponent\(handoffRef\)\}\/consume/)
   assert.match(router, /sessionStorage\.setItem\(\s*OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY/)
   assert.doesNotMatch(router, /window\.location\.assign\(handoffPrompt/)
   assert.doesNotMatch(router, /[?&](?:question|prompt)=/)
@@ -26,7 +26,8 @@ test('native operating brief has no durable Center credential or app bundle brid
   const briefApi = readFileSync(new URL('./operatingBrief.ts', import.meta.url), 'utf8')
   const briefView = readFileSync(new URL('../views/operating/OperatingBriefWorkspace.vue', import.meta.url), 'utf8')
 
-  assert.match(briefApi, /exchangeOperatingAnalysis\(signal\)/)
+	assert.match(briefApi, /\/api\/v1\/operating-brief/)
+	assert.doesNotMatch(operatingAnalysisApi + briefApi, /exchangeOperatingAnalysis|weknora-exchange/)
   assert.doesNotMatch(operatingAnalysisApi, /retail_ai_app_auth_token|document\.cookie|localStorage\.setItem/)
   assert.doesNotMatch(briefApi, /retail_ai_app_auth_token|document\.cookie|localStorage\.setItem/)
   assert.doesNotMatch(briefView, /\/app\/operating-brief|mountOperatingBrief|document\.cookie|localStorage\.setItem/)

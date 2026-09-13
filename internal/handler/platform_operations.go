@@ -2,14 +2,16 @@ package handler
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service"
@@ -26,11 +28,14 @@ var operationsOpaqueID = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
 
 type PlatformOperationsHandler struct {
 	tenants          interfaces.TenantService
+	activations      interfaces.EnterpriseActivationService
 	tenantOperations interfaces.PlatformOperationsTenantRepository
 	members          interfaces.TenantMemberService
 	users            interfaces.UserService
 	identities       interfaces.PlatformOperationsIdentityService
 	bridge           interfaces.PlatformOperationsBridge
+	capabilityPlans  *service.CapabilityPlanService
+	edgeBindings     interfaces.GovernedEdgeBindingService
 }
 
 type enterpriseActivationResponse struct {
@@ -52,9 +57,16 @@ type enterpriseActivationResponse struct {
 	CompletedAt                *string `json:"completedAt"`
 }
 
+type enterpriseActivationRequest struct {
+	Name                       string `json:"name"`
+	Description                string `json:"description"`
+	SeatsTotal                 int    `json:"seats_total"`
+	StorageQuota               int64  `json:"storage_quota"`
+	InitialAdministratorUserID string `json:"initial_administrator_user_id"`
+}
+
 type enterpriseEdgeSummaryResponse struct {
 	ConnectionStatus string  `json:"connectionStatus"`
-	PolicyStatus     string  `json:"policyStatus"`
 	NodeCount        int     `json:"nodeCount"`
 	OnlineNodeCount  int     `json:"onlineNodeCount"`
 	LastSeenAt       *string `json:"lastSeenAt"`
@@ -69,6 +81,7 @@ type enterpriseEdgeNodeResponse struct {
 	DataServiceStatus map[string]any `json:"dataServiceStatus"`
 	RegisteredAt      *string        `json:"registeredAt"`
 	LastSeenAt        *string        `json:"lastSeenAt"`
+	ControlRevision   int64          `json:"controlRevision"`
 }
 
 type enterpriseEdgeResponse struct {
@@ -76,6 +89,7 @@ type enterpriseEdgeResponse struct {
 	ProductBaseTenantID string                        `json:"productBaseTenantId"`
 	EnterpriseID        string                        `json:"enterpriseId"`
 	BindingID           string                        `json:"bindingId"`
+	Binding             *types.GovernedEdgeBinding    `json:"binding"`
 	Summary             enterpriseEdgeSummaryResponse `json:"summary"`
 	Nodes               []enterpriseEdgeNodeResponse  `json:"nodes"`
 }
@@ -91,15 +105,19 @@ type enterpriseEnrollmentResponse struct {
 
 func NewPlatformOperationsHandler(
 	tenants interfaces.TenantService,
+	activations interfaces.EnterpriseActivationService,
 	tenantOperations interfaces.PlatformOperationsTenantRepository,
 	members interfaces.TenantMemberService,
 	users interfaces.UserService,
 	identities interfaces.PlatformOperationsIdentityService,
 	bridge interfaces.PlatformOperationsBridge,
+	capabilityPlans *service.CapabilityPlanService,
+	edgeBindings interfaces.GovernedEdgeBindingService,
 ) *PlatformOperationsHandler {
 	return &PlatformOperationsHandler{
-		tenants: tenants, tenantOperations: tenantOperations, members: members,
+		tenants: tenants, activations: activations, tenantOperations: tenantOperations, members: members,
 		users: users, identities: identities, bridge: bridge,
+		capabilityPlans: capabilityPlans, edgeBindings: edgeBindings,
 	}
 }
 
@@ -126,7 +144,8 @@ func enterpriseProjection(tenant *types.Tenant, seatsUsed int64) gin.H {
 	return gin.H{
 		"id": tenant.ID, "name": tenant.Name, "description": tenant.Description,
 		"status": tenant.Status, "seats_total": tenant.SeatsTotal, "seats_used": seatsUsed,
-		"storage_quota": tenant.StorageQuota, "storage_used": tenant.StorageUsed,
+		"analysis_enabled": tenant.AnalysisEnabled,
+		"storage_quota":    tenant.StorageQuota, "storage_used": tenant.StorageUsed,
 		"created_at": tenant.CreatedAt, "updated_at": tenant.UpdatedAt,
 	}
 }
@@ -177,11 +196,12 @@ func (h *PlatformOperationsHandler) UpdateEnterprise(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Name         string          `json:"name"`
-		Description  string          `json:"description"`
-		Status       string          `json:"status"`
-		SeatsTotal   json.RawMessage `json:"seats_total"`
-		StorageQuota *int64          `json:"storage_quota"`
+		Name            string          `json:"name"`
+		Description     string          `json:"description"`
+		Status          string          `json:"status"`
+		AnalysisEnabled *bool           `json:"analysis_enabled"`
+		SeatsTotal      json.RawMessage `json:"seats_total"`
+		StorageQuota    *int64          `json:"storage_quota"`
 	}
 	decoder := json.NewDecoder(io.LimitReader(c.Request.Body, maxPlatformOperationsRequestBytes+1))
 	decoder.DisallowUnknownFields()
@@ -192,7 +212,7 @@ func (h *PlatformOperationsHandler) UpdateEnterprise(c *gin.Context) {
 	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" || len(req.Name) > 128 || len(req.Description) > 512 ||
 		(req.Status != types.TenantStatusActive && req.Status != types.TenantStatusSuspended) ||
-		len(req.SeatsTotal) == 0 || req.StorageQuota == nil || *req.StorageQuota < 0 {
+		req.AnalysisEnabled == nil || len(req.SeatsTotal) == 0 || req.StorageQuota == nil || *req.StorageQuota < 0 {
 		c.Error(apperrors.NewValidationError("invalid enterprise update"))
 		return
 	}
@@ -207,7 +227,8 @@ func (h *PlatformOperationsHandler) UpdateEnterprise(c *gin.Context) {
 	}
 	actorUserID, _ := types.UserIDFromContext(c.Request.Context())
 	tenant, used, err := h.tenantOperations.UpdateForPlatformOperations(
-		c.Request.Context(), actorUserID, tenantID, req.Name, req.Description, req.Status, seatsTotal, *req.StorageQuota)
+		c.Request.Context(), actorUserID, tenantID, req.Name, req.Description, req.Status,
+		*req.AnalysisEnabled, seatsTotal, *req.StorageQuota)
 	if err != nil {
 		if errors.Is(err, apprepo.ErrSeatLimitBelowUsage) {
 			c.Error(apperrors.NewConflictError("seats_total cannot be lower than active member count"))
@@ -451,49 +472,6 @@ func (h *PlatformOperationsHandler) GetInitialAdministrator(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
 }
 
-func (h *PlatformOperationsHandler) proxy(c *gin.Context, method, path, idempotencyKey string, body []byte, secretResponse bool, output any) {
-	actorID, _ := types.UserIDFromContext(c.Request.Context())
-	var reader io.Reader
-	if body != nil {
-		reader = bytes.NewReader(body)
-	}
-	response, err := h.bridge.Do(c.Request.Context(), method, path, actorID, idempotencyKey, reader)
-	if err != nil {
-		c.Error(apperrors.NewServiceUnavailableError("platform operations service unavailable"))
-		return
-	}
-	if secretResponse {
-		c.Header("Cache-Control", "no-store")
-		c.Header("Pragma", "no-cache")
-	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		var upstream struct {
-			Detail string `json:"detail"`
-		}
-		_ = json.Unmarshal(response.Body, &upstream)
-		message := strings.TrimSpace(upstream.Detail)
-		if message == "" {
-			message = "platform operations request failed"
-		}
-		switch response.StatusCode {
-		case http.StatusBadRequest, http.StatusUnprocessableEntity:
-			c.Error(apperrors.NewValidationError(message))
-		case http.StatusNotFound:
-			c.Error(apperrors.NewNotFoundError(message))
-		case http.StatusConflict:
-			c.Error(apperrors.NewConflictError(message))
-		default:
-			c.Error(apperrors.NewServiceUnavailableError("platform operations service unavailable"))
-		}
-		return
-	}
-	if err := json.Unmarshal(response.Body, output); err != nil {
-		c.Error(apperrors.NewServiceUnavailableError("platform operations service returned an invalid response"))
-		return
-	}
-	c.JSON(response.StatusCode, gin.H{"success": true, "data": output})
-}
-
 func (h *PlatformOperationsHandler) ProxyEnterpriseActivation(c *gin.Context) {
 	activationID := strings.TrimSpace(c.Param("activation_id"))
 	if !operationsOpaqueID.MatchString(activationID) {
@@ -505,28 +483,63 @@ func (h *PlatformOperationsHandler) ProxyEnterpriseActivation(c *gin.Context) {
 		c.Error(apperrors.NewValidationError("Idempotency-Key is required and must be stable"))
 		return
 	}
-	var request struct {
-		Name                       string `json:"name"`
-		Description                string `json:"description"`
-		SeatsTotal                 int    `json:"seats_total"`
-		StorageQuota               int64  `json:"storage_quota"`
-		InitialAdministratorUserID string `json:"initial_administrator_user_id"`
-	}
+	var request enterpriseActivationRequest
 	decoder := json.NewDecoder(io.LimitReader(c.Request.Body, maxPlatformOperationsRequestBytes+1))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil || decoder.Decode(&struct{}{}) != io.EOF ||
-		strings.TrimSpace(request.Name) == "" || len(request.Name) > 128 || len(request.Description) > 512 ||
+		strings.TrimSpace(request.Name) == "" || request.Name != strings.TrimSpace(request.Name) || len(request.Name) > 128 ||
+		request.Description != strings.TrimSpace(request.Description) || len(request.Description) > 512 ||
 		request.SeatsTotal < 1 || request.StorageQuota < 0 || !operationsOpaqueID.MatchString(request.InitialAdministratorUserID) {
 		c.Error(apperrors.NewValidationError("invalid enterprise activation"))
 		return
 	}
-	body, err := json.Marshal(request)
-	if err != nil {
-		c.Error(apperrors.NewInternalServerError("failed to encode enterprise activation"))
+	actorID, _ := types.UserIDFromContext(c.Request.Context())
+	if err := h.tenantOperations.ValidateSystemAdministrator(c.Request.Context(), actorID); err != nil {
+		writeOperationsActivationError(c, err)
 		return
 	}
-	var output enterpriseActivationResponse
-	h.proxy(c, http.MethodPut, "/api/internal/product-base/operations/enterprise-activations/"+url.PathEscape(activationID), idempotencyKey, body, false, &output)
+	existing, existingErr := h.activations.GetEnterpriseActivation(c.Request.Context(), activationID)
+	planVersionID := ""
+	if existingErr == nil && existing != nil {
+		planVersionID = existing.AICapabilityPlanVersionID
+	} else if errors.Is(existingErr, apprepo.ErrTenantNotFound) {
+		if h.capabilityPlans == nil {
+			c.Error(apperrors.NewConflictError("default capability plan is unavailable"))
+			return
+		}
+		var planErr error
+		planVersionID, planErr = h.capabilityPlans.ResolveActivationPlanVersion(c.Request.Context(), actorID)
+		if planErr != nil {
+			c.Error(apperrors.NewConflictError("default capability plan is unavailable"))
+			return
+		}
+	} else if existingErr != nil {
+		c.Error(apperrors.NewInternalServerError("failed to read enterprise activation"))
+		return
+	}
+	canonicalBytes := canonicalEnterpriseActivationV2(request, planVersionID)
+	requestDigest := sha256.Sum256(canonicalBytes)
+	idempotencyDigest := sha256.Sum256([]byte(idempotencyKey))
+	seats, quota := request.SeatsTotal, request.StorageQuota
+	command := interfaces.EnterpriseActivationCommand{
+		ActivationID: activationID, ActorUserID: actorID,
+		IdempotencyKeySHA256: fmt.Sprintf("%x", idempotencyDigest),
+		RequestSHA256:        fmt.Sprintf("%x", requestDigest), AICapabilityPlanVersionID: planVersionID,
+		TenantName: request.Name, TenantDescription: request.Description,
+		FirstOwnerUserID: request.InitialAdministratorUserID,
+		DesiredState:     types.EnterpriseActivationStatePrepared, SeatsTotal: &seats, StorageQuota: &quota,
+	}
+	if _, err := h.activations.ApplyEnterpriseActivation(c.Request.Context(), command); err != nil {
+		writeOperationsActivationError(c, err)
+		return
+	}
+	command.DesiredState = types.EnterpriseActivationStateActive
+	result, err := h.activations.ApplyEnterpriseActivation(c.Request.Context(), command)
+	if err != nil {
+		writeOperationsActivationError(c, err)
+		return
+	}
+	writeEnterpriseActivation(c, result)
 }
 
 func (h *PlatformOperationsHandler) GetEnterpriseActivation(c *gin.Context) {
@@ -535,8 +548,109 @@ func (h *PlatformOperationsHandler) GetEnterpriseActivation(c *gin.Context) {
 		c.Error(apperrors.NewValidationError("activation_id is invalid"))
 		return
 	}
-	var output enterpriseActivationResponse
-	h.proxy(c, http.MethodGet, "/api/internal/product-base/operations/enterprise-activations/"+url.PathEscape(activationID), "", nil, false, &output)
+	actorID, _ := types.UserIDFromContext(c.Request.Context())
+	if err := h.tenantOperations.ValidateSystemAdministrator(c.Request.Context(), actorID); err != nil {
+		writeOperationsActivationError(c, err)
+		return
+	}
+	result, err := h.activations.GetEnterpriseActivation(c.Request.Context(), activationID)
+	if err != nil {
+		writeOperationsActivationError(c, err)
+		return
+	}
+	writeEnterpriseActivation(c, result)
+}
+
+func writeOperationsActivationError(c *gin.Context, err error) {
+	if appErr, ok := apperrors.IsAppError(err); ok {
+		c.Error(appErr)
+		return
+	}
+	switch {
+	case errors.Is(err, apprepo.ErrTenantNotFound):
+		c.Error(apperrors.NewNotFoundError("enterprise activation not found"))
+	case errors.Is(err, apprepo.ErrEnterpriseActivationConflict):
+		c.Error(apperrors.NewConflictError("enterprise activation conflicts with the durable receipt"))
+	case errors.Is(err, apprepo.ErrMemberActionForbidden):
+		c.Error(apperrors.NewForbiddenError("system administrator authority is no longer active"))
+	default:
+		c.Error(err)
+	}
+}
+
+func canonicalEnterpriseActivationV2(request enterpriseActivationRequest, planVersionID string) []byte {
+	var buffer bytes.Buffer
+	buffer.WriteString(`{"aiCapabilityPlanVersionId":`)
+	writeCanonicalJSONString(&buffer, planVersionID)
+	buffer.WriteString(`,"description":`)
+	writeCanonicalJSONString(&buffer, request.Description)
+	buffer.WriteString(`,"initialAdministratorUserId":`)
+	writeCanonicalJSONString(&buffer, request.InitialAdministratorUserID)
+	buffer.WriteString(`,"name":`)
+	writeCanonicalJSONString(&buffer, request.Name)
+	buffer.WriteString(`,"schema":"EnterpriseActivationV2","seatsTotal":`)
+	buffer.WriteString(strconv.Itoa(request.SeatsTotal))
+	buffer.WriteString(`,"storageQuota":`)
+	buffer.WriteString(strconv.FormatInt(request.StorageQuota, 10))
+	buffer.WriteByte('}')
+	return buffer.Bytes()
+}
+
+func writeCanonicalJSONString(buffer *bytes.Buffer, value string) {
+	buffer.WriteByte('"')
+	for _, r := range value {
+		switch r {
+		case '"', '\\':
+			buffer.WriteByte('\\')
+			buffer.WriteRune(r)
+		case '\b':
+			buffer.WriteString(`\b`)
+		case '\f':
+			buffer.WriteString(`\f`)
+		case '\n':
+			buffer.WriteString(`\n`)
+		case '\r':
+			buffer.WriteString(`\r`)
+		case '\t':
+			buffer.WriteString(`\t`)
+		default:
+			if r < 0x20 {
+				buffer.WriteString(fmt.Sprintf(`\u%04x`, r))
+			} else {
+				buffer.WriteRune(r)
+			}
+		}
+	}
+	buffer.WriteByte('"')
+}
+
+func writeEnterpriseActivation(c *gin.Context, result *interfaces.EnterpriseActivationResult) {
+	tenantID := strconv.FormatUint(result.TenantID, 10)
+	bindingID := result.BindingID
+	seats := 0
+	if result.SeatsTotal != nil {
+		seats = *result.SeatsTotal
+	}
+	response := enterpriseActivationResponse{
+		Schema: "EnterpriseActivationV2", ActivationID: result.ActivationID,
+		EnterpriseID: result.GovernedEnterpriseID, ProductBaseTenantID: &tenantID,
+		BindingID: &bindingID, Status: string(result.State), LastErrorCode: result.LastErrorCode,
+		Name: result.Name, Description: result.Description, SeatsTotal: seats,
+		StorageQuota: result.StorageQuota, InitialAdministratorUserID: result.InitialOwnerUserID,
+		AICapabilityPlanVersionID: result.AICapabilityPlanVersionID,
+		CreatedAt:                 result.CreatedAt.UTC().Format(time.RFC3339Nano), UpdatedAt: result.UpdatedAt.UTC().Format(time.RFC3339Nano),
+	}
+	if result.CompletedAt != nil {
+		formatted := result.CompletedAt.UTC().Format(time.RFC3339Nano)
+		response.CompletedAt = &formatted
+	}
+	if result.State == types.EnterpriseActivationStateActive {
+		response.Status = "completed"
+	}
+	if result.State == types.EnterpriseActivationStatePrepared {
+		response.Status = "pb_prepared"
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": response})
 }
 
 func (h *PlatformOperationsHandler) GetEnterpriseEdge(c *gin.Context) {
@@ -544,16 +658,38 @@ func (h *PlatformOperationsHandler) GetEnterpriseEdge(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var output enterpriseEdgeResponse
-	h.proxy(
-		c,
-		http.MethodGet,
-		"/api/internal/product-base/operations/enterprises/"+strconv.FormatUint(tenantID, 10)+"/edge",
-		"",
-		nil,
-		false,
-		&output,
-	)
+	actorUserID, _ := types.UserIDFromContext(c.Request.Context())
+	if err := h.tenantOperations.ValidateSystemAdministrator(c.Request.Context(), actorUserID); err != nil {
+		writeOperationsEdgeError(c, err)
+		return
+	}
+	tenant, err := h.tenants.GetTenantByID(c.Request.Context(), tenantID)
+	if err != nil {
+		writeOperationsEdgeError(c, err)
+		return
+	}
+	if tenant.GovernedEnterpriseID == nil || tenant.GovernedEdgeBinding == nil ||
+		tenant.GovernedEdgeBinding.EnterpriseID != *tenant.GovernedEnterpriseID {
+		writeOperationsEdgeError(c, apprepo.ErrGovernedEdgeBindingConflict)
+		return
+	}
+	observed, err := h.bridge.GetEnterpriseEdge(c.Request.Context(), *tenant.GovernedEnterpriseID, actorUserID)
+	if err != nil {
+		writeOperationsEdgeError(c, err)
+		return
+	}
+	nodes := make([]enterpriseEdgeNodeResponse, len(observed.Nodes))
+	for i, node := range observed.Nodes {
+		nodes[i] = enterpriseEdgeNodeResponse(node)
+	}
+	output := enterpriseEdgeResponse{
+		Schema: "PlatformEnterpriseEdgeV1", ProductBaseTenantID: strconv.FormatUint(tenantID, 10),
+		EnterpriseID: *tenant.GovernedEnterpriseID, BindingID: tenant.GovernedEdgeBinding.BindingID,
+		Binding: tenant.GovernedEdgeBinding,
+		Summary: enterpriseEdgeSummaryResponse(observed.Summary), Nodes: nodes,
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": output})
 }
 
 func (h *PlatformOperationsHandler) RotateEnterpriseEnrollmentToken(c *gin.Context) {
@@ -561,14 +697,177 @@ func (h *PlatformOperationsHandler) RotateEnterpriseEnrollmentToken(c *gin.Conte
 	if !ok {
 		return
 	}
-	var output enterpriseEnrollmentResponse
-	h.proxy(
-		c,
-		http.MethodPost,
-		"/api/internal/product-base/operations/enterprises/"+strconv.FormatUint(tenantID, 10)+"/edge-enrollment-token/rotate",
-		"",
-		nil,
-		true,
-		&output,
-	)
+	actorUserID, _ := types.UserIDFromContext(c.Request.Context())
+	if err := h.tenantOperations.ValidateSystemAdministrator(c.Request.Context(), actorUserID); err != nil {
+		writeOperationsEdgeError(c, err)
+		return
+	}
+	tenant, err := h.tenants.GetTenantByID(c.Request.Context(), tenantID)
+	if err != nil {
+		writeOperationsEdgeError(c, err)
+		return
+	}
+	if tenant.GovernedEnterpriseID == nil || tenant.GovernedEdgeBinding == nil ||
+		tenant.GovernedEdgeBinding.EnterpriseID != *tenant.GovernedEnterpriseID {
+		writeOperationsEdgeError(c, apprepo.ErrGovernedEdgeBindingConflict)
+		return
+	}
+	rotated, err := h.bridge.RotateEnterpriseEnrollmentToken(c.Request.Context(), *tenant.GovernedEnterpriseID, actorUserID)
+	if err != nil {
+		writeOperationsEdgeError(c, err)
+		return
+	}
+	output := enterpriseEnrollmentResponse{
+		Schema: "PlatformEnterpriseEdgeEnrollmentV1", ProductBaseTenantID: strconv.FormatUint(tenantID, 10),
+		EnterpriseID: *tenant.GovernedEnterpriseID, BindingID: tenant.GovernedEdgeBinding.BindingID,
+		EnrollmentToken: rotated.EnrollmentToken, RotatedAt: rotated.RotatedAt,
+	}
+	c.Header("Cache-Control", "no-store")
+	c.Header("Pragma", "no-cache")
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": output})
+}
+
+type edgeBindingCommandRequest struct {
+	ExpectedRevision   int64  `json:"expectedRevision"`
+	EdgeNodeID         string `json:"edgeNodeId"`
+	SourceID           string `json:"sourceId"`
+	DeploymentRevision int64  `json:"deploymentRevision"`
+}
+
+func readEdgeBindingCommand(c *gin.Context) (edgeBindingCommandRequest, bool) {
+	var request edgeBindingCommandRequest
+	decoder := json.NewDecoder(io.LimitReader(c.Request.Body, maxPlatformOperationsRequestBytes+1))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil || decoder.Decode(&struct{}{}) != io.EOF ||
+		request.ExpectedRevision < 1 || request.DeploymentRevision < 1 ||
+		strings.TrimSpace(request.EdgeNodeID) == "" || request.EdgeNodeID != strings.TrimSpace(request.EdgeNodeID) ||
+		strings.TrimSpace(request.SourceID) == "" || request.SourceID != strings.TrimSpace(request.SourceID) {
+		c.Error(apperrors.NewValidationError("invalid Edge binding command"))
+		return request, false
+	}
+	return request, true
+}
+
+func writeOperationsEdgeError(c *gin.Context, err error) {
+	var upstream *interfaces.PlatformOperationsUpstreamError
+	switch {
+	case errors.Is(err, apprepo.ErrMemberActionForbidden):
+		c.Error(apperrors.NewForbiddenError("system administrator authority is no longer active"))
+	case errors.Is(err, apprepo.ErrTenantNotFound), errors.Is(err, apprepo.ErrGovernedEnterpriseNotFound), errors.Is(err, gorm.ErrRecordNotFound):
+		c.Error(apperrors.NewNotFoundError("enterprise Edge authority was not found"))
+	case errors.Is(err, apprepo.ErrGovernedEdgeBindingConflict):
+		c.Error(apperrors.NewConflictError("Edge binding changed or does not match the observed node"))
+	case errors.As(err, &upstream) && upstream.StatusCode == http.StatusServiceUnavailable && upstream.Detail == "edge_node_disabled_projection_pending":
+		c.Error(apperrors.NewServiceUnavailableError("edge_node_disabled_projection_pending"))
+	case errors.As(err, &upstream):
+		c.Error(apperrors.NewServiceUnavailableError("Center node observation is unavailable"))
+	default:
+		c.Error(apperrors.NewServiceUnavailableError("Edge binding preflight is unavailable"))
+	}
+}
+
+func (h *PlatformOperationsHandler) PrepareEnterpriseEdgeBinding(c *gin.Context) {
+	tenantID, ok := parseOperationsTenantID(c)
+	if !ok {
+		return
+	}
+	request, ok := readEdgeBindingCommand(c)
+	if !ok {
+		return
+	}
+	actorUserID, _ := types.UserIDFromContext(c.Request.Context())
+	binding, err := h.edgeBindings.Prepare(c.Request.Context(), interfaces.GovernedEdgeBindingPrepareCommand{
+		TenantID: tenantID, ActorUserID: actorUserID, ExpectedRevision: request.ExpectedRevision,
+		EdgeNodeID: request.EdgeNodeID, SourceID: request.SourceID, DeploymentRevision: request.DeploymentRevision,
+	})
+	if err != nil {
+		writeOperationsEdgeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": binding})
+}
+
+func (h *PlatformOperationsHandler) ConfirmEnterpriseEdgeBinding(c *gin.Context) {
+	tenantID, ok := parseOperationsTenantID(c)
+	if !ok {
+		return
+	}
+	request, ok := readEdgeBindingCommand(c)
+	if !ok {
+		return
+	}
+	actorUserID, _ := types.UserIDFromContext(c.Request.Context())
+	binding, err := h.edgeBindings.Confirm(c.Request.Context(), interfaces.GovernedEdgeBindingConfirmCommand{
+		TenantID: tenantID, ActorUserID: actorUserID, ExpectedRevision: request.ExpectedRevision,
+		EdgeNodeID: request.EdgeNodeID, SourceID: request.SourceID, DeploymentRevision: request.DeploymentRevision,
+	})
+	if err != nil {
+		writeOperationsEdgeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": binding})
+}
+
+func (h *PlatformOperationsHandler) RevokeEdgeNode(c *gin.Context) {
+	var request struct {
+		EnterpriseID    string `json:"enterprise_id"`
+		EdgeNodeID      string `json:"edge_node_id"`
+		ControlRevision int64  `json:"control_revision"`
+	}
+	decoder := json.NewDecoder(io.LimitReader(c.Request.Body, maxPlatformOperationsRequestBytes+1))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil || decoder.Decode(&struct{}{}) != io.EOF ||
+		request.EnterpriseID == "" || request.EnterpriseID != strings.TrimSpace(request.EnterpriseID) ||
+		request.EdgeNodeID == "" || request.EdgeNodeID != strings.TrimSpace(request.EdgeNodeID) ||
+		request.ControlRevision < 1 {
+		c.Error(apperrors.NewValidationError("invalid Edge node revocation"))
+		return
+	}
+	receipt, err := h.edgeBindings.Revoke(c.Request.Context(), request.EnterpriseID, request.EdgeNodeID, request.ControlRevision)
+	if err != nil {
+		writeOperationsEdgeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"schema":                    "EdgeNodeRevocationReceiptV1",
+		"enterprise_id":             receipt.EnterpriseID,
+		"edge_node_id":              receipt.EdgeNodeID,
+		"sent_control_revision":     receipt.SentControlRevision,
+		"accepted_control_revision": receipt.AcceptedControlRevision,
+		"binding_revision":          receipt.BindingRevision,
+		"status":                    receipt.Status,
+	})
+}
+
+func (h *PlatformOperationsHandler) DisableEnterpriseEdgeNode(c *gin.Context) {
+	tenantID, ok := parseOperationsTenantID(c)
+	if !ok {
+		return
+	}
+	actorUserID, _ := types.UserIDFromContext(c.Request.Context())
+	if err := h.tenantOperations.ValidateSystemAdministrator(c.Request.Context(), actorUserID); err != nil {
+		writeOperationsEdgeError(c, err)
+		return
+	}
+	tenant, err := h.tenants.GetTenantByID(c.Request.Context(), tenantID)
+	if err != nil {
+		writeOperationsEdgeError(c, err)
+		return
+	}
+	if tenant.GovernedEnterpriseID == nil || tenant.GovernedEdgeBinding == nil || tenant.GovernedEdgeBinding.EnterpriseID != *tenant.GovernedEnterpriseID {
+		writeOperationsEdgeError(c, apprepo.ErrGovernedEdgeBindingConflict)
+		return
+	}
+	nodeID := strings.TrimSpace(c.Param("node_id"))
+	if !operationsOpaqueID.MatchString(nodeID) {
+		c.Error(apperrors.NewBadRequestError("invalid edge node id"))
+		return
+	}
+	result, err := h.bridge.DisableEnterpriseEdgeNode(c.Request.Context(), *tenant.GovernedEnterpriseID, nodeID, actorUserID)
+	if err != nil {
+		writeOperationsEdgeError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
 }

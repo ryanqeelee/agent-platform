@@ -55,7 +55,7 @@ func platformIdentityRouter(identities *recordingPlatformIdentityService) *gin.E
 		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), types.UserIDContextKey, "system-admin-1"))
 		c.Next()
 	})
-	handler := NewPlatformOperationsHandler(nil, nil, nil, nil, identities, nil)
+	handler := NewPlatformOperationsHandler(nil, nil, nil, nil, nil, identities, nil, nil, nil)
 	router.POST("/api/v1/system/admin/operations/initial-administrators", handler.CreateInitialAdministrator)
 	router.GET("/api/v1/system/admin/operations/initial-administrators/:command_id", handler.GetInitialAdministrator)
 	router.POST("/api/v1/system/admin/operations/enterprises/:tenant_id/members/:user_id/password-reset", handler.ResetMemberPassword)

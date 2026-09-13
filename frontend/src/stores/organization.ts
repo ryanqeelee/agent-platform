@@ -43,6 +43,7 @@ import {
   reviewJoinRequest as reviewJoinRequestApi,
   requestRoleUpgrade as requestRoleUpgradeApi
 } from '@/api/organization'
+import { useDeploymentCapabilitiesStore } from './deploymentCapabilities'
 import { getCurrentLanguage } from '@/utils/request'
 import { createVersionedRequestCoordinator } from './versionedRequest'
 import {
@@ -130,6 +131,13 @@ export const useOrganizationStore = defineStore('organization', () => {
   )
 
   async function fetchOrganizations(options?: { force?: boolean }) {
+    const capabilities = useDeploymentCapabilitiesStore()
+    await capabilities.ensureLoaded()
+    if (!capabilities.isSupported('organizations')) {
+      organizations.value = []
+      resourceCounts.value = null
+      return
+    }
     const force = options?.force ?? false
     if (
       !force &&
@@ -482,6 +490,12 @@ export const useOrganizationStore = defineStore('organization', () => {
   )
 
   async function fetchSharedKnowledgeBases(options?: { force?: boolean }) {
+    const capabilities = useDeploymentCapabilitiesStore()
+    await capabilities.ensureLoaded()
+    if (!capabilities.isSupported('organizations')) {
+      sharedKnowledgeBases.value = []
+      return sharedKnowledgeBases.value
+    }
     const force = options?.force ?? false
     if (
       !force &&
@@ -527,6 +541,12 @@ export const useOrganizationStore = defineStore('organization', () => {
   )
 
   async function fetchSharedAgents(options?: { force?: boolean }) {
+    const capabilities = useDeploymentCapabilitiesStore()
+    await capabilities.ensureLoaded()
+    if (!capabilities.isSupported('organizations')) {
+      sharedAgents.value = []
+      return sharedAgents.value
+    }
     const locale = getCurrentLanguage()
     const force = options?.force ?? false
     if (

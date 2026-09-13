@@ -19,28 +19,64 @@ func governedAnalysisSessionIDs(
 	return repo.GovernedAnalysisSessionIDs(ctx, sessionIDs)
 }
 
-func currentMemberCanReadOperatingAnalysis(
+// OperatingAnalysisReadPermission is the shared product/member decision used
+// by history reads, live admission, availability, and handoff consumption.
+type OperatingAnalysisReadPermission struct {
+	ProductEnabled bool
+	MemberEnabled  bool
+}
+
+func (p OperatingAnalysisReadPermission) Allowed() bool {
+	return p.ProductEnabled && p.MemberEnabled
+}
+
+// CurrentOperatingAnalysisReadPermission reads current Platform authority.
+// It deliberately excludes the Edge binding so historical-result permission
+// remains valid while a connection is disabled or unavailable.
+func CurrentOperatingAnalysisReadPermission(
 	ctx context.Context,
 	members interfaces.TenantMemberService,
-) (bool, error) {
+	tenants interfaces.TenantService,
+) (OperatingAnalysisReadPermission, error) {
+	permission := OperatingAnalysisReadPermission{}
 	principal, ok := types.PrincipalFromContext(ctx)
-	if !ok || principal.Type != types.PrincipalWebUser || members == nil {
-		return false, nil
+	if !ok || principal.Type != types.PrincipalWebUser || members == nil || tenants == nil {
+		return permission, nil
 	}
 	userID, hasUser := types.UserIDFromContext(ctx)
 	tenantID, hasTenant := types.TenantIDFromContext(ctx)
 	if !hasUser || !hasTenant || userID == "" || tenantID == 0 {
-		return false, nil
+		return permission, nil
+	}
+	tenant, err := tenants.GetTenantByID(ctx, tenantID)
+	if err != nil {
+		return permission, err
+	}
+	permission.ProductEnabled = tenant != nil && tenant.ID == tenantID &&
+		tenant.Status == types.TenantStatusActive && tenant.AnalysisEnabled
+	if !permission.ProductEnabled {
+		return permission, nil
 	}
 	membership, err := members.GetMembership(ctx, userID, tenantID)
 	if err != nil {
-		return false, err
+		return permission, err
 	}
-	return membership != nil &&
+	permission.MemberEnabled = membership != nil &&
 		membership.UserID == userID &&
 		membership.TenantID == tenantID &&
 		membership.Status == types.TenantMemberStatusActive &&
-		membership.OperatingAnalysisAccess, nil
+		membership.OperatingAnalysisAccess
+	return permission, nil
+
+}
+
+func currentMemberCanReadOperatingAnalysis(
+	ctx context.Context,
+	members interfaces.TenantMemberService,
+	tenants interfaces.TenantService,
+) (bool, error) {
+	permission, err := CurrentOperatingAnalysisReadPermission(ctx, members, tenants)
+	return permission.Allowed(), err
 }
 
 // authorizeGovernedAnalysisSessionRead runs after the existing tenant/owner
@@ -50,6 +86,7 @@ func authorizeGovernedAnalysisSessionRead(
 	ctx context.Context,
 	repo interfaces.MessageRepository,
 	members interfaces.TenantMemberService,
+	tenants interfaces.TenantService,
 	sessionID string,
 ) error {
 	governed, err := governedAnalysisSessionIDs(ctx, repo, []string{sessionID})
@@ -59,7 +96,7 @@ func authorizeGovernedAnalysisSessionRead(
 	if !governed[sessionID] {
 		return nil
 	}
-	allowed, err := currentMemberCanReadOperatingAnalysis(ctx, members)
+	allowed, err := currentMemberCanReadOperatingAnalysis(ctx, members, tenants)
 	if err != nil {
 		return err
 	}

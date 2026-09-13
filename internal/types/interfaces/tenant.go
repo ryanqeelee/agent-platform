@@ -12,32 +12,75 @@ import (
 // an opaque idempotency receipt; persisted tenant identity and owner fields
 // are compared independently on replay.
 type EnterpriseActivationCommand struct {
-	ActivationID      string
-	RequestSHA256     string
-	TenantName        string
-	TenantDescription string
-	FirstOwnerUserID  string
-	DesiredState      types.EnterpriseActivationState
-	SeatsTotal        *int
-	StorageQuota      *int64
+	ActivationID              string
+	ActorUserID               string
+	IdempotencyKeySHA256      string
+	RequestSHA256             string
+	AICapabilityPlanVersionID string
+	TenantName                string
+	TenantDescription         string
+	FirstOwnerUserID          string
+	DesiredState              types.EnterpriseActivationState
+	SeatsTotal                *int
+	StorageQuota              *int64
 }
 
 // EnterpriseActivationResult is the stable internal projection returned by
 // the repository/service. HTTP serialization stays private to the handler.
 type EnterpriseActivationResult struct {
-	ActivationID      string
-	TenantID          uint64
-	OwnerMembershipID uint64
-	RequestSHA256     string
-	State             types.EnterpriseActivationState
+	ActivationID              string
+	TenantID                  uint64
+	OwnerMembershipID         uint64
+	RequestSHA256             string
+	State                     types.EnterpriseActivationState
+	GovernedEnterpriseID      string
+	BindingID                 string
+	AICapabilityPlanVersionID string
+	Name                      string
+	Description               string
+	SeatsTotal                *int
+	StorageQuota              int64
+	InitialOwnerUserID        string
+	LastErrorCode             *string
+	CreatedAt                 time.Time
+	UpdatedAt                 time.Time
+	CompletedAt               *time.Time
+}
+
+type GovernedEdgeBindingPrepareCommand struct {
+	TenantID           uint64
+	ActorUserID        string
+	ExpectedRevision   int64
+	EdgeNodeID         string
+	SourceID           string
+	DeploymentRevision int64
+}
+
+type GovernedEdgeBindingConfirmCommand struct {
+	TenantID           uint64
+	ActorUserID        string
+	ExpectedRevision   int64
+	EdgeNodeID         string
+	SourceID           string
+	DeploymentRevision int64
+}
+
+type EdgeNodeRevocationReceipt struct {
+	EnterpriseID            string
+	EdgeNodeID              string
+	SentControlRevision     int64
+	AcceptedControlRevision int64
+	BindingRevision         int64
+	Status                  string
+}
+
+type EnterpriseActivationService interface {
+	ApplyEnterpriseActivation(ctx context.Context, command EnterpriseActivationCommand) (*EnterpriseActivationResult, error)
+	GetEnterpriseActivation(ctx context.Context, activationID string) (*EnterpriseActivationResult, error)
 }
 
 // TenantService defines the tenant service interface
 type TenantService interface {
-	ApplyGovernedEdgeBinding(context.Context, uint64, types.GovernedEdgeBinding) error
-	// ApplyEnterpriseActivation creates or advances one Ringxun-owned tenant
-	// activation receipt without changing the general tenant creation flow.
-	ApplyEnterpriseActivation(ctx context.Context, command EnterpriseActivationCommand) (*EnterpriseActivationResult, error)
 	// CreateTenant creates a tenant
 	CreateTenant(ctx context.Context, tenant *types.Tenant) (*types.Tenant, error)
 	// GetTenantByID gets a tenant by ID
@@ -73,10 +116,14 @@ type TenantService interface {
 
 // TenantRepository defines the tenant repository interface
 type TenantRepository interface {
-	ApplyGovernedEdgeBinding(context.Context, uint64, types.GovernedEdgeBinding) error
 	// ApplyEnterpriseActivation atomically owns the activation receipt, binds
 	// the existing first Owner, and advances the tenant/member state pair.
 	ApplyEnterpriseActivation(ctx context.Context, command EnterpriseActivationCommand) (*EnterpriseActivationResult, error)
+	GetEnterpriseActivation(ctx context.Context, activationID string) (*EnterpriseActivationResult, error)
+	SetEnterpriseActivationError(ctx context.Context, activationID string, code *string) error
+	PrepareGovernedEdgeBinding(ctx context.Context, command GovernedEdgeBindingPrepareCommand) (*types.GovernedEdgeBinding, error)
+	ConfirmGovernedEdgeBinding(ctx context.Context, command GovernedEdgeBindingConfirmCommand) (*types.GovernedEdgeBinding, error)
+	RevokeGovernedEdgeBinding(ctx context.Context, enterpriseID, edgeNodeID string, controlRevision int64) (*EdgeNodeRevocationReceipt, error)
 	// CreateTenant creates a tenant
 	CreateTenant(ctx context.Context, tenant *types.Tenant) error
 	// GetTenantByID gets a tenant by ID

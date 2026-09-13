@@ -117,9 +117,19 @@ type Tenant struct {
 	// Ringxun activation receipt. These fields are private persistence state
 	// for the platform adapter and must never leak through general tenant APIs.
 	RingxunActivationID            *string `yaml:"-" json:"-" gorm:"column:ringxun_activation_id;type:varchar(128);uniqueIndex:idx_tenants_ringxun_activation_id_unique"`
+	RingxunActivationIdempotencyKeySHA256 *string `yaml:"-" json:"-" gorm:"column:ringxun_activation_idempotency_key_sha256;type:varchar(64);uniqueIndex:idx_tenants_ringxun_activation_idempotency_unique"`
 	RingxunActivationRequestSHA256 *string `yaml:"-" json:"-" gorm:"column:ringxun_activation_request_sha256;type:varchar(64)"`
+	RingxunActivationPlanVersionID *string `yaml:"-" json:"-" gorm:"column:ringxun_activation_plan_version_id;type:text"`
 	RingxunInitialOwnerUserID      *string `yaml:"-" json:"-" gorm:"column:ringxun_initial_owner_user_id;type:varchar(36)"`
-	// Center-managed connection binding; only the internal management adapter writes it.
+	RingxunActivationCompletedAt   *time.Time `yaml:"-" json:"-" gorm:"column:ringxun_activation_completed_at"`
+	RingxunActivationLastErrorCode *string `yaml:"-" json:"-" gorm:"column:ringxun_activation_last_error_code;type:varchar(64)"`
+	// GovernedEnterpriseID is the immutable external key shared with Center.
+	// It is never inferred from a tenant name or browser-selected value.
+	GovernedEnterpriseID *string `yaml:"-" json:"-" gorm:"column:governed_enterprise_id;type:varchar(128);uniqueIndex:idx_tenants_governed_enterprise_id_unique"`
+	// AnalysisEnabled is the enterprise product entitlement. Connection health
+	// and binding state must not grant or revoke historical-result access.
+	AnalysisEnabled bool `yaml:"-" json:"-" gorm:"column:analysis_enabled;not null;default:false"`
+	// Platform-owned connection binding. Center can only submit node revocation.
 	GovernedEdgeBinding *GovernedEdgeBinding `yaml:"-" json:"-" gorm:"type:jsonb"`
 	// Retriever engines
 	RetrieverEngines RetrieverEngines `yaml:"retriever_engines"   json:"retriever_engines"   gorm:"type:json"`

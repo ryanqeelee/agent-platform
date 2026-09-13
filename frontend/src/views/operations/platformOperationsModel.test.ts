@@ -40,6 +40,7 @@ test('enterprise edit preserves an unlimited seat quota', () => {
     name: '不限席位企业',
     description: '',
     status: 'active',
+    analysis_enabled: false,
     seats_total: null,
     seats_used: 7,
     storage_quota: GIB_BYTES,
@@ -53,6 +54,7 @@ test('enterprise update always sends an explicit seat quota', () => {
     name: ' Acme ',
     description: ' Retail ',
     status: 'active' as const,
+    analysis_enabled: false,
     storage_quota_gib: 1,
   }
 
@@ -60,6 +62,7 @@ test('enterprise update always sends an explicit seat quota', () => {
     name: 'Acme',
     description: 'Retail',
     status: 'active',
+    analysis_enabled: false,
     seats_total: null,
     storage_quota: GIB_BYTES,
   })
@@ -74,6 +77,7 @@ test('enterprise edit and activation preserve an unlimited storage quota', () =>
     name: '不限存储企业',
     description: '',
     status: 'active',
+    analysis_enabled: false,
     seats_total: 3,
     seats_used: 1,
     storage_quota: 0,

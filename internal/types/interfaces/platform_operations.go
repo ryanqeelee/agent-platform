@@ -2,25 +2,70 @@ package interfaces
 
 import (
 	"context"
-	"io"
+	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// PlatformOperationsResponse preserves the Center operations response while
-// keeping its service credential out of the browser-facing layer.
-type PlatformOperationsResponse struct {
-	StatusCode  int
-	ContentType string
-	Body        []byte
+type PlatformOperationsUpstreamError struct {
+	StatusCode int
+	Detail     string
+}
+
+func (e *PlatformOperationsUpstreamError) Error() string {
+	return fmt.Sprintf("Center operations returned %d: %s", e.StatusCode, e.Detail)
+}
+
+type CenterEnterpriseEdgeSummary struct {
+	ConnectionStatus string  `json:"connectionStatus"`
+	NodeCount        int     `json:"nodeCount"`
+	OnlineNodeCount  int     `json:"onlineNodeCount"`
+	LastSeenAt       *string `json:"lastSeenAt"`
+}
+
+type CenterEnterpriseEdgeNode struct {
+	EdgeNodeID        string         `json:"edgeNodeId"`
+	DisplayName       string         `json:"displayName"`
+	Version           string         `json:"version"`
+	Status            string         `json:"status"`
+	CatalogVersion    *string        `json:"catalogVersion"`
+	DataServiceStatus map[string]any `json:"dataServiceStatus"`
+	RegisteredAt      *string        `json:"registeredAt"`
+	LastSeenAt        *string        `json:"lastSeenAt"`
+	ControlRevision   int64          `json:"controlRevision"`
+}
+
+type CenterEnterpriseEdge struct {
+	Schema       string                      `json:"schema"`
+	EnterpriseID string                      `json:"enterpriseId"`
+	Summary      CenterEnterpriseEdgeSummary `json:"summary"`
+	Nodes        []CenterEnterpriseEdgeNode  `json:"nodes"`
+}
+
+type CenterEnterpriseEnrollment struct {
+	Schema          string  `json:"schema"`
+	EnterpriseID    string  `json:"enterpriseId"`
+	EnrollmentToken string  `json:"enrollmentToken"`
+	RotatedAt       *string `json:"rotatedAt"`
+}
+
+type CenterEdgeNodeDisable struct {
+	Schema          string `json:"schema"`
+	EnterpriseID    string `json:"enterpriseId"`
+	EdgeNodeID      string `json:"edgeNodeId"`
+	Status          string `json:"status"`
+	ControlRevision int64  `json:"controlRevision"`
 }
 
 type PlatformOperationsBridge interface {
-	Do(ctx context.Context, method, path, actorUserID, idempotencyKey string, body io.Reader) (*PlatformOperationsResponse, error)
+	DisableEnterpriseEdgeNode(ctx context.Context, enterpriseID, edgeNodeID, actorUserID string) (*CenterEdgeNodeDisable, error)
+	GetEnterpriseEdge(ctx context.Context, enterpriseID, actorUserID string) (*CenterEnterpriseEdge, error)
+	RotateEnterpriseEnrollmentToken(ctx context.Context, enterpriseID, actorUserID string) (*CenterEnterpriseEnrollment, error)
 }
 
 type PlatformOperationsTenantRepository interface {
-	UpdateForPlatformOperations(ctx context.Context, actorUserID string, id uint64, name, description, status string, seatsTotal *int, storageQuota int64) (*types.Tenant, int64, error)
+	ValidateSystemAdministrator(ctx context.Context, actorUserID string) error
+	UpdateForPlatformOperations(ctx context.Context, actorUserID string, id uint64, name, description, status string, analysisEnabled bool, seatsTotal *int, storageQuota int64) (*types.Tenant, int64, error)
 }
 
 type PlatformOperationsIdentityRepository interface {

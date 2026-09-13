@@ -3,10 +3,8 @@ package service
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/infrastructure/capabilityplan"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/require"
@@ -58,28 +56,6 @@ func TestCreateSessionLeavesNoRowWhenPlanUnavailable(t *testing.T) {
 	require.Nil(t, created)
 	require.ErrorIs(t, err, interfaces.ErrAICapabilityUnavailable)
 	require.Nil(t, repo.created)
-}
-
-func TestRingxunCapabilityPlanIntegrationPinsSession(t *testing.T) {
-	baseURL := os.Getenv("RINGXUN_CAPABILITY_PLAN_INTEGRATION_BASE_URL")
-	if baseURL == "" {
-		t.Skip("requires the Ringxun capability-plan integration fixture")
-	}
-	t.Setenv("RINGXUN_CAPABILITY_PLAN_BASE_URL", baseURL)
-	t.Setenv(
-		"RINGXUN_CAPABILITY_PLAN_SERVICE_TOKEN",
-		os.Getenv("RINGXUN_CAPABILITY_PLAN_INTEGRATION_SERVICE_TOKEN"),
-	)
-
-	repo := &sessionPinRepository{}
-	service := &sessionService{
-		sessionRepo:            repo,
-		capabilityPlanResolver: capabilityplan.NewClientFromEnv(),
-	}
-	created, err := service.CreateSession(context.Background(), &types.Session{TenantID: 7})
-	require.NoError(t, err)
-	require.Equal(t, os.Getenv("RINGXUN_CAPABILITY_PLAN_INTEGRATION_VERSION_ID"), created.AICapabilityPlanVersionID)
-	require.Same(t, created, repo.created)
 }
 
 func TestRunnableSessionRejectsHistoricalMissingPlan(t *testing.T) {

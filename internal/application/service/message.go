@@ -138,7 +138,7 @@ func (s *messageService) GetMessageForRead(ctx context.Context, sessionID string
 	if err != nil {
 		return nil, err
 	}
-	if err := authorizeGovernedAnalysisSessionRead(ctx, s.messageRepo, s.tenantMemberService, sessionID); err != nil {
+	if err := authorizeGovernedAnalysisSessionRead(ctx, s.messageRepo, s.tenantMemberService, s.tenantService, sessionID); err != nil {
 		return nil, err
 	}
 	return message, nil
@@ -167,7 +167,7 @@ func (s *messageService) GetMessagesBySession(ctx context.Context,
 		logger.Errorf(ctx, "Failed to get session: %v", err)
 		return nil, err
 	}
-	if err := authorizeGovernedAnalysisSessionRead(ctx, s.messageRepo, s.tenantMemberService, sessionID); err != nil {
+	if err := authorizeGovernedAnalysisSessionRead(ctx, s.messageRepo, s.tenantMemberService, s.tenantService, sessionID); err != nil {
 		return nil, err
 	}
 
@@ -204,7 +204,7 @@ func (s *messageService) GetRecentMessagesBySession(ctx context.Context,
 		logger.Errorf(ctx, "Failed to get session: %v", err)
 		return nil, err
 	}
-	if err := authorizeGovernedAnalysisSessionRead(ctx, s.messageRepo, s.tenantMemberService, sessionID); err != nil {
+	if err := authorizeGovernedAnalysisSessionRead(ctx, s.messageRepo, s.tenantMemberService, s.tenantService, sessionID); err != nil {
 		return nil, err
 	}
 
@@ -240,7 +240,7 @@ func (s *messageService) GetMessagesBySessionBeforeTime(ctx context.Context,
 		logger.Errorf(ctx, "Failed to get session: %v", err)
 		return nil, err
 	}
-	if err := authorizeGovernedAnalysisSessionRead(ctx, s.messageRepo, s.tenantMemberService, sessionID); err != nil {
+	if err := authorizeGovernedAnalysisSessionRead(ctx, s.messageRepo, s.tenantMemberService, s.tenantService, sessionID); err != nil {
 		return nil, err
 	}
 

@@ -2,7 +2,9 @@ package repository
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -20,7 +22,18 @@ func activationTestDB(t *testing.T) *gorm.DB {
 	dsn := filepath.Join(t.TempDir(), "activation.db") + "?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=on"
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&types.Tenant{}, &types.User{}, &types.TenantMember{}))
+	require.NoError(t, db.AutoMigrate(
+		&types.Tenant{}, &types.User{}, &types.TenantMember{}, &types.AuditLog{},
+		&types.AICapabilityPlanVersion{}, &types.TenantAICapabilityPlanAssignment{},
+	))
+	require.NoError(t, db.Omit("TenantID").Create(&types.User{
+		ID: "activation-system-admin", Username: "activation-system-admin",
+		Email: "activation-system-admin@example.invalid", IsActive: true, IsSystemAdmin: true,
+	}).Error)
+	require.NoError(t, db.Create(&types.AICapabilityPlanVersion{
+		VersionID: "activation-plan-v1", ContractVersion: types.AICapabilityPlanContractVersion,
+		ServiceLevel: "test", CreatedBy: "activation-system-admin",
+	}).Error)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
@@ -28,13 +41,15 @@ func activationTestDB(t *testing.T) *gorm.DB {
 }
 
 func activationCommand(id, owner string) interfaces.EnterpriseActivationCommand {
+	idempotency := sha256.Sum256([]byte(id))
 	return interfaces.EnterpriseActivationCommand{
-		ActivationID:      id,
-		RequestSHA256:     strings.Repeat("a", 64),
-		TenantName:        "Acme",
-		TenantDescription: "Acme workspace",
-		FirstOwnerUserID:  owner,
-		DesiredState:      types.EnterpriseActivationStatePrepared,
+		ActivationID: id, ActorUserID: "activation-system-admin",
+		IdempotencyKeySHA256: fmt.Sprintf("%x", idempotency), RequestSHA256: strings.Repeat("a", 64),
+		AICapabilityPlanVersionID: "activation-plan-v1",
+		TenantName:                "Acme",
+		TenantDescription:         "Acme workspace",
+		FirstOwnerUserID:          owner,
+		DesiredState:              types.EnterpriseActivationStatePrepared,
 	}
 }
 

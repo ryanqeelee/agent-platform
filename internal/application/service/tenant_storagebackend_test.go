@@ -47,7 +47,11 @@ func TestEnterpriseActivationResumesDefaultBackendBeforeOpening(t *testing.T) {
 	t.Setenv("STORAGE_TYPE", "unsupported-for-test")
 	db, err := gorm.Open(sqlite.Open("file:activation-storage?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&types.Tenant{}, &types.User{}, &types.TenantMember{}, &types.StorageBackend{}, &types.WebSearchProviderEntity{}))
+	require.NoError(t, db.AutoMigrate(
+		&types.Tenant{}, &types.User{}, &types.TenantMember{}, &types.StorageBackend{},
+		&types.WebSearchProviderEntity{}, &types.AICapabilityPlanVersion{},
+		&types.TenantAICapabilityPlanAssignment{},
+	))
 	tenantRepo := repository.NewTenantRepository(db)
 	storageRepo := repository.NewStorageBackendRepository(db)
 	webSearchRepo := repository.NewWebSearchProviderRepository(db)
@@ -55,14 +59,25 @@ func TestEnterpriseActivationResumesDefaultBackendBeforeOpening(t *testing.T) {
 	require.NoError(t, db.Create(&types.User{
 		ID: "activation-owner", Username: "activation-owner", Email: "activation-owner@example.invalid", IsActive: true,
 	}).Error)
+	require.NoError(t, db.Omit("TenantID").Create(&types.User{
+		ID: "activation-system-admin", Username: "activation-system-admin",
+		Email: "activation-system-admin@example.invalid", IsActive: true, IsSystemAdmin: true,
+	}).Error)
+	require.NoError(t, db.Create(&types.AICapabilityPlanVersion{
+		VersionID: "activation-plan-v1", ContractVersion: types.AICapabilityPlanContractVersion,
+		ServiceLevel: "test", CreatedBy: "activation-system-admin",
+	}).Error)
 	command := interfaces.EnterpriseActivationCommand{
-		ActivationID: "activation-storage", RequestSHA256: strings.Repeat("a", 64),
-		TenantName: "Acme", TenantDescription: "Acme workspace",
+		ActivationID: "activation-storage", ActorUserID: "activation-system-admin",
+		IdempotencyKeySHA256: strings.Repeat("b", 64), RequestSHA256: strings.Repeat("a", 64),
+		AICapabilityPlanVersionID: "activation-plan-v1",
+		TenantName:                "Acme", TenantDescription: "Acme workspace",
 		FirstOwnerUserID: "activation-owner", DesiredState: types.EnterpriseActivationStatePrepared,
 	}
 
 	// The durable receipt remains prepared when backend materialization fails.
-	_, err = tenantSvc.ApplyEnterpriseActivation(context.Background(), command)
+	activationSvc := tenantSvc.(interfaces.EnterpriseActivationService)
+	_, err = activationSvc.ApplyEnterpriseActivation(context.Background(), command)
 	require.Error(t, err)
 	var prepared types.Tenant
 	require.NoError(t, db.Where("ringxun_activation_id = ?", command.ActivationID).Take(&prepared).Error)
@@ -71,7 +86,7 @@ func TestEnterpriseActivationResumesDefaultBackendBeforeOpening(t *testing.T) {
 
 	require.NoError(t, os.Setenv("STORAGE_TYPE", "local"))
 	command.DesiredState = types.EnterpriseActivationStateActive
-	result, err := tenantSvc.ApplyEnterpriseActivation(context.Background(), command)
+	result, err := activationSvc.ApplyEnterpriseActivation(context.Background(), command)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, types.EnterpriseActivationStateActive, result.State)

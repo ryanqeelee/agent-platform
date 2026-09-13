@@ -33,8 +33,7 @@ export MAX_SKILL_BUNDLE_SIZE=${SKILL_MB}M
 export APP_HOST=${APP_HOST:-app}
 export APP_PORT=${APP_PORT:-8080}
 export APP_SCHEME=${APP_SCHEME:-http}
-export RETAIL_AI_CENTER_BASE_URL=${RETAIL_AI_CENTER_BASE_URL:-http://retail-ai-app:8080}
-envsubst '${MAX_FILE_SIZE} ${MAX_SKILL_BUNDLE_SIZE} ${APP_HOST} ${APP_PORT} ${APP_SCHEME} ${RETAIL_AI_CENTER_BASE_URL}' \
+envsubst '${MAX_FILE_SIZE} ${MAX_SKILL_BUNDLE_SIZE} ${APP_HOST} ${APP_PORT} ${APP_SCHEME}' \
   < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf
 
 # 启动 nginx

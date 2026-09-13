@@ -2,14 +2,17 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -35,6 +38,10 @@ func NewTenantRepository(db *gorm.DB) interfaces.TenantRepository {
 
 func NewPlatformOperationsTenantRepository(db *gorm.DB) interfaces.PlatformOperationsTenantRepository {
 	return &tenantRepository{db: db}
+}
+
+func (r *tenantRepository) ValidateSystemAdministrator(ctx context.Context, actorUserID string) error {
+	return lockPlatformSystemAdministrator(ctx, r.db.WithContext(ctx), actorUserID)
 }
 
 func enterpriseActivationConflict(reason string) error {
@@ -97,8 +104,12 @@ func applyExistingActivation(
 	tenant *types.Tenant,
 ) (*interfaces.EnterpriseActivationResult, error) {
 	// The lookup predicate already proves this row owns command.ActivationID.
-	if tenant.DeletedAt.Valid || tenant.RingxunActivationRequestSHA256 == nil ||
+	if tenant.DeletedAt.Valid || tenant.RingxunActivationIdempotencyKeySHA256 == nil ||
+		*tenant.RingxunActivationIdempotencyKeySHA256 != command.IdempotencyKeySHA256 ||
+		tenant.RingxunActivationRequestSHA256 == nil ||
 		*tenant.RingxunActivationRequestSHA256 != command.RequestSHA256 ||
+		tenant.RingxunActivationPlanVersionID == nil ||
+		*tenant.RingxunActivationPlanVersionID != command.AICapabilityPlanVersionID ||
 		tenant.RingxunInitialOwnerUserID == nil ||
 		*tenant.RingxunInitialOwnerUserID != command.FirstOwnerUserID {
 		return nil, enterpriseActivationConflict("activation receipt does not match the request")
@@ -115,10 +126,7 @@ func applyExistingActivation(
 			Order("created_at ASC, id ASC").Take(&member).Error; err != nil {
 			return nil, enterpriseActivationConflict("initial owner receipt is unavailable")
 		}
-		current := &interfaces.EnterpriseActivationResult{
-			ActivationID: command.ActivationID, TenantID: tenant.ID, OwnerMembershipID: member.ID,
-			RequestSHA256: command.RequestSHA256, State: state,
-		}
+		current := activationResult(tenant, member.ID, state)
 		switch command.DesiredState {
 		case types.EnterpriseActivationStatePrepared, types.EnterpriseActivationStateActive:
 			return current, nil
@@ -150,13 +158,7 @@ func applyExistingActivation(
 	if member.Status != types.TenantMemberStatusSuspended {
 		return nil, enterpriseActivationConflict("tenant and owner membership states disagree")
 	}
-	current := &interfaces.EnterpriseActivationResult{
-		ActivationID:      command.ActivationID,
-		TenantID:          tenant.ID,
-		OwnerMembershipID: member.ID,
-		RequestSHA256:     command.RequestSHA256,
-		State:             state,
-	}
+	current := activationResult(tenant, member.ID, state)
 
 	now := time.Now()
 	switch command.DesiredState {
@@ -189,9 +191,11 @@ func applyExistingActivation(
 			if memberUpdate.RowsAffected != 1 {
 				return nil, enterpriseActivationConflict("initial owner membership changed concurrently")
 			}
+			completedAt := now
 			tenantUpdate := tx.WithContext(ctx).Model(&types.Tenant{}).
 				Where("id = ? AND status = ?", tenant.ID, types.TenantStatusProvisioning).
-				Updates(map[string]any{"status": types.TenantStatusActive, "updated_at": now})
+				Updates(map[string]any{"status": types.TenantStatusActive, "analysis_enabled": true,
+					"ringxun_activation_completed_at": completedAt, "ringxun_activation_last_error_code": nil, "updated_at": now})
 			if tenantUpdate.Error != nil {
 				return nil, tenantUpdate.Error
 			}
@@ -199,6 +203,11 @@ func applyExistingActivation(
 				return nil, enterpriseActivationConflict("activation tenant changed concurrently")
 			}
 			state = types.EnterpriseActivationStateActive
+			tenant.Status = types.TenantStatusActive
+			tenant.AnalysisEnabled = true
+			tenant.RingxunActivationCompletedAt = &completedAt
+			tenant.RingxunActivationLastErrorCode = nil
+			tenant.UpdatedAt = now
 		}
 	case types.EnterpriseActivationStateAbandoned:
 		switch state {
@@ -217,13 +226,32 @@ func applyExistingActivation(
 				return nil, enterpriseActivationConflict("activation tenant changed concurrently")
 			}
 			state = types.EnterpriseActivationStateAbandoned
+			tenant.Status = types.TenantStatusActivationAbandoned
+			tenant.UpdatedAt = now
 		}
 	default:
 		return nil, enterpriseActivationConflict("invalid desired activation state")
 	}
 
 	current.State = state
+	current = activationResult(tenant, member.ID, state)
 	return current, nil
+}
+
+func activationResult(tenant *types.Tenant, ownerMembershipID uint64, state types.EnterpriseActivationState) *interfaces.EnterpriseActivationResult {
+	result := &interfaces.EnterpriseActivationResult{
+		TenantID: tenant.ID, OwnerMembershipID: ownerMembershipID, State: state,
+		Name: tenant.Name, Description: tenant.Description, SeatsTotal: tenant.SeatsTotal,
+		StorageQuota: tenant.StorageQuota, CreatedAt: tenant.CreatedAt, UpdatedAt: tenant.UpdatedAt,
+		CompletedAt: tenant.RingxunActivationCompletedAt, LastErrorCode: tenant.RingxunActivationLastErrorCode,
+	}
+	if tenant.RingxunActivationID != nil { result.ActivationID = *tenant.RingxunActivationID }
+	if tenant.RingxunActivationRequestSHA256 != nil { result.RequestSHA256 = *tenant.RingxunActivationRequestSHA256 }
+	if tenant.GovernedEnterpriseID != nil { result.GovernedEnterpriseID = *tenant.GovernedEnterpriseID }
+	if tenant.GovernedEdgeBinding != nil { result.BindingID = tenant.GovernedEdgeBinding.BindingID }
+	if tenant.RingxunActivationPlanVersionID != nil { result.AICapabilityPlanVersionID = *tenant.RingxunActivationPlanVersionID }
+	if tenant.RingxunInitialOwnerUserID != nil { result.InitialOwnerUserID = *tenant.RingxunInitialOwnerUserID }
+	return result
 }
 
 // ApplyEnterpriseActivation atomically creates or advances the one tenant and
@@ -234,6 +262,9 @@ func (r *tenantRepository) ApplyEnterpriseActivation(
 ) (*interfaces.EnterpriseActivationResult, error) {
 	var result *interfaces.EnterpriseActivationResult
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockPlatformSystemAdministrator(ctx, tx, command.ActorUserID); err != nil {
+			return err
+		}
 		tenant, err := loadActivationTenant(ctx, tx, command.ActivationID)
 		if err != nil {
 			return err
@@ -244,6 +275,10 @@ func (r *tenantRepository) ApplyEnterpriseActivation(
 		}
 		if command.DesiredState != types.EnterpriseActivationStatePrepared {
 			return enterpriseActivationConflict("activation must be prepared before it can advance")
+		}
+		var plan types.AICapabilityPlanVersion
+		if err := tx.WithContext(ctx).Select("version_id").Where("version_id = ?", command.AICapabilityPlanVersionID).Take(&plan).Error; err != nil {
+			return enterpriseActivationConflict("activation capability plan is unavailable")
 		}
 
 		var user types.User
@@ -276,15 +311,27 @@ func (r *tenantRepository) ApplyEnterpriseActivation(
 		}
 
 		activationID := command.ActivationID
+		idempotencySHA := command.IdempotencyKeySHA256
 		requestSHA := command.RequestSHA256
+		planVersionID := plan.VersionID
 		ownerID := command.FirstOwnerUserID
+		governedEnterpriseID := "tenant_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+		bindingID := "binding_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 		tenant = &types.Tenant{
 			Name:                           command.TenantName,
 			Description:                    command.TenantDescription,
 			Status:                         types.TenantStatusProvisioning,
 			RingxunActivationID:            &activationID,
+			RingxunActivationIdempotencyKeySHA256: &idempotencySHA,
 			RingxunActivationRequestSHA256: &requestSHA,
+			RingxunActivationPlanVersionID: &planVersionID,
 			RingxunInitialOwnerUserID:      &ownerID,
+			GovernedEnterpriseID:           &governedEnterpriseID,
+			AnalysisEnabled:                false,
+			GovernedEdgeBinding: &types.GovernedEdgeBinding{
+				BindingID: bindingID, Revision: 1, DeploymentRevision: 0,
+				EnterpriseID: governedEnterpriseID, Enabled: false,
+			},
 			SeatsTotal:                     command.SeatsTotal,
 		}
 		if command.StorageQuota != nil {
@@ -314,6 +361,11 @@ func (r *tenantRepository) ApplyEnterpriseActivation(
 			}
 			tenant.StorageQuota = *command.StorageQuota
 		}
+		if err := tx.WithContext(ctx).Create(&types.TenantAICapabilityPlanAssignment{
+			TenantID: tenant.ID, VersionID: planVersionID, UpdatedBy: command.ActorUserID, UpdatedAt: time.Now(),
+		}).Error; err != nil {
+			return err
+		}
 
 		bound := tx.WithContext(ctx).Model(&types.User{}).
 			Where("id = ? AND (tenant_id IS NULL OR tenant_id = ?) AND is_active = ? AND is_system_admin = ? AND can_access_all_tenants = ?",
@@ -339,13 +391,7 @@ func (r *tenantRepository) ApplyEnterpriseActivation(
 		if err := tx.WithContext(ctx).Create(member).Error; err != nil {
 			return err
 		}
-		result = &interfaces.EnterpriseActivationResult{
-			ActivationID:      command.ActivationID,
-			TenantID:          tenant.ID,
-			OwnerMembershipID: member.ID,
-			RequestSHA256:     command.RequestSHA256,
-			State:             types.EnterpriseActivationStatePrepared,
-		}
+		result = activationResult(tenant, member.ID, types.EnterpriseActivationStatePrepared)
 		return nil
 	})
 	if err != nil {
@@ -354,11 +400,37 @@ func (r *tenantRepository) ApplyEnterpriseActivation(
 	return result, nil
 }
 
+func (r *tenantRepository) GetEnterpriseActivation(ctx context.Context, activationID string) (*interfaces.EnterpriseActivationResult, error) {
+	var result *interfaces.EnterpriseActivationResult
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		tenant, err := loadActivationTenant(ctx, tx, activationID)
+		if err != nil { return err }
+		if tenant == nil { return ErrTenantNotFound }
+		if tenant.RingxunInitialOwnerUserID == nil { return enterpriseActivationConflict("initial owner receipt is unavailable") }
+		var member types.TenantMember
+		if err := tx.WithContext(ctx).Unscoped().Select("id").Where("user_id = ? AND tenant_id = ?", *tenant.RingxunInitialOwnerUserID, tenant.ID).
+			Order("created_at ASC, id ASC").Take(&member).Error; err != nil {
+			return enterpriseActivationConflict("initial owner receipt is unavailable")
+		}
+		state, ok := activationStateFromTenantStatus(tenant.Status)
+		if !ok { return enterpriseActivationConflict("activation receipt has an invalid tenant status") }
+		result = activationResult(tenant, member.ID, state)
+		return nil
+	})
+	return result, err
+}
+
+func (r *tenantRepository) SetEnterpriseActivationError(ctx context.Context, activationID string, code *string) error {
+	return r.db.WithContext(ctx).Model(&types.Tenant{}).Where("ringxun_activation_id = ?", activationID).
+		Updates(map[string]any{"ringxun_activation_last_error_code": code, "updated_at": time.Now()}).Error
+}
+
 func (r *tenantRepository) UpdateForPlatformOperations(
 	ctx context.Context,
 	actorUserID string,
 	id uint64,
 	name, description, status string,
+	analysisEnabled bool,
 	seatsTotal *int,
 	storageQuota int64,
 ) (*types.Tenant, int64, error) {
@@ -395,13 +467,25 @@ func (r *tenantRepository) UpdateForPlatformOperations(
 		}
 		if err := tx.WithContext(ctx).Model(&types.Tenant{}).Where("id = ?", id).Updates(map[string]any{
 			"name": name, "description": description, "status": status, "seats_total": seatsTotal,
-			"storage_quota": storageQuota, "updated_at": time.Now(),
+			"analysis_enabled": analysisEnabled, "storage_quota": storageQuota, "updated_at": time.Now(),
 		}).Error; err != nil {
 			return err
 		}
+		details, err := json.Marshal(map[string]any{
+			"status": status, "analysis_enabled": analysisEnabled,
+			"seats_total": seatsTotal, "storage_quota": storageQuota,
+		})
+		if err != nil { return err }
+		if err := tx.WithContext(ctx).Create(&types.AuditLog{
+			TenantID: id, ActorUserID: actorUserID, ActorRole: "system_admin",
+			Action: "ops.enterprise.updated", ScopeType: "tenant", ScopeID: strconv.FormatUint(id, 10),
+			TargetType: "tenant", TargetID: strconv.FormatUint(id, 10),
+			Outcome: types.AuditOutcomeSuccess, Details: types.JSON(details),
+		}).Error; err != nil { return err }
 		tenant.Name = name
 		tenant.Description = description
 		tenant.Status = status
+		tenant.AnalysisEnabled = analysisEnabled
 		tenant.SeatsTotal = seatsTotal
 		tenant.StorageQuota = storageQuota
 		return nil

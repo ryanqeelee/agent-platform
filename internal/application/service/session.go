@@ -251,7 +251,7 @@ func (s *sessionService) GetSession(ctx context.Context, id string) (*types.Sess
 		})
 		return nil, err
 	}
-	if err := authorizeGovernedAnalysisSessionRead(ctx, s.messageRepo, s.tenantMemberService, id); err != nil {
+	if err := authorizeGovernedAnalysisSessionRead(ctx, s.messageRepo, s.tenantMemberService, s.tenantService, id); err != nil {
 		return nil, err
 	}
 
@@ -410,7 +410,7 @@ func (s *sessionService) ListSessions(
 			return nil, classifyErr
 		}
 		if len(governed) > 0 {
-			allowed, accessErr := currentMemberCanReadOperatingAnalysis(ctx, s.tenantMemberService)
+			allowed, accessErr := currentMemberCanReadOperatingAnalysis(ctx, s.tenantMemberService, s.tenantService)
 			if accessErr != nil {
 				return nil, accessErr
 			}

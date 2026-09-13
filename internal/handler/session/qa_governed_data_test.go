@@ -131,6 +131,10 @@ func (governedAdmissionResolver) Resolve(context.Context, uint64) (types.Governe
 	return types.GovernedEdgeConnection{EnterpriseID: "enterprise", EdgeNodeID: "edge", SourceID: "retail"}, nil
 }
 
+func (governedAdmissionResolver) VerifyCandidate(context.Context, types.GovernedEdgeBinding) error {
+	return nil
+}
+
 func TestGovernedDataTurnAdmissionRejectsRevokedAndCrossTenantCredentials(t *testing.T) {
 	allowed := true
 	calls := 0

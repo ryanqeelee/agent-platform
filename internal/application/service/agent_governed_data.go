@@ -23,12 +23,12 @@ func (s *agentService) registerGovernedDataTools(ctx context.Context, registry *
 	if !wanted[tools.ToolGovernedDataSchema] || !wanted[tools.ToolGovernedDataQuery] {
 		return fmt.Errorf("select both business data schema and query tools")
 	}
-	connection, err := AuthorizeGovernedData(ctx, s.userService, s.tenantMemberService, s.governedEdgeResolver)
+	connection, err := AuthorizeGovernedData(ctx, s.userService, s.tenantMemberService, s.tenantService, s.governedEdgeResolver)
 	if err != nil {
 		return err
 	}
 	client, err := tools.NewGovernedDataClient(connection, func(callCtx context.Context) error {
-		current, err := AuthorizeGovernedData(callCtx, s.userService, s.tenantMemberService, s.governedEdgeResolver)
+		current, err := AuthorizeGovernedData(callCtx, s.userService, s.tenantMemberService, s.tenantService, s.governedEdgeResolver)
 		if err != nil {
 			return err
 		}
@@ -58,7 +58,7 @@ func (s *agentService) registerGovernedDataTools(ctx context.Context, registry *
 
 // AuthorizeGovernedData uses the existing live member grant and server-owned
 // connection binding. No browser token is forwarded to the Edge.
-func AuthorizeGovernedData(ctx context.Context, users interfaces.UserService, members interfaces.TenantMemberService, resolver interfaces.GovernedEdgeResolver) (types.GovernedEdgeConnection, error) {
+func AuthorizeGovernedData(ctx context.Context, users interfaces.UserService, members interfaces.TenantMemberService, tenants interfaces.TenantService, resolver interfaces.GovernedEdgeResolver) (types.GovernedEdgeConnection, error) {
 	bearer, tenantID, authenticated := types.GovernedDataUserCredential(ctx)
 	if !authenticated || users == nil {
 		return types.GovernedEdgeConnection{}, tools.ErrGovernedDataAccessDenied
@@ -68,7 +68,7 @@ func AuthorizeGovernedData(ctx context.Context, users interfaces.UserService, me
 	if err != nil || user == nil || user.ID != actorID || !user.IsActive {
 		return types.GovernedEdgeConnection{}, tools.ErrGovernedDataAccessDenied
 	}
-	allowed, err := currentMemberCanReadOperatingAnalysis(ctx, members)
+	allowed, err := currentMemberCanReadOperatingAnalysis(ctx, members, tenants)
 	if err != nil {
 		return types.GovernedEdgeConnection{}, err
 	}

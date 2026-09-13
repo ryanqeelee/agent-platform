@@ -32,6 +32,11 @@ type GovernedDataClient struct {
 	freshnessToken string
 }
 
+// GovernedDataResponse is the exact Edge JSON returned by a server-owned
+// operation. Fixed product computations use this narrow surface so they share
+// the same connection fencing and response identity checks as native tools.
+type GovernedDataResponse map[string]any
+
 func NewGovernedDataClient(connection types.GovernedEdgeConnection, authorize func(context.Context) error) (*GovernedDataClient, error) {
 	u, err := url.Parse(connection.BaseURL)
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
@@ -51,6 +56,116 @@ func NewGovernedDataClient(connection types.GovernedEdgeConnection, authorize fu
 		connection: connection, authorize: authorize,
 		http: &http.Client{Timeout: 45 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 	}, nil
+}
+
+func (c *GovernedDataClient) Connection() types.GovernedEdgeConnection { return c.connection }
+
+// Catalog reads the current index and records its immutable query fence.
+func (c *GovernedDataClient) Catalog(ctx context.Context) (GovernedDataResponse, error) {
+	return c.operation(ctx, "catalog", map[string]any{})
+}
+
+// TableDefinition reads one exact table from the fenced catalog.
+func (c *GovernedDataClient) TableDefinition(ctx context.Context, table string) (GovernedDataResponse, error) {
+	if strings.TrimSpace(table) == "" {
+		return nil, fmt.Errorf("table is required")
+	}
+	return c.operation(ctx, "schema", map[string]any{"table": table})
+}
+
+// Query executes a server-owned SELECT under the current catalog fence.
+func (c *GovernedDataClient) Query(ctx context.Context, sql string, limit int, runID string) (GovernedDataResponse, error) {
+	if strings.TrimSpace(sql) == "" || limit < 1 || limit > 10000 {
+		return nil, fmt.Errorf("invalid governed query")
+	}
+	c.mu.Lock()
+	version, freshness := c.catalogVersion, c.freshnessToken
+	c.mu.Unlock()
+	if version == "" || freshness == "" {
+		return nil, fmt.Errorf("discover the governed Catalog before querying")
+	}
+	return c.operation(ctx, "query", map[string]any{
+		"source_id": c.connection.SourceID, "catalog_version": version,
+		"freshness_token": freshness, "sql": sql, "limit": limit,
+		"client_context": map[string]any{"agent_id": "weknora-operating-brief", "run_id": runID},
+	})
+}
+
+func (c *GovernedDataClient) operation(ctx context.Context, operation string, body map[string]any) (GovernedDataResponse, error) {
+	raw, err := c.request(ctx, operation, body)
+	if err != nil {
+		return nil, err
+	}
+	var result GovernedDataResponse
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&result); err != nil {
+		return nil, fmt.Errorf("invalid governed data response")
+	}
+	catalog, _ := result["catalog"].(map[string]any)
+	version, _ := catalog["version"].(string)
+	freshness, _ := catalog["freshness_token"].(string)
+	if result["contract_version"] != governedEdgeContract || result["enterprise_id"] != c.connection.EnterpriseID || result["edge_node_id"] != c.connection.EdgeNodeID || version == "" || freshness == "" {
+		return nil, fmt.Errorf("invalid Edge response identity")
+	}
+	if operation == "catalog" {
+		source, _ := result["source"].(map[string]any)
+		if source["source_id"] != c.connection.SourceID {
+			return nil, fmt.Errorf("Edge catalog source mismatch")
+		}
+		c.mu.Lock()
+		c.catalogVersion, c.freshnessToken = version, freshness
+		c.mu.Unlock()
+	} else {
+		c.mu.Lock()
+		expectedVersion, expectedFreshness := c.catalogVersion, c.freshnessToken
+		c.mu.Unlock()
+		if version != expectedVersion || freshness != expectedFreshness {
+			return nil, fmt.Errorf("Edge catalog changed during governed read")
+		}
+	}
+	if operation == "query" {
+		query, _ := result["query"].(map[string]any)
+		if query["id"] == nil || result["rows"] == nil {
+			return nil, fmt.Errorf("missing Edge query result")
+		}
+	}
+	return result, nil
+}
+
+// VerifyGovernedDataCandidate performs the same authenticated Catalog request
+// as a live governed turn and validates the returned binding identity. The
+// caller owns current product authority and Center observation checks.
+func VerifyGovernedDataCandidate(ctx context.Context, connection types.GovernedEdgeConnection) error {
+	client, err := NewGovernedDataClient(connection, func(context.Context) error { return nil })
+	if err != nil {
+		return err
+	}
+	raw, err := client.request(ctx, "catalog", map[string]any{})
+	if err != nil {
+		return err
+	}
+	var result struct {
+		ContractVersion string `json:"contract_version"`
+		EnterpriseID    string `json:"enterprise_id"`
+		EdgeNodeID       string `json:"edge_node_id"`
+		Catalog          struct {
+			Version        string `json:"version"`
+			FreshnessToken string `json:"freshness_token"`
+		} `json:"catalog"`
+		Source struct {
+			SourceID string `json:"source_id"`
+		} `json:"source"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil ||
+		result.ContractVersion != governedEdgeContract ||
+		result.EnterpriseID != connection.EnterpriseID ||
+		result.EdgeNodeID != connection.EdgeNodeID ||
+		result.Source.SourceID != connection.SourceID ||
+		result.Catalog.Version == "" || result.Catalog.FreshnessToken == "" {
+		return fmt.Errorf("Edge Catalog returned another or incomplete binding")
+	}
+	return nil
 }
 
 const governedDataMaxResponse = 8 * 1024 * 1024

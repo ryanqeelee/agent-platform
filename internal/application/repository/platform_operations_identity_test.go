@@ -216,7 +216,7 @@ func TestLegacyTenantUpdateDoesNotOverwriteOperationsFields(t *testing.T) {
 
 	reducedSeats := 5
 	_, _, err := NewPlatformOperationsTenantRepository(repo.db).UpdateForPlatformOperations(
-		context.Background(), "system-admin", tenant.ID, "Operations renamed", "Operations", types.TenantStatusSuspended, &reducedSeats, 2048)
+		context.Background(), "system-admin", tenant.ID, "Operations renamed", "Operations", types.TenantStatusSuspended, true, &reducedSeats, 2048)
 	require.NoError(t, err)
 
 	stale.Name = "stale configuration snapshot"
@@ -235,7 +235,7 @@ func TestLegacyTenantUpdateDoesNotOverwriteOperationsFields(t *testing.T) {
 
 	_, _, err = NewPlatformOperationsTenantRepository(repo.db).UpdateForPlatformOperations(
 		context.Background(), "system-admin", tenant.ID, "Operations final", "Operations final description",
-		types.TenantStatusActive, &reducedSeats, 4096)
+		types.TenantStatusActive, false, &reducedSeats, 4096)
 	require.NoError(t, err)
 	profileDescription := "profile description only"
 	require.NoError(t, NewTenantRepository(repo.db).UpdateTenantProfile(

@@ -524,16 +524,8 @@ func authenticateAPIKeyRequest(
 
 func isPlatformTenantOptionalAPI(path, method string) bool {
 	path = strings.TrimSuffix(strings.TrimSpace(path), "/")
-	const activationPrefix = "/api/v1/system/enterprise-activations/"
-	if method == http.MethodPut && strings.HasPrefix(path, activationPrefix) &&
-		!strings.Contains(strings.TrimPrefix(path, activationPrefix), "/") {
+	if method == http.MethodPost && path == "/api/v1/system/edge-node-revocations" {
 		return true
-	}
-	if method == http.MethodPut && strings.HasPrefix(path, "/api/v1/system/tenants/") {
-		parts := strings.Split(strings.TrimPrefix(path, "/api/v1/system/tenants/"), "/")
-		if len(parts) == 2 && parts[0] != "" && parts[1] == "edge-binding" {
-			return true
-		}
 	}
 	// 精确匹配 admin 控制面前缀（"/api/v1/system/admin" 本身或其子路径）。
 	// 裸 HasPrefix 会误放行诸如 "/api/v1/system/admin-foo" 的同前缀路径。

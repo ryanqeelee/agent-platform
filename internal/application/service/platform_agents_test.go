@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -15,15 +14,11 @@ import (
 type platformAgentRepoStub struct {
 	interfaces.CustomAgentRepository
 	rows    map[uint64]map[string]*types.CustomAgent
-	getErr  map[uint64]error
 	created *types.CustomAgent
 	updated *types.CustomAgent
 }
 
 func (r *platformAgentRepoStub) GetAgentByID(_ context.Context, id string, tenantID uint64) (*types.CustomAgent, error) {
-	if err := r.getErr[tenantID]; err != nil {
-		return nil, err
-	}
 	if row := r.rows[tenantID][id]; row != nil {
 		copy := *row
 		return &copy, nil
@@ -107,7 +102,7 @@ func installTestBuiltins(t *testing.T, configs map[string]types.CustomAgentConfi
 	})
 }
 
-func TestPlatformAgentManagementIsTenantlessAndExcludesInstaller(t *testing.T) {
+func TestPlatformAgentListIsTenantlessAndExcludesDedicatedInstaller(t *testing.T) {
 	installTestBuiltin(t, types.BuiltinQuickAnswerID, types.CustomAgentConfig{AgentMode: types.AgentModeQuickAnswer})
 	repo := &platformAgentRepoStub{rows: map[uint64]map[string]*types.CustomAgent{}}
 	svc := NewPlatformAgentService(repo, platformModelRepoStub{})
@@ -122,8 +117,57 @@ func TestPlatformAgentManagementIsTenantlessAndExcludesInstaller(t *testing.T) {
 		require.Zero(t, agent.TenantID)
 		require.NotEqual(t, types.BuiltinSkillInstallerID, agent.ID)
 	}
-	_, err = svc.Get(platformAdminContext(), types.BuiltinSkillInstallerID)
-	require.ErrorIs(t, err, ErrPlatformAgentNotFound)
+}
+
+func TestPlatformSkillInstallerUpdateAndGetPersistGlobalConfig(t *testing.T) {
+	installTestBuiltin(t, types.BuiltinSkillInstallerID, types.CustomAgentConfig{
+		AgentMode: types.AgentModeSmartReasoning,
+		ModelID:   "yaml-model",
+	})
+	repo := &platformAgentRepoStub{rows: map[uint64]map[string]*types.CustomAgent{}}
+	svc := NewPlatformAgentService(repo, platformModelRepoStub{models: map[string]*types.Model{
+		"global-chat": {ID: "global-chat", Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusActive},
+	}})
+
+	_, err := svc.Get(context.Background(), types.BuiltinSkillInstallerID)
+	require.ErrorIs(t, err, ErrPlatformAgentForbidden)
+	_, err = svc.Update(context.Background(), types.BuiltinSkillInstallerID, types.CustomAgentConfig{})
+	require.ErrorIs(t, err, ErrPlatformAgentForbidden)
+
+	updated, err := svc.Update(platformAdminContext(), types.BuiltinSkillInstallerID, types.CustomAgentConfig{
+		AgentMode:    types.AgentModeSmartReasoning,
+		ModelID:      "global-chat",
+		SystemPrompt: "install only reviewed skills",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, repo.created)
+	require.Zero(t, repo.created.TenantID)
+	require.Equal(t, types.BuiltinSkillInstallerID, repo.created.ID)
+	require.Equal(t, "global-chat", updated.Config.ModelID)
+
+	observed, err := svc.Get(platformAdminContext(), types.BuiltinSkillInstallerID)
+	require.NoError(t, err)
+	require.Zero(t, observed.TenantID)
+	require.Equal(t, "global-chat", observed.Config.ModelID)
+	require.Equal(t, "install only reviewed skills", observed.Config.SystemPrompt)
+
+	agents, err := svc.List(platformAdminContext())
+	require.NoError(t, err)
+	for _, agent := range agents {
+		require.NotEqual(t, types.BuiltinSkillInstallerID, agent.ID)
+	}
+}
+
+func TestPlatformSkillInstallerModelValidationMatchesOtherPlatformAgents(t *testing.T) {
+	installTestBuiltin(t, types.BuiltinSkillInstallerID, types.CustomAgentConfig{})
+	repo := &platformAgentRepoStub{rows: map[uint64]map[string]*types.CustomAgent{}}
+	svc := NewPlatformAgentService(repo, platformModelRepoStub{models: map[string]*types.Model{
+		"tenant-chat": {ID: "tenant-chat", TenantID: 7, Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusActive},
+	}})
+
+	_, err := svc.Update(platformAdminContext(), types.BuiltinSkillInstallerID, types.CustomAgentConfig{ModelID: "tenant-chat"})
+	require.ErrorIs(t, err, ErrPlatformAgentInvalidConfig)
+	require.Nil(t, repo.created)
 }
 
 func TestPlatformAgentUpdateRejectsTenantBindingsAndNonGlobalModels(t *testing.T) {
@@ -206,7 +250,7 @@ func TestRuntimeUsesGlobalBuiltinAndIgnoresTenantOverride(t *testing.T) {
 
 }
 
-func TestEmployeeRuntimeKeepsGlobalPolicyAndInjectsEnterpriseBindings(t *testing.T) {
+func TestEmployeeRuntimeKeepsGlobalPolicyAndUsesPlatformSandbox(t *testing.T) {
 	installTestBuiltin(t, types.BuiltinEmployeeAssistantID, types.CustomAgentConfig{AgentMode: types.AgentModeSmartReasoning})
 	repo := &platformAgentRepoStub{rows: map[uint64]map[string]*types.CustomAgent{
 		0: {
@@ -219,7 +263,7 @@ func TestEmployeeRuntimeKeepsGlobalPolicyAndInjectsEnterpriseBindings(t *testing
 	svc := &customAgentService{
 		repo:                 repo,
 		scenarioCapabilities: assistantScenarioResolverStub{settings: assistantScenarioSettings(true, false, true)},
-		sandboxConfigs:       &employeeSandboxRepoStub{rows: []*types.TenantSandboxConfigEntity{{ID: "tenant-sandbox", TenantID: 7, Name: "employee-assistant"}}},
+		sandboxDefault:       &employeeSandboxDefaultStub{id: "platform-sandbox"},
 		webSearchProviders:   &employeeProviderStub{provider: &types.WebSearchProviderEntity{ID: "tenant-provider", Provider: types.WebSearchProviderTypeKeenable}},
 	}
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
@@ -228,53 +272,37 @@ func TestEmployeeRuntimeKeepsGlobalPolicyAndInjectsEnterpriseBindings(t *testing
 	require.NoError(t, err)
 	require.False(t, agent.Config.WebSearchEnabled)
 	require.Empty(t, agent.Config.WebSearchProviderID)
-	require.Equal(t, "tenant-sandbox", agent.Config.SandboxConfigID)
+	require.Equal(t, "platform-sandbox", agent.Config.SandboxConfigID)
 	require.Equal(t, "all", agent.Config.SkillsSelectionMode)
 }
 
-func TestSkillInstallerUpdateAndReadStayTenantScoped(t *testing.T) {
+func TestTenantServiceRejectsSkillInstallerReadAndUpdate(t *testing.T) {
 	installTestBuiltin(t, types.BuiltinSkillInstallerID, types.CustomAgentConfig{ModelID: "yaml-model"})
 	repo := &platformAgentRepoStub{rows: map[uint64]map[string]*types.CustomAgent{
+		0: {
+			types.BuiltinSkillInstallerID: {
+				ID: types.BuiltinSkillInstallerID, IsBuiltin: true,
+				Config: types.CustomAgentConfig{ModelID: "platform-model"},
+			},
+		},
 		42: {
 			types.BuiltinSkillInstallerID: {
 				ID: types.BuiltinSkillInstallerID, TenantID: 42, IsBuiltin: true,
-				Config: types.CustomAgentConfig{ModelID: "model-before"},
+				Config: types.CustomAgentConfig{ModelID: "retired-tenant-override"},
 			},
 		},
 	}}
 	svc := &customAgentService{repo: repo}
 	ctx42 := context.WithValue(platformAdminContext(), types.TenantIDContextKey, uint64(42))
 
-	updated, err := svc.UpdateAgent(ctx42, &types.CustomAgent{
+	_, err := svc.UpdateAgent(ctx42, &types.CustomAgent{
 		ID:     types.BuiltinSkillInstallerID,
 		Config: types.CustomAgentConfig{ModelID: "model-after"},
 	})
-	require.NoError(t, err)
-	require.Equal(t, "model-after", updated.Config.ModelID)
+	require.ErrorIs(t, err, ErrCannotModifyBuiltin)
+	require.Nil(t, repo.created)
+	require.Nil(t, repo.updated)
 
-	observed, err := svc.GetAgentByID(ctx42, types.BuiltinSkillInstallerID)
-	require.NoError(t, err)
-	require.Equal(t, uint64(42), observed.TenantID)
-	require.True(t, observed.IsBuiltin)
-	require.Equal(t, "model-after", observed.Config.ModelID)
-
-	ctx43 := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(43))
-	fallback, err := svc.GetAgentByID(ctx43, types.BuiltinSkillInstallerID)
-	require.NoError(t, err)
-	require.Equal(t, uint64(43), fallback.TenantID)
-	require.True(t, fallback.IsBuiltin)
-	require.Equal(t, "yaml-model", fallback.Config.ModelID)
-}
-
-func TestSkillInstallerReadPropagatesRepositoryErrors(t *testing.T) {
-	installTestBuiltin(t, types.BuiltinSkillInstallerID, types.CustomAgentConfig{ModelID: "yaml-model"})
-	storageErr := errors.New("storage unavailable")
-	svc := &customAgentService{repo: &platformAgentRepoStub{
-		rows:   map[uint64]map[string]*types.CustomAgent{},
-		getErr: map[uint64]error{42: storageErr},
-	}}
-	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(42))
-
-	_, err := svc.GetAgentByID(ctx, types.BuiltinSkillInstallerID)
-	require.ErrorIs(t, err, storageErr)
+	_, err = svc.GetAgentByID(ctx42, types.BuiltinSkillInstallerID)
+	require.ErrorIs(t, err, ErrAgentNotFound)
 }

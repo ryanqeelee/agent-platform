@@ -64,30 +64,10 @@ func RegisterUserFavoriteRoutes(r *gin.RouterGroup, h *handler.UserResourceFavor
 	}
 }
 
-// RegisterSkillRoutes registers enterprise and employee skill routes. Platform
-// catalog administration is exposed only through the explicit tenant control
-// plane registered by RegisterSystemAdminTenantRuntimeRoutes.
+// RegisterSkillRoutes registers the enterprise read-only employee projection.
+// Platform catalog and installation mutation lives under /system/admin.
 func RegisterSkillRoutes(r *gin.RouterGroup, skillHandler *handler.SkillHandler, g *rbacGuards) {
 	r.GET("/employee-assistant/skills", g.Viewer(), skillHandler.ListEmployeeSkills)
-	r.GET("/employee-assistant/skills/manage", g.Admin(), skillHandler.ListEnterpriseSkills)
-	r.PATCH("/employee-assistant/skills/manage/:id", g.Admin(), skillHandler.SetEnterpriseSkillEnabled)
-}
-
-func registerSkillReadHandlers(skills *gin.RouterGroup, skillHandler *handler.SkillHandler) {
-	{
-		skills.GET("", skillHandler.ListSkills)
-		skills.GET("/catalog", skillHandler.ListCatalog)
-	}
-}
-
-func registerSkillCatalogWriteHandlers(catalog *gin.RouterGroup, skillHandler *handler.SkillHandler) {
-	{
-		catalog.POST("", skillHandler.RegisterCatalog)
-		catalog.POST("/:id/install", skillHandler.InstallCatalog)
-		catalog.GET("/:id/files", skillHandler.ListCatalogFiles)
-		catalog.GET("/:id/files/content", skillHandler.GetCatalogFile)
-		catalog.DELETE("/:id", skillHandler.DeleteCatalog)
-	}
 }
 
 // RegisterOrganizationRoutes registers organization and sharing routes

@@ -70,7 +70,7 @@ func imPrincipal(id string) types.Principal {
 
 func searchSkillRow() *types.TenantSkillEntity {
 	return &types.TenantSkillEntity{
-		ID: "sk-1", TenantID: testEnvTenantID, SandboxConfigID: testEnvConfigID,
+		ID: "sk-1", SandboxConfigID: testEnvConfigID,
 		Name: "web-search",
 		Envs: types.SkillEnvVars{
 			{Name: "TAVILY_API_KEY", Required: true, Value: "workspace-key"},
@@ -213,6 +213,30 @@ func TestResolverIsPinnedToItsOwnConfig(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotContains(t, env, "HTTP_PROXY")
+}
+
+func TestResolverDoesNotCrossTenantsOnSharedPlatformConfig(t *testing.T) {
+	reader := &fakeUserEnvReader{tenantID: testEnvTenantID}
+	reader.put(webPrincipal("same-user"), testEnvConfigID, "sk-1",
+		map[string]string{"TAVILY_API_KEY": "tenant-seven-private"})
+	row := searchSkillRow()
+	row.Envs[0].Value = ""
+	first := NewUserEnvResolver(
+		[]*types.TenantSkillEntity{row}, reader, testEnvTenantID, testEnvConfigID,
+	)
+	second := NewUserEnvResolver(
+		[]*types.TenantSkillEntity{row}, reader, testEnvTenantID+1, testEnvConfigID,
+	)
+	ctx := types.WithPrincipal(context.Background(), webPrincipal("same-user"))
+
+	firstEnv, _, err := first.ResolveEnv(ctx, "web-search")
+	require.NoError(t, err)
+	secondEnv, secondMissing, err := second.ResolveEnv(ctx, "web-search")
+	require.NoError(t, err)
+
+	require.Equal(t, "tenant-seven-private", firstEnv["TAVILY_API_KEY"])
+	require.NotContains(t, secondEnv, "TAVILY_API_KEY")
+	require.Contains(t, secondMissing, "TAVILY_API_KEY")
 }
 
 func TestResolverReportsMissingRequiredOnly(t *testing.T) {

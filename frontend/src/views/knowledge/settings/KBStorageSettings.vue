@@ -21,8 +21,9 @@
               </span>
             </t-option>
           </t-select>
+          <p v-if="!defaultID" class="option-hint change-warning">{{ $t('kbSettings.storage.defaultRequired') }}</p>
           <p v-if="props.hasFiles" class="option-hint change-warning">{{ $t('kbSettings.storage.migrateHint') }}</p>
-          <p v-else-if="selected" class="option-hint">{{ selected.config.endpoint || selected.config.bucket_name || selected.config.path_prefix || $t('kbSettings.storage.localStorage') }}</p>
+          <p v-else-if="selected" class="option-hint">{{ selected.name }} · {{ selected.provider.toUpperCase() }}</p>
           <a href="javascript:void(0)" class="go-settings" @click.prevent="goToSettings">{{ $t('kbSettings.storage.manageInstances') }}</a>
         </div>
       </div>
@@ -32,29 +33,29 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { listStorageBackends, type StorageBackend } from '@/api/storage-backend'
+import type { StorageBackendCapability } from '@/api/storage-backend'
+import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useUIStore } from '@/stores/ui'
 
-const props = defineProps<{ storageBackendId?: string; storageProvider?: string; hasFiles?: boolean }>()
+const props = defineProps<{ storageBackendId?: string; hasFiles?: boolean }>()
 const emit = defineEmits<{
   'update:storageBackendId': [value: string]
-  'update:storageProvider': [value: string]
 }>()
 const uiStore = useUIStore()
-const loading = ref(false), backends = ref<StorageBackend[]>([]), defaultID = ref(''), localID = ref(props.storageBackendId || '')
+const editorResources = useEditorResourcesStore()
+const loading = ref(false), backends = ref<StorageBackendCapability[]>([]), defaultID = ref(''), localID = ref(props.storageBackendId || '')
 const selected = computed(() => backends.value.find(item => item.id === localID.value))
 
 function handleChange() {
   emit('update:storageBackendId', localID.value)
-  emit('update:storageProvider', selected.value?.provider || props.storageProvider || '')
 }
 async function load() {
   loading.value = true
   try {
-    const response = await listStorageBackends()
-    backends.value = (response.data || []).filter(item => item.status === 'active')
-    defaultID.value = response.default_storage_backend_id || ''
-    if (!localID.value) localID.value = defaultID.value || backends.value[0]?.id || ''
+    await editorResources.ensureStorageBackends()
+    backends.value = editorResources.storageBackends.filter(item => item.status === 'active')
+    defaultID.value = editorResources.defaultStorageBackendID
+    if (!localID.value) localID.value = defaultID.value
     if (localID.value) handleChange()
   } finally { loading.value = false }
 }

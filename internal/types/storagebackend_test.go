@@ -34,26 +34,9 @@ func TestNewStorageBackendResponseMasksCredentials(t *testing.T) {
 	assert.Equal(t, "id", backend.Config.AccessKeyID)
 }
 
-func TestStorageBackendFromEnvironment(t *testing.T) {
-	t.Setenv("STORAGE_TYPE", "s3")
-	t.Setenv("S3_ENDPOINT", "https://s3.example.com")
-	t.Setenv("S3_REGION", "ap-test-1")
-	t.Setenv("S3_ACCESS_KEY", "access")
-	t.Setenv("S3_SECRET_KEY", "secret")
-	t.Setenv("S3_BUCKET_NAME", "bucket")
-
-	backend := StorageBackendFromEnvironment(42)
-	require.NotNil(t, backend)
-	assert.Equal(t, uint64(42), backend.TenantID)
-	assert.Equal(t, "s3", backend.Provider)
-	assert.Equal(t, StorageBackendSourceEnv, backend.Source)
-	assert.True(t, backend.LegacyAlias)
-	assert.Equal(t, "bucket", backend.Config.BucketName)
-}
-
 func TestStorageBackendRejectsTraversingPathPrefix(t *testing.T) {
 	backend := &StorageBackend{
-		TenantID: 1, Name: "unsafe", Provider: "local",
+		Name: "unsafe", Provider: "local",
 		Config: StorageBackendConfig{PathPrefix: "../outside"},
 	}
 	require.Error(t, backend.Validate())

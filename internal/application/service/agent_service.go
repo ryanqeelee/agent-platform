@@ -121,11 +121,13 @@ type agentService struct {
 	memoryService         interfaces.MemoryService
 	temporaryDocuments    interfaces.TemporaryDocumentService
 	storageResolver       interfaces.StorageBackendResolver
+	skillArchives         interfaces.PlatformSkillArchiveStore
 	toolApprovalGate      approval.MCPApproval
 	sandboxMgr            sandbox.Manager
 	sandboxResolver       sandbox.TenantSandboxResolver
 	sandboxPinner         *SessionSandboxPinner
 	sandboxPolicy         WorkspaceSandboxPolicy
+	sandboxDefault        PlatformSandboxDefault
 }
 
 const employeeQuickShellTimeout = 20 * time.Second
@@ -156,7 +158,8 @@ func (e *lazyQuickShellExecutor) ExecShellCommand(
 	runtimeCtx := context.WithValue(ctx, types.TenantIDContextKey, e.tenantID)
 	e.once.Do(func() {
 		mgr, _, err := resolveSandboxForExecution(runtimeCtx, e.service.sandboxResolver,
-			e.service.sandboxMgr, e.service.sandboxPinner, e.tenantID, e.sessionID, e.configID, e.service.sandboxPolicy)
+			e.service.sandboxMgr, e.service.sandboxPinner, e.tenantID, e.sessionID, e.configID,
+			e.service.sandboxPolicy, e.service.sandboxDefault)
 		if err != nil {
 			e.initErr = err
 			return
@@ -265,6 +268,8 @@ func NewAgentService(
 	sandboxResolver sandbox.TenantSandboxResolver,
 	sandboxPinner *SessionSandboxPinner,
 	sandboxPolicy WorkspaceSandboxPolicy,
+	sandboxDefault PlatformSandboxDefault,
+	skillArchives interfaces.PlatformSkillArchiveStore,
 	temporaryDocuments interfaces.TemporaryDocumentService,
 ) interfaces.AgentService {
 	return &agentService{
@@ -292,11 +297,13 @@ func NewAgentService(
 		messageService:        messageService,
 		memoryService:         memoryService,
 		storageResolver:       storageResolver,
+		skillArchives:         skillArchives,
 		toolApprovalGate:      toolApprovalGate,
 		sandboxMgr:            sandboxMgr,
 		sandboxResolver:       sandboxResolver,
 		sandboxPinner:         sandboxPinner,
 		sandboxPolicy:         sandboxPolicy,
+		sandboxDefault:        sandboxDefault,
 	}
 }
 
@@ -683,7 +690,7 @@ func (s *agentService) resolveWorkspaceSandbox(
 	tenantID, _ := types.TenantIDFromContext(ctx)
 	sandboxMgr, _, err := resolveSandboxForExecution(
 		ctx, s.sandboxResolver, s.sandboxMgr, s.sandboxPinner,
-		tenantID, sessionID, configID, s.sandboxPolicy,
+		tenantID, sessionID, configID, s.sandboxPolicy, s.sandboxDefault,
 	)
 	if err != nil {
 		return nil, err
@@ -710,7 +717,7 @@ func (s *agentService) initializeSkillsManager(
 	tenantID, _ := types.TenantIDFromContext(ctx)
 	sandboxMgr, configID, err := resolveSandboxForExecution(
 		ctx, s.sandboxResolver, s.sandboxMgr, s.sandboxPinner,
-		tenantID, sessionID, config.SandboxConfigID, s.sandboxPolicy,
+		tenantID, sessionID, config.SandboxConfigID, s.sandboxPolicy, s.sandboxDefault,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("resolve sandbox config for session %s: %w", sessionID, err)
@@ -779,11 +786,6 @@ func (s *agentService) tenantSkillSource(
 	if len(rows) == 0 {
 		return nil
 	}
-	// The rows were fetched under the caller's workspace, so this is the
-	// caller's ID; it is read off the row rather than the context so the
-	// bundle download cannot resolve a different workspace's storage than the
-	// one the rows came from.
-	ownerTenantID := rows[0].TenantID
 	// The closure captures the engine-creation context because loadBundle
 	// takes no context of its own. That is the turn's context today -
 	// CreateAgentEngine and engine.Execute are called back to back with the
@@ -792,7 +794,7 @@ func (s *agentService) tenantSkillSource(
 	// downloads start failing for installed skills only, and loadBundle needs
 	// a ctx parameter.
 	return skills.NewTenantSkillSource(rows, func(row *types.TenantSkillEntity) ([]byte, error) {
-		return s.loadInstalledSkillBundle(ctx, ownerTenantID, row)
+		return s.loadInstalledSkillBundle(ctx, row)
 	})
 }
 
@@ -804,26 +806,26 @@ func (s *agentService) tenantSkillSource(
 // previous bytes. read_skill is documented as serving what was installed, so a
 // definition that has moved on is reported rather than substituted.
 func (s *agentService) loadInstalledSkillBundle(
-	ctx context.Context, tenantID uint64, row *types.TenantSkillEntity,
+	ctx context.Context, row *types.TenantSkillEntity,
 ) ([]byte, error) {
 	if row == nil {
 		return nil, errors.New("skill is required")
 	}
 	if ref := strings.TrimSpace(row.BundleRef); ref != "" {
-		return s.readSkillBundle(ctx, tenantID, ref)
+		return s.readSkillBundle(ctx, ref)
 	}
 	cid := strings.TrimSpace(row.CatalogID)
 	if cid == "" || s.db == nil {
 		return nil, fmt.Errorf("skill %s has no stored bundle; its files cannot be read", row.Name)
 	}
-	cat, err := repository.NewTenantSkillRepository(s.db).GetCatalog(ctx, tenantID, cid)
+	cat, err := repository.NewTenantSkillRepository(s.db).GetCatalog(ctx, cid)
 	if err != nil {
 		return nil, err
 	}
 	if cat == nil || strings.TrimSpace(cat.BundleRef) == "" {
 		return nil, fmt.Errorf("skill %s has no stored bundle; its files cannot be read", row.Name)
 	}
-	archive, err := s.readSkillBundle(ctx, tenantID, strings.TrimSpace(cat.BundleRef))
+	archive, err := s.readSkillBundle(ctx, strings.TrimSpace(cat.BundleRef))
 	if err != nil {
 		return nil, err
 	}
@@ -864,14 +866,7 @@ func (s *agentService) userEnvResolver(
 				"any configured environment variable", configID)
 		return nil
 	}
-	// The workspace is read off a row for the same reason tenantSkillSource
-	// does it: the rows were fetched under the caller's workspace, and a value
-	// must never be looked up in a different one. With no rows there is nothing
-	// to disagree with the context.
 	tenantID, _ := types.TenantIDFromContext(ctx)
-	if len(rows) > 0 {
-		tenantID = rows[0].TenantID
-	}
 	if tenantID == 0 {
 		return nil
 	}
@@ -903,21 +898,12 @@ func (s *agentService) skillEnvCapture(config *types.AgentConfig) tools.SkillEnv
 // of it would need a live sandbox, and the archive is byte-identical to what
 // was installed.
 func (s *agentService) readSkillBundle(
-	ctx context.Context, tenantID uint64, ref string,
+	ctx context.Context, ref string,
 ) ([]byte, error) {
-	if s.storageResolver == nil {
-		return nil, errors.New("storage resolver is not configured")
+	if s.skillArchives == nil {
+		return nil, errors.New("platform skill archive store is not configured")
 	}
-	fs, _, err := s.storageResolver.ResolveFileService(
-		ctx, &types.Tenant{ID: tenantID}, "", "", "",
-	)
-	if err != nil {
-		return nil, err
-	}
-	if fs == nil {
-		return nil, errors.New("file service is not configured")
-	}
-	reader, err := fs.GetFile(ctx, ref)
+	reader, err := s.skillArchives.Open(ctx, ref)
 	if err != nil {
 		return nil, err
 	}

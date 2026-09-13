@@ -2,12 +2,14 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -41,26 +43,26 @@ func (s *transcriptStreams) types() []types.ResponseType {
 	return out
 }
 
-// transcriptMessages is the durable half. Only the two calls the transcript
-// makes are implemented; the rest panic so an accidental new dependency on the
-// repository surfaces as a test failure rather than a silent nil write.
+// transcriptMessages is the durable installation-row half. The embedded
+// interface keeps this fake restricted to the one conditional write owned by
+// the transcript.
 type transcriptMessages struct {
-	interfaces.MessageRepository
-	created []*types.Message
-	updated []*types.Message
-	err     error
+	repository.TenantSkillRepository
+	currentRunID string
+	transcript   types.JSON
+	updated      []types.JSON
+	err          error
 }
 
-func (m *transcriptMessages) CreateMessage(
-	_ context.Context, msg *types.Message,
-) (*types.Message, error) {
-	m.created = append(m.created, msg)
-	return msg, m.err
-}
-
-func (m *transcriptMessages) UpdateMessage(_ context.Context, msg *types.Message) error {
-	m.updated = append(m.updated, msg)
-	return m.err
+func (m *transcriptMessages) UpdateInstallTranscript(
+	_ context.Context, _, _, runID string, transcript types.JSON,
+) (bool, error) {
+	if runID != m.currentRunID {
+		return false, nil
+	}
+	m.transcript = append(types.JSON(nil), transcript...)
+	m.updated = append(m.updated, append(types.JSON(nil), transcript...))
+	return true, m.err
 }
 
 func newTranscriptForTest(t *testing.T) (
@@ -69,8 +71,10 @@ func newTranscriptForTest(t *testing.T) (
 	t.Helper()
 	bus := event.NewEventBus()
 	streams := &transcriptStreams{}
-	messages := &transcriptMessages{}
-	tr := newInstallTranscript(context.Background(), bus, streams, messages, "sess-1", "msg-1", nil)
+	messages := &transcriptMessages{currentRunID: "run-1"}
+	tr := newInstallTranscript(
+		context.Background(), bus, streams, messages, "cfg-1", "sk-1", "run-1", nil,
+	)
 	tr.Subscribe()
 	return tr, bus, streams, messages
 }
@@ -130,6 +134,8 @@ func TestInstallTranscriptReportsAFailedCommandAsAnError(t *testing.T) {
 func TestInstallTranscriptPersistsTheAnswerAndStepsOnComplete(t *testing.T) {
 	tr, bus, streams, messages := newTranscriptForTest(t)
 	ctx := context.Background()
+	require.NoError(t, tr.Create(ctx, "install pdf-tools"))
+	messages.updated = nil
 
 	require.NoError(t, bus.Emit(ctx, event.Event{
 		ID: "a-1", Type: event.EventAgentFinalAnswer,
@@ -142,72 +148,27 @@ func TestInstallTranscriptPersistsTheAnswerAndStepsOnComplete(t *testing.T) {
 	require.NoError(t, bus.Emit(ctx, event.Event{
 		ID: "done", Type: event.EventAgentComplete,
 		Data: event.AgentCompleteData{
-			MessageID: "msg-1", TotalDurationMs: 4200, TotalSteps: 3,
+			MessageID: "sk-1", TotalDurationMs: 4200, TotalSteps: 3,
 		},
 	}))
 	tr.Finish(ctx, nil)
 
 	require.Equal(t, types.ResponseTypeComplete, streams.types()[len(streams.types())-1])
 	require.Len(t, messages.updated, 1)
-	saved := messages.updated[0]
-	require.Equal(t, "installed pdf-tools", saved.Content)
-	require.True(t, saved.IsCompleted)
-	require.EqualValues(t, 4200, saved.AgentDurationMs)
-}
-
-// The engine routes a round's plain assistant prose through
-// EventAgentFinalAnswer, so every "now I'll check X" preamble arrives as an
-// answer chunk. Only the prose of the round that ends the run is the answer.
-// Without retracting the preambles the persisted record is every round's
-// commentary glued end to end, which is unreadable — and is what the console
-// renders as the install's result.
-func TestInstallTranscriptRetractsPreamblesSupersededByAToolCall(t *testing.T) {
-	tr, bus, _, messages := newTranscriptForTest(t)
-	ctx := context.Background()
-
-	emitAnswer := func(id, content string, done bool) {
-		require.NoError(t, bus.Emit(ctx, event.Event{
-			ID: id, Type: event.EventAgentFinalAnswer,
-			Data: event.AgentFinalAnswerData{Content: content, Done: done},
-		}))
-	}
-
-	emitAnswer("a-1", "The script needs duckduckgo-search, so I'll create the venv:", true)
-	require.NoError(t, bus.Emit(ctx, event.Event{
-		ID: "c-1", Type: event.EventAgentToolCall,
-		Data: event.AgentToolCallData{
-			ToolName: "shell_exec", ToolCallID: "call-1",
-			Arguments: map[string]any{"command": "uv venv .venv"},
-		},
-	}))
-	emitAnswer("a-2", "Installed successfully. Now verifying:", true)
-	require.NoError(t, bus.Emit(ctx, event.Event{
-		ID: "c-2", Type: event.EventAgentToolCall,
-		Data: event.AgentToolCallData{
-			ToolName: "shell_exec", ToolCallID: "call-2",
-			Arguments: map[string]any{"command": "python scripts/search.py --help"},
-		},
-	}))
-	emitAnswer("a-3", "Installed duckduckgo-search into the skill venv.", true)
-
-	require.NoError(t, bus.Emit(ctx, event.Event{
-		ID: "done", Type: event.EventAgentComplete,
-		Data: event.AgentCompleteData{MessageID: "msg-1", TotalDurationMs: 900},
-	}))
-	tr.Finish(ctx, nil)
-
-	require.Len(t, messages.updated, 1)
-	require.Equal(t,
-		"Installed duckduckgo-search into the skill venv.",
-		messages.updated[0].Content,
-		"only the final round's prose is the answer; earlier preambles were retracted by their tool calls",
-	)
+	require.Contains(t, string(messages.transcript), "installed pdf-tools")
+	var persisted []*types.Message
+	require.NoError(t, json.Unmarshal(messages.transcript, &persisted))
+	require.Len(t, persisted, 2)
+	require.Equal(t, int64(4200), persisted[1].AgentDurationMs)
 }
 
 // An install that dies before the engine emits complete is exactly the run
 // someone will come looking for, so Finish must close the record itself.
 func TestInstallTranscriptRecordsAFailedRun(t *testing.T) {
 	tr, _, streams, messages := newTranscriptForTest(t)
+	require.NoError(t, tr.Create(context.Background(), "install pdf-tools"))
+	streams.events = nil
+	messages.updated = nil
 
 	tr.Finish(context.Background(), errors.New("installer agent failed: boom"))
 
@@ -216,8 +177,7 @@ func TestInstallTranscriptRecordsAFailedRun(t *testing.T) {
 		types.ResponseTypeComplete,
 	}, streams.types())
 	require.Len(t, messages.updated, 1)
-	require.Contains(t, messages.updated[0].Content, "boom")
-	require.True(t, messages.updated[0].IsCompleted)
+	require.Contains(t, string(messages.transcript), "boom")
 }
 
 // The transcript is a troubleshooting aid. A broken Redis or a failing write
@@ -225,8 +185,12 @@ func TestInstallTranscriptRecordsAFailedRun(t *testing.T) {
 func TestInstallTranscriptSwallowsItsOwnFailures(t *testing.T) {
 	bus := event.NewEventBus()
 	streams := &transcriptStreams{err: errors.New("redis down")}
-	messages := &transcriptMessages{err: errors.New("db down")}
-	tr := newInstallTranscript(context.Background(), bus, streams, messages, "sess-1", "msg-1", nil)
+	messages := &transcriptMessages{
+		currentRunID: "run-1", err: errors.New("db down"),
+	}
+	tr := newInstallTranscript(
+		context.Background(), bus, streams, messages, "cfg-1", "sk-1", "run-1", nil,
+	)
 	tr.Subscribe()
 
 	require.NoError(t, bus.Emit(context.Background(), event.Event{
@@ -236,20 +200,34 @@ func TestInstallTranscriptSwallowsItsOwnFailures(t *testing.T) {
 	require.NotPanics(t, func() { tr.Finish(context.Background(), nil) })
 }
 
-func TestInstallTranscriptCreateSeedsTheAssistantRow(t *testing.T) {
+func TestInstallTranscriptCreatePersistsTheOpeningPrompt(t *testing.T) {
 	streams := &transcriptStreams{}
-	messages := &transcriptMessages{}
+	messages := &transcriptMessages{currentRunID: "run-1"}
 	tr := newInstallTranscript(
-		context.Background(), event.NewEventBus(), streams, messages, "sess-1", "msg-1", nil,
+		context.Background(), event.NewEventBus(), streams, messages,
+		"cfg-1", "sk-1", "run-1", nil,
 	)
 
 	require.NoError(t, tr.Create(context.Background(), "install pdf-tools"))
-	require.Len(t, messages.created, 2)
-	require.Equal(t, "user", messages.created[0].Role)
-	require.Equal(t, "install pdf-tools", messages.created[0].Content)
-	require.Equal(t, "assistant", messages.created[1].Role)
-	require.Equal(t, "msg-1", messages.created[1].ID)
-	require.Equal(t, "sess-1", messages.created[1].SessionID)
+	require.Len(t, messages.updated, 1)
+	require.Contains(t, string(messages.transcript), "install pdf-tools")
+}
+
+func TestInstallTranscriptCannotOverwriteANewerRun(t *testing.T) {
+	current := types.JSON(`[{"content":"newer"}]`)
+	messages := &transcriptMessages{
+		currentRunID: "run-new", transcript: append(types.JSON(nil), current...),
+	}
+	tr := newInstallTranscript(
+		context.Background(), event.NewEventBus(), &transcriptStreams{}, messages,
+		"cfg-1", "sk-1", "run-old", nil,
+	)
+
+	require.NoError(t, tr.Create(context.Background(), "stale prompt"))
+	tr.Finish(context.Background(), errors.New("stale failure"))
+
+	require.JSONEq(t, string(current), string(messages.transcript))
+	require.Empty(t, messages.updated)
 }
 
 // A console that attaches to a running install reads the event log and nothing
@@ -257,8 +235,10 @@ func TestInstallTranscriptCreateSeedsTheAssistantRow(t *testing.T) {
 // answering a question nobody can see.
 func TestInstallTranscriptCreateOpensTheLogWithThePrompt(t *testing.T) {
 	streams := &transcriptStreams{}
+	messages := &transcriptMessages{currentRunID: "run-1"}
 	tr := newInstallTranscript(
-		context.Background(), event.NewEventBus(), streams, &transcriptMessages{}, "sess-1", "msg-1", nil,
+		context.Background(), event.NewEventBus(), streams, messages,
+		"cfg-1", "sk-1", "run-1", nil,
 	)
 
 	require.NoError(t, tr.Create(context.Background(), "install pdf-tools"))
@@ -275,12 +255,15 @@ func TestInstallTranscriptCreateOpensTheLogWithThePrompt(t *testing.T) {
 func TestInstallTranscriptStaysOpenAcrossInstallerRounds(t *testing.T) {
 	tr, bus, streams, messages := newTranscriptForTest(t)
 	ctx := context.Background()
+	require.NoError(t, tr.Create(ctx, "install pdf-tools"))
+	streams.events = nil
+	messages.updated = nil
 
 	finishRound := func(steps int, ms int64) {
 		require.NoError(t, bus.Emit(ctx, event.Event{
 			ID: "done", Type: event.EventAgentComplete,
 			Data: event.AgentCompleteData{
-				MessageID: "msg-1", TotalSteps: steps, TotalDurationMs: ms,
+				MessageID: "sk-1", TotalSteps: steps, TotalDurationMs: ms,
 			},
 		}))
 	}
@@ -309,6 +292,9 @@ func TestInstallTranscriptStaysOpenAcrossInstallerRounds(t *testing.T) {
 // duplicate the verdict in the record people read.
 func TestInstallTranscriptFinishIsIdempotent(t *testing.T) {
 	tr, _, streams, messages := newTranscriptForTest(t)
+	require.NoError(t, tr.Create(context.Background(), "install pdf-tools"))
+	streams.events = nil
+	messages.updated = nil
 
 	tr.Finish(context.Background(), errors.New("python verification failed: boom"))
 	tr.Finish(context.Background(), errors.New("python verification failed: boom"))
@@ -349,13 +335,14 @@ func TestAsymptoticInstallPercent(t *testing.T) {
 func TestInstallTranscriptPublishesActivityProgressOnToolCalls(t *testing.T) {
 	bus := event.NewEventBus()
 	streams := &transcriptStreams{}
-	messages := &transcriptMessages{}
+	messages := &transcriptMessages{currentRunID: "run-1"}
 	type activity struct {
 		steps   int
 		lastCmd string
 	}
 	var got []activity
-	tr := newInstallTranscript(context.Background(), bus, streams, messages, "sess-1", "msg-1",
+	tr := newInstallTranscript(context.Background(), bus, streams, messages,
+		"cfg-1", "sk-1", "run-1",
 		func(steps int, lastCmd string) { got = append(got, activity{steps, lastCmd}) })
 	tr.Subscribe()
 	ctx := context.Background()

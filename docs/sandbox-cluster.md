@@ -1,6 +1,6 @@
 # WeKnora 沙箱集群与标准模板
 
-本文面向部署和平台管理员，说明如何把 CubeSandbox 或 E2B 接入 WeKnora。Docker、CubeSandbox、E2B 都在同一个空间设置页面通过同一套配置与检查接口管理；只有远端后端需要本文所述的集群和模板准备。普通智能体使用者不需要搭建模板，也不应该逐项猜测运行环境。
+本文面向部署和平台管理员，说明如何把 CubeSandbox 或 E2B 接入 WeKnora。Docker、CubeSandbox、E2B 都在平台设置页面通过同一套全局配置与检查接口管理；只有远端后端需要本文所述的集群和模板准备。普通智能体使用者不需要搭建模板，也不应该逐项猜测运行环境。
 
 ## 谁负责什么
 
@@ -8,7 +8,7 @@
 | --- | --- |
 | WeKnora 发布流程 | 维护 `docker/Dockerfile.sandbox`，发布与 WeKnora 版本匹配的 `wechatopenai/weknora-sandbox` 镜像 |
 | 集群管理员 | 部署 CubeSandbox 或开通 E2B，并保证控制面模板 API 可用 |
-| 空间管理员 | 在“设置 → 沙箱后端”中填写集群地址和凭据，先完成连接验证，再选择接口返回的模板 |
+| 平台管理员 | 在“设置 → 沙箱后端”中填写集群地址和凭据，先完成连接验证，再选择接口返回的模板 |
 | 智能体管理员 | 在智能体的 Skills 配置中选择已经验证过的沙箱后端 |
 
 “WeKnora 标准模板”指模板内容由 WeKnora 维护，并不代表所有集群共享同一个模板 ID。CubeSandbox 的模板 ID、E2B 的模板 ID/别名都属于具体集群或账号；跨集群硬编码一个 ID 会指向不存在或内容不一致的模板。
@@ -62,7 +62,7 @@ Cube 变体只发布 linux/amd64——envd 的来源镜像 `cubesandbox-base` �
 ### 制作模板并对接 WeKnora
 
 1. 按 [CubeSandbox Quick Start](https://github.com/TencentCloud/CubeSandbox/blob/master/docs/zh/guide/quickstart.md) 完成控制面、计算节点、CubeProxy 与域名解析。生产环境还需按官方文档完成鉴权、TLS、网络策略与多节点部署。
-2. 在 WeKnora 的空间设置中填写 CubeAPI、CubeProxy、sandbox domain 和可选 API Key。需要自定义 guest DNS 时填写「DNS 服务器」（须为 IP）；留空则使用集群默认。若这些端点位于 RFC1918/loopback 网络，显式打开“允许访问私网集群地址”。
+2. 在 WeKnora 的平台设置中填写 CubeAPI、CubeProxy、sandbox domain 和可选 API Key。需要自定义 guest DNS 时填写「DNS 服务器」（须为 IP）；留空则使用集群默认。若这些端点位于 RFC1918/loopback 网络，显式打开“允许访问私网集群地址”。
 3. 点击“连接并继续”。WeKnora 先验证控制面地址与凭据，通过后才进入模板步骤并列出集群模板。**不会自动创建**。没有 WeKnora 标准模板时在占位卡片上点「创建」，会从 `wechatopenai/weknora-sandbox:main-cube` 发起构建。改 DNS 或需要换镜像时在 weknora 卡片上点「重建」：优先对现有标准模板做 in-place rebuild（模板 ID 不变）；只有 redo 被拒绝时才先建新模板、成功后再删旧的。已安装 Skill 的配置（以及同一集群上其它已装 Skill 的配置）不能重建。失败模板同样用「重建」（CubeMaster 拒绝 redo、错误码 130400 时尤其需要）。
 4. 模板构建状态会自动刷新。状态变为 `READY` 后才可选择并进入运行配置；界面显示模板名称、状态和版本，配置内部才保存该集群自己的 `template_id`。
 
@@ -111,7 +111,7 @@ E2B 官方托管服务、自建 E2B Infrastructure，以及任意实现 E2B 协�
 ## 在设置页面完成接入
 
 1. 打开“设置 → 沙箱后端”，点击“添加沙箱后端”。
-2. 填写该集群自己的 API、Proxy、sandbox domain 和凭据；这些值只保存在当前空间配置中，不读取 Sandbox 环境变量。
+2. 填写该集群自己的 API、Proxy、sandbox domain 和凭据；这些值只保存在当前平台配置中，不读取 Sandbox 环境变量。
 3. 点击“连接并继续”，验证控制面地址和凭据；连接通过后才加载模板列表。
 4. 没有标准模板时点占位卡片上的「创建」，或选择集群已有的兼容模板；改 DNS / 镜像后在 weknora 卡片上点「重建」。**该配置已安装 Skill 时不能更换或重建模板**——技能环境绑在快照上，新底模不会进去；请新建一份沙箱再装 Skill。构建中的模板不可选择，状态会自动刷新。
 5. 配置运行参数；上线前可执行一次“完整验证”。完整验证会真实创建、执行并销毁一个沙箱。

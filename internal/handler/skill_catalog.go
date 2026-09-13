@@ -15,20 +15,19 @@ import (
 )
 
 // ListCatalog godoc
-// @Summary      List workspace skills
-// @Description  Returns every skill definition in this workspace and which sandbox configs it is installed on.
+// @Summary      List platform skills
+// @Description  Returns every platform skill definition and which sandbox configs it is installed on.
 // @Tags         Skills
 // @Produce      json
 // @Success      200  {object}  map[string]interface{}
 // @Security     Bearer
-// @Param        tenant_id  path  int  true  "Enterprise ID"
-// @Router       /system/admin/tenants/{tenant_id}/skills/catalog [get]
+// @Router       /system/admin/skills [get]
 func (h *SkillHandler) ListCatalog(c *gin.Context) {
 	if h.catalog == nil {
 		c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
 		return
 	}
-	rows, err := h.catalog.ListCatalog(c.Request.Context(), sandboxConfigTenantID(c))
+	rows, err := h.catalog.ListCatalog(c.Request.Context())
 	if err != nil {
 		_ = c.Error(err)
 		return
@@ -37,7 +36,7 @@ func (h *SkillHandler) ListCatalog(c *gin.Context) {
 }
 
 // RegisterCatalog godoc
-// @Summary      Add a skill to the workspace catalog
+// @Summary      Add a skill to the platform catalog
 // @Description  Records a skill without installing it. Send a zip as multipart field "file", or JSON {"source":"..."}.
 // @Tags         Skills
 // @Accept       json
@@ -45,8 +44,7 @@ func (h *SkillHandler) ListCatalog(c *gin.Context) {
 // @Produce      json
 // @Success      201  {object}  map[string]interface{}
 // @Security     Bearer
-// @Param        tenant_id  path  int  true  "Enterprise ID"
-// @Router       /system/admin/tenants/{tenant_id}/skills/catalog [post]
+// @Router       /system/admin/skills [post]
 func (h *SkillHandler) RegisterCatalog(c *gin.Context) {
 	if h.catalog == nil {
 		_ = c.Error(apperrors.NewInternalServerError("skill catalog is not configured"))
@@ -85,7 +83,7 @@ func (h *SkillHandler) RegisterCatalog(c *gin.Context) {
 	}
 
 	cat, err := h.catalog.RegisterCatalogFromArchive(
-		c.Request.Context(), sandboxConfigTenantID(c), archive,
+		c.Request.Context(), archive,
 	)
 	if err != nil {
 		respondSkillServiceError(c, err)
@@ -111,7 +109,7 @@ func (h *SkillHandler) registerCatalogFromSource(c *gin.Context) {
 		return
 	}
 	cat, err := h.catalog.RegisterCatalogFromSource(
-		c.Request.Context(), sandboxConfigTenantID(c), source,
+		c.Request.Context(), source,
 	)
 	if err != nil {
 		respondSkillServiceError(c, err)
@@ -133,8 +131,7 @@ type catalogInstallRequest struct {
 // @Param        id   path  string  true  "Catalog skill ID"
 // @Success      202  {object}  map[string]interface{}
 // @Security     Bearer
-// @Param        tenant_id  path  int  true  "Enterprise ID"
-// @Router       /system/admin/tenants/{tenant_id}/skills/catalog/{id}/install [post]
+// @Router       /system/admin/skills/{id}/install [post]
 func (h *SkillHandler) InstallCatalog(c *gin.Context) {
 	if h.catalog == nil {
 		_ = c.Error(apperrors.NewInternalServerError("skill catalog is not configured"))
@@ -151,7 +148,7 @@ func (h *SkillHandler) InstallCatalog(c *gin.Context) {
 		return
 	}
 	result, err := h.catalog.InstallCatalogToConfigs(
-		c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"), req.SandboxConfigIDs,
+		c.Request.Context(), c.Param("id"), req.SandboxConfigIDs,
 	)
 	if err != nil {
 		respondSkillServiceError(c, err)
@@ -177,15 +174,14 @@ func (h *SkillHandler) InstallCatalog(c *gin.Context) {
 // @Param        id   path  string  true  "Catalog skill ID"
 // @Success      200  {object}  map[string]interface{}
 // @Security     Bearer
-// @Param        tenant_id  path  int  true  "Enterprise ID"
-// @Router       /system/admin/tenants/{tenant_id}/skills/catalog/{id} [delete]
+// @Router       /system/admin/skills/{id} [delete]
 func (h *SkillHandler) DeleteCatalog(c *gin.Context) {
 	if h.catalog == nil {
 		_ = c.Error(apperrors.NewInternalServerError("skill catalog is not configured"))
 		return
 	}
 	if err := h.catalog.DeleteCatalog(
-		c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"),
+		c.Request.Context(), c.Param("id"),
 	); err != nil {
 		_ = c.Error(err)
 		return
@@ -201,15 +197,14 @@ func (h *SkillHandler) DeleteCatalog(c *gin.Context) {
 // @Param        id   path  string  true  "Catalog skill ID"
 // @Success      200  {object}  map[string]interface{}
 // @Security     Bearer
-// @Param        tenant_id  path  int  true  "Enterprise ID"
-// @Router       /system/admin/tenants/{tenant_id}/skills/catalog/{id}/files [get]
+// @Router       /system/admin/skills/{id}/files [get]
 func (h *SkillHandler) ListCatalogFiles(c *gin.Context) {
 	if h.catalog == nil {
 		_ = c.Error(apperrors.NewInternalServerError("skill catalog is not configured"))
 		return
 	}
 	files, err := h.catalog.ListCatalogFiles(
-		c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"),
+		c.Request.Context(), c.Param("id"),
 	)
 	if err != nil {
 		respondSkillServiceError(c, err)
@@ -226,15 +221,14 @@ func (h *SkillHandler) ListCatalogFiles(c *gin.Context) {
 // @Param        path  query  string  true  "Skill-root-relative file path"
 // @Success      200   {object}  map[string]interface{}
 // @Security     Bearer
-// @Param        tenant_id  path  int  true  "Enterprise ID"
-// @Router       /system/admin/tenants/{tenant_id}/skills/catalog/{id}/files/content [get]
+// @Router       /system/admin/skills/{id}/files/content [get]
 func (h *SkillHandler) GetCatalogFile(c *gin.Context) {
 	if h.catalog == nil {
 		_ = c.Error(apperrors.NewInternalServerError("skill catalog is not configured"))
 		return
 	}
 	file, err := h.catalog.ReadCatalogFile(
-		c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"), c.Query("path"),
+		c.Request.Context(), c.Param("id"), c.Query("path"),
 	)
 	if err != nil {
 		respondSkillServiceError(c, err)

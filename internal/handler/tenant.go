@@ -1281,7 +1281,7 @@ func (h *TenantHandler) SearchTenants(c *gin.Context) {
 
 // GetTenantKV godoc
 // @Summary      获取空间KV配置
-// @Description  获取空间级别的KV配置（支持prompt-templates、storage-engine-config、chat-history-config、retrieval-config）
+// @Description  获取空间级别的KV配置（支持prompt-templates、chat-history-config、retrieval-config）
 // @Tags         空间管理
 // @Accept       json
 // @Produce      json
@@ -1296,7 +1296,7 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 	key := secutils.SanitizeForLog(c.Param("key"))
 
 	switch key {
-	case "storage-engine-config", "chat-history-config", "retrieval-config":
+	case "chat-history-config", "retrieval-config":
 		if !types.IsSystemAdminFromContext(ctx) {
 			c.Error(errors.NewForbiddenError("platform configuration requires system administrator access"))
 			return
@@ -1307,8 +1307,6 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 	case "prompt-templates":
 		h.GetPromptTemplates(c)
 		return
-	case "storage-engine-config":
-		h.GetTenantStorageEngineConfig(c)
 		return
 	case "chat-history-config":
 		h.GetTenantChatHistoryConfig(c)
@@ -1325,7 +1323,7 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 
 // UpdateTenantKV godoc
 // @Summary      更新空间KV配置
-// @Description  更新空间级别的KV配置（支持storage-engine-config、chat-history-config、retrieval-config）
+// @Description  更新空间级别的KV配置（支持chat-history-config、retrieval-config）
 // @Tags         空间管理
 // @Accept       json
 // @Produce      json
@@ -1341,7 +1339,7 @@ func (h *TenantHandler) UpdateTenantKV(c *gin.Context) {
 	key := secutils.SanitizeForLog(c.Param("key"))
 
 	switch key {
-	case "storage-engine-config", "chat-history-config", "retrieval-config":
+	case "chat-history-config", "retrieval-config":
 		if !types.IsSystemAdminFromContext(ctx) {
 			c.Error(errors.NewForbiddenError("platform configuration requires system administrator access"))
 			return
@@ -1349,9 +1347,6 @@ func (h *TenantHandler) UpdateTenantKV(c *gin.Context) {
 	}
 
 	switch key {
-	case "storage-engine-config":
-		h.updateTenantStorageEngineConfigInternal(c)
-		return
 	case "chat-history-config":
 		h.updateTenantChatHistoryConfigInternal(c)
 		return
@@ -1363,75 +1358,6 @@ func (h *TenantHandler) UpdateTenantKV(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("unsupported key"))
 		return
 	}
-}
-
-// GetTenantStorageEngineConfig returns the tenant's storage engine config (Local, MinIO, COS parameters).
-func (h *TenantHandler) GetTenantStorageEngineConfig(c *gin.Context) {
-	ctx := c.Request.Context()
-	tenant, _ := types.TenantInfoFromContext(ctx)
-	if tenant == nil {
-		logger.Error(ctx, "Workspace is empty")
-		c.Error(errors.NewBadRequestError("Workspace is empty"))
-		return
-	}
-	data := types.StorageEngineConfigForResponse(tenant.StorageEngineConfig, true)
-	if data == nil {
-		data = &types.StorageEngineConfig{}
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    data,
-	})
-}
-
-// updateTenantStorageEngineConfigInternal updates the tenant's storage engine config.
-func (h *TenantHandler) updateTenantStorageEngineConfigInternal(c *gin.Context) {
-	ctx := c.Request.Context()
-	var cfg types.StorageEngineConfig
-	if err := c.ShouldBindJSON(&cfg); err != nil {
-		logger.Error(ctx, "Failed to parse request parameters", err)
-		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
-		return
-	}
-	provider := strings.ToLower(strings.TrimSpace(cfg.DefaultProvider))
-	if provider == "" {
-		provider = firstAllowedStorageProvider()
-	}
-	if provider == "" {
-		c.Error(errors.NewBadRequestError("No storage provider is allowed by STORAGE_ALLOW_LIST"))
-		return
-	}
-	if !isStorageProviderAllowed(provider) {
-		c.Error(errors.NewBadRequestError("Storage provider is not allowed by STORAGE_ALLOW_LIST"))
-		return
-	}
-	cfg.DefaultProvider = provider
-	tenant, _ := types.TenantInfoFromContext(ctx)
-	if tenant == nil {
-		logger.Error(ctx, "Workspace is empty")
-		c.Error(errors.NewBadRequestError("Workspace is empty"))
-		return
-	}
-	merged := types.MergeStorageEngineConfigForUpdate(&cfg, tenant.StorageEngineConfig)
-	tenant.StorageEngineConfig = merged
-	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
-	if err != nil {
-		if appErr, ok := errors.IsAppError(err); ok {
-			c.Error(appErr)
-		} else {
-			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to update workspace storage engine config").WithDetails(err.Error()))
-		}
-		return
-	}
-	emitPlatformConfigAudit(ctx, h.audit, types.AuditActionSystemRetrievalProcessingChanged,
-		"update", "storage_backend", strconv.FormatUint(updatedTenant.ID, 10), "enterprise_assigned",
-		platformConfigRevision(updatedTenant.CreatedAt, updatedTenant.UpdatedAt), []string{"storage_engine_config"})
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    types.StorageEngineConfigForResponse(updatedTenant.StorageEngineConfig, true),
-		"message": "存储引擎配置已更新",
-	})
 }
 
 // GetPromptTemplates godoc

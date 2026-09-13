@@ -172,7 +172,7 @@ test('adminSkillEnvClearPayload sends an empty string so the declaration stays',
   assert.deepEqual(adminSkillEnvClearPayload('API_TOKEN'), { API_TOKEN: '' })
 })
 
-test('canClearAdminSkillEnv is only true once a workspace value is stored', () => {
+test('canClearAdminSkillEnv is only true once a platform default is stored', () => {
   assert.equal(canClearAdminSkillEnv({ is_set: true }), true)
   assert.equal(canClearAdminSkillEnv({ is_set: false }), false)
   assert.equal(canClearAdminSkillEnv({}), false)

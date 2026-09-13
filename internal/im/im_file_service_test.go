@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // stubIMFileService implements interfaces.FileService for IM resolver tests.
@@ -43,69 +43,48 @@ func (s *stubIMFileService) CopyFile(context.Context, string, uint64, string) (s
 	return "", nil
 }
 
-func TestBuildIMFileServiceForProvider_FallbackToGlobal(t *testing.T) {
-	stub := &stubIMFileService{}
-	tenant := &types.Tenant{
-		StorageEngineConfig: &types.StorageEngineConfig{
-			DefaultProvider: "cos",
-			COS: &types.COSEngineConfig{
-				SecretID:   "id",
-				SecretKey:  "key",
-				BucketName: "bucket",
-				Region:     "ap-shanghai",
-			},
-		},
-	}
-
-	svc := buildIMFileServiceForProvider(tenant, "minio", stub)
-	require.NotNil(t, svc)
-	got, err := svc.GetFileURL(context.Background(), "minio://wizard-test/10000/exports/a.png")
-	require.NoError(t, err)
-	assert.Equal(t, "https://global-storage.example/minio://wizard-test/10000/exports/a.png", got)
+type stubStorageBackendResolver struct {
+	fileService interfaces.FileService
+	provider    string
+	calls       int
+	backendIDs  []string
 }
 
-func TestIMFileServiceResolver_CachesPerProvider(t *testing.T) {
-	stub := &stubIMFileService{}
-	tenant := &types.Tenant{
-		StorageEngineConfig: &types.StorageEngineConfig{
-			DefaultProvider: "cos",
-			COS: &types.COSEngineConfig{
-				SecretID:   "id",
-				SecretKey:  "key",
-				BucketName: "bucket",
-				Region:     "ap-shanghai",
-			},
-		},
-	}
-	r := newIMFileServiceResolver(tenant, stub)
+func (r *stubStorageBackendResolver) ResolveFileService(
+	_ context.Context, backendID, _ string,
+) (interfaces.FileService, string, error) {
+	r.calls++
+	r.backendIDs = append(r.backendIDs, backendID)
+	return r.fileService, r.provider, nil
+}
 
-	svc1 := r.ResolveFileService("minio://wizard-test/10000/a.png")
-	svc2 := r.ResolveFileService("minio://wizard-test/10000/b.png")
+func (r *stubStorageBackendResolver) ResolveBackend(
+	_ context.Context, backendID string,
+) (*types.StorageBackend, error) {
+	return &types.StorageBackend{ID: backendID, Provider: r.provider}, nil
+}
+
+func TestIMFileServiceResolver_CachesPerBackend(t *testing.T) {
+	stub := &stubIMFileService{}
+	storage := &stubStorageBackendResolver{fileService: stub, provider: "minio"}
+	r := newIMFileServiceResolver(&types.Tenant{}, nil, storage)
+
+	svc1 := r.ResolveFileService("storage://backend-a/minio://wizard-test/10000/a.png")
+	svc2 := r.ResolveFileService("storage://backend-a/minio://wizard-test/10000/b.png")
 	assert.Same(t, svc1, svc2, "same provider should reuse cached FileService")
-
-	svc3 := r.ResolveFileService("local://10000/c.png")
-	assert.NotSame(t, svc1, svc3, "different provider should use a different service")
+	assert.Equal(t, 1, storage.calls)
+	assert.Equal(t, []string{"backend-a"}, storage.backendIDs)
 }
 
-func TestRewriteStorageURLs_MinIOFallbackViaGlobal(t *testing.T) {
+func TestRewriteStorageURLs_MinIOViaGlobalBackend(t *testing.T) {
 	stub := &stubIMFileService{
 		getFileURL: func(_ context.Context, filePath string) (string, error) {
 			return "https://minio.example/presigned?path=" + filePath, nil
 		},
 	}
-	tenant := &types.Tenant{
-		StorageEngineConfig: &types.StorageEngineConfig{
-			DefaultProvider: "cos",
-			COS: &types.COSEngineConfig{
-				SecretID:   "id",
-				SecretKey:  "key",
-				BucketName: "bucket",
-				Region:     "ap-shanghai",
-			},
-		},
-	}
 	in := `![知识助理"知识库"管理视图界面](minio://wizard-test/10000/exports/c91cf852.png)`
-	resolver := newIMFileServiceResolver(tenant, stub)
+	storage := &stubStorageBackendResolver{fileService: stub, provider: "minio"}
+	resolver := newIMFileServiceResolver(&types.Tenant{}, nil, storage)
 	out := rewriteStorageURLs(context.Background(), in, resolver)
 	assert.Contains(t, out, "https://minio.example/presigned")
 	assert.NotContains(t, out, "](minio://")
@@ -118,9 +97,11 @@ func TestRewriteStorageURLs_ScopedPath(t *testing.T) {
 			return "https://storage.example/a.png", nil
 		},
 	}
+	storage := &stubStorageBackendResolver{fileService: stub, provider: "cos"}
 	input := "![img](storage://backend-a/cos://bucket/ap-test/10000/exports/a.png)"
-	output := rewriteStorageURLs(context.Background(), input, newIMFileServiceResolver(&types.Tenant{}, stub))
+	output := rewriteStorageURLs(context.Background(), input, newIMFileServiceResolver(&types.Tenant{}, nil, storage))
 	assert.Contains(t, output, "https://storage.example/a.png")
+	assert.Equal(t, []string{"backend-a"}, storage.backendIDs)
 }
 
 // When GetFileURL resolves a resource:// alias to a still-internal storage://
@@ -153,16 +134,15 @@ func TestRewriteStorageURLs_UppercaseSchemeIsSubstituted(t *testing.T) {
 	assert.NotContains(t, out, "resource://")
 }
 
-func TestCleanIMContent_MinIOFallbackIntegration(t *testing.T) {
+func TestCleanIMContent_MinIOGlobalBackendIntegration(t *testing.T) {
 	stub := &stubIMFileService{
 		getFileURL: func(_ context.Context, _ string) (string, error) {
 			return "https://minio.example/img.png", nil
 		},
 	}
-	tenant := &types.Tenant{
-		StorageEngineConfig: &types.StorageEngineConfig{DefaultProvider: "cos"},
-	}
+	tenant := &types.Tenant{}
 	in := "see ![x](minio://wizard-test/10000/exports/x.png) ok"
-	out := cleanIMContent(context.Background(), in, tenant, stub)
+	storage := &stubStorageBackendResolver{fileService: stub, provider: "minio"}
+	out := cleanIMContent(context.Background(), in, tenant, nil, storage)
 	assert.Contains(t, out, "https://minio.example/img.png")
 }

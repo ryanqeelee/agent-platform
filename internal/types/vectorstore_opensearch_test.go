@@ -103,36 +103,6 @@ func TestGetVectorStoreTypes_OpenSearchEntry(t *testing.T) {
 	assert.True(t, efs.Immutable) // no PutSettings path → immutable
 }
 
-// TestBuildEnvVectorStores_OpenSearch verifies the env-store builder case.
-func TestBuildEnvVectorStores_OpenSearch(t *testing.T) {
-	lookup := mockEnvLookup(map[string]string{
-		"OPENSEARCH_ADDR":                 "https://os:9200",
-		"OPENSEARCH_USERNAME":             "admin",
-		"OPENSEARCH_PASSWORD":             "secret",
-		"OPENSEARCH_INDEX":                "weknora",
-		"OPENSEARCH_INSECURE_SKIP_VERIFY": "true",
-	})
-	stores := BuildEnvVectorStores("opensearch", lookup)
-	require.Len(t, stores, 1)
-	s := stores[0]
-	assert.Equal(t, "__env_opensearch__", s.ID)
-	assert.Equal(t, OpenSearchRetrieverEngineType, s.EngineType)
-	assert.Equal(t, "https://os:9200", s.ConnectionConfig.Addr)
-	assert.Equal(t, "admin", s.ConnectionConfig.Username)
-	assert.Equal(t, "secret", s.ConnectionConfig.Password)
-	assert.True(t, s.ConnectionConfig.InsecureSkipVerify)
-	assert.Equal(t, "weknora", s.IndexConfig.IndexName)
-}
-
-// TestBuildEnvVectorStores_OpenSearch_InsecureDefaultsFalse verifies the TLS
-// skip flag is false unless the env var is explicitly "true".
-func TestBuildEnvVectorStores_OpenSearch_InsecureDefaultsFalse(t *testing.T) {
-	lookup := mockEnvLookup(map[string]string{"OPENSEARCH_ADDR": "https://os:9200"})
-	stores := BuildEnvVectorStores("opensearch", lookup)
-	require.Len(t, stores, 1)
-	assert.False(t, stores[0].ConnectionConfig.InsecureSkipVerify)
-}
-
 // TestRetrieverEngineMapping_OpenSearch verifies the RETRIEVE_DRIVER mapping.
 func TestRetrieverEngineMapping_OpenSearch(t *testing.T) {
 	m := GetRetrieverEngineMapping()

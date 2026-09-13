@@ -393,7 +393,7 @@
               Docker has no provider-side timeout at all: an abandoned container
               keeps its memory and CPU share on the daemon host until WeKnora
               reclaims it, so the idle TTL and the resource caps are the only
-              things bounding what one workspace can hold.
+              things bounding what one sandbox can hold.
             -->
             <template v-if="backend === 'docker'">
               <t-form-item :label="$t('settings.sandbox.dockerIdleTtl')"
@@ -741,7 +741,6 @@ import { useI18n } from 'vue-i18n'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import SandboxBackendBadge from '@/components/settings/SandboxBackendBadge.vue'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
-import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 import {
   checkSandboxConfig,
   createSandboxConfig,
@@ -778,7 +777,6 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const deploymentCapabilities = useDeploymentCapabilitiesStore()
-const platformTenantID = usePlatformTenantControlID()
 const dockerBackendEnabled = computed(() =>
   deploymentCapabilities.isSupported('settings.sandbox.docker'),
 )
@@ -823,7 +821,7 @@ const allowPrivateEndpoints = ref(false)
 const cube = reactive<SandboxCubeConfig>({})
 const e2b = reactive<SandboxE2BConfig>({})
 const docker = reactive<SandboxDockerConfig>({})
-// Tracks which secrets the tenant already has stored, so an empty input can
+// Tracks which secrets the platform config already has stored, so an empty input can
 // mean "keep the saved key" instead of "no key configured".
 const storedSecrets = reactive({ cube: false, e2b: false })
 const envRows = ref<{ key: string; value: string; stored?: boolean }[]>([])
@@ -1208,7 +1206,7 @@ async function refreshInFlightSkill() {
     return
   }
   try {
-    const res = await listConfigSkills(platformTenantID.value!, id)
+    const res = await listConfigSkills(id)
     inFlightFromSkills.value = (res?.data || []).some(
       (skill) => skill.status === 'installing' || skill.status === 'removing',
     )
@@ -1389,7 +1387,7 @@ async function loadTemplates(ensureStandard = false, silent = false, replaceStan
   if (!silent) templatesLoading.value = true
   templatesError.value = ''
   try {
-    const res = await querySandboxTemplates(platformTenantID.value!, {
+    const res = await querySandboxTemplates({
       config: collectPayload(),
       config_id: effectiveRecord.value?.id,
       ensure_standard: ensureStandard,
@@ -1617,8 +1615,8 @@ async function save() {
     const payload = { name: trimmed, description: description.value, config: collectPayload() }
     const existing = effectiveRecord.value
     const res = existing
-      ? await updateSandboxConfigById(platformTenantID.value!, existing.id, payload)
-      : await createSandboxConfig(platformTenantID.value!, payload)
+      ? await updateSandboxConfigById(existing.id, payload)
+      : await createSandboxConfig(payload)
     MessagePlugin.success(t('common.saveSuccess'))
     // The list behind the drawer refreshes either way, so closing here is only
     // about whether the wizard has anything left to offer.
@@ -1651,7 +1649,7 @@ async function runCheck(deep: boolean): Promise<boolean> {
   try {
     // config_id lets the backend resolve masked secrets against the stored row,
     // so an edited form can be probed without retyping the API key.
-    const res = await checkSandboxConfig(platformTenantID.value!, {
+    const res = await checkSandboxConfig({
       config: collectPayload(),
       config_id: effectiveRecord.value?.id,
       deep,

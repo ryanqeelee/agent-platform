@@ -3,7 +3,7 @@
     <t-icon :name="iconName" class="vs-badge-icon" />
     <span class="vs-badge-name">{{ displayName }}</span>
     <span
-      v-if="engineType && (effectiveSource === 'user' || effectiveSource === 'env')"
+      v-if="engineType && effectiveSource === 'user'"
       class="vs-badge-engine"
     >
       ({{ engineType }})
@@ -34,10 +34,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 
-// When backend omits the source (e.g. legacy KB row from a cached list
-// endpoint that does not enrich), treat it as env so the badge renders
-// gracefully instead of going blank.
-const effectiveSource = computed<VectorStoreSource>(() => props.source || 'env')
+const effectiveSource = computed<VectorStoreSource>(() => props.source || 'unavailable')
 
 const isUnavailable = computed(
   () => props.status === 'unavailable' || effectiveSource.value === 'unavailable',
@@ -45,11 +42,7 @@ const isUnavailable = computed(
 
 const iconName = computed(() => {
   switch (effectiveSource.value) {
-    case 'env':
     case 'user':
-      // Both env- and user-bound KBs sit on top of a vector store; the
-      // distinction is purely organizational (configured at process
-      // start vs. created in the UI), so they share the same icon.
       return 'data-base'
     case 'shared':
       return 'share'
@@ -60,7 +53,6 @@ const iconName = computed(() => {
 })
 
 const displayName = computed(() => {
-  if (effectiveSource.value === 'env') return t('vectorStoreBadge.systemDefault')
   if (effectiveSource.value === 'shared') return t('vectorStoreBadge.sharedFromOrg')
   return props.name || t('vectorStoreBadge.unknownStore')
 })
@@ -77,11 +69,6 @@ const displayName = computed(() => {
   line-height: 1.4;
   background: var(--td-bg-color-component, #f5f7fa);
   color: var(--td-text-color-primary, #1d2129);
-}
-
-.vs-badge-env {
-  background: var(--td-brand-color-1, #ecf2fe);
-  color: var(--td-brand-color-7, #0052d9);
 }
 
 .vs-badge-user {

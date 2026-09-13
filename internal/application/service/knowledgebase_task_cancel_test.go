@@ -253,18 +253,58 @@ func (kbCleanupEmbedder) BatchEmbedWithPool(
 	return nil, nil
 }
 
+type kbCleanupRetrieveEngine struct {
+	interfaces.RetrieveEngineService
+	deletedKnowledgeIDs []string
+}
+
+func (e *kbCleanupRetrieveEngine) EngineType() types.RetrieverEngineType {
+	return types.PostgresRetrieverEngineType
+}
+
+func (e *kbCleanupRetrieveEngine) Support() []types.RetrieverType {
+	return []types.RetrieverType{types.VectorRetrieverType}
+}
+
+func (e *kbCleanupRetrieveEngine) DeleteByKnowledgeIDList(
+	_ context.Context, knowledgeIDs []string, _ int, _ string,
+) error {
+	e.deletedKnowledgeIDs = append(e.deletedKnowledgeIDs, knowledgeIDs...)
+	return nil
+}
+
+type kbCleanupRetrieveRegistry struct {
+	interfaces.RetrieveEngineRegistry
+	engine interfaces.RetrieveEngineService
+}
+
+func (r kbCleanupRetrieveRegistry) GetOrLoadByStoreID(
+	context.Context, uint64, string,
+) (interfaces.RetrieveEngineService, error) {
+	return r.engine, nil
+}
+
 func TestProcessKBDeleteCollectsKnowledgeIDsForEveryScrub(t *testing.T) {
+	const storeID = "00000000-0000-0000-0000-0000000000cc"
 	inspector := &recordingKBTaskInspector{}
+	retrieveEngine := &kbCleanupRetrieveEngine{}
 	svc := &knowledgeBaseService{
 		kgRepo: populatedKBKnowledgeRepo{items: []*types.Knowledge{
 			{ID: "knowledge-1", KnowledgeBaseID: "kb-1", EmbeddingModelID: "model-1"},
 			{ID: "knowledge-2", KnowledgeBaseID: "kb-1", EmbeddingModelID: "model-1"},
 		}},
-		chunkRepo:     kbCleanupChunkRepo{},
-		modelService:  kbCleanupModelService{},
-		taskInspector: inspector,
+		chunkRepo:      kbCleanupChunkRepo{},
+		modelService:   kbCleanupModelService{},
+		retrieveEngine: kbCleanupRetrieveRegistry{engine: retrieveEngine},
+		ownership:      &kbDeleteOwnership{usable: map[string]bool{storeID: true}, defaultID: storeID},
+		taskInspector:  inspector,
 	}
-	payload, err := json.Marshal(types.KBDeletePayload{TenantID: 1, KnowledgeBaseID: "kb-1"})
+	storeIDValue := storeID
+	payload, err := json.Marshal(types.KBDeletePayload{
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		VectorStoreID:   &storeIDValue,
+	})
 	require.NoError(t, err)
 
 	err = svc.ProcessKBDelete(context.Background(), asynq.NewTask(types.TypeKBDelete, payload))
@@ -274,6 +314,7 @@ func TestProcessKBDeleteCollectsKnowledgeIDsForEveryScrub(t *testing.T) {
 	for _, call := range inspector.calls {
 		assert.Equal(t, []string{"knowledge-1", "knowledge-2"}, call.knowledgeIDs)
 	}
+	assert.ElementsMatch(t, []string{"knowledge-1", "knowledge-2"}, retrieveEngine.deletedKnowledgeIDs)
 }
 
 // kbDeleteDeferredRegistry reports a retryable engine-resolution failure from
@@ -302,12 +343,16 @@ func (r kbDeleteDeferredRegistry) GetOrLoadByStoreID(
 }
 
 type kbDeleteOwnership struct {
-	owned map[string]uint64
+	usable    map[string]bool
+	defaultID string
 }
 
-func (o *kbDeleteOwnership) StoreOwnedBy(_ context.Context, storeID string, tenantID uint64) (bool, error) {
-	owner, ok := o.owned[storeID]
-	return ok && owner == tenantID, nil
+func (o *kbDeleteOwnership) StoreUsable(_ context.Context, storeID string) (bool, error) {
+	return o.usable[storeID], nil
+}
+
+func (o *kbDeleteOwnership) DefaultStoreID(_ context.Context) (string, error) {
+	return o.defaultID, nil
 }
 
 type kbDeleteTrackingKnowledgeRepo struct {
@@ -331,7 +376,7 @@ func TestProcessKBDeleteEngineResolutionFailureRetries(t *testing.T) {
 		chunkRepo:      kbCleanupChunkRepo{},
 		modelService:   kbCleanupModelService{},
 		retrieveEngine: kbDeleteDeferredRegistry{err: context.Canceled},
-		ownership:      &kbDeleteOwnership{owned: map[string]uint64{storeID: 1}},
+		ownership:      &kbDeleteOwnership{usable: map[string]bool{storeID: true}},
 	}
 	payload, err := json.Marshal(types.KBDeletePayload{
 		TenantID:        1,
@@ -357,7 +402,7 @@ func TestProcessKBDeleteUnavailableStoreRetries(t *testing.T) {
 		chunkRepo:      kbCleanupChunkRepo{},
 		modelService:   kbCleanupModelService{},
 		retrieveEngine: kbDeleteDeferredRegistry{err: retriever.ErrVectorStoreUnavailable},
-		ownership:      &kbDeleteOwnership{owned: map[string]uint64{storeID: 1}},
+		ownership:      &kbDeleteOwnership{usable: map[string]bool{storeID: true}},
 	}
 	payload, err := json.Marshal(types.KBDeletePayload{
 		TenantID:        1,

@@ -1339,6 +1339,40 @@ func TestInvalidateStaysWithinTheWorkspace(t *testing.T) {
 	require.Zero(t, n)
 }
 
+func TestSharedPlatformConfigKeepsTenantRuntimeInstancesSeparate(t *testing.T) {
+	ctx := context.Background()
+	client := newFakeRemoteClient(SandboxTypeCube)
+	bindings := NewMemorySessionSandboxBindingStore()
+	lifecycle, err := newRemoteSessionLifecycle(
+		client,
+		bindings,
+		&fakeSessionExistenceChecker{exists: true},
+		RemoteCreateRequest{TemplateID: "template-shared"},
+		time.Minute,
+		"cfg-shared",
+	)
+	require.NoError(t, err)
+
+	firstKey := SessionSandboxKey{TenantID: 7, SessionID: "same-session"}
+	secondKey := SessionSandboxKey{TenantID: 8, SessionID: "same-session"}
+	first, err := lifecycle.Resolve(ctx, firstKey)
+	require.NoError(t, err)
+	second, err := lifecycle.Resolve(ctx, secondKey)
+	require.NoError(t, err)
+
+	require.NotEqual(t, first.ID(), second.ID())
+	firstBinding, err := bindings.Get(ctx, firstKey)
+	require.NoError(t, err)
+	secondBinding, err := bindings.Get(ctx, secondKey)
+	require.NoError(t, err)
+	require.NotNil(t, firstBinding)
+	require.NotNil(t, secondBinding)
+	require.Equal(t, "cfg-shared", firstBinding.ConfigID)
+	require.Equal(t, "cfg-shared", secondBinding.ConfigID)
+	require.Equal(t, uint64(7), firstBinding.TenantID)
+	require.Equal(t, uint64(8), secondBinding.TenantID)
+}
+
 func newTestLifecycleWithConfigID(t *testing.T, configID string) *remoteSessionLifecycle {
 	t.Helper()
 	lifecycle, err := newRemoteSessionLifecycle(

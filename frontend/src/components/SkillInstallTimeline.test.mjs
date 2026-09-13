@@ -7,10 +7,13 @@ const timeline = readFileSync(new URL('./SkillInstallTimeline.vue', import.meta.
 const systemAPI = readFileSync(new URL('../api/system/index.ts', import.meta.url), 'utf8')
 
 test('completed skill installs use only durable scoped history', () => {
-  assert.match(timeline, /getConfigSkillTranscriptHistory\(tenantId, props\.configId, props\.skillId\)/)
+  assert.match(timeline, /runId: string/)
+  assert.doesNotMatch(timeline, /:session-id=/)
+  assert.doesNotMatch(timeline, /sessionId: string/)
+  assert.match(timeline, /getConfigSkillTranscriptHistory\(props\.configId, props\.skillId\)/)
   const completedBranch = timeline.slice(
     timeline.indexOf('if (!props.live)'),
-    timeline.indexOf('// Locators land after the installer sandbox is up.'),
+    timeline.indexOf('if (!props.runId || !props.messageId)'),
   )
   assert.match(completedBranch, /await loadHistory\(run\)/)
   assert.doesNotMatch(completedBranch, /follow\(run\)/)
@@ -53,12 +56,13 @@ test('durable installer final answer remains visible without agent steps', () =>
   )
 })
 
-test('persistent history uses only the canonical platform tenant path', () => {
+test('persistent history uses only the tenantless platform path', () => {
   assert.match(
     systemAPI,
-    /platformSandboxConfigPath\(tenantId\).*skills\/\$\{skillId\}\/transcript\/history/s,
+    /`\$\{platformSandboxConfigPath\}\/\$\{configId\}\/skills\/\$\{skillId\}\/transcript\/history`/,
   )
   for (const source of [timeline, systemAPI]) {
+    assert.doesNotMatch(source, /platformSandboxConfigPath\(tenantId\)/)
     assert.doesNotMatch(source, /@\/api\/chat/)
     assert.doesNotMatch(source, /\/api\/v1\/sessions/)
     assert.doesNotMatch(source, /getMessageList/)

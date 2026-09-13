@@ -5,13 +5,11 @@ import (
 	"context"
 	"errors"
 	"io"
-	"mime/multipart"
 	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
-	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -21,38 +19,17 @@ type skillBundleFileMap struct {
 	files map[string][]byte
 }
 
-func (s skillBundleFileMap) CheckConnectivity(context.Context) error { return nil }
-func (s skillBundleFileMap) SaveFile(context.Context, *multipart.FileHeader, uint64, string) (string, error) {
+func (s skillBundleFileMap) Put(context.Context, string, []byte) (string, error) {
 	return "", errors.New("not implemented")
 }
-func (s skillBundleFileMap) SaveBytes(context.Context, []byte, uint64, string, bool) (string, error) {
-	return "", errors.New("not implemented")
-}
-func (s skillBundleFileMap) GetFile(_ context.Context, ref string) (io.ReadCloser, error) {
+func (s skillBundleFileMap) Open(_ context.Context, ref string) (io.ReadCloser, error) {
 	data, ok := s.files[ref]
 	if !ok {
 		return nil, errors.New("bundle not found")
 	}
 	return io.NopCloser(bytes.NewReader(data)), nil
 }
-func (s skillBundleFileMap) GetFileURL(context.Context, string) (string, error) { return "", nil }
-func (s skillBundleFileMap) DeleteFile(context.Context, string) error           { return nil }
-func (s skillBundleFileMap) CopyFile(context.Context, string, uint64, string) (string, error) {
-	return "", errors.New("not implemented")
-}
-
-type skillBundleResolver struct{ fs interfaces.FileService }
-
-func (r skillBundleResolver) ResolveFileService(
-	context.Context, *types.Tenant, string, string, string,
-) (interfaces.FileService, string, error) {
-	return r.fs, "", nil
-}
-func (skillBundleResolver) ResolveBackend(
-	context.Context, *types.Tenant, string, string,
-) (*types.StorageBackend, error) {
-	return nil, nil
-}
+func (s skillBundleFileMap) Delete(context.Context, string) error { return nil }
 
 func newAgentSkillBundleService(t *testing.T, files map[string][]byte) (*agentService, *gorm.DB) {
 	t.Helper()
@@ -64,8 +41,8 @@ func newAgentSkillBundleService(t *testing.T, files map[string][]byte) (*agentSe
 		&types.TenantSkillSnapshotEntity{}, &types.TenantUserEnvVar{},
 	))
 	return &agentService{
-		db:              db,
-		storageResolver: skillBundleResolver{fs: skillBundleFileMap{files: files}},
+		db:            db,
+		skillArchives: skillBundleFileMap{files: files},
 	}, db
 }
 
@@ -84,11 +61,11 @@ func TestLoadInstalledSkillBundleReadsAMatchingCatalogArchive(t *testing.T) {
 	svc, db := newAgentSkillBundleService(t, map[string][]byte{"file://catalog.zip": v1})
 	ctx := context.Background()
 	require.NoError(t, repository.NewTenantSkillRepository(db).CreateCatalog(ctx, &types.TenantSkillCatalogEntity{
-		ID: "cat-1", TenantID: 7, Name: "pdf-tools",
+		ID: "cat-1", Name: "pdf-tools",
 		BundleRef: "file://catalog.zip", BundleSHA256: skillArchiveSHA256(v1),
 	}))
 
-	got, err := svc.loadInstalledSkillBundle(ctx, 7, &types.TenantSkillEntity{
+	got, err := svc.loadInstalledSkillBundle(ctx, &types.TenantSkillEntity{
 		Name: "pdf-tools", CatalogID: "cat-1", BundleSHA256: skillArchiveSHA256(v1),
 	})
 	require.NoError(t, err)
@@ -100,11 +77,11 @@ func TestLoadInstalledSkillBundleRejectsAReplacedCatalogArchive(t *testing.T) {
 	svc, db := newAgentSkillBundleService(t, map[string][]byte{"file://catalog.zip": v2})
 	ctx := context.Background()
 	require.NoError(t, repository.NewTenantSkillRepository(db).CreateCatalog(ctx, &types.TenantSkillCatalogEntity{
-		ID: "cat-1", TenantID: 7, Name: "pdf-tools",
+		ID: "cat-1", Name: "pdf-tools",
 		BundleRef: "file://catalog.zip", BundleSHA256: skillArchiveSHA256(v2),
 	}))
 
-	_, err := svc.loadInstalledSkillBundle(ctx, 7, &types.TenantSkillEntity{
+	_, err := svc.loadInstalledSkillBundle(ctx, &types.TenantSkillEntity{
 		Name: "pdf-tools", CatalogID: "cat-1",
 		BundleSHA256: strings.Repeat("d", 64),
 	})
@@ -121,11 +98,11 @@ func TestLoadInstalledSkillBundlePrefersAPinnedInstallRef(t *testing.T) {
 	})
 	ctx := context.Background()
 	require.NoError(t, repository.NewTenantSkillRepository(db).CreateCatalog(ctx, &types.TenantSkillCatalogEntity{
-		ID: "cat-1", TenantID: 7, Name: "pdf-tools",
+		ID: "cat-1", Name: "pdf-tools",
 		BundleRef: "file://catalog.zip", BundleSHA256: skillArchiveSHA256(v2),
 	}))
 
-	got, err := svc.loadInstalledSkillBundle(ctx, 7, &types.TenantSkillEntity{
+	got, err := svc.loadInstalledSkillBundle(ctx, &types.TenantSkillEntity{
 		Name: "pdf-tools", CatalogID: "cat-1",
 		BundleRef: "file://old.zip", BundleSHA256: skillArchiveSHA256(v1),
 	})

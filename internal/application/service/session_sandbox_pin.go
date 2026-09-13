@@ -33,6 +33,14 @@ type SessionSandboxPinner struct {
 	db *gorm.DB
 }
 
+// SandboxSessionReference identifies one live business session pin. TenantID
+// is returned only for safe inventory display; platform config ownership does
+// not derive from it.
+type SandboxSessionReference struct {
+	TenantID  uint64 `json:"tenant_id"`
+	SessionID string `json:"session_id"`
+}
+
 // NewSessionSandboxPinner returns a pinner over the sessions table.
 func NewSessionSandboxPinner(db *gorm.DB) *SessionSandboxPinner {
 	return &SessionSandboxPinner{db: db}
@@ -139,6 +147,20 @@ func (p *SessionSandboxPinner) Clear(ctx context.Context, sessionID string) erro
 		Update("sandbox_config_id", nil).Error
 }
 
+// ListReferencesByConfigID inventories pins across every tenant. A platform
+// config must not be deleted while any live business session still points to
+// it, including an old session whose agent default has since changed.
+func (p *SessionSandboxPinner) ListReferencesByConfigID(
+	ctx context.Context, configID string,
+) ([]SandboxSessionReference, error) {
+	var refs []SandboxSessionReference
+	err := p.db.WithContext(ctx).Model(&types.Session{}).
+		Select("tenant_id", "id AS session_id").
+		Where("sandbox_config_id = ?", configID).
+		Order("tenant_id ASC, id ASC").Scan(&refs).Error
+	return refs, err
+}
+
 // resolveSandboxForExecution resolves before pinning so non-remote workspace
 // backends never leave a permanent session pin. Remote backends
 // pin before their first Create; concurrent callers adopt and re-resolve the
@@ -152,6 +174,7 @@ func resolveSandboxForExecution(
 	sessionID string,
 	agentConfigID string,
 	policy WorkspaceSandboxPolicy,
+	platformDefault PlatformSandboxDefault,
 ) (sandbox.Manager, string, error) {
 	if pinner != nil && strings.TrimSpace(sessionID) != "" {
 		pinned, err := pinner.Read(ctx, sessionID)
@@ -167,6 +190,13 @@ func resolveSandboxForExecution(
 	}
 
 	configID := strings.TrimSpace(agentConfigID)
+	if configID == "" && platformDefault != nil {
+		var err error
+		configID, err = platformDefault.DefaultSandboxConfigID(ctx)
+		if err != nil {
+			return nil, "", fmt.Errorf("resolve platform sandbox default: %w", err)
+		}
+	}
 	mgr, err := resolveTenantSandboxForConfig(
 		ctx, resolver, fallback, tenantID, configID, policy,
 	)

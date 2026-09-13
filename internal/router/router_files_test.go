@@ -25,6 +25,30 @@ type stubFileService struct {
 	getFile func(ctx context.Context, filePath string) (io.ReadCloser, error)
 }
 
+type stubFileStorageResolver struct {
+	fileService interfaces.FileService
+	provider    string
+}
+
+func (r *stubFileStorageResolver) ResolveFileService(
+	_ context.Context, backendID, _ string,
+) (interfaces.FileService, string, error) {
+	if r.fileService == nil {
+		return nil, "", errors.New("storage backend not found")
+	}
+	return r.fileService, r.provider, nil
+}
+
+func (r *stubFileStorageResolver) ResolveBackend(
+	_ context.Context, backendID string,
+) (*types.StorageBackend, error) {
+	return &types.StorageBackend{ID: backendID, Provider: r.provider}, nil
+}
+
+func storageResolverFor(files interfaces.FileService) interfaces.StorageBackendResolver {
+	return &stubFileStorageResolver{fileService: files, provider: "local"}
+}
+
 type stubResourceCatalog struct {
 	resource   *types.StoredResource
 	bindings   []*types.ResourceBinding
@@ -187,20 +211,20 @@ func (s *stubFileService) CopyFile(ctx context.Context, srcPath string, tenantID
 	panic("unexpected call to CopyFile")
 }
 
-func TestServeFilesFallsBackToGlobalFileService(t *testing.T) {
+func TestServeFilesResolvesPlatformDefaultBackend(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	t.Setenv("STORAGE_TYPE", "local")
 
 	engine := gin.New()
 	var requestedPath string
 	filePath := "local://42/docs/example.txt"
 	resourceRef := types.BuildResourcePath("AbCdEfGhIjKlMnOpQrStUv")
-	serveFilesWithResources(engine, &stubFileService{
+	files := &stubFileService{
 		getFile: func(ctx context.Context, filePath string) (io.ReadCloser, error) {
 			requestedPath = filePath
-			return io.NopCloser(strings.NewReader("fallback-body")), nil
+			return io.NopCloser(strings.NewReader("default-body")), nil
 		},
-	}, nil, &stubResourceCatalog{resource: &types.StoredResource{TenantID: 42, PhysicalPath: filePath}}, nil, nil, &stubMessageFileLookup{})
+	}
+	serveFilesWithResources(engine, files, storageResolverFor(files), &stubResourceCatalog{resource: &types.StoredResource{TenantID: 42, PhysicalPath: filePath}}, nil, nil, &stubMessageFileLookup{})
 
 	req := httptest.NewRequest(http.MethodGet, "/files?file_path="+url.QueryEscape(resourceRef), nil)
 	req = req.WithContext(context.WithValue(req.Context(), types.TenantInfoContextKey, &types.Tenant{ID: 42}))
@@ -214,8 +238,8 @@ func TestServeFilesFallsBackToGlobalFileService(t *testing.T) {
 	if requestedPath != filePath {
 		t.Fatalf("requested path = %q, want %q", requestedPath, filePath)
 	}
-	if body := recorder.Body.String(); body != "fallback-body" {
-		t.Fatalf("body = %q, want %q", body, "fallback-body")
+	if body := recorder.Body.String(); body != "default-body" {
+		t.Fatalf("body = %q, want %q", body, "default-body")
 	}
 }
 
@@ -227,10 +251,11 @@ func TestServeFilesResolvesShortResourceReference(t *testing.T) {
 
 	engine := gin.New()
 	var requestedPath string
-	serveFilesWithResources(engine, &stubFileService{getFile: func(_ context.Context, path string) (io.ReadCloser, error) {
+	files := &stubFileService{getFile: func(_ context.Context, path string) (io.ReadCloser, error) {
 		requestedPath = path
 		return io.NopCloser(strings.NewReader("image")), nil
-	}}, nil, &stubResourceCatalog{resource: &types.StoredResource{TenantID: 42, PhysicalPath: physical}}, nil, nil, &stubMessageFileLookup{})
+	}}
+	serveFilesWithResources(engine, files, storageResolverFor(files), &stubResourceCatalog{resource: &types.StoredResource{TenantID: 42, PhysicalPath: physical}}, nil, nil, &stubMessageFileLookup{})
 
 	req := httptest.NewRequest(http.MethodGet, "/files?file_path="+url.QueryEscape(ref), nil)
 	req = req.WithContext(context.WithValue(req.Context(), types.TenantInfoContextKey, &types.Tenant{ID: 42}))
@@ -262,18 +287,19 @@ func TestGenericFileRoutesRejectGovernedMessageArtifactAndPreserveOrdinary(t *te
 			t.Run(route+" "+tc.name, func(t *testing.T) {
 				const handle = "AbCdEfGhIjKlMnOpQrStUv"
 				engine := gin.New()
+				files := &stubFileService{getFile: func(context.Context, string) (io.ReadCloser, error) {
+					if tc.governed {
+						t.Fatal("governed artifact must not reach storage")
+					}
+					return io.NopCloser(strings.NewReader(tc.wantBytes)), nil
+				}}
 				engine.GET(route, func(c *gin.Context) {
 					ctx := context.WithValue(c.Request.Context(), types.TenantInfoContextKey, &types.Tenant{ID: 42})
 					c.Request = c.Request.WithContext(ctx)
 					c.Next()
 				}, newFileServeHandler(
-					&stubFileService{getFile: func(context.Context, string) (io.ReadCloser, error) {
-						if tc.governed {
-							t.Fatal("governed artifact must not reach storage")
-						}
-						return io.NopCloser(strings.NewReader(tc.wantBytes)), nil
-					}},
-					nil,
+					files,
+					storageResolverFor(files),
 					&stubResourceCatalog{
 						resource: &types.StoredResource{Handle: handle, TenantID: 42, PhysicalPath: "local://42/exports/result.csv"},
 						bindings: []*types.ResourceBinding{{
@@ -318,9 +344,10 @@ func TestServeFilesRejectsUnregisteredPath(t *testing.T) {
 func TestServeFilesServesKnowledgeBoundResourceAfterLiveAccessCheck(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
-	serveFilesWithResources(engine, &stubFileService{getFile: func(context.Context, string) (io.ReadCloser, error) {
+	files := &stubFileService{getFile: func(context.Context, string) (io.ReadCloser, error) {
 		return io.NopCloser(strings.NewReader("image")), nil
-	}}, nil, &stubResourceCatalog{
+	}}
+	serveFilesWithResources(engine, files, storageResolverFor(files), &stubResourceCatalog{
 		resource: &types.StoredResource{Handle: "AbCdEfGhIjKlMnOpQrStUv", TenantID: 42, PhysicalPath: "local://42/exports/a.png"},
 		bindings: []*types.ResourceBinding{{OwnerType: "knowledge", OwnerID: "knowledge-1"}},
 	}, &stubKnowledgeByID{knowledge: &types.Knowledge{
@@ -479,19 +506,19 @@ func TestResourceGrantRejectsGovernedMessageArtifactAndPreservesOrdinary(t *test
 	}
 }
 
-func TestServeFilesDoesNotFallbackWhenProviderDoesNotMatchGlobalStorage(t *testing.T) {
+func TestServeFilesFailsWhenPlatformDefaultResolutionFails(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	t.Setenv("STORAGE_TYPE", "minio")
 
 	engine := gin.New()
 	filePath := "local://42/docs/example.txt"
 	resourceRef := types.BuildResourcePath("AbCdEfGhIjKlMnOpQrStUv")
-	serveFilesWithResources(engine, &stubFileService{
+	files := &stubFileService{
 		getFile: func(ctx context.Context, filePath string) (io.ReadCloser, error) {
-			t.Fatalf("GetFile should not be called for mismatched provider, got %q", filePath)
+			t.Fatalf("GetFile should not be called when the platform default cannot be resolved, got %q", filePath)
 			return nil, nil
 		},
-	}, nil, &stubResourceCatalog{resource: &types.StoredResource{TenantID: 42, PhysicalPath: filePath}}, nil, nil, &stubMessageFileLookup{})
+	}
+	serveFilesWithResources(engine, files, &stubFileStorageResolver{}, &stubResourceCatalog{resource: &types.StoredResource{TenantID: 42, PhysicalPath: filePath}}, nil, nil, &stubMessageFileLookup{})
 
 	req := httptest.NewRequest(http.MethodGet, "/files?file_path="+url.QueryEscape(resourceRef), nil)
 	req = req.WithContext(context.WithValue(req.Context(), types.TenantInfoContextKey, &types.Tenant{ID: 42}))
@@ -552,11 +579,12 @@ func TestServeFilesAPIKeyScopeMatrix(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			engine := gin.New()
-			serveFilesWithResources(engine, &stubFileService{
+			files := &stubFileService{
 				getFile: func(_ context.Context, _ string) (io.ReadCloser, error) {
 					return io.NopCloser(strings.NewReader("body")), nil
 				},
-			}, nil, &stubResourceCatalog{resource: &types.StoredResource{TenantID: 42, PhysicalPath: filePath}}, nil, nil, &stubMessageFileLookup{})
+			}
+			serveFilesWithResources(engine, files, storageResolverFor(files), &stubResourceCatalog{resource: &types.StoredResource{TenantID: 42, PhysicalPath: filePath}}, nil, nil, &stubMessageFileLookup{})
 
 			req := httptest.NewRequest(http.MethodGet, "/files?file_path="+url.QueryEscape(resourceRef), nil)
 			ctx := context.WithValue(req.Context(), types.TenantInfoContextKey, &types.Tenant{ID: 42})
@@ -687,6 +715,7 @@ func newMessageScopedFilesTestEngine(
 	resourceCatalog interfaces.ResourceCatalog,
 ) *gin.Engine {
 	engine := gin.New()
+	storageResolver := storageResolverFor(global)
 	engine.GET("/sessions/:id/messages/:message_id/files",
 		func(c *gin.Context) {
 			ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, callerTenantID)
@@ -698,7 +727,7 @@ func newMessageScopedFilesTestEngine(
 			agentShareService,
 			tenantService,
 			global,
-			nil,
+			storageResolver,
 			resourceCatalog,
 		),
 	)
@@ -998,11 +1027,12 @@ func TestServeFilesForcesActiveContentDownload(t *testing.T) {
 	engine := gin.New()
 	filePath := "local://42/docs/payload.svg"
 	resourceRef := types.BuildResourcePath("AbCdEfGhIjKlMnOpQrStUv")
-	serveFilesWithResources(engine, &stubFileService{
+	files := &stubFileService{
 		getFile: func(_ context.Context, _ string) (io.ReadCloser, error) {
 			return io.NopCloser(strings.NewReader(`<svg onload="alert(1)"></svg>`)), nil
 		},
-	}, nil, &stubResourceCatalog{resource: &types.StoredResource{TenantID: 42, PhysicalPath: filePath}}, nil, nil, &stubMessageFileLookup{})
+	}
+	serveFilesWithResources(engine, files, storageResolverFor(files), &stubResourceCatalog{resource: &types.StoredResource{TenantID: 42, PhysicalPath: filePath}}, nil, nil, &stubMessageFileLookup{})
 
 	req := httptest.NewRequest(http.MethodGet, "/files?file_path="+url.QueryEscape(resourceRef), nil)
 	req = req.WithContext(context.WithValue(req.Context(), types.TenantInfoContextKey, &types.Tenant{ID: 42}))

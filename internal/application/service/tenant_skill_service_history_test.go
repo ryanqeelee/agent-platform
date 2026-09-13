@@ -2,8 +2,8 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
@@ -23,12 +23,11 @@ func newTranscriptHistoryFixture(t *testing.T) *transcriptHistoryFixture {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&types.TenantSkillEntity{}, &types.Message{}))
+	require.NoError(t, db.AutoMigrate(&types.TenantSkillEntity{}))
 	return &transcriptHistoryFixture{
 		db: db,
 		service: &TenantSkillService{
-			skills:   repository.NewTenantSkillRepository(db),
-			messages: repository.NewMessageRepository(db),
+			skills: repository.NewTenantSkillRepository(db),
 		},
 	}
 }
@@ -38,11 +37,11 @@ func (f *transcriptHistoryFixture) seedSkill(t *testing.T, skill *types.TenantSk
 	require.NoError(t, f.db.Session(&gorm.Session{SkipHooks: true}).Create(skill).Error)
 }
 
-func (f *transcriptHistoryFixture) seedMessages(t *testing.T, messages ...*types.Message) {
+func historyTranscriptMessages(t *testing.T, messages ...*types.Message) types.JSON {
 	t.Helper()
-	for _, message := range messages {
-		require.NoError(t, f.db.Session(&gorm.Session{SkipHooks: true}).Create(message).Error)
-	}
+	raw, err := json.Marshal(messages)
+	require.NoError(t, err)
+	return types.JSON(raw)
 }
 
 func requireTranscriptHistoryNotFound(t *testing.T, err error) {
@@ -52,83 +51,76 @@ func requireTranscriptHistoryNotFound(t *testing.T, err error) {
 	require.Equal(t, 404, appErr.HTTPCode)
 }
 
-func TestGetInstallTranscriptHistoryReturnsOnlyLocatedInstallMessages(t *testing.T) {
+func TestGetInstallTranscriptHistoryReturnsMessageDTOs(t *testing.T) {
 	fixture := newTranscriptHistoryFixture(t)
-	now := time.Now()
 	fixture.seedSkill(t, &types.TenantSkillEntity{
-		ID: "skill-1", TenantID: 42, SandboxConfigID: "cfg-a", Name: "pdf",
-		Status: types.SkillStatusReady, InstallSessionID: "session-1", InstallMessageID: "answer-1",
+		ID: "skill-1", SandboxConfigID: "cfg-a", Name: "pdf",
+		Status: types.SkillStatusReady, InstallRunID: "run-1",
+		InstallTranscript: historyTranscriptMessages(t,
+			&types.Message{ID: "prompt-1", SessionID: "run-1", Role: "user", Content: "install pdf"},
+			&types.Message{ID: "answer-1", SessionID: "run-1", Role: "assistant", Content: "installed"},
+		),
 	})
-	fixture.seedMessages(t,
-		&types.Message{ID: "prompt-1", SessionID: "session-1", Role: "user", Content: "install pdf", CreatedAt: now},
-		&types.Message{ID: "answer-1", SessionID: "session-1", Role: "assistant", Content: "installed", CreatedAt: now.Add(time.Millisecond)},
-		&types.Message{ID: "other-answer", SessionID: "session-1", Role: "assistant", Content: "must not leak", CreatedAt: now.Add(2 * time.Millisecond)},
-		&types.Message{ID: "other-session", SessionID: "session-2", Role: "assistant", Content: "other tenant data", CreatedAt: now},
-	)
 
 	history, err := fixture.service.GetInstallTranscriptHistory(
-		context.Background(), 42, "cfg-a", "skill-1",
+		context.Background(), "cfg-a", "skill-1",
 	)
 	require.NoError(t, err)
 	require.Len(t, history, 2)
 	require.Equal(t, []string{"prompt-1", "answer-1"}, []string{history[0].ID, history[1].ID})
-	require.Equal(t, []string{"user", "assistant"}, []string{history[0].Role, history[1].Role})
 }
 
-func TestGetInstallTranscriptHistoryEnforcesTenantConfigAndSkillScope(t *testing.T) {
+func TestGetInstallTranscriptHistoryEnforcesConfigAndSkillScope(t *testing.T) {
 	fixture := newTranscriptHistoryFixture(t)
 	fixture.seedSkill(t, &types.TenantSkillEntity{
-		ID: "skill-1", TenantID: 42, SandboxConfigID: "cfg-a", Name: "pdf",
-		Status: types.SkillStatusReady, InstallSessionID: "session-1", InstallMessageID: "answer-1",
+		ID: "skill-1", SandboxConfigID: "cfg-a", Name: "pdf",
+		Status: types.SkillStatusReady, InstallRunID: "run-1",
+		InstallTranscript: historyTranscriptMessages(t,
+			&types.Message{ID: "prompt-1", Role: "user"},
+			&types.Message{ID: "answer-1", Role: "assistant"},
+		),
 	})
 
-	for _, call := range []struct {
-		name              string
-		tenantID          uint64
-		configID, skillID string
-	}{
-		{name: "other tenant", tenantID: 41, configID: "cfg-a", skillID: "skill-1"},
-		{name: "other config", tenantID: 42, configID: "cfg-b", skillID: "skill-1"},
-		{name: "other skill", tenantID: 42, configID: "cfg-a", skillID: "skill-2"},
+	for _, call := range []struct{ configID, skillID string }{
+		{configID: "cfg-b", skillID: "skill-1"},
+		{configID: "cfg-a", skillID: "skill-2"},
 	} {
-		t.Run(call.name, func(t *testing.T) {
-			_, err := fixture.service.GetInstallTranscriptHistory(
-				context.Background(), call.tenantID, call.configID, call.skillID,
-			)
-			requireTranscriptHistoryNotFound(t, err)
-		})
+		_, err := fixture.service.GetInstallTranscriptHistory(
+			context.Background(), call.configID, call.skillID,
+		)
+		requireTranscriptHistoryNotFound(t, err)
 	}
 }
 
-func TestGetInstallTranscriptHistoryLifecycleWithoutDurableRows(t *testing.T) {
+func TestGetInstallTranscriptHistoryLifecycleWithoutDurableRun(t *testing.T) {
 	fixture := newTranscriptHistoryFixture(t)
 	fixture.seedSkill(t, &types.TenantSkillEntity{
-		ID: "installing", TenantID: 42, SandboxConfigID: "cfg-a", Name: "live",
+		ID: "installing", SandboxConfigID: "cfg-a", Name: "live",
 		Status: types.SkillStatusInstalling,
 	})
 	fixture.seedSkill(t, &types.TenantSkillEntity{
-		ID: "ready-no-locator", TenantID: 42, SandboxConfigID: "cfg-a", Name: "old",
+		ID: "ready-no-locator", SandboxConfigID: "cfg-a", Name: "old",
 		Status: types.SkillStatusReady,
 	})
 	fixture.seedSkill(t, &types.TenantSkillEntity{
-		ID: "ready-no-message", TenantID: 42, SandboxConfigID: "cfg-a", Name: "missing",
-		Status: types.SkillStatusReady, InstallSessionID: "gone", InstallMessageID: "gone",
+		ID: "ready-no-run", SandboxConfigID: "cfg-a", Name: "missing",
+		Status: types.SkillStatusReady, InstallRunID: "gone",
 	})
 
 	history, err := fixture.service.GetInstallTranscriptHistory(
-		context.Background(), 42, "cfg-a", "installing",
+		context.Background(), "cfg-a", "installing",
 	)
 	require.NoError(t, err)
 	require.NotNil(t, history)
 	require.Empty(t, history)
 
 	_, err = fixture.service.GetInstallTranscriptHistory(
-		context.Background(), 42, "cfg-a", "ready-no-locator",
+		context.Background(), "cfg-a", "ready-no-locator",
 	)
 	requireTranscriptHistoryNotFound(t, err)
 
 	_, err = fixture.service.GetInstallTranscriptHistory(
-		context.Background(), 42, "cfg-a", "ready-no-message",
+		context.Background(), "cfg-a", "ready-no-run",
 	)
 	requireTranscriptHistoryNotFound(t, err)
 }

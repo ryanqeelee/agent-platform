@@ -398,11 +398,7 @@ func TestValidateProcessOverrides_NonMediaFileTypes(t *testing.T) {
 func TestValidateProcessOverrides_ImageAllowsStorageFallback(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.WithValue(context.Background(), types.TenantInfoContextKey, &types.Tenant{
-		StorageEngineConfig: &types.StorageEngineConfig{
-			COS: &types.COSEngineConfig{SecretID: "id"},
-		},
-	})
+	ctx := context.WithValue(context.Background(), types.TenantInfoContextKey, &types.Tenant{})
 	kb := &types.KnowledgeBase{
 		VLMConfig: types.VLMConfig{Enabled: true, ModelID: "vlm-1"},
 	}

@@ -17,7 +17,7 @@ func TestListSkillFilesReadsTheStoredArchive(t *testing.T) {
 	fx := newInstallFixture(t)
 	fx.seedStoredSkillBundle(t)
 
-	files, err := fx.svc.ListSkillFiles(context.Background(), 7, "cfg-1", "sk-1")
+	files, err := fx.svc.ListSkillFiles(context.Background(), "cfg-1", "sk-1")
 	require.NoError(t, err)
 	require.Equal(t, []SkillFileEntry{
 		{Path: "SKILL.md", Size: int64(len(validSkillMD))},
@@ -25,21 +25,10 @@ func TestListSkillFilesReadsTheStoredArchive(t *testing.T) {
 	}, files)
 }
 
-func TestListSkillFilesRefusesAnotherWorkspace(t *testing.T) {
-	fx := newInstallFixture(t)
-	fx.seedStoredSkillBundle(t)
-
-	_, err := fx.svc.ListSkillFiles(context.Background(), 8, "cfg-1", "sk-1")
-	require.Error(t, err)
-	appErr, ok := apperrors.IsAppError(err)
-	require.True(t, ok)
-	require.Equal(t, 404, appErr.HTTPCode)
-}
-
 func TestListSkillFilesReportsMissingBundle(t *testing.T) {
 	fx := newInstallFixture(t)
 
-	_, err := fx.svc.ListSkillFiles(context.Background(), 7, "cfg-1", "sk-1")
+	_, err := fx.svc.ListSkillFiles(context.Background(), "cfg-1", "sk-1")
 	require.Error(t, err)
 	appErr, ok := apperrors.IsAppError(err)
 	require.True(t, ok)
@@ -54,12 +43,12 @@ func TestListSkillFilesUsesCatalogWhenInstallHasNoRef(t *testing.T) {
 		"scripts/extract.py": []byte("print('hi')\n"),
 	})
 	require.NoError(t, err)
-	fx.storedBundles = map[string][]byte{"file://catalog.zip": archive}
+	fx.storedBundles = map[string][]byte{"storage://catalog.zip": archive}
 	require.NoError(t, fx.skillRepo.CreateCatalog(ctx, &types.TenantSkillCatalogEntity{
-		ID: "cat-1", TenantID: 7, Name: "pdf-tools",
-		BundleRef: "file://catalog.zip", BundleSHA256: skillArchiveSHA256(archive),
+		ID: "cat-1", Name: "pdf-tools",
+		BundleRef: "storage://catalog.zip", BundleSHA256: skillArchiveSHA256(archive),
 	}))
-	skill, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", "sk-1")
+	skill, err := fx.skillRepo.GetSkill(ctx, "cfg-1", "sk-1")
 	require.NoError(t, err)
 	skill.CatalogID = "cat-1"
 	skill.BundleRef = ""
@@ -67,7 +56,7 @@ func TestListSkillFilesUsesCatalogWhenInstallHasNoRef(t *testing.T) {
 	skill.Status = types.SkillStatusReady
 	require.NoError(t, fx.skillRepo.UpdateSkill(ctx, skill))
 
-	files, err := fx.svc.ListSkillFiles(ctx, 7, "cfg-1", "sk-1")
+	files, err := fx.svc.ListSkillFiles(ctx, "cfg-1", "sk-1")
 	require.NoError(t, err)
 	require.NotEmpty(t, files)
 }
@@ -84,12 +73,12 @@ func TestListSkillFilesRefusesACatalogArchiveTheInstallWasNotBuiltFrom(t *testin
 		"scripts/extract.py": []byte("print('v2')\n"),
 	})
 	require.NoError(t, err)
-	fx.storedBundles = map[string][]byte{"file://catalog.zip": updated}
+	fx.storedBundles = map[string][]byte{"storage://catalog.zip": updated}
 	require.NoError(t, fx.skillRepo.CreateCatalog(ctx, &types.TenantSkillCatalogEntity{
-		ID: "cat-1", TenantID: 7, Name: "pdf-tools",
-		BundleRef: "file://catalog.zip", BundleSHA256: skillArchiveSHA256(updated),
+		ID: "cat-1", Name: "pdf-tools",
+		BundleRef: "storage://catalog.zip", BundleSHA256: skillArchiveSHA256(updated),
 	}))
-	skill, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", "sk-1")
+	skill, err := fx.skillRepo.GetSkill(ctx, "cfg-1", "sk-1")
 	require.NoError(t, err)
 	skill.CatalogID = "cat-1"
 	skill.BundleRef = ""
@@ -97,7 +86,7 @@ func TestListSkillFilesRefusesACatalogArchiveTheInstallWasNotBuiltFrom(t *testin
 	skill.Status = types.SkillStatusReady
 	require.NoError(t, fx.skillRepo.UpdateSkill(ctx, skill))
 
-	_, err = fx.svc.ListSkillFiles(ctx, 7, "cfg-1", "sk-1")
+	_, err = fx.svc.ListSkillFiles(ctx, "cfg-1", "sk-1")
 	require.Error(t, err)
 	appErr, ok := apperrors.IsAppError(err)
 	require.True(t, ok)
@@ -115,12 +104,12 @@ func TestListAndReadSkillFilesDownloadTheCatalogArchiveOnce(t *testing.T) {
 		"scripts/extract.py": []byte("print('hi')\n"),
 	})
 	require.NoError(t, err)
-	fx.storedBundles = map[string][]byte{"file://catalog.zip": archive}
+	fx.storedBundles = map[string][]byte{"storage://catalog.zip": archive}
 	require.NoError(t, fx.skillRepo.CreateCatalog(ctx, &types.TenantSkillCatalogEntity{
-		ID: "cat-1", TenantID: 7, Name: "pdf-tools",
-		BundleRef: "file://catalog.zip", BundleSHA256: skillArchiveSHA256(archive),
+		ID: "cat-1", Name: "pdf-tools",
+		BundleRef: "storage://catalog.zip", BundleSHA256: skillArchiveSHA256(archive),
 	}))
-	skill, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", "sk-1")
+	skill, err := fx.skillRepo.GetSkill(ctx, "cfg-1", "sk-1")
 	require.NoError(t, err)
 	skill.CatalogID = "cat-1"
 	skill.BundleRef = ""
@@ -128,12 +117,12 @@ func TestListAndReadSkillFilesDownloadTheCatalogArchiveOnce(t *testing.T) {
 	skill.Status = types.SkillStatusReady
 	require.NoError(t, fx.skillRepo.UpdateSkill(ctx, skill))
 
-	files, err := fx.svc.ListSkillFiles(ctx, 7, "cfg-1", "sk-1")
+	files, err := fx.svc.ListSkillFiles(ctx, "cfg-1", "sk-1")
 	require.NoError(t, err)
 	require.NotEmpty(t, files)
-	_, err = fx.svc.ReadSkillFile(ctx, 7, "cfg-1", "sk-1", "SKILL.md")
+	_, err = fx.svc.ReadSkillFile(ctx, "cfg-1", "sk-1", "SKILL.md")
 	require.NoError(t, err)
-	_, err = fx.svc.ReadSkillFile(ctx, 7, "cfg-1", "sk-1", "scripts/extract.py")
+	_, err = fx.svc.ReadSkillFile(ctx, "cfg-1", "sk-1", "scripts/extract.py")
 	require.NoError(t, err)
 
 	require.Equal(t, int32(1), fx.getFileCalls.Load())
@@ -143,7 +132,7 @@ func TestReadSkillFileReturnsTextContent(t *testing.T) {
 	fx := newInstallFixture(t)
 	fx.seedStoredSkillBundle(t)
 
-	file, err := fx.svc.ReadSkillFile(context.Background(), 7, "cfg-1", "sk-1", "scripts/extract.py")
+	file, err := fx.svc.ReadSkillFile(context.Background(), "cfg-1", "sk-1", "scripts/extract.py")
 	require.NoError(t, err)
 	require.Equal(t, "scripts/extract.py", file.Path)
 	require.Equal(t, skillFileEncodingUTF8, file.Encoding)
@@ -187,13 +176,13 @@ func TestListAndReadSkillFilesDownloadTheBundleOnce(t *testing.T) {
 	fx := newInstallFixture(t)
 	fx.seedStoredSkillBundle(t)
 
-	files, err := fx.svc.ListSkillFiles(context.Background(), 7, "cfg-1", "sk-1")
+	files, err := fx.svc.ListSkillFiles(context.Background(), "cfg-1", "sk-1")
 	require.NoError(t, err)
 	require.NotEmpty(t, files)
 
-	_, err = fx.svc.ReadSkillFile(context.Background(), 7, "cfg-1", "sk-1", "SKILL.md")
+	_, err = fx.svc.ReadSkillFile(context.Background(), "cfg-1", "sk-1", "SKILL.md")
 	require.NoError(t, err)
-	_, err = fx.svc.ReadSkillFile(context.Background(), 7, "cfg-1", "sk-1", "scripts/extract.py")
+	_, err = fx.svc.ReadSkillFile(context.Background(), "cfg-1", "sk-1", "scripts/extract.py")
 	require.NoError(t, err)
 
 	require.Equal(t, int32(1), fx.getFileCalls.Load())
@@ -208,17 +197,17 @@ func TestListAndReadSkillFilesCoalesceConcurrentDownloads(t *testing.T) {
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		_, err := fx.svc.ListSkillFiles(context.Background(), 7, "cfg-1", "sk-1")
+		_, err := fx.svc.ListSkillFiles(context.Background(), "cfg-1", "sk-1")
 		errCh <- err
 	}()
 	go func() {
 		defer wg.Done()
-		_, err := fx.svc.ReadSkillFile(context.Background(), 7, "cfg-1", "sk-1", "SKILL.md")
+		_, err := fx.svc.ReadSkillFile(context.Background(), "cfg-1", "sk-1", "SKILL.md")
 		errCh <- err
 	}()
 	go func() {
 		defer wg.Done()
-		_, err := fx.svc.ReadSkillFile(context.Background(), 7, "cfg-1", "sk-1", "scripts/extract.py")
+		_, err := fx.svc.ReadSkillFile(context.Background(), "cfg-1", "sk-1", "scripts/extract.py")
 		errCh <- err
 	}()
 	wg.Wait()
@@ -236,14 +225,14 @@ func TestListSkillFilesStripsAWrapDirectory(t *testing.T) {
 		"pdf-tools/scripts/extract.py": "print('hi')\n",
 	}))
 
-	files, err := fx.svc.ListSkillFiles(context.Background(), 7, "cfg-1", "sk-1")
+	files, err := fx.svc.ListSkillFiles(context.Background(), "cfg-1", "sk-1")
 	require.NoError(t, err)
 	require.Equal(t, []SkillFileEntry{
 		{Path: "SKILL.md", Size: int64(len(validSkillMD))},
 		{Path: "scripts/extract.py", Size: int64(len("print('hi')\n"))},
 	}, files)
 
-	file, err := fx.svc.ReadSkillFile(context.Background(), 7, "cfg-1", "sk-1", "scripts/extract.py")
+	file, err := fx.svc.ReadSkillFile(context.Background(), "cfg-1", "sk-1", "scripts/extract.py")
 	require.NoError(t, err)
 	require.Equal(t, "print('hi')\n", file.Content)
 }
@@ -253,7 +242,7 @@ func TestReadSkillFileRejectsPathTraversal(t *testing.T) {
 	fx.seedStoredSkillBundle(t)
 
 	for _, rel := range []string{"../secret", "/etc/passwd", "scripts/../../SKILL.md", `scripts\extract.py`} {
-		_, err := fx.svc.ReadSkillFile(context.Background(), 7, "cfg-1", "sk-1", rel)
+		_, err := fx.svc.ReadSkillFile(context.Background(), "cfg-1", "sk-1", rel)
 		require.Error(t, err, rel)
 		appErr, ok := apperrors.IsAppError(err)
 		require.True(t, ok, rel)
@@ -265,7 +254,7 @@ func TestReadSkillFileReportsMissingPath(t *testing.T) {
 	fx := newInstallFixture(t)
 	fx.seedStoredSkillBundle(t)
 
-	_, err := fx.svc.ReadSkillFile(context.Background(), 7, "cfg-1", "sk-1", "missing.txt")
+	_, err := fx.svc.ReadSkillFile(context.Background(), "cfg-1", "sk-1", "missing.txt")
 	require.Error(t, err)
 	appErr, ok := apperrors.IsAppError(err)
 	require.True(t, ok)
@@ -281,7 +270,7 @@ func TestReadSkillFileInlinesASmallImage(t *testing.T) {
 	})
 	fx.storeSkillBundle(t, "sk-1", archive)
 
-	file, err := fx.svc.ReadSkillFile(context.Background(), 7, "cfg-1", "sk-1", "assets/a.png")
+	file, err := fx.svc.ReadSkillFile(context.Background(), "cfg-1", "sk-1", "assets/a.png")
 	require.NoError(t, err)
 	require.Equal(t, skillFileEncodingBase64, file.Encoding)
 	require.Equal(t, "image/png", file.MediaType)
@@ -304,19 +293,19 @@ func TestListSkillFilesDoesNotFallbackToADifferentCatalogBundle(t *testing.T) {
 		"SKILL.md":           validSkillMD,
 		"scripts/extract.py": "print('other')\n",
 	})
-	fx.storedBundles = map[string][]byte{"file://catalog.zip": other}
+	fx.storedBundles = map[string][]byte{"storage://catalog.zip": other}
 	require.NoError(t, fx.skillRepo.CreateCatalog(ctx, &types.TenantSkillCatalogEntity{
-		ID: "cat-1", TenantID: 7, Name: "pdf-tools",
-		BundleRef: "file://catalog.zip", BundleSHA256: skillArchiveSHA256(other),
+		ID: "cat-1", Name: "pdf-tools",
+		BundleRef: "storage://catalog.zip", BundleSHA256: skillArchiveSHA256(other),
 	}))
-	skill, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", "sk-1")
+	skill, err := fx.skillRepo.GetSkill(ctx, "cfg-1", "sk-1")
 	require.NoError(t, err)
 	skill.CatalogID = "cat-1"
-	skill.BundleRef = "file://missing.zip"
+	skill.BundleRef = "storage://missing.zip"
 	skill.BundleSHA256 = strings.Repeat("a", 64)
 	require.NoError(t, fx.skillRepo.UpdateSkill(ctx, skill))
 
-	_, err = fx.svc.ListSkillFiles(ctx, 7, "cfg-1", "sk-1")
+	_, err = fx.svc.ListSkillFiles(ctx, "cfg-1", "sk-1")
 	require.Error(t, err)
 	appErr, ok := apperrors.IsAppError(err)
 	require.True(t, ok)
@@ -336,10 +325,18 @@ func (f *installFixture) seedStoredSkillBundle(t *testing.T) {
 func (f *installFixture) storeSkillBundle(t *testing.T, skillID string, archive []byte) {
 	t.Helper()
 	ctx := context.Background()
-	skill, err := f.skillRepo.GetSkill(ctx, 7, "cfg-1", skillID)
+	skill, err := f.skillRepo.GetSkill(ctx, "cfg-1", skillID)
 	require.NoError(t, err)
 	require.NotNil(t, skill)
-	skill.BundleRef = "file://bundle.zip"
+	catalogID := "catalog-" + skillID
+	bundleRef := "storage://" + catalogID + ".zip"
+	digest := skillArchiveSHA256(archive)
+	require.NoError(t, f.skillRepo.CreateCatalog(ctx, &types.TenantSkillCatalogEntity{
+		ID: catalogID, Name: skill.Name, BundleRef: bundleRef, BundleSHA256: digest,
+	}))
+	skill.CatalogID = catalogID
+	skill.BundleRef = ""
+	skill.BundleSHA256 = digest
 	skill.Status = types.SkillStatusReady
 	require.NoError(t, f.skillRepo.UpdateSkill(ctx, skill))
 	if f.storedBundles == nil {
@@ -347,5 +344,5 @@ func (f *installFixture) storeSkillBundle(t *testing.T, skillID string, archive 
 	}
 	copied := make([]byte, len(archive))
 	copy(copied, archive)
-	f.storedBundles["file://bundle.zip"] = copied
+	f.storedBundles[bundleRef] = copied
 }

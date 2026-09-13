@@ -14,7 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func TestSystemAdminTenantRuntimeRouteSurfaceAndAPIKeyDefaultDeny(t *testing.T) {
+func TestSystemAdminRuntimeRouteSurfacesAndAPIKeyDefaultDeny(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	v1 := router.Group("/api/v1")
@@ -24,18 +24,20 @@ func TestSystemAdminTenantRuntimeRouteSurfaceAndAPIKeyDefaultDeny(t *testing.T) 
 		nil,
 		&handler.TenantHandler{},
 		&handler.MessageHandler{},
-		&handler.SandboxConfigHandler{},
-		&handler.SandboxSkillHandler{},
-		&handler.SkillHandler{},
-		&handler.CustomAgentHandler{},
-		&handler.SystemHandler{},
 		&handler.TenantMemoryConfigHandler{},
 		&handler.AICapabilityPlanHandler{},
-		&handler.VectorStoreHandler{},
-		&handler.StorageBackendHandler{},
 		guards,
 	)
 	RegisterSystemRoutes(v1, &handler.SystemHandler{}, guards)
+	RegisterSystemAdminSandboxSkillRoutes(
+		v1,
+		&handler.SandboxConfigHandler{},
+		&handler.SandboxSkillHandler{},
+		&handler.SkillHandler{},
+		&handler.SystemHandler{},
+		guards,
+	)
+	RegisterSandboxPermissionRoutes(v1, &handler.SandboxConfigHandler{}, guards)
 
 	routes := make(map[string]struct{})
 	for _, route := range router.Routes() {
@@ -51,40 +53,35 @@ func TestSystemAdminTenantRuntimeRouteSurfaceAndAPIKeyDefaultDeny(t *testing.T) 
 		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/memory-config"},
 		{http.MethodPut, "/api/v1/system/admin/tenants/:tenant_id/memory-config"},
 		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/retrieval-processing-settings"},
-		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/vector-stores"},
-		{http.MethodPost, "/api/v1/system/admin/tenants/:tenant_id/vector-stores"},
-		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/storage-backends"},
-		{http.MethodPost, "/api/v1/system/admin/tenants/:tenant_id/storage-backends"},
-		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs"},
-		{http.MethodPut, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs/workspace-policy"},
-		{http.MethodPost, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs"},
-		{http.MethodPost, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs/check"},
-		{http.MethodPost, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs/templates/query"},
-		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs/:id"},
-		{http.MethodPut, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs/:id"},
-		{http.MethodDelete, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs/:id"},
-		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs/:id/sandboxes"},
-		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs/:id/skills"},
-		{http.MethodPost, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs/:id/skills"},
-		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs/:id/skills/:skillId"},
-		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs/:id/skills/:skillId/files"},
-		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs/:id/skills/:skillId/files/content"},
-		{http.MethodPost, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs/:id/skills/:skillId/reinstall"},
-		{http.MethodPost, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs/:id/skills/:skillId/stop"},
-		{http.MethodPatch, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs/:id/skills/:skillId"},
-		{http.MethodDelete, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs/:id/skills/:skillId"},
-		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs/:id/skills/:skillId/install-events"},
-		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs/:id/skills/:skillId/transcript"},
-		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs/:id/skills/:skillId/transcript/history"},
-		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/skills"},
-		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/skills/installer-agent"},
-		{http.MethodPut, "/api/v1/system/admin/tenants/:tenant_id/skills/installer-agent"},
-		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/skills/catalog"},
-		{http.MethodPost, "/api/v1/system/admin/tenants/:tenant_id/skills/catalog"},
-		{http.MethodPost, "/api/v1/system/admin/tenants/:tenant_id/skills/catalog/:id/install"},
-		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/skills/catalog/:id/files"},
-		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/skills/catalog/:id/files/content"},
-		{http.MethodDelete, "/api/v1/system/admin/tenants/:tenant_id/skills/catalog/:id"},
+		{http.MethodGet, "/api/v1/system/admin/sandbox-configs"},
+		{http.MethodPut, "/api/v1/system/admin/sandbox-configs/default"},
+		{http.MethodPost, "/api/v1/system/admin/sandbox-configs"},
+		{http.MethodPost, "/api/v1/system/admin/sandbox-configs/check"},
+		{http.MethodPost, "/api/v1/system/admin/sandbox-configs/templates/query"},
+		{http.MethodGet, "/api/v1/system/admin/sandbox-configs/:id"},
+		{http.MethodPut, "/api/v1/system/admin/sandbox-configs/:id"},
+		{http.MethodDelete, "/api/v1/system/admin/sandbox-configs/:id"},
+		{http.MethodGet, "/api/v1/system/admin/sandbox-configs/:id/sandboxes"},
+		{http.MethodGet, "/api/v1/system/admin/sandbox-configs/:id/skills"},
+		{http.MethodPost, "/api/v1/system/admin/sandbox-configs/:id/skills"},
+		{http.MethodGet, "/api/v1/system/admin/sandbox-configs/:id/skills/:skillId"},
+		{http.MethodGet, "/api/v1/system/admin/sandbox-configs/:id/skills/:skillId/files"},
+		{http.MethodGet, "/api/v1/system/admin/sandbox-configs/:id/skills/:skillId/files/content"},
+		{http.MethodPost, "/api/v1/system/admin/sandbox-configs/:id/skills/:skillId/reinstall"},
+		{http.MethodPost, "/api/v1/system/admin/sandbox-configs/:id/skills/:skillId/stop"},
+		{http.MethodPatch, "/api/v1/system/admin/sandbox-configs/:id/skills/:skillId"},
+		{http.MethodDelete, "/api/v1/system/admin/sandbox-configs/:id/skills/:skillId"},
+		{http.MethodGet, "/api/v1/system/admin/sandbox-configs/:id/skills/:skillId/install-events"},
+		{http.MethodGet, "/api/v1/system/admin/sandbox-configs/:id/skills/:skillId/transcript"},
+		{http.MethodGet, "/api/v1/system/admin/sandbox-configs/:id/skills/:skillId/transcript/history"},
+		{http.MethodGet, "/api/v1/system/admin/skills"},
+		{http.MethodPost, "/api/v1/system/admin/skills"},
+		{http.MethodPost, "/api/v1/system/admin/skills/:id/install"},
+		{http.MethodGet, "/api/v1/system/admin/skills/:id/files"},
+		{http.MethodGet, "/api/v1/system/admin/skills/:id/files/content"},
+		{http.MethodDelete, "/api/v1/system/admin/skills/:id"},
+		{http.MethodGet, "/api/v1/sandbox-policy"},
+		{http.MethodPut, "/api/v1/sandbox-policy"},
 	}
 	for _, route := range want {
 		key := route.method + " " + route.path
@@ -103,6 +100,8 @@ func TestSystemAdminTenantRuntimeRouteSurfaceAndAPIKeyDefaultDeny(t *testing.T) 
 		http.MethodPost + " /api/v1/system/sandbox-check",
 		http.MethodGet + " /api/v1/system/admin/tenants/:tenant_id/parser-engine-config",
 		http.MethodPut + " /api/v1/system/admin/tenants/:tenant_id/parser-engine-config",
+		http.MethodGet + " /api/v1/system/admin/tenants/:tenant_id/sandbox-configs",
+		http.MethodGet + " /api/v1/system/admin/tenants/:tenant_id/skills/catalog",
 	} {
 		if _, ok := routes[oldRoute]; ok {
 			t.Errorf("legacy platform route is still registered: %s", oldRoute)
@@ -169,12 +168,7 @@ func TestSystemAdminTenantRuntimeEnablesChatHistoryForTargetTenant(t *testing.T)
 		tenantService,
 		tenantHandler,
 		&handler.MessageHandler{},
-		&handler.SandboxConfigHandler{},
-		&handler.SandboxSkillHandler{},
-		&handler.SkillHandler{},
-		&handler.CustomAgentHandler{},
-		&handler.SystemHandler{},
-		nil, nil, nil, nil,
+		nil, nil,
 		&rbacGuards{},
 	)
 
@@ -234,12 +228,7 @@ func TestSystemAdminTenantRuntimeChatHistoryRejectsMissingAuthorityOrTenant(t *t
 				nil,
 				&handler.TenantHandler{},
 				&handler.MessageHandler{},
-				&handler.SandboxConfigHandler{},
-				&handler.SandboxSkillHandler{},
-				&handler.SkillHandler{},
-				&handler.CustomAgentHandler{},
-				&handler.SystemHandler{},
-				nil, nil, nil, nil,
+				nil, nil,
 				&rbacGuards{},
 			)
 

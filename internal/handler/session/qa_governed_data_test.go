@@ -125,6 +125,12 @@ func (m governedAdmissionMembers) GetMembership(_ context.Context, user string, 
 	return &types.TenantMember{UserID: user, TenantID: tenant, Status: types.TenantMemberStatusActive, OperatingAnalysisAccess: *m.allowed}, nil
 }
 
+type governedAdmissionTenants struct{ interfaces.TenantService }
+
+func (governedAdmissionTenants) GetTenantByID(_ context.Context, id uint64) (*types.Tenant, error) {
+	return &types.Tenant{ID: id, Status: types.TenantStatusActive, AnalysisEnabled: true}, nil
+}
+
 type governedAdmissionResolver struct{}
 
 func (governedAdmissionResolver) Resolve(context.Context, uint64) (types.GovernedEdgeConnection, error) {
@@ -138,7 +144,7 @@ func (governedAdmissionResolver) VerifyCandidate(context.Context, types.Governed
 func TestGovernedDataTurnAdmissionRejectsRevokedAndCrossTenantCredentials(t *testing.T) {
 	allowed := true
 	calls := 0
-	h := &Handler{userService: governedAdmissionUsers{}, tenantMemberService: governedAdmissionMembers{allowed: &allowed, calls: &calls}, governedEdgeResolver: governedAdmissionResolver{}}
+	h := &Handler{userService: governedAdmissionUsers{}, tenantService: governedAdmissionTenants{}, tenantMemberService: governedAdmissionMembers{allowed: &allowed, calls: &calls}, governedEdgeResolver: governedAdmissionResolver{}}
 	ctx := context.WithValue(context.Background(), types.UserIDContextKey, "user-a")
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, uint64(10001))
 	ctx = types.WithPrincipal(ctx, types.Principal{Type: types.PrincipalWebUser, ID: "user-a"})
@@ -180,7 +186,7 @@ func TestGovernedCredentialFollowsEffectiveQAPath(t *testing.T) {
 			h := &Handler{
 				sessionService: &stubSessionService{}, customAgentService: &resolveOwnAgentStub{agent: agent},
 				messageService: history,
-				userService:    governedAdmissionUsers{}, tenantMemberService: governedAdmissionMembers{allowed: &allowed, calls: &calls}, governedEdgeResolver: governedAdmissionResolver{},
+				userService:    governedAdmissionUsers{}, tenantService: governedAdmissionTenants{}, tenantMemberService: governedAdmissionMembers{allowed: &allowed, calls: &calls}, governedEdgeResolver: governedAdmissionResolver{},
 			}
 			parse := func() (*qaRequestContext, error) {
 				c, _ := gin.CreateTestContext(httptest.NewRecorder())

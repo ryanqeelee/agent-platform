@@ -14,7 +14,7 @@ import (
 const skillProgressTTL = 30 * time.Minute
 
 // SkillProgress is the transient install/remove progress. It is deliberately
-// NOT persisted: the durable state is tenant_skills.status, and a percentage
+// NOT persisted: the durable state is platform_skills.status, and a percentage
 // that outlives the job that produced it is worse than no percentage.
 type SkillProgress struct {
 	Percent int    `json:"percent"`
@@ -23,15 +23,15 @@ type SkillProgress struct {
 	Status  string `json:"status,omitempty"`
 }
 
-func skillProgressKey(tenantID uint64, configID, skillID string) string {
-	return fmt.Sprintf("weknora-skill-install:%d:%s:%s", tenantID, configID, skillID)
+func skillProgressKey(configID, skillID string) string {
+	return fmt.Sprintf("weknora-skill-install:%s:%s", configID, skillID)
 }
 
 // publishProgress stores the latest value and broadcasts it. Without Redis both
 // are no-ops and the UI falls back to the DB status alone; the install itself
 // keeps working, which is the point.
 func (s *TenantSkillService) publishProgress(
-	ctx context.Context, tenantID uint64, configID, skillID string, p SkillProgress,
+	ctx context.Context, configID, skillID string, p SkillProgress,
 ) {
 	if s.redis == nil {
 		return
@@ -40,7 +40,7 @@ func (s *TenantSkillService) publishProgress(
 	if err != nil {
 		return
 	}
-	key := skillProgressKey(tenantID, configID, skillID)
+	key := skillProgressKey(configID, skillID)
 	if err := s.redis.Set(ctx, key, payload, skillProgressTTL).Err(); err != nil {
 		logger.Warnf(ctx, "[skill] store progress %s failed: %v", key, err)
 	}
@@ -50,16 +50,14 @@ func (s *TenantSkillService) publishProgress(
 }
 
 // LastProgress returns the last known value so a fresh SSE connection can paint
-// immediately instead of waiting for the next tick. tenantID is part of the
-// key so a caller that only has config/skill IDs cannot read another
-// workspace's progress.
+// immediately instead of waiting for the next tick.
 func (s *TenantSkillService) LastProgress(
-	ctx context.Context, tenantID uint64, configID, skillID string,
+	ctx context.Context, configID, skillID string,
 ) (SkillProgress, bool) {
 	if s.redis == nil {
 		return SkillProgress{}, false
 	}
-	raw, err := s.redis.Get(ctx, skillProgressKey(tenantID, configID, skillID)).Bytes()
+	raw, err := s.redis.Get(ctx, skillProgressKey(configID, skillID)).Bytes()
 	if err != nil {
 		return SkillProgress{}, false
 	}

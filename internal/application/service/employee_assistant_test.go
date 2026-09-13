@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
-	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/require"
@@ -127,42 +126,37 @@ func TestEmployeeReadToolsDoNotGrantExtensions(t *testing.T) {
 	}
 }
 
-type employeeSandboxRepoStub struct {
-	repository.TenantSandboxConfigRepository
-	rows            []*types.TenantSandboxConfigEntity
-	err             error
-	requestedTenant uint64
+type employeeSandboxDefaultStub struct {
+	id    string
+	err   error
+	calls int
 }
 
-func (r *employeeSandboxRepoStub) ListByTenant(_ context.Context, tenant uint64) ([]*types.TenantSandboxConfigEntity, error) {
-	r.requestedTenant = tenant
-	return r.rows, r.err
+func (r *employeeSandboxDefaultStub) DefaultSandboxConfigID(context.Context) (string, error) {
+	r.calls++
+	return r.id, r.err
 }
 func TestEmployeeAssistantSandboxSelection(t *testing.T) {
 	restore := types.OverrideBuiltinAgentEntriesForTest(map[string]*types.BuiltinAgentEntry{
 		types.BuiltinEmployeeAssistantID: {ID: types.BuiltinEmployeeAssistantID, IsBuiltin: true},
 	})
 	t.Cleanup(restore)
-	own := &types.TenantSandboxConfigEntity{ID: "ours", TenantID: 7, Name: "employee-assistant"}
 	for _, tc := range []struct {
-		name    string
-		enabled bool
-		rows    []*types.TenantSandboxConfigEntity
-		repoErr error
-		want    string
-		wantErr bool
+		name       string
+		enabled    bool
+		defaultID  string
+		defaultErr error
+		want       string
+		wantErr    bool
 	}{
-		{name: "disabled", rows: []*types.TenantSandboxConfigEntity{own}},
+		{name: "disabled", defaultID: "ours"},
 		{name: "unconfigured", enabled: true},
-		{name: "configured", enabled: true, rows: []*types.TenantSandboxConfigEntity{own}, want: "ours"},
-		{name: "unrelated", enabled: true, rows: []*types.TenantSandboxConfigEntity{{ID: "other", TenantID: 7, Name: "other"}}},
-		{name: "foreign", enabled: true, rows: []*types.TenantSandboxConfigEntity{{ID: "foreign", TenantID: 8, Name: "employee-assistant"}}, wantErr: true},
-		{name: "duplicate", enabled: true, rows: []*types.TenantSandboxConfigEntity{own, own}, wantErr: true},
-		{name: "read_failure", enabled: true, repoErr: errors.New("unavailable"), wantErr: true},
+		{name: "configured", enabled: true, defaultID: "ours", want: "ours"},
+		{name: "read_failure", enabled: true, defaultErr: errors.New("unavailable"), wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			repo := &employeeSandboxRepoStub{rows: tc.rows, err: tc.repoErr}
-			svc := &customAgentService{repo: &platformAgentRepoStub{rows: map[uint64]map[string]*types.CustomAgent{}}, scenarioCapabilities: assistantScenarioResolverStub{settings: assistantScenarioSettings(false, false, tc.enabled)}, sandboxConfigs: repo}
+			defaults := &employeeSandboxDefaultStub{id: tc.defaultID, err: tc.defaultErr}
+			svc := &customAgentService{repo: &platformAgentRepoStub{rows: map[uint64]map[string]*types.CustomAgent{}}, scenarioCapabilities: assistantScenarioResolverStub{settings: assistantScenarioSettings(false, false, tc.enabled)}, sandboxDefault: defaults}
 			agent, err := svc.employeeAssistant(context.Background(), 7)
 			if tc.wantErr {
 				require.Error(t, err)
@@ -176,9 +170,9 @@ func TestEmployeeAssistantSandboxSelection(t *testing.T) {
 				require.NotEqual(t, "all", agent.Config.SkillsSelectionMode)
 			}
 			if tc.enabled {
-				require.Equal(t, uint64(7), repo.requestedTenant)
+				require.Equal(t, 1, defaults.calls)
 			} else {
-				require.Zero(t, repo.requestedTenant)
+				require.Zero(t, defaults.calls)
 			}
 		})
 	}

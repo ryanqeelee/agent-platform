@@ -2,9 +2,15 @@ package file
 
 import (
 	"context"
+	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
-	"time"
+
+	"github.com/Tencent/WeKnora/internal/utils"
+	"github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss"
+	"github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss/credentials"
 )
 
 func TestParseOssFilePath(t *testing.T) {
@@ -99,49 +105,17 @@ func TestParseOssFilePath(t *testing.T) {
 }
 
 func TestNewOSSClient(t *testing.T) {
-	tests := []struct {
-		name      string
-		endpoint  string
-		region    string
-		accessKey string
-		secretKey string
-		wantErr   bool
-	}{
-		{
-			name:      "valid parameters create client",
-			endpoint:  "https://oss-cn-hangzhou.aliyuncs.com",
-			region:    "cn-hangzhou",
-			accessKey: "test-access-key",
-			secretKey: "test-secret-key",
-			wantErr:   false,
-		},
-		{
-			name:      "custom endpoint",
-			endpoint:  "https://example.com",
-			region:    "cn-shanghai",
-			accessKey: "ak",
-			secretKey: "sk",
-			wantErr:   false,
-		},
-	}
+	const endpoint = "https://oss-unit.test"
+	t.Setenv("SSRF_WHITELIST", "oss-unit.test")
+	utils.ResetSSRFWhitelistForTest()
+	t.Cleanup(utils.ResetSSRFWhitelistForTest)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			client, err := newOSSClient(tt.endpoint, tt.region, tt.accessKey, tt.secretKey)
-			if tt.wantErr {
-				if err == nil {
-					t.Error("expected error but got nil")
-				}
-				return
-			}
-			if err != nil {
-				t.Errorf("newOSSClient() unexpected error: %v", err)
-				return
-			}
-			if client == nil {
-				t.Error("expected non-nil client")
-			}
-		})
+	client, err := newOSSClient(endpoint, "cn-hangzhou", "test-access-key", "test-secret-key")
+	if err != nil {
+		t.Fatalf("newOSSClient() error = %v", err)
+	}
+	if client == nil {
+		t.Fatal("newOSSClient() returned a nil client")
 	}
 }
 
@@ -151,59 +125,80 @@ func TestNewOSSClientRejectsUnsafeEndpoint(t *testing.T) {
 	}
 }
 
-func TestCheckOssConnectivity_InvalidEndpoint(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	// Should fail with an invalid/unreachable endpoint
-	err := CheckOssConnectivity(ctx,
-		"https://invalid-oss-endpoint-that-does-not-exist.local",
+func TestCheckOssConnectivity_RejectsUnsafeEndpoint(t *testing.T) {
+	err := CheckOssConnectivity(context.Background(),
+		"http://127.0.0.1:9000",
 		"cn-hangzhou",
-		"invalid-access-key",
-		"invalid-secret-key",
-		"nonexistent-bucket",
+		"access-key",
+		"secret-key",
+		"bucket",
 	)
-
 	if err == nil {
-		t.Error("CheckOssConnectivity with invalid endpoint should return an error")
+		t.Fatal("CheckOssConnectivity() expected an unsafe endpoint error")
+	}
+	if !strings.Contains(err.Error(), "unsafe OSS endpoint") {
+		t.Fatalf("CheckOssConnectivity() error = %v, want unsafe endpoint error", err)
 	}
 }
 
-func TestOssEnsureBucket_NonExistent(t *testing.T) {
-	client, err := newOSSClient(
-		"https://oss-cn-hangzhou.aliyuncs.com",
-		"cn-hangzhou",
-		"test-invalid-key",
-		"test-invalid-secret",
-	)
-	if err != nil {
-		t.Fatalf("newOSSClient() error: %v", err)
-	}
+func TestOssEnsureBucket_CheckFails(t *testing.T) {
+	transportErr := errors.New("mock bucket check failure")
+	client := newMockOSSClient(func(*http.Request) (*http.Response, error) {
+		return nil, transportErr
+	})
 
-	// Bucket that definitely doesn't exist - should return error
-	err = ossEnsureBucket(client, "this-bucket-definitely-does-not-exist-12345")
+	err := ossEnsureBucket(client, "test-bucket")
 	if err == nil {
-		t.Error("ossEnsureBucket with non-existent bucket should return an error")
+		t.Fatal("ossEnsureBucket() expected a bucket check error")
+	}
+	if !strings.Contains(err.Error(), "failed to check OSS bucket") || !errors.Is(err, transportErr) {
+		t.Fatalf("ossEnsureBucket() error = %v, want wrapped bucket check error", err)
 	}
 }
 
 func TestOssEnsureBucket_CreateFails(t *testing.T) {
-	client, err := newOSSClient(
-		"https://oss-cn-hangzhou.aliyuncs.com",
-		"cn-hangzhou",
-		"test-invalid-key",
-		"test-invalid-secret",
-	)
-	if err != nil {
-		t.Fatalf("newOSSClient() error: %v", err)
-	}
+	createErr := errors.New("mock bucket creation failure")
+	client := newMockOSSClient(func(req *http.Request) (*http.Response, error) {
+		if req.Method == http.MethodGet {
+			return mockOSSResponse(req, http.StatusNotFound, `<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>NoSuchBucket</Code><Message>not found</Message><RequestId>test-request</RequestId></Error>`), nil
+		}
+		return nil, createErr
+	})
 
-	// Use a bucket that does not exist so IsBucketExist returns false and the
-	// create path is exercised; with invalid credentials PutBucket then fails.
-	// A common name like "test-bucket" already exists globally on OSS, which
-	// would short-circuit at IsBucketExist and make this assertion flaky.
-	err = ossEnsureBucket(client, "weknora-nonexistent-bucket-create-fails-12345")
+	err := ossEnsureBucket(client, "test-bucket")
 	if err == nil {
-		t.Error("ossEnsureBucket with invalid credentials should return an error")
+		t.Fatal("ossEnsureBucket() expected a bucket creation error")
+	}
+	if !strings.Contains(err.Error(), "failed to create OSS bucket") || !errors.Is(err, createErr) {
+		t.Fatalf("ossEnsureBucket() error = %v, want wrapped bucket creation error", err)
+	}
+}
+
+type ossRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn ossRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
+
+func newMockOSSClient(roundTrip ossRoundTripFunc) *oss.Client {
+	cfg := oss.LoadDefaultConfig().
+		WithCredentialsProvider(credentials.NewStaticCredentialsProvider("access-key", "secret-key", "")).
+		WithRegion("cn-hangzhou").
+		WithEndpoint("https://oss-unit.test").
+		WithRetryMaxAttempts(1).
+		WithHttpClient(&http.Client{Transport: roundTrip})
+	return oss.NewClient(cfg)
+}
+
+func mockOSSResponse(req *http.Request, statusCode int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: statusCode,
+		Header: http.Header{
+			"Content-Type":     []string{"application/xml"},
+			"X-Oss-Request-Id": []string{"test-request"},
+		},
+		Body:    io.NopCloser(strings.NewReader(body)),
+		Request: req,
 	}
 }

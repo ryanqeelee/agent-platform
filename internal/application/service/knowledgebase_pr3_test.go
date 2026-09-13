@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
+	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
-	"github.com/Tencent/WeKnora/internal/storageallowlist"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
@@ -34,16 +34,24 @@ import (
 const validKBStoreUUID = "0193b8a0-1111-7000-8000-000000000001"
 
 type fakeOwnership struct {
-	owned map[string]uint64 // storeID -> tenantID owner
-	err   error
+	owned     map[string]uint64
+	defaultID string
+	err       error
 }
 
-func (f *fakeOwnership) StoreOwnedBy(_ context.Context, storeID string, tenantID uint64) (bool, error) {
+func (f *fakeOwnership) StoreUsable(_ context.Context, storeID string) (bool, error) {
 	if f.err != nil {
 		return false, f.err
 	}
-	owner, ok := f.owned[storeID]
-	return ok && owner == tenantID, nil
+	_, ok := f.owned[storeID]
+	return ok, nil
+}
+
+func (f *fakeOwnership) DefaultStoreID(_ context.Context) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	return f.defaultID, nil
 }
 
 type fakeRegistry struct {
@@ -150,6 +158,46 @@ func newPR3KBService(repo *fakeKBRepo, registry *fakeRegistry, ownership *fakeOw
 	}
 }
 
+type fakeStorageResolver struct {
+	backends  map[string]*types.StorageBackend
+	defaultID string
+}
+
+func (r *fakeStorageResolver) ResolveBackend(_ context.Context, backendID string) (*types.StorageBackend, error) {
+	if backendID == "" {
+		backendID = r.defaultID
+	}
+	backend := r.backends[backendID]
+	if backend == nil {
+		return nil, stderrors.New("storage backend not found")
+	}
+	return backend, nil
+}
+
+func (r *fakeStorageResolver) ResolveFileService(
+	ctx context.Context, backendID, localBaseDir string,
+) (interfaces.FileService, string, error) {
+	backend, err := r.ResolveBackend(ctx, backendID)
+	if err != nil {
+		return nil, "", err
+	}
+	return filesvc.NewLocalFileService(localBaseDir, ""), backend.Provider, nil
+}
+
+func storageResolverWithDefault(id, provider string) interfaces.StorageBackendResolver {
+	return &fakeStorageResolver{
+		backends:  map[string]*types.StorageBackend{id: {ID: id, Provider: provider}},
+		defaultID: id,
+	}
+}
+
+func vectorFixture() (*fakeRegistry, *fakeOwnership) {
+	return &fakeRegistry{registered: map[string]struct{}{validKBStoreUUID: {}}}, &fakeOwnership{
+		owned:     map[string]uint64{validKBStoreUUID: 1},
+		defaultID: validKBStoreUUID,
+	}
+}
+
 type knowledgeProcessingPlanResolverStub struct {
 	pin *types.KnowledgeProcessingPlanPin
 	err error
@@ -166,36 +214,48 @@ func ctxWithTenant(tenantID uint64) context.Context {
 	return context.WithValue(context.Background(), types.TenantIDContextKey, tenantID)
 }
 
-func ctxWithTenantStorage(tenantID uint64, defaultProvider string) context.Context {
+func ctxWithTenantStorage(tenantID uint64, _ string) context.Context {
 	ctx := ctxWithTenant(tenantID)
 	tenant := &types.Tenant{
 		ID: tenantID,
-		StorageEngineConfig: &types.StorageEngineConfig{
-			DefaultProvider: defaultProvider,
-		},
 	}
 	return context.WithValue(ctx, types.TenantInfoContextKey, tenant)
 }
 
-func TestCreateKnowledgeBase_DefaultStorageProviderFromTenant(t *testing.T) {
+func TestCreateKnowledgeBase_UsesPlatformStorageBackend(t *testing.T) {
 	repo := newFakeKBRepo()
-	svc := newPR3KBService(repo, &fakeRegistry{registered: map[string]struct{}{}}, &fakeOwnership{})
+	registry, ownership := vectorFixture()
+	svc := newPR3KBService(repo, registry, ownership)
+	svc.storageResolver = storageResolverWithDefault("storage-minio", "minio")
 
-	kb, err := svc.CreateKnowledgeBase(ctxWithTenantStorage(1, "minio"), &types.KnowledgeBase{Name: "kb"})
+	kb, err := svc.CreateKnowledgeBase(ctxWithTenantStorage(1, ""), &types.KnowledgeBase{Name: "kb"})
 	require.NoError(t, err)
 	assert.Equal(t, "minio", kb.GetStorageProvider())
+	require.NotNil(t, kb.StorageBackendID)
+	assert.Equal(t, "storage-minio", *kb.StorageBackendID)
 
-	kbExplicit, err := svc.CreateKnowledgeBase(ctxWithTenantStorage(1, "minio"), &types.KnowledgeBase{
-		Name:                  "kb2",
-		StorageProviderConfig: &types.StorageProviderConfig{Provider: "cos"},
+	svc.storageResolver = &fakeStorageResolver{
+		backends: map[string]*types.StorageBackend{
+			"storage-minio": {ID: "storage-minio", Provider: "minio"},
+			"storage-cos":   {ID: "storage-cos", Provider: "cos"},
+		},
+		defaultID: "storage-minio",
+	}
+	explicitID := "storage-cos"
+	kbExplicit, err := svc.CreateKnowledgeBase(ctxWithTenantStorage(1, ""), &types.KnowledgeBase{
+		Name:             "kb2",
+		StorageBackendID: &explicitID,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "cos", kbExplicit.GetStorageProvider())
+	require.NotNil(t, kbExplicit.StorageBackendID)
+	assert.Equal(t, explicitID, *kbExplicit.StorageBackendID)
 }
 
 func TestCreateKnowledgeBase_WorkspacePrincipalUsesPlatformModelDefaults(t *testing.T) {
 	repo := newFakeKBRepo()
-	svc := newPR3KBService(repo, &fakeRegistry{registered: map[string]struct{}{}}, &fakeOwnership{})
+	registry, ownership := vectorFixture()
+	svc := newPR3KBService(repo, registry, ownership)
 	svc.modelService = &stubModelService{modelsByID: map[string]*types.Model{
 		"chat-default":  {ID: "chat-default", Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusActive, IsDefault: true},
 		"embed-default": {ID: "embed-default", Type: types.ModelTypeEmbedding, Status: types.ModelStatusActive, IsDefault: true},
@@ -217,7 +277,8 @@ func TestCreateKnowledgeBase_WorkspacePrincipalUsesPlatformModelDefaults(t *test
 	require.NoError(t, err)
 	assert.Equal(t, "chat-default", kb.SummaryModelID)
 	assert.Equal(t, "embed-default", kb.EmbeddingModelID)
-	assert.Nil(t, kb.VectorStoreID)
+	require.NotNil(t, kb.VectorStoreID)
+	assert.Equal(t, validKBStoreUUID, *kb.VectorStoreID)
 	assert.False(t, kb.VLMConfig.Enabled)
 	assert.Equal(t, "plan-v1", kb.AICapabilityPlanVersionID)
 }
@@ -237,7 +298,8 @@ func TestCreateKnowledgeBase_WorkspacePrincipalLeavesNoRowWhenPlanUnavailable(t 
 
 func TestCreateKnowledgeBase_APIKeyKeepsExistingCreationPath(t *testing.T) {
 	repo := newFakeKBRepo()
-	svc := newPR3KBService(repo, &fakeRegistry{registered: map[string]struct{}{}}, &fakeOwnership{})
+	registry, ownership := vectorFixture()
+	svc := newPR3KBService(repo, registry, ownership)
 	svc.planResolver = knowledgeProcessingPlanResolverStub{err: interfaces.ErrAICapabilityUnavailable}
 	svc.modelService = &stubModelService{modelsByID: map[string]*types.Model{
 		"chat-default":  {ID: "chat-default", Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusActive, IsDefault: true},
@@ -289,18 +351,22 @@ func TestAuthorizeOwnKnowledgeBaseRequiresExactSharedProvenance(t *testing.T) {
 	}
 }
 
-func TestCreateKnowledgeBase_DefaultStorageProviderRespectsAllowList(t *testing.T) {
-	t.Setenv(storageallowlist.AllowListEnv, "minio")
+func TestCreateKnowledgeBase_PlatformStorageBackendIsSharedAcrossTenants(t *testing.T) {
 	repo := newFakeKBRepo()
-	svc := newPR3KBService(repo, &fakeRegistry{registered: map[string]struct{}{}}, &fakeOwnership{})
+	registry, ownership := vectorFixture()
+	svc := newPR3KBService(repo, registry, ownership)
+	svc.storageResolver = storageResolverWithDefault("storage-minio", "minio")
 
 	kb, err := svc.CreateKnowledgeBase(ctxWithTenantStorage(1, ""), &types.KnowledgeBase{Name: "kb"})
 	require.NoError(t, err)
 	assert.Equal(t, "minio", kb.GetStorageProvider())
 
-	kbDisallowedDefault, err := svc.CreateKnowledgeBase(ctxWithTenantStorage(1, "local"), &types.KnowledgeBase{Name: "kb2"})
+	kbOtherTenant, err := svc.CreateKnowledgeBase(ctxWithTenantStorage(2, ""), &types.KnowledgeBase{Name: "kb2"})
 	require.NoError(t, err)
-	assert.Equal(t, "minio", kbDisallowedDefault.GetStorageProvider())
+	assert.Equal(t, uint64(2), kbOtherTenant.TenantID)
+	assert.Equal(t, "minio", kbOtherTenant.GetStorageProvider())
+	require.NotNil(t, kbOtherTenant.StorageBackendID)
+	assert.Equal(t, "storage-minio", *kbOtherTenant.StorageBackendID)
 }
 
 // ---------------------------------------------------------------------------
@@ -310,28 +376,30 @@ func TestCreateKnowledgeBase_DefaultStorageProviderRespectsAllowList(t *testing.
 func TestCreateKnowledgeBase_VectorStoreBinding(t *testing.T) {
 	registered := map[string]struct{}{validKBStoreUUID: {}}
 
-	t.Run("nil vector_store_id persists unchanged", func(t *testing.T) {
+	t.Run("nil vector_store_id binds platform default", func(t *testing.T) {
 		repo := newFakeKBRepo()
 		svc := newPR3KBService(repo,
 			&fakeRegistry{registered: registered},
-			&fakeOwnership{owned: map[string]uint64{validKBStoreUUID: 1}},
+			&fakeOwnership{owned: map[string]uint64{validKBStoreUUID: 1}, defaultID: validKBStoreUUID},
 		)
 		kb, err := svc.CreateKnowledgeBase(ctxWithTenant(1), &types.KnowledgeBase{Name: "kb"})
 		require.NoError(t, err)
-		assert.Nil(t, kb.VectorStoreID)
+		require.NotNil(t, kb.VectorStoreID)
+		assert.Equal(t, validKBStoreUUID, *kb.VectorStoreID)
 		assert.Len(t, repo.rows, 1)
 	})
 
-	t.Run("empty string vector_store_id normalizes to nil", func(t *testing.T) {
+	t.Run("empty string vector_store_id binds platform default", func(t *testing.T) {
 		repo := newFakeKBRepo()
 		svc := newPR3KBService(repo,
 			&fakeRegistry{registered: registered},
-			&fakeOwnership{},
+			&fakeOwnership{owned: map[string]uint64{validKBStoreUUID: 1}, defaultID: validKBStoreUUID},
 		)
 		empty := ""
 		kb, err := svc.CreateKnowledgeBase(ctxWithTenant(1), &types.KnowledgeBase{Name: "kb", VectorStoreID: &empty})
 		require.NoError(t, err)
-		assert.Nil(t, kb.VectorStoreID)
+		require.NotNil(t, kb.VectorStoreID)
+		assert.Equal(t, validKBStoreUUID, *kb.VectorStoreID)
 	})
 
 	t.Run("malformed UUID rejected with BindingInvalid code", func(t *testing.T) {
@@ -363,18 +431,18 @@ func TestCreateKnowledgeBase_VectorStoreBinding(t *testing.T) {
 		assert.Equal(t, validKBStoreUUID, *kb.VectorStoreID)
 	})
 
-	t.Run("valid UUID + cross-tenant → BindingInvalid", func(t *testing.T) {
+	t.Run("valid UUID + shared global store persists for another tenant", func(t *testing.T) {
 		repo := newFakeKBRepo()
 		svc := newPR3KBService(repo,
 			&fakeRegistry{registered: registered},
-			&fakeOwnership{owned: map[string]uint64{validKBStoreUUID: 2}}, // owned by tenant 2
+			&fakeOwnership{owned: map[string]uint64{validKBStoreUUID: 1}},
 		)
 		id := validKBStoreUUID
-		_, err := svc.CreateKnowledgeBase(ctxWithTenant(1), &types.KnowledgeBase{Name: "kb", VectorStoreID: &id})
-		require.Error(t, err)
-		appErr, ok := apperrors.IsAppError(err)
-		require.True(t, ok)
-		assert.Equal(t, apperrors.ErrVectorStoreBindingInvalid, appErr.Code)
+		kb, err := svc.CreateKnowledgeBase(ctxWithTenant(2), &types.KnowledgeBase{Name: "kb", VectorStoreID: &id})
+		require.NoError(t, err)
+		require.NotNil(t, kb.VectorStoreID)
+		assert.Equal(t, validKBStoreUUID, *kb.VectorStoreID)
+		assert.Equal(t, uint64(2), kb.TenantID)
 	})
 
 	t.Run("valid UUID + owned but unregistered → Unavailable", func(t *testing.T) {

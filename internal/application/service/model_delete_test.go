@@ -107,10 +107,10 @@ func (s *stubAgentRepoForModelDelete) ListModelUsages(
 ) ([]types.ModelUsageResource, error) {
 	return s.usages, s.usageErr
 }
-func (s *stubAgentRepoForModelDelete) CountBySandboxConfigID(context.Context, uint64, string) (int64, error) {
+func (s *stubAgentRepoForModelDelete) CountBySandboxConfigID(context.Context, string) (int64, error) {
 	return 0, nil
 }
-func (s *stubAgentRepoForModelDelete) ListNamesBySandboxConfigID(context.Context, uint64, string) ([]string, error) {
+func (s *stubAgentRepoForModelDelete) ListNamesBySandboxConfigID(context.Context, string) ([]string, error) {
 	return nil, nil
 }
 

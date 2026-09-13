@@ -50,7 +50,7 @@ func TestSandboxConfigResponseMasksSecrets(t *testing.T) {
 func TestSandboxesStillLiveMapsTo409WithCounts(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.PUT("/system/admin/tenants/42/sandbox-configs/:id", func(c *gin.Context) {
+	router.PUT("/system/admin/sandbox-configs/:id", func(c *gin.Context) {
 		respondSandboxesStillLive(c, service.SandboxInventory{
 			SandboxCount: 3,
 			SessionIDs:   []string{"s-1", "s-2"},
@@ -59,7 +59,7 @@ func TestSandboxesStillLiveMapsTo409WithCounts(t *testing.T) {
 	})
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/system/admin/tenants/42/sandbox-configs/cfg-a",
+	req := httptest.NewRequest(http.MethodPut, "/system/admin/sandbox-configs/cfg-a",
 		strings.NewReader(`{}`))
 	router.ServeHTTP(w, req)
 
@@ -85,12 +85,12 @@ func TestSandboxesStillLiveMapsTo409WithCounts(t *testing.T) {
 func TestSandboxInventoryUnverifiableMapsToDistinct409(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.DELETE("/system/admin/tenants/42/sandbox-configs/:id", func(c *gin.Context) {
+	router.DELETE("/system/admin/sandbox-configs/:id", func(c *gin.Context) {
 		respondSandboxInventoryUnverifiable(c)
 	})
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/system/admin/tenants/42/sandbox-configs/cfg-a", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/system/admin/sandbox-configs/cfg-a", nil)
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusConflict, w.Code)
@@ -109,7 +109,7 @@ func TestSandboxInventoryUnverifiableMapsToDistinct409(t *testing.T) {
 func TestSkillSnapshotReleaseFailedMapsTo409WithRemaining(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.DELETE("/system/admin/tenants/42/sandbox-configs/:id", func(c *gin.Context) {
+	router.DELETE("/system/admin/sandbox-configs/:id", func(c *gin.Context) {
 		if !respondSandboxConfigRefusal(c, &service.SkillSnapshotReleaseFailedError{
 			Remaining: []string{"snap-2"},
 		}) {
@@ -118,7 +118,7 @@ func TestSkillSnapshotReleaseFailedMapsTo409WithRemaining(t *testing.T) {
 	})
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/system/admin/tenants/42/sandbox-configs/cfg-a", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/system/admin/sandbox-configs/cfg-a", nil)
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusConflict, w.Code)
@@ -139,14 +139,14 @@ func TestSkillSnapshotReleaseFailedMapsTo409WithRemaining(t *testing.T) {
 func TestSkillSnapshotBlocksTemplateMapsTo409(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.POST("/system/admin/tenants/42/sandbox-configs/templates/query", func(c *gin.Context) {
+	router.POST("/system/admin/sandbox-configs/templates/query", func(c *gin.Context) {
 		if !respondSandboxConfigRefusal(c, service.ErrSkillSnapshotBlocksTemplateChange) {
 			t.Fatal("expected skill snapshot template lock to map as a refusal")
 		}
 	})
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/system/admin/tenants/42/sandbox-configs/templates/query", nil)
+	req := httptest.NewRequest(http.MethodPost, "/system/admin/sandbox-configs/templates/query", nil)
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusConflict, w.Code)
@@ -172,19 +172,18 @@ func TestSandboxConfigDeletePassesForceQuery(t *testing.T) {
 		c.Set(types.TenantIDContextKey.String(), uint64(42))
 		c.Next()
 	})
-	router.DELETE("/system/admin/tenants/42/sandbox-configs/:id", h.Delete)
+	router.DELETE("/system/admin/sandbox-configs/:id", h.Delete)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/system/admin/tenants/42/sandbox-configs/cfg-a?force=true", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/system/admin/sandbox-configs/cfg-a?force=true", nil)
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
-	require.Equal(t, uint64(42), svc.deleteTenantID)
 	require.Equal(t, "cfg-a", svc.deleteID)
 	require.True(t, svc.deleteForce)
 
 	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodDelete, "/system/admin/tenants/42/sandbox-configs/cfg-b", nil)
+	req = httptest.NewRequest(http.MethodDelete, "/system/admin/sandbox-configs/cfg-b", nil)
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -232,14 +231,12 @@ func TestSandboxConfigUnexpectedErrorIsNotDowngraded(t *testing.T) {
 }
 
 type fakeSandboxConfigService struct {
-	deleteTenantID uint64
-	deleteID       string
-	deleteForce    bool
+	deleteID    string
+	deleteForce bool
 }
 
 func (s *fakeSandboxConfigService) Create(
 	context.Context,
-	uint64,
 	service.CreateSandboxConfigInput,
 ) (*types.TenantSandboxConfigEntity, error) {
 	return nil, nil
@@ -247,22 +244,21 @@ func (s *fakeSandboxConfigService) Create(
 
 func (s *fakeSandboxConfigService) List(
 	context.Context,
-	uint64,
 ) ([]*types.TenantSandboxConfigEntity, error) {
 	return nil, nil
 }
 
 func (s *fakeSandboxConfigService) Get(
 	context.Context,
-	uint64,
 	string,
 ) (*types.TenantSandboxConfigEntity, error) {
 	return nil, nil
 }
 
+func (s *fakeSandboxConfigService) SetDefault(context.Context, string) error { return nil }
+
 func (s *fakeSandboxConfigService) Update(
 	context.Context,
-	uint64,
 	string,
 	service.UpdateSandboxConfigInput,
 ) (*types.TenantSandboxConfigEntity, error) {
@@ -271,11 +267,9 @@ func (s *fakeSandboxConfigService) Update(
 
 func (s *fakeSandboxConfigService) Delete(
 	_ context.Context,
-	tenantID uint64,
 	id string,
 	force bool,
 ) error {
-	s.deleteTenantID = tenantID
 	s.deleteID = id
 	s.deleteForce = force
 	return nil
@@ -283,7 +277,6 @@ func (s *fakeSandboxConfigService) Delete(
 
 func (s *fakeSandboxConfigService) Inventory(
 	context.Context,
-	uint64,
 	string,
 ) (service.SandboxInventory, error) {
 	return service.SandboxInventory{}, nil
@@ -306,7 +299,6 @@ func (s *fakeSandboxConfigService) SetWorkspaceScriptsDisabled(
 
 func (s *fakeSandboxConfigService) QueryTemplates(
 	context.Context,
-	uint64,
 	service.SandboxTemplateQueryInput,
 ) (*service.SandboxTemplateCatalog, error) {
 	return &service.SandboxTemplateCatalog{}, nil

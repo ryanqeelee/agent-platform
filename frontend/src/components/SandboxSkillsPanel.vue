@@ -172,7 +172,7 @@
           </ul>
           <section v-if="skillHasDeclaredEnvs(managedSkill)" class="skill-manage__section">
             <h4>{{ $t('settings.sandbox.skillEnv.toggle') }}</h4>
-            <p class="skill-envs__hint">{{ $t('settings.sandbox.skillEnv.workspaceHint') }}</p>
+            <p class="skill-envs__hint">{{ $t('settings.sandbox.skillEnv.platformHint') }}</p>
             <div class="skill-envs__rows">
               <div v-for="(env, envIdx) in managedSkill.envs" :key="env.name" class="skill-envs__row">
                 <div class="skill-envs__meta">
@@ -233,7 +233,7 @@
               </div>
             </div>
           </section>
-          <section v-if="hasTranscript(managedSkill)" class="skill-manage__section">
+          <section v-if="hasInstallTimeline(managedSkill)" class="skill-manage__section">
             <div class="skill-manage__section-head">
               <h4>{{ $t('settings.sandbox.skillTranscriptTitle') }}</h4>
               <div v-if="managedSkill.status === 'installing'" class="skill-manage__progress">
@@ -248,12 +248,12 @@
               </div>
             </div>
             <SkillInstallTimeline
-              :key="`${managedSkill.id}-${managedSkill.install_session_id || ''}-${transcriptEpoch}`"
+              :key="`${managedSkill.id}-${managedSkill.install_run_id || ''}-${transcriptEpoch}`"
               compact
               :config-id="record?.id || ''"
               :skill-id="managedSkill.id"
-              :session-id="managedSkill.install_session_id || ''"
-              :message-id="managedSkill.install_message_id || ''"
+              :run-id="managedSkill.install_run_id || ''"
+              :message-id="managedSkill.id"
               :live="managedSkill.status === 'installing'"
             />
           </section>
@@ -344,7 +344,7 @@
                             <div class="skill-env-popup__head-text">
                               <div class="skill-env-popup__title">{{ skill.name || skill.id }}</div>
                               <div class="skill-env-popup__meta">
-                                {{ $t('settings.sandbox.skillEnv.workspaceTitle') }}
+                                {{ $t('settings.sandbox.skillEnv.platformTitle') }}
                               </div>
                             </div>
                             <t-button
@@ -359,7 +359,7 @@
                             </t-button>
                           </header>
                           <div class="skill-env-popup__body">
-                            <p class="skill-envs__hint">{{ $t('settings.sandbox.skillEnv.workspaceHint') }}</p>
+                            <p class="skill-envs__hint">{{ $t('settings.sandbox.skillEnv.platformHint') }}</p>
                             <div class="skill-envs__rows">
                               <div v-for="(env, envIdx) in skill.envs" :key="env.name" class="skill-envs__row">
                                 <div class="skill-envs__meta">
@@ -439,7 +439,7 @@
                       </template>
                     </t-popup>
                   <t-popup
-                    v-if="hasTranscript(skill)"
+                    v-if="hasInstallTimeline(skill)"
                     :visible="expandedSkillId === skill.id"
                     trigger="click"
                     placement="bottom-right"
@@ -488,12 +488,12 @@
                           </header>
                           <div class="skill-transcript-popup__body">
                             <SkillInstallTimeline
-                              :key="`${skill.id}-${skill.install_session_id || ''}-${transcriptEpoch}`"
+                              :key="`${skill.id}-${skill.install_run_id || ''}-${transcriptEpoch}`"
                               compact
                               :config-id="record?.id || ''"
                               :skill-id="skill.id"
-                              :session-id="skill.install_session_id || ''"
-                              :message-id="skill.install_message_id || ''"
+                              :run-id="skill.install_run_id || ''"
+                              :message-id="skill.id"
                               :live="skill.status === 'installing'"
                             />
                           </div>
@@ -607,7 +607,6 @@ import { fetchEventSource } from '@microsoft/fetch-event-source'
 import ModelSelector from '@/components/ModelSelector.vue'
 import SkillInstallTimeline from '@/components/SkillInstallTimeline.vue'
 import { SETTING_DRAWER_HEADER_ACTIONS_ID } from '@/components/settings/SettingDrawer.vue'
-import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 import { SKILL_ICON } from '@/types/mention'
 import type { CustomAgent } from '@/api/agent'
 import { getSkillInstallerAgent, updateSkillInstallerAgent } from '@/api/skill'
@@ -665,7 +664,6 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const platformTenantID = usePlatformTenantControlID()
 const headerActionsTarget = inject(SETTING_DRAWER_HEADER_ACTIONS_ID, '')
 
 const loading = ref(false)
@@ -689,7 +687,7 @@ const transcriptEpoch = ref(0)
 const focusedSkillId = ref('')
 const skillItemEls = new Map<string, HTMLElement>()
 let focusTimer: number | null = null
-// Workspace-wide env values. Only one skill's editor popup is open at a time,
+// Platform default env values. Only one skill's editor popup is open at a time,
 // same as the install timeline.
 const expandedEnvSkillId = ref('')
 // Drafts keyed by skill then variable name. An absent key means "the admin did
@@ -833,13 +831,8 @@ watch(
   { immediate: true },
 )
 
-// The locators are written only after the installer sandbox is up and the
-// agent has a message to stream into. The row itself is already "installing"
-// the moment the upload is accepted, and that is when the button has to
-// appear — waiting for the locators would hide it for the first minute.
-function hasTranscript(skill: ConfigSkill): boolean {
-  if (skill.status === 'installing') return true
-  return Boolean(skill.install_session_id && skill.install_message_id)
+function hasInstallTimeline(skill: ConfigSkill): boolean {
+  return Boolean(skill.install_run_id)
 }
 
 function bindSkillItem(id: string, el: unknown) {
@@ -986,7 +979,7 @@ async function submitEnvs(
     skill.id,
   )
   try {
-    const res = await patchConfigSkill(platformTenantID.value!, configId, skill.id, { envs })
+    const res = await patchConfigSkill(configId, skill.id, { envs })
     if (!isCurrent()) return
     const updated = res?.data
     if (updated) {
@@ -1126,13 +1119,11 @@ function followBusySkills() {
 function followProgress(skillId: string) {
   if (!props.record || abortBySkill.has(skillId)) return
   const configId = props.record.id
-  const tenantId = platformTenantID.value
-  if (!tenantId) return
   const controller = new AbortController()
   abortBySkill.set(skillId, controller)
 
   const token = localStorage.getItem('weknora_token')
-  const url = `${getApiBaseUrl()}${configSkillInstallEventsUrl(tenantId, configId, skillId)}`
+  const url = `${getApiBaseUrl()}${configSkillInstallEventsUrl(configId, skillId)}`
 
   void fetchEventSource(url, {
     method: 'GET',
@@ -1170,7 +1161,7 @@ function followProgress(skillId: string) {
 async function refreshImage() {
   if (!props.record) return
   try {
-    const res = await getSandboxConfigById(platformTenantID.value!, props.record.id)
+    const res = await getSandboxConfigById(props.record.id)
     if (res?.data) emit('updated', res.data)
   } catch {
     emit('skillsChanged')
@@ -1200,7 +1191,7 @@ async function loadSkills(silent = false) {
   const previous = skillsSignature(skills.value)
   const wasBusy = skills.value.some(isBusy)
   try {
-    const res = await listConfigSkills(platformTenantID.value!, props.record.id)
+    const res = await listConfigSkills(props.record.id)
     skills.value = overlayUninstallStatus(res?.data || [])
     followBusySkills()
     ensurePoll()
@@ -1233,7 +1224,7 @@ defineExpose({
 
 async function loadInstallerModel() {
   try {
-    const res = await getSkillInstallerAgent(platformTenantID.value!)
+    const res = await getSkillInstallerAgent()
     installerAgent.value = res?.data || null
     const configured = installerAgent.value?.config?.model_id?.trim() || ''
     installerModelId.value = configured || readLastChatModelID()
@@ -1250,7 +1241,7 @@ async function persistInstallerModel(modelId: string) {
   }
   const current = installerAgent.value
   const config = { ...(current?.config || {}), model_id: id }
-  const res = await updateSkillInstallerAgent(platformTenantID.value!, {
+  const res = await updateSkillInstallerAgent({
     name: current?.name || '',
     description: current?.description || '',
     avatar: current?.avatar || '',
@@ -1315,7 +1306,7 @@ async function uploadFile(file: File) {
   uploadPercent.value = 0
   try {
     await persistInstallerModel(installerModelId.value)
-    const res = await uploadConfigSkill(platformTenantID.value!, props.record.id, file, (percent) => {
+    const res = await uploadConfigSkill(props.record.id, file, (percent) => {
       uploadPercent.value = percent
     })
     MessagePlugin.success(t('settings.sandbox.skillUploadAccepted'))
@@ -1341,7 +1332,7 @@ async function installFromSource() {
   installingFromSource.value = true
   try {
     await persistInstallerModel(installerModelId.value)
-    const res = await installConfigSkillFromSource(platformTenantID.value!, props.record.id, { source })
+    const res = await installConfigSkillFromSource(props.record.id, { source })
     MessagePlugin.success(t('settings.sandbox.skillUploadAccepted'))
     sourceInput.value = ''
     const skillId = res?.data?.skill_id || ''
@@ -1369,7 +1360,7 @@ async function toggleEnabled(skill: ConfigSkill, enabled: boolean) {
   if (!props.record) return
   togglingId.value = skill.id
   try {
-    const res = await patchConfigSkill(platformTenantID.value!, props.record.id, skill.id, { enabled })
+    const res = await patchConfigSkill(props.record.id, skill.id, { enabled })
     const updated = res?.data
     skills.value = skills.value.map((item) => (item.id === skill.id ? (updated || { ...item, enabled }) : item))
     MessagePlugin.success(
@@ -1390,7 +1381,7 @@ async function retrySkill(skill: ConfigSkill) {
   retryingId.value = skill.id
   forgetProgress(skill.id)
   try {
-    await reinstallConfigSkill(platformTenantID.value!, props.record.id, skill.id)
+    await reinstallConfigSkill(props.record.id, skill.id)
     MessagePlugin.success(t('settings.sandbox.skillRetryAccepted'))
     await loadSkills()
     followProgress(skill.id)
@@ -1406,7 +1397,7 @@ async function stopSkill(skill: ConfigSkill) {
   stoppingId.value = skill.id
   forgetProgress(skill.id)
   try {
-    const res = await stopConfigSkill(platformTenantID.value!, props.record.id, skill.id)
+    const res = await stopConfigSkill(props.record.id, skill.id)
     const updated = res?.data
     if (updated) {
       skills.value = skills.value.map((item) => (item.id === skill.id ? { ...item, ...updated } : item))
@@ -1428,7 +1419,7 @@ async function removeSkill(skill: ConfigSkill) {
   uninstallDone.value = false
   forgetProgress(skill.id)
   try {
-    await deleteConfigSkill(platformTenantID.value!, props.record.id, skill.id)
+    await deleteConfigSkill(props.record.id, skill.id)
     MessagePlugin.success(t('settings.sandbox.skillDeleteAccepted'))
     skills.value = skills.value.map((item) => (
       item.id === skill.id ? { ...item, status: 'removing' } : item

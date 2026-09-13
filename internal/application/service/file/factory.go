@@ -11,8 +11,9 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
-// NewFileServiceFromStorageConfig builds a provider-specific FileService from tenant storage config.
-// provider can be empty; in that case it falls back to sec.DefaultProvider.
+// NewFileServiceFromStorageConfig builds a provider FileService from the
+// internal driver configuration produced by a global StorageBackend.
+// provider can be empty; in that case it uses sec.DefaultProvider.
 // Returns the resolved provider name together with the service.
 func NewFileServiceFromStorageConfig(
 	provider string,

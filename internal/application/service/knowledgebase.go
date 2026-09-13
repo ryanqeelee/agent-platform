@@ -13,7 +13,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/datasource"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/storageallowlist"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -36,7 +35,7 @@ type knowledgeBaseService struct {
 	kbShareService  interfaces.KBShareService
 	modelService    interfaces.ModelService
 	retrieveEngine  interfaces.RetrieveEngineRegistry
-	ownership       retriever.TenantStoreOwnership
+	ownership       retriever.StoreConfigAvailability
 	tenantRepo      interfaces.TenantRepository
 	fileSvc         interfaces.FileService
 	storageResolver interfaces.StorageBackendResolver
@@ -61,7 +60,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	kbShareService interfaces.KBShareService,
 	modelService interfaces.ModelService,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
-	ownership retriever.TenantStoreOwnership,
+	ownership retriever.StoreConfigAvailability,
 	tenantRepo interfaces.TenantRepository,
 	fileSvc interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
@@ -148,7 +147,6 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 			return nil, err
 		}
 	}
-	applyTenantDefaultStorageProvider(ctx, kb)
 	if err := s.applyAndValidateStorageBackend(ctx, kb); err != nil {
 		return nil, err
 	}
@@ -163,10 +161,22 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 			kb.TenantID)
 	}
 
-	if kb.HasVectorStore() {
-		if err := s.validateVectorStoreBinding(ctx, kb.TenantID, *kb.VectorStoreID); err != nil {
+	if !kb.HasVectorStore() {
+		if s.ownership == nil {
+			return nil, apperrors.NewServiceUnavailableError("platform vector store configuration is unavailable")
+		}
+		defaultID, err := s.ownership.DefaultStoreID(ctx)
+		if err != nil {
 			return nil, err
 		}
+		defaultID = strings.TrimSpace(defaultID)
+		if defaultID == "" {
+			return nil, apperrors.NewBadRequestError("platform default vector store is not configured")
+		}
+		kb.VectorStoreID = &defaultID
+	}
+	if err := s.validateVectorStoreBinding(ctx, kb.TenantID, *kb.VectorStoreID); err != nil {
+		return nil, err
 	}
 
 	logger.Infof(ctx, "Creating knowledge base, ID: %s, tenant ID: %d, name: %s", kb.ID, kb.TenantID, kb.Name)
@@ -233,22 +243,11 @@ func (s *knowledgeBaseService) applyAndValidateStorageBackend(ctx context.Contex
 	if s.storageResolver == nil || kb == nil {
 		return nil
 	}
-	tenant, _ := types.TenantInfoFromContext(ctx)
-	if tenant == nil {
-		return apperrors.NewBadRequestError("workspace context missing")
-	}
 	id := ""
 	if kb.StorageBackendID != nil {
 		id = strings.TrimSpace(*kb.StorageBackendID)
 	}
-	provider := kb.GetStorageProvider()
-	// A newly created KB without an explicit instance follows the concrete
-	// tenant default. The legacy provider is only a fallback for workspaces
-	// that have not been migrated yet.
-	if id == "" && tenant.DefaultStorageBackendID != nil && strings.TrimSpace(*tenant.DefaultStorageBackendID) != "" {
-		provider = ""
-	}
-	backend, err := s.storageResolver.ResolveBackend(ctx, tenant, id, provider)
+	backend, err := s.storageResolver.ResolveBackend(ctx, id)
 	if err != nil {
 		return apperrors.NewBadRequestError("storage backend is unavailable").WithDetails(err.Error())
 	}
@@ -258,27 +257,6 @@ func (s *knowledgeBaseService) applyAndValidateStorageBackend(ctx context.Contex
 	kb.StorageBackendID = &backend.ID
 	kb.SetStorageProvider(backend.Provider)
 	return nil
-}
-
-// applyTenantDefaultStorageProvider fills an empty KB storage provider from the
-// tenant's global default (Settings → Storage engine). Frontend should send the
-// same value; this keeps API clients and legacy UIs consistent.
-func applyTenantDefaultStorageProvider(ctx context.Context, kb *types.KnowledgeBase) {
-	if kb == nil || strings.TrimSpace(kb.GetStorageProvider()) != "" {
-		return
-	}
-	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	provider := ""
-	if tenant != nil && tenant.StorageEngineConfig != nil {
-		provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
-	}
-	if provider == "" || !storageallowlist.IsAllowed(provider) {
-		provider = storageallowlist.FirstAllowed()
-	}
-	if provider == "" {
-		return
-	}
-	kb.SetStorageProvider(provider)
 }
 
 // validateVectorStoreBinding routes through retriever.VerifyBinding so the
@@ -1248,18 +1226,9 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 
 		// Defense 3: the concrete storage instance must match. Comparing only
 		// provider names would incorrectly allow COS-A -> COS-B clones.
-		if tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); tenant != nil {
-			defaultID, defaultProvider := "", ""
-			if tenant.DefaultStorageBackendID != nil {
-				defaultID = *tenant.DefaultStorageBackendID
-			}
-			if tenant.StorageEngineConfig != nil {
-				defaultProvider = tenant.StorageEngineConfig.DefaultProvider
-			}
-			if !sourceKB.SharesStorageBackendWith(targetKB, defaultID, defaultProvider) {
-				return nil, nil, apperrors.NewBadRequestError(
-					"source and target knowledge bases use different storage instances; cross-storage-backend cloning is not supported")
-			}
+		if !sourceKB.SharesStorageBackendWith(targetKB, "", "") {
+			return nil, nil, apperrors.NewBadRequestError(
+				"source and target knowledge bases use different storage instances; cross-storage-backend cloning is not supported")
 		}
 	} else {
 		var faqConfig *types.FAQConfig

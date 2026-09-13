@@ -8,7 +8,6 @@ import (
 
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 )
@@ -141,29 +140,16 @@ func mimeToExt(mime string) string {
 }
 
 func (h *Handler) resolveImageFileService(ctx context.Context, storageProvider string) interfaces.FileService {
-	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	if tenant == nil {
-		return h.fileService
-	}
 	if h.storageResolver != nil {
-		svc, resolvedProvider, err := h.storageResolver.ResolveFileService(ctx, tenant, "", storageProvider, "")
+		svc, resolvedProvider, err := h.storageResolver.ResolveFileService(ctx, "", "")
 		if err == nil && svc != nil {
 			logger.Infof(ctx, "[image-storage] using storage instance provider=%s for image uploads", resolvedProvider)
 			return svc
 		}
 		if err != nil {
 			logger.Warnf(ctx, "[image-storage] failed to resolve storage instance for provider=%s: %v", storageProvider, err)
+			return filesvc.NewUnavailableFileService(err)
 		}
 	}
-	if strings.TrimSpace(storageProvider) == "" || tenant.StorageEngineConfig == nil {
-		return h.fileService
-	}
-
-	svc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(storageProvider, tenant.StorageEngineConfig, "")
-	if err != nil {
-		logger.Warnf(ctx, "[image-storage] failed to create %s file service: %v, fallback to default", storageProvider, err)
-		return h.fileService
-	}
-	logger.Infof(ctx, "[image-storage] using provider=%s for image uploads", resolvedProvider)
-	return svc
+	return filesvc.NewUnavailableFileService(fmt.Errorf("storage backend resolver is not configured"))
 }

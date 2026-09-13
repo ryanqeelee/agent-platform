@@ -20,28 +20,28 @@ func (s *TenantSkillService) ListUsableSkills(
 
 // ListSkills returns the skills installed onto one sandbox config.
 //
-// The config is read first so a config that does not belong to this workspace
-// is reported as missing rather than as a config that simply has no skills.
+// The config is read first so an unknown platform config is reported as
+// missing rather than as a config that simply has no skills.
 func (s *TenantSkillService) ListSkills(
-	ctx context.Context, tenantID uint64, configID string,
+	ctx context.Context, configID string,
 ) ([]*types.TenantSkillEntity, error) {
-	cfgEntity, err := s.configs.GetByID(ctx, tenantID, configID)
+	cfgEntity, err := s.configs.GetByID(ctx, configID)
 	if err != nil {
 		return nil, err
 	}
 	if cfgEntity == nil {
 		return nil, apperrors.NewNotFoundError("sandbox config not found")
 	}
-	return s.skills.ListSkillsByConfig(ctx, tenantID, configID)
+	return s.skills.ListSkillsByConfig(ctx, configID)
 }
 
-// GetSkill returns one installed skill, or nil when this workspace's config
-// does not carry it. The repository scopes the lookup by workspace and config,
-// so a skill ID from another workspace is indistinguishable from a missing one.
+// GetSkill returns one installed skill, or nil when this platform config does
+// not carry it. The repository scopes the lookup by config, so a skill ID from
+// another config is indistinguishable from a missing one.
 func (s *TenantSkillService) GetSkill(
-	ctx context.Context, tenantID uint64, configID, skillID string,
+	ctx context.Context, configID, skillID string,
 ) (*types.TenantSkillEntity, error) {
-	return s.skills.GetSkill(ctx, tenantID, configID, skillID)
+	return s.skills.GetSkill(ctx, configID, skillID)
 }
 
 // SkillAdminUpdate is everything one admin request may change about an
@@ -79,9 +79,9 @@ type SkillAdminUpdate struct {
 // It returns nil when the skill is not reachable for this workspace and
 // config, so the handler renders the usual 404.
 func (s *TenantSkillService) UpdateSkillAdmin(
-	ctx context.Context, tenantID uint64, configID, skillID string, update SkillAdminUpdate,
+	ctx context.Context, configID, skillID string, update SkillAdminUpdate,
 ) (*types.TenantSkillEntity, error) {
-	skill, err := s.skills.GetSkill(ctx, tenantID, configID, skillID)
+	skill, err := s.skills.GetSkill(ctx, configID, skillID)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +122,7 @@ func (s *TenantSkillService) UpdateSkillAdmin(
 	// and the status the installer is keeping there is none of this request's
 	// business.
 	if err := s.skills.UpdateSkillAdminState(
-		ctx, tenantID, configID, skillID, skill.Enabled, skill.Envs,
+		ctx, configID, skillID, skill.Enabled, skill.Envs,
 	); err != nil {
 		return nil, err
 	}
@@ -131,17 +131,17 @@ func (s *TenantSkillService) UpdateSkillAdmin(
 
 // SetSkillEnabled hides or reveals an installed skill.
 func (s *TenantSkillService) SetSkillEnabled(
-	ctx context.Context, tenantID uint64, configID, skillID string, enabled bool,
+	ctx context.Context, configID, skillID string, enabled bool,
 ) (*types.TenantSkillEntity, error) {
-	return s.UpdateSkillAdmin(ctx, tenantID, configID, skillID,
+	return s.UpdateSkillAdmin(ctx, configID, skillID,
 		SkillAdminUpdate{Enabled: &enabled})
 }
 
 // SetSkillEnvValues stores the workspace-wide values for one skill.
 func (s *TenantSkillService) SetSkillEnvValues(
-	ctx context.Context, tenantID uint64, configID, skillID string, values map[string]string,
+	ctx context.Context, configID, skillID string, values map[string]string,
 ) (*types.TenantSkillEntity, error) {
-	return s.UpdateSkillAdmin(ctx, tenantID, configID, skillID,
+	return s.UpdateSkillAdmin(ctx, configID, skillID,
 		SkillAdminUpdate{EnvValues: values})
 }
 
@@ -152,12 +152,12 @@ func (s *TenantSkillService) SetSkillEnvValues(
 // durable status. The returned closer must always be called: it releases the
 // Redis subscription, which would otherwise outlive the request.
 func (s *TenantSkillService) SubscribeProgress(
-	ctx context.Context, tenantID uint64, configID, skillID string,
+	ctx context.Context, configID, skillID string,
 ) (<-chan SkillProgress, func(), error) {
 	if s.redis == nil {
 		return nil, func() {}, nil
 	}
-	sub := s.redis.Subscribe(ctx, skillProgressKey(tenantID, configID, skillID))
+	sub := s.redis.Subscribe(ctx, skillProgressKey(configID, skillID))
 	out := make(chan SkillProgress, skillProgressBuffer)
 	go func() {
 		defer close(out)

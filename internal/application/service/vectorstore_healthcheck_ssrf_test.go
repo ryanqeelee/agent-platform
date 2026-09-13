@@ -10,7 +10,7 @@ import (
 )
 
 func TestTestConnection_MilvusBlocksUnsafeAddrAtDialSink(t *testing.T) {
-	svc := NewVectorStoreService(&mockVectorStoreRepo{}, nil, nil, nil, nil)
+	svc := NewVectorStoreService(&mockVectorStoreRepo{}, nil, nil, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -27,7 +27,7 @@ func TestTestConnection_MilvusBlocksUnsafeAddrAtDialSink(t *testing.T) {
 }
 
 func TestTestConnection_DorisBlocksUnsafeAddrAtDialSink(t *testing.T) {
-	svc := NewVectorStoreService(&mockVectorStoreRepo{}, nil, nil, nil, nil)
+	svc := NewVectorStoreService(&mockVectorStoreRepo{}, nil, nil, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

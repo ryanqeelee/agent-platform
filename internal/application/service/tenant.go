@@ -26,18 +26,15 @@ type ListTenantsParams struct {
 
 // tenantService implements the TenantService interface
 type tenantService struct {
-	repo        interfaces.TenantRepository // Repository for tenant data operations
-	storageRepo interfaces.StorageBackendRepository
+	repo interfaces.TenantRepository // Repository for tenant data operations
 }
 
 // NewTenantService creates a new tenant service instance
 func NewTenantService(
 	repo interfaces.TenantRepository,
-	storageRepo interfaces.StorageBackendRepository,
 ) interfaces.TenantService {
 	return &tenantService{
-		repo:        repo,
-		storageRepo: storageRepo,
+		repo: repo,
 	}
 }
 
@@ -92,17 +89,6 @@ func (s *tenantService) ApplyEnterpriseActivation(
 	}
 
 	result, err := s.repo.ApplyEnterpriseActivation(ctx, command)
-	if errors.Is(err, apprepo.ErrEnterpriseActivationStorageRequired) {
-		if result == nil {
-			return nil, errors.New("activation storage precondition returned no tenant")
-		}
-		if ensureErr := s.ensureActivationDefaultStorageBackend(ctx, result.TenantID); ensureErr != nil {
-			code := "storage_backend_unavailable"
-			_ = s.repo.SetEnterpriseActivationError(ctx, command.ActivationID, &code)
-			return nil, ensureErr
-		}
-		result, err = s.repo.ApplyEnterpriseActivation(ctx, command)
-	}
 	if errors.Is(err, apprepo.ErrEnterpriseActivationConflict) {
 		return nil, werrors.NewConflictError("enterprise activation conflicts with the durable receipt").WithDetails(err.Error())
 	}
@@ -111,13 +97,6 @@ func (s *tenantService) ApplyEnterpriseActivation(
 	}
 	if err != nil {
 		return nil, err
-	}
-	if result.State == types.EnterpriseActivationStatePrepared {
-		if err := s.ensureActivationDefaultStorageBackend(ctx, result.TenantID); err != nil {
-			code := "storage_backend_unavailable"
-			_ = s.repo.SetEnterpriseActivationError(ctx, command.ActivationID, &code)
-			return nil, err
-		}
 	}
 	return result, nil
 }
@@ -147,13 +126,6 @@ func (s *tenantService) CreateTenant(ctx context.Context, tenant *types.Tenant) 
 	tenant.CreatedAt = time.Now()
 	tenant.UpdatedAt = time.Now()
 
-	if err := s.validateStorageBucketUniqueness(ctx, tenant); err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"tenant_name": tenant.Name,
-		})
-		return nil, err
-	}
-
 	logger.Info(ctx, "Saving tenant information to database")
 	if err := s.repo.CreateTenant(ctx, tenant); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -161,81 +133,8 @@ func (s *tenantService) CreateTenant(ctx context.Context, tenant *types.Tenant) 
 		})
 		return nil, err
 	}
-	if err := s.createDefaultStorageBackend(ctx, tenant); err != nil {
-		// No related rows exist yet, so rolling the tenant back is safe and
-		// avoids leaving a workspace that cannot bind new knowledge bases.
-		_ = s.repo.DeleteTenant(ctx, tenant.ID)
-		return nil, err
-	}
 	logger.Infof(ctx, "Tenant created successfully, ID: %d, name: %s", tenant.ID, tenant.Name)
 	return tenant, nil
-}
-
-func (s *tenantService) createDefaultStorageBackend(ctx context.Context, tenant *types.Tenant) error {
-	if s.storageRepo == nil || tenant == nil {
-		return nil
-	}
-	if tenant.DefaultStorageBackendID != nil && strings.TrimSpace(*tenant.DefaultStorageBackendID) != "" {
-		backend, err := s.storageRepo.GetByID(ctx, tenant.ID, *tenant.DefaultStorageBackendID)
-		if err != nil {
-			return err
-		}
-		if backend == nil {
-			return errors.New("default storage backend does not exist")
-		}
-		return nil
-	}
-	provider := ""
-	if tenant.StorageEngineConfig != nil {
-		provider = tenant.StorageEngineConfig.DefaultProvider
-	}
-	backend := types.StorageBackendFromLegacy(tenant.ID, provider, tenant.StorageEngineConfig)
-	if backend == nil {
-		backend = types.StorageBackendFromEnvironment(tenant.ID)
-	}
-	if backend == nil {
-		return errors.New("no supported default storage backend is configured")
-	}
-	backend.LegacyAlias = true
-	created := false
-	existing, err := s.storageRepo.FindLegacyAlias(ctx, tenant.ID, backend.Provider)
-	if err != nil {
-		return err
-	}
-	if existing != nil {
-		backend = existing
-	} else if err := s.storageRepo.Create(ctx, backend); err != nil {
-		// An identical replay may have won the unique legacy-alias insert.
-		existing, lookupErr := s.storageRepo.FindLegacyAlias(ctx, tenant.ID, backend.Provider)
-		if lookupErr != nil {
-			return lookupErr
-		}
-		if existing == nil {
-			return err
-		}
-		backend = existing
-	} else {
-		created = true
-	}
-	tenant.DefaultStorageBackendID = &backend.ID
-	if err := s.repo.SetDefaultStorageBackend(ctx, tenant.ID, backend.ID); err != nil {
-		if created {
-			_ = s.storageRepo.Delete(ctx, tenant.ID, backend.ID)
-		}
-		return err
-	}
-	return nil
-}
-
-func (s *tenantService) ensureActivationDefaultStorageBackend(ctx context.Context, tenantID uint64) error {
-	if s.storageRepo == nil {
-		return errors.New("activation requires a storage backend repository")
-	}
-	tenant, err := s.repo.GetTenantByID(ctx, tenantID)
-	if err != nil {
-		return err
-	}
-	return s.createDefaultStorageBackend(ctx, tenant)
 }
 
 // GetTenantByID retrieves a tenant by their ID
@@ -281,13 +180,6 @@ func (s *tenantService) UpdateTenant(ctx context.Context, tenant *types.Tenant) 
 	}
 
 	logger.Infof(ctx, "Updating tenant, ID: %d, name: %s", tenant.ID, tenant.Name)
-
-	if err := s.validateStorageBucketUniqueness(ctx, tenant); err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"tenant_id": tenant.ID,
-		})
-		return nil, err
-	}
 
 	tenant.UpdatedAt = time.Now()
 	logger.Info(ctx, "Saving tenant information to database")
@@ -436,83 +328,4 @@ func (s *tenantService) GetWeKnoraCloudCredentials(ctx context.Context) *types.W
 		return nil
 	}
 	return tenant.Credentials.GetWeKnoraCloud()
-}
-
-func (s *tenantService) validateStorageBucketUniqueness(ctx context.Context, tenant *types.Tenant) error {
-	if tenant.StorageEngineConfig == nil {
-		return nil
-	}
-
-	// Fetch existing tenant from DB to compare
-	var oldTenant *types.Tenant
-	if tenant.ID != 0 {
-		var err error
-		oldTenant, err = s.repo.GetTenantByID(ctx, tenant.ID)
-		if err != nil && err.Error() != "tenant not found" && err.Error() != "record not found" {
-			return err
-		}
-	}
-
-	// Fetch ALL tenants to check for collision.
-	allTenants, err := s.repo.ListTenants(ctx)
-	if err != nil {
-		return err
-	}
-
-	// Helper to get bucket names from a StorageEngineConfig
-	getBuckets := func(cfg *types.StorageEngineConfig) map[string]string {
-		if cfg == nil {
-			return nil
-		}
-		res := make(map[string]string)
-		if cfg.MinIO != nil && cfg.MinIO.BucketName != "" {
-			res["minio"] = cfg.MinIO.BucketName
-		}
-		if cfg.COS != nil && cfg.COS.BucketName != "" {
-			res["cos"] = cfg.COS.BucketName
-		}
-		if cfg.TOS != nil && cfg.TOS.BucketName != "" {
-			res["tos"] = cfg.TOS.BucketName
-		}
-		if cfg.S3 != nil && cfg.S3.BucketName != "" {
-			res["s3"] = cfg.S3.BucketName
-		}
-		if cfg.OSS != nil && cfg.OSS.BucketName != "" {
-			res["oss"] = cfg.OSS.BucketName
-		}
-		return res
-	}
-
-	var oldBuckets map[string]string
-	if oldTenant != nil {
-		oldBuckets = getBuckets(oldTenant.StorageEngineConfig)
-	}
-	newBuckets := getBuckets(tenant.StorageEngineConfig)
-
-	// Collect buckets used by other tenants
-	usedByOthers := make(map[string]map[string]bool) // provider -> set of bucket names
-	for _, t := range allTenants {
-		if t.ID == tenant.ID {
-			continue
-		}
-		tb := getBuckets(t.StorageEngineConfig)
-		for p, b := range tb {
-			if usedByOthers[p] == nil {
-				usedByOthers[p] = make(map[string]bool)
-			}
-			usedByOthers[p][b] = true
-		}
-	}
-
-	// Check if any NEW bucket is already used by someone else, AND it's different from the OLD bucket
-	for p, b := range newBuckets {
-		oldB := oldBuckets[p]
-		if b != oldB { // User is trying to change their bucket name or set a new one
-			if usedByOthers[p] != nil && usedByOthers[p][b] {
-				return werrors.NewBadRequestError("存储桶名称「" + b + "」已被其他空间使用，为保证数据隔离，请使用其他名称")
-			}
-		}
-	}
-
-	return nil
 }

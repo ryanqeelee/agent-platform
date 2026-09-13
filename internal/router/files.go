@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -10,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 
-	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/gin-gonic/gin"
 
 	"github.com/Tencent/WeKnora/internal/config"
@@ -173,20 +173,18 @@ func authorizeKnowledgeBoundResource(
 	return false
 }
 
-// resolveFileService picks the file service for (tenant, backendID, provider)
-// — via the storage resolver when wired, else directly from the tenant's
-// storage config. No fallback; used by the presigned surfaces where a
-// missing tenant config must surface as an error.
+// resolveFileService picks an explicit platform-global backend or the strict
+// platform default when backendID is empty.
 func resolveFileService(
 	ctx context.Context,
 	tenant *types.Tenant,
 	backendID, provider, absDir string,
 	storageResolver interfaces.StorageBackendResolver,
 ) (interfaces.FileService, string, error) {
-	if storageResolver != nil {
-		return storageResolver.ResolveFileService(ctx, tenant, backendID, provider, absDir)
+	if storageResolver == nil {
+		return nil, "", fmt.Errorf("storage resolver is not configured")
 	}
-	return filesvc.NewFileServiceFromStorageConfig(provider, tenant.StorageEngineConfig, absDir)
+	return storageResolver.ResolveFileService(ctx, backendID, absDir)
 }
 
 // resolveTenantFileServiceWithFallback is resolveFileService plus the
@@ -204,28 +202,17 @@ func resolveTenantFileServiceWithFallback(
 	globalFileService interfaces.FileService,
 ) (fileSvc interfaces.FileService, resolvedProvider string, ok bool) {
 	var err error
-	if storageResolver != nil {
-		fileSvc, resolvedProvider, err = storageResolver.ResolveFileService(ctx, tenant, backendID, provider, absDir)
-	} else if tenant.StorageEngineConfig != nil {
-		fileSvc, resolvedProvider, err = filesvc.NewFileServiceFromStorageConfig(provider, tenant.StorageEngineConfig, absDir)
-	} else {
+	if storageResolver == nil {
 		err = http.ErrMissingFile
+	} else {
+		fileSvc, resolvedProvider, err = storageResolver.ResolveFileService(ctx, backendID, absDir)
 	}
 	if err == nil {
 		return fileSvc, resolvedProvider, true
 	}
 
-	globalStorageType := strings.ToLower(strings.TrimSpace(os.Getenv("STORAGE_TYPE")))
-	if globalStorageType == "" {
-		globalStorageType = "local"
-	}
-	if provider == globalStorageType && globalFileService != nil {
-		logger.Warnf(ctx, "[Router] %s tenant storage config missing or invalid, fallback to global file service: tenant_id=%d provider=%s err=%v",
-			logTag, tenant.ID, provider, err)
-		return globalFileService, globalStorageType, true
-	}
-	logger.Warnf(ctx, "[Router] %s resolve file service failed without fallback: tenant_id=%d provider=%s global_storage_type=%s err=%v",
-		logTag, tenant.ID, provider, globalStorageType, err)
+	logger.Warnf(ctx, "[Router] %s resolve file service failed: tenant_id=%d backend_id=%s err=%v",
+		logTag, tenant.ID, backendID, err)
 	return nil, "", false
 }
 
@@ -452,13 +439,10 @@ func serveResourceGrants(
 			return
 		}
 
-		// The grant row carries its own backend ID; only the provider scheme
-		// comes from the physical path.
-		_, provider := parseStorageTarget(resource.PhysicalPath)
+		// The grant row carries its own platform-global backend ID.
 		var fileSvc interfaces.FileService
 		if storageResolver != nil {
-			fileSvc, _, err = storageResolver.ResolveFileService(
-				ctx, tenant, resource.StorageBackendID, provider, localStorageBaseDir())
+			fileSvc, _, err = storageResolver.ResolveFileService(ctx, resource.StorageBackendID, localStorageBaseDir())
 		} else {
 			fileSvc = globalFileService
 		}

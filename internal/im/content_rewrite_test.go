@@ -113,74 +113,27 @@ func TestFindIncompleteXMLTag(t *testing.T) {
 	}
 }
 
-func TestResolveIMFileServiceForPath_LocalSchemeDespiteCOSDefault(t *testing.T) {
-	t.Setenv("SYSTEM_AES_KEY", "weknora-test-aes-key-32bytes!!!")
-	t.Setenv("APP_EXTERNAL_URL", "https://weknora.example.com")
-
-	tenant := &types.Tenant{
-		StorageEngineConfig: &types.StorageEngineConfig{
-			DefaultProvider: "cos",
-			COS: &types.COSEngineConfig{
-				SecretID:   "id",
-				SecretKey:  "key",
-				BucketName: "bucket",
-				Region:     "ap-shanghai",
-			},
-		},
-	}
-	svc := resolveIMFileServiceForPath(tenant, "local://10000/exports/img.png", nil)
-	require.NotNil(t, svc)
-	got, err := svc.GetFileURL(context.Background(), "local://10000/exports/img.png")
-	require.NoError(t, err)
-	assert.Contains(t, got, "/api/v1/files/presigned")
-}
-
-func TestRewriteStorageURLs_LocalUsesPresignedAPI(t *testing.T) {
-	t.Setenv("SYSTEM_AES_KEY", "weknora-test-aes-key-32bytes!!!")
-	t.Setenv("APP_EXTERNAL_URL", "https://weknora.example.com")
-
-	tenant := &types.Tenant{
-		StorageEngineConfig: &types.StorageEngineConfig{
-			DefaultProvider: "cos",
-			COS: &types.COSEngineConfig{
-				SecretID:   "id",
-				SecretKey:  "key",
-				BucketName: "bucket",
-				Region:     "ap-shanghai",
-			},
-		},
-	}
-
+func TestRewriteStorageURLs_LocalUsesGlobalBackend(t *testing.T) {
+	stub := &stubIMFileService{getFileURL: func(_ context.Context, _ string) (string, error) {
+		return "https://weknora.example.com/api/v1/files/presigned?token=test", nil
+	}}
+	storage := &stubStorageBackendResolver{fileService: stub, provider: "local"}
 	in := "![img](local://10000/exports/abc.png)"
-	out := rewriteStorageURLs(context.Background(), in, newIMFileServiceResolver(tenant, nil))
+	out := rewriteStorageURLs(context.Background(), in, newIMFileServiceResolver(&types.Tenant{}, nil, storage))
 	assert.Contains(t, out, "/api/v1/files/presigned")
 	assert.NotContains(t, out, "myqcloud.com")
 }
 
 func TestRewriteStorageURLs_COSPathNotSignedAsLocalKey(t *testing.T) {
-	// Without real COS credentials, GetFileURL may fail; ensure we never embed
-	// local:// as a COS object key when rewriting fails.
-	tenant := &types.Tenant{
-		StorageEngineConfig: &types.StorageEngineConfig{
-			DefaultProvider: "cos",
-			COS: &types.COSEngineConfig{
-				SecretID:   "id",
-				SecretKey:  "key",
-				BucketName: "test-bucket",
-				Region:     "ap-shanghai",
-				PathPrefix: "weknora",
-			},
-		},
-	}
+	stub := &stubIMFileService{getFileURL: func(_ context.Context, _ string) (string, error) {
+		return "https://cos.example/exports/abc.png", nil
+	}}
+	storage := &stubStorageBackendResolver{fileService: stub, provider: "cos"}
 	path := "cos://test-bucket/ap-shanghai/weknora/10000/exports/abc.png"
-	svc := resolveIMFileServiceForPath(tenant, path, nil)
-	require.NotNil(t, svc)
-
 	in := "![img](" + path + ")"
-	out := rewriteStorageURLs(context.Background(), in, newIMFileServiceResolver(tenant, nil))
-	if out != in {
-		assert.False(t, strings.Contains(out, "local%3A"), "COS URL must not treat local:// as object key")
-	}
+	out := rewriteStorageURLs(context.Background(), in, newIMFileServiceResolver(&types.Tenant{}, nil, storage))
+	assert.NotContains(t, out, "local%3A", "COS URL must not treat local:// as object key")
+	assert.Contains(t, out, "https://cos.example/")
 }
 
 func TestHoldbackCutoff(t *testing.T) {
@@ -348,21 +301,6 @@ func TestSimulateIMStreamFlush_BareProviderURLStillHeld(t *testing.T) {
 }
 
 func TestCleanIMContent_AfterStreamReassembly(t *testing.T) {
-	t.Setenv("SYSTEM_AES_KEY", "weknora-test-aes-key-32bytes!!!")
-	t.Setenv("APP_EXTERNAL_URL", "https://weknora.example.com")
-
-	tenant := &types.Tenant{
-		StorageEngineConfig: &types.StorageEngineConfig{
-			DefaultProvider: "cos",
-			COS: &types.COSEngineConfig{
-				SecretID:   "id",
-				SecretKey:  "key",
-				BucketName: "bucket",
-				Region:     "ap-shanghai",
-			},
-		},
-	}
-
 	parts := []string{
 		`![知识助理"知识库"管理视图界面](local://10000/exports/c91cf852`,
 		`-9c72-f549da25619a.png)`,
@@ -370,7 +308,11 @@ func TestCleanIMContent_AfterStreamReassembly(t *testing.T) {
 	sent, rem := simulateIMStreamFlush(parts)
 	require.Empty(t, rem)
 	joined := strings.Join(sent, "")
-	out := cleanIMContent(context.Background(), joined, tenant, nil)
+	stub := &stubIMFileService{getFileURL: func(_ context.Context, _ string) (string, error) {
+		return "https://weknora.example.com/api/v1/files/presigned?token=test", nil
+	}}
+	storage := &stubStorageBackendResolver{fileService: stub, provider: "local"}
+	out := cleanIMContent(context.Background(), joined, &types.Tenant{}, nil, storage)
 	assert.Contains(t, out, "/api/v1/files/presigned")
 	assert.NotContains(t, out, "local://10000")
 }
@@ -397,18 +339,15 @@ func TestSimulateIMStreamFlush_BracketInAltMiddleImage(t *testing.T) {
 }
 
 func TestRewriteStorageURLs_MultipleImagesInOneChunk(t *testing.T) {
-	t.Setenv("SYSTEM_AES_KEY", "weknora-test-aes-key-32bytes!!!")
-	t.Setenv("APP_EXTERNAL_URL", "https://weknora.example.com")
-
-	tenant := &types.Tenant{
-		StorageEngineConfig: &types.StorageEngineConfig{DefaultProvider: "cos"},
-	}
-
+	stub := &stubIMFileService{getFileURL: func(_ context.Context, filePath string) (string, error) {
+		return "https://weknora.example.com/api/v1/files/presigned?token=" + strings.TrimPrefix(filePath, "local://"), nil
+	}}
+	storage := &stubStorageBackendResolver{fileService: stub, provider: "local"}
 	doc := "### 1\n\n![a](local://10000/exports/bb524693.png)\n\n### 2\n\n" +
 		`![知识助理"知识库"管理视图界面](local://10000/exports/c91cf852.png)` + "\n\n### 3\n\n" +
 		"![c](local://10000/exports/a0423e91.png)\n"
 
-	out := rewriteStorageURLs(context.Background(), doc, newIMFileServiceResolver(tenant, nil))
+	out := rewriteStorageURLs(context.Background(), doc, newIMFileServiceResolver(&types.Tenant{}, nil, storage))
 	assert.NotContains(t, out, "local://")
 	assert.Equal(t, 3, strings.Count(out, "/api/v1/files/presigned"))
 }

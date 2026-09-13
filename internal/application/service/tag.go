@@ -25,7 +25,7 @@ type knowledgeTagService struct {
 	knowledgeRepo  interfaces.KnowledgeRepository
 	chunkRepo      interfaces.ChunkRepository
 	retrieveEngine interfaces.RetrieveEngineRegistry
-	ownership      retriever.TenantStoreOwnership
+	ownership      retriever.StoreConfigAvailability
 	modelService   interfaces.ModelService
 	task           interfaces.TaskEnqueuer
 	kbShareService interfaces.KBShareService
@@ -39,7 +39,7 @@ func NewKnowledgeTagService(
 	knowledgeRepo interfaces.KnowledgeRepository,
 	chunkRepo interfaces.ChunkRepository,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
-	ownership retriever.TenantStoreOwnership,
+	ownership retriever.StoreConfigAvailability,
 	modelService interfaces.ModelService,
 	task interfaces.TaskEnqueuer,
 	kbShareService interfaces.KBShareService,

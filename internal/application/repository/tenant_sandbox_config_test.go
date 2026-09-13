@@ -21,56 +21,64 @@ func newSandboxConfigTestRepo(t *testing.T) (TenantSandboxConfigRepository, *gor
 	// AutoMigrate cannot express the partial unique index, so add it here to
 	// match the production migration.
 	require.NoError(t, db.Exec(
-		`CREATE UNIQUE INDEX IF NOT EXISTS uq_tenant_sandbox_configs_tenant_name
-		 ON tenant_sandbox_configs (tenant_id, name) WHERE deleted_at IS NULL`).Error)
+		`CREATE UNIQUE INDEX IF NOT EXISTS uq_platform_sandbox_configs_active_default
+		 ON platform_sandbox_configs (is_default) WHERE is_default = 1 AND deleted_at IS NULL`).Error)
 	return NewTenantSandboxConfigRepository(db), db
 }
 
-func TestSandboxConfigRepoIsolatesTenants(t *testing.T) {
+func TestSandboxConfigRepoIsPlatformGlobalAndPreservesDuplicateNames(t *testing.T) {
 	repo, _ := newSandboxConfigTestRepo(t)
 	ctx := context.Background()
 
 	require.NoError(t, repo.Create(ctx, &types.TenantSandboxConfigEntity{
 		ID:          "cfg-a",
-		TenantID:    1,
 		Name:        "prod",
 		SandboxType: "e2b",
 		Config:      &types.TenantSandboxConfig{SandboxType: "e2b"},
 	}))
 	require.NoError(t, repo.Create(ctx, &types.TenantSandboxConfigEntity{
 		ID:          "cfg-b",
-		TenantID:    2,
 		Name:        "prod",
 		SandboxType: "e2b",
 		Config:      &types.TenantSandboxConfig{SandboxType: "e2b"},
 	}))
 
-	// Same name in a different workspace is fine; cross-tenant reads are not.
-	got, err := repo.GetByID(ctx, 1, "cfg-b")
+	got, err := repo.GetByID(ctx, "cfg-b")
 	require.NoError(t, err)
-	require.Nil(t, got, "must not read another workspace's config")
+	require.Equal(t, "cfg-b", got.ID)
 
-	list, err := repo.ListByTenant(ctx, 1)
+	list, err := repo.ListAll(ctx)
 	require.NoError(t, err)
-	require.Len(t, list, 1)
+	require.Len(t, list, 2)
 	require.Equal(t, "cfg-a", list[0].ID)
 }
 
-func TestSandboxConfigRepoRejectsDuplicateNameInTenant(t *testing.T) {
+func TestSandboxConfigRepoSwitchesExplicitDefaultAndGuardsDeletion(t *testing.T) {
 	repo, _ := newSandboxConfigTestRepo(t)
 	ctx := context.Background()
 
 	base := func(id string) *types.TenantSandboxConfigEntity {
 		return &types.TenantSandboxConfigEntity{
 			ID:          id,
-			TenantID:    1,
 			Name:        "prod",
 			SandboxType: "e2b",
 			Config:      &types.TenantSandboxConfig{SandboxType: "e2b"},
 		}
 	}
 	require.NoError(t, repo.Create(ctx, base("cfg-1")))
-	require.Error(t, repo.Create(ctx, base("cfg-2")))
+	require.NoError(t, repo.Create(ctx, base("cfg-2")))
+	require.NoError(t, repo.SetDefault(ctx, "cfg-1"))
+
+	got, err := repo.GetDefault(ctx)
+	require.NoError(t, err)
+	require.Equal(t, "cfg-1", got.ID)
+	require.ErrorIs(t, repo.SoftDelete(ctx, "cfg-1"), ErrDeleteDefaultSandboxConfig)
+
+	require.NoError(t, repo.SetDefault(ctx, "cfg-2"))
+	got, err = repo.GetDefault(ctx)
+	require.NoError(t, err)
+	require.Equal(t, "cfg-2", got.ID)
+	require.NoError(t, repo.SoftDelete(ctx, "cfg-1"))
 }
 
 func TestSandboxConfigRepoSoftDeleteHidesRow(t *testing.T) {
@@ -79,14 +87,13 @@ func TestSandboxConfigRepoSoftDeleteHidesRow(t *testing.T) {
 
 	require.NoError(t, repo.Create(ctx, &types.TenantSandboxConfigEntity{
 		ID:          "cfg-a",
-		TenantID:    1,
 		Name:        "prod",
 		SandboxType: "e2b",
 		Config:      &types.TenantSandboxConfig{SandboxType: "e2b"},
 	}))
-	require.NoError(t, repo.SoftDelete(ctx, 1, "cfg-a"))
+	require.NoError(t, repo.SoftDelete(ctx, "cfg-a"))
 
-	got, err := repo.GetByID(ctx, 1, "cfg-a")
+	got, err := repo.GetByID(ctx, "cfg-a")
 	require.NoError(t, err)
 	require.Nil(t, got)
 }
@@ -97,22 +104,21 @@ func TestSandboxConfigRepoCordonRoundTrip(t *testing.T) {
 
 	require.NoError(t, repo.Create(ctx, &types.TenantSandboxConfigEntity{
 		ID:          "cfg-a",
-		TenantID:    1,
 		Name:        "prod",
 		SandboxType: "e2b",
 		Config:      &types.TenantSandboxConfig{SandboxType: "e2b"},
 	}))
 
 	at := time.Now().UTC().Truncate(time.Second)
-	require.NoError(t, repo.SetCordon(ctx, 1, "cfg-a", at))
+	require.NoError(t, repo.SetCordon(ctx, "cfg-a", at))
 
-	got, err := repo.GetByID(ctx, 1, "cfg-a")
+	got, err := repo.GetByID(ctx, "cfg-a")
 	require.NoError(t, err)
 	require.NotNil(t, got.CordonedAt)
 	require.True(t, got.IsCordoned(at.Add(time.Second), types.SandboxCordonLease))
 
-	require.NoError(t, repo.ClearCordon(ctx, 1, "cfg-a"))
-	got, err = repo.GetByID(ctx, 1, "cfg-a")
+	require.NoError(t, repo.ClearCordon(ctx, "cfg-a"))
+	got, err = repo.GetByID(ctx, "cfg-a")
 	require.NoError(t, err)
 	require.Nil(t, got.CordonedAt)
 }

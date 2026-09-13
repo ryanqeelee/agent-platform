@@ -172,9 +172,6 @@ func applyExistingActivation(
 		case types.EnterpriseActivationStateAbandoned:
 			return nil, enterpriseActivationConflict("abandoned activation cannot become active")
 		case types.EnterpriseActivationStatePrepared:
-			if tenant.DefaultStorageBackendID == nil || strings.TrimSpace(*tenant.DefaultStorageBackendID) == "" {
-				return current, ErrEnterpriseActivationStorageRequired
-			}
 			if err := lockTenantAndCheckSeat(ctx, tx, tenant.ID); err != nil {
 				return nil, err
 			}
@@ -245,12 +242,24 @@ func activationResult(tenant *types.Tenant, ownerMembershipID uint64, state type
 		StorageQuota: tenant.StorageQuota, CreatedAt: tenant.CreatedAt, UpdatedAt: tenant.UpdatedAt,
 		CompletedAt: tenant.RingxunActivationCompletedAt, LastErrorCode: tenant.RingxunActivationLastErrorCode,
 	}
-	if tenant.RingxunActivationID != nil { result.ActivationID = *tenant.RingxunActivationID }
-	if tenant.RingxunActivationRequestSHA256 != nil { result.RequestSHA256 = *tenant.RingxunActivationRequestSHA256 }
-	if tenant.GovernedEnterpriseID != nil { result.GovernedEnterpriseID = *tenant.GovernedEnterpriseID }
-	if tenant.GovernedEdgeBinding != nil { result.BindingID = tenant.GovernedEdgeBinding.BindingID }
-	if tenant.RingxunActivationPlanVersionID != nil { result.AICapabilityPlanVersionID = *tenant.RingxunActivationPlanVersionID }
-	if tenant.RingxunInitialOwnerUserID != nil { result.InitialOwnerUserID = *tenant.RingxunInitialOwnerUserID }
+	if tenant.RingxunActivationID != nil {
+		result.ActivationID = *tenant.RingxunActivationID
+	}
+	if tenant.RingxunActivationRequestSHA256 != nil {
+		result.RequestSHA256 = *tenant.RingxunActivationRequestSHA256
+	}
+	if tenant.GovernedEnterpriseID != nil {
+		result.GovernedEnterpriseID = *tenant.GovernedEnterpriseID
+	}
+	if tenant.GovernedEdgeBinding != nil {
+		result.BindingID = tenant.GovernedEdgeBinding.BindingID
+	}
+	if tenant.RingxunActivationPlanVersionID != nil {
+		result.AICapabilityPlanVersionID = *tenant.RingxunActivationPlanVersionID
+	}
+	if tenant.RingxunInitialOwnerUserID != nil {
+		result.InitialOwnerUserID = *tenant.RingxunInitialOwnerUserID
+	}
 	return result
 }
 
@@ -318,21 +327,21 @@ func (r *tenantRepository) ApplyEnterpriseActivation(
 		governedEnterpriseID := "tenant_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 		bindingID := "binding_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 		tenant = &types.Tenant{
-			Name:                           command.TenantName,
-			Description:                    command.TenantDescription,
-			Status:                         types.TenantStatusProvisioning,
-			RingxunActivationID:            &activationID,
+			Name:                                  command.TenantName,
+			Description:                           command.TenantDescription,
+			Status:                                types.TenantStatusProvisioning,
+			RingxunActivationID:                   &activationID,
 			RingxunActivationIdempotencyKeySHA256: &idempotencySHA,
-			RingxunActivationRequestSHA256: &requestSHA,
-			RingxunActivationPlanVersionID: &planVersionID,
-			RingxunInitialOwnerUserID:      &ownerID,
-			GovernedEnterpriseID:           &governedEnterpriseID,
-			AnalysisEnabled:                false,
+			RingxunActivationRequestSHA256:        &requestSHA,
+			RingxunActivationPlanVersionID:        &planVersionID,
+			RingxunInitialOwnerUserID:             &ownerID,
+			GovernedEnterpriseID:                  &governedEnterpriseID,
+			AnalysisEnabled:                       false,
 			GovernedEdgeBinding: &types.GovernedEdgeBinding{
 				BindingID: bindingID, Revision: 1, DeploymentRevision: 0,
 				EnterpriseID: governedEnterpriseID, Enabled: false,
 			},
-			SeatsTotal:                     command.SeatsTotal,
+			SeatsTotal: command.SeatsTotal,
 		}
 		if command.StorageQuota != nil {
 			tenant.StorageQuota = *command.StorageQuota
@@ -404,16 +413,24 @@ func (r *tenantRepository) GetEnterpriseActivation(ctx context.Context, activati
 	var result *interfaces.EnterpriseActivationResult
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		tenant, err := loadActivationTenant(ctx, tx, activationID)
-		if err != nil { return err }
-		if tenant == nil { return ErrTenantNotFound }
-		if tenant.RingxunInitialOwnerUserID == nil { return enterpriseActivationConflict("initial owner receipt is unavailable") }
+		if err != nil {
+			return err
+		}
+		if tenant == nil {
+			return ErrTenantNotFound
+		}
+		if tenant.RingxunInitialOwnerUserID == nil {
+			return enterpriseActivationConflict("initial owner receipt is unavailable")
+		}
 		var member types.TenantMember
 		if err := tx.WithContext(ctx).Unscoped().Select("id").Where("user_id = ? AND tenant_id = ?", *tenant.RingxunInitialOwnerUserID, tenant.ID).
 			Order("created_at ASC, id ASC").Take(&member).Error; err != nil {
 			return enterpriseActivationConflict("initial owner receipt is unavailable")
 		}
 		state, ok := activationStateFromTenantStatus(tenant.Status)
-		if !ok { return enterpriseActivationConflict("activation receipt has an invalid tenant status") }
+		if !ok {
+			return enterpriseActivationConflict("activation receipt has an invalid tenant status")
+		}
 		result = activationResult(tenant, member.ID, state)
 		return nil
 	})
@@ -475,13 +492,17 @@ func (r *tenantRepository) UpdateForPlatformOperations(
 			"status": status, "analysis_enabled": analysisEnabled,
 			"seats_total": seatsTotal, "storage_quota": storageQuota,
 		})
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		if err := tx.WithContext(ctx).Create(&types.AuditLog{
 			TenantID: id, ActorUserID: actorUserID, ActorRole: "system_admin",
 			Action: "ops.enterprise.updated", ScopeType: "tenant", ScopeID: strconv.FormatUint(id, 10),
 			TargetType: "tenant", TargetID: strconv.FormatUint(id, 10),
 			Outcome: types.AuditOutcomeSuccess, Details: types.JSON(details),
-		}).Error; err != nil { return err }
+		}).Error; err != nil {
+			return err
+		}
 		tenant.Name = name
 		tenant.Description = description
 		tenant.Status = status
@@ -585,7 +606,7 @@ func (r *tenantRepository) UpdateTenant(ctx context.Context, tenant *types.Tenan
 	return r.db.WithContext(ctx).Model(&types.Tenant{}).Where("id = ?", tenant.ID).
 		Select(
 			"retriever_engines", "business", "context_config",
-			"credentials", "storage_engine_config",
+			"credentials",
 			"chat_history_config", "retrieval_config", "api_principal_config", "updated_at",
 		).Updates(tenant).Error
 }
@@ -606,11 +627,6 @@ func (r *tenantRepository) UpdateTenantProfile(ctx context.Context, id uint64, n
 		return gorm.ErrRecordNotFound
 	}
 	return nil
-}
-
-func (r *tenantRepository) SetDefaultStorageBackend(ctx context.Context, tenantID uint64, backendID string) error {
-	return r.db.WithContext(ctx).Model(&types.Tenant{}).Where("id = ?", tenantID).
-		Update("default_storage_backend_id", backendID).Error
 }
 
 // DeleteTenant soft-deletes the tenant and every active membership row

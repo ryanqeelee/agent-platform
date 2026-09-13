@@ -1,16 +1,21 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import {
-  getStorageEngineConfig,
-  getStorageEngineStatus,
   getPromptTemplates,
   getParserEngines,
   getSystemInfo,
   type PromptTemplatesConfig,
-  type StorageEngineStatusItem,
   type ParserEngineInfo,
   type SystemInfo,
 } from '@/api/system'
+import {
+  listStorageBackendCapabilities,
+  type StorageBackendCapability,
+} from '@/api/storage-backend'
+import {
+  listVectorStoreCapabilities,
+  type VectorStoreCapability,
+} from '@/api/vector-store'
 import { listMCPServices, type MCPService } from '@/api/mcp-service'
 import { listEmployeeSkills, type SkillInfo } from '@/api/skill'
 import { getAgentTypePresets, getPlaceholders, type AgentTypePreset, type PlaceholdersResponse } from '@/api/agent'
@@ -18,29 +23,9 @@ import { getTenantRetrievalConfig } from '@/api/retrieval'
 
 const CACHE_TTL_MS = 60_000
 
-export function pickUsableStorageProvider(
-  candidate: string | undefined,
-  engines: StorageEngineStatusItem[],
-  allowedProviders: string[],
-): string {
-  const provider = candidate?.trim() || ''
-  const isUsable = (name: string) => {
-    if (!name) return false
-    const status = engines.find((item) => item.name === name)
-    if (status) return status.allowed !== false && status.available !== false
-    if (engines.length > 0) return false
-    if (allowedProviders.length > 0) return allowedProviders.includes(name)
-    return false
-  }
-
-  if (isUsable(provider)) return provider
-  const fallback = engines.find((item) => item.allowed !== false && item.available !== false)?.name
-  if (fallback) return fallback
-  return allowedProviders[0] || provider || 'local'
-}
-
 type EditorResourceKey =
-  | 'storageEngine'
+  | 'storageBackends'
+  | 'vectorStores'
   | 'mcpServices'
   | 'skills'
   | 'agentTypePresets'
@@ -51,9 +36,10 @@ type EditorResourceKey =
   | 'systemInfo'
 
 export const useEditorResourcesStore = defineStore('editorResources', () => {
-  const storageConfig = ref<Awaited<ReturnType<typeof getStorageEngineConfig>>['data'] | null>(null)
-  const storageStatus = ref<StorageEngineStatusItem[]>([])
-  const storageAllowedProviders = ref<string[]>([])
+  const storageBackends = ref<StorageBackendCapability[]>([])
+  const defaultStorageBackendID = ref('')
+  const vectorStores = ref<VectorStoreCapability[]>([])
+  const defaultVectorStoreID = ref('')
   const mcpServices = ref<MCPService[]>([])
   const skills = ref<SkillInfo[]>([])
   const skillsAvailable = ref(false)
@@ -81,25 +67,22 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
     return p
   }
 
-  async function ensureStorageEngine(force = false): Promise<void> {
-    return runOnce('storageEngine', force, async () => {
-      const [configRes, statusRes] = await Promise.all([
-        getStorageEngineConfig(),
-        getStorageEngineStatus(),
-      ])
-      storageConfig.value = configRes?.data ?? null
-      storageStatus.value = statusRes?.data?.engines ?? []
-      storageAllowedProviders.value = statusRes?.data?.allowed_providers ?? []
-      loadedAt.value.storageEngine = Date.now()
+  async function ensureStorageBackends(force = false): Promise<void> {
+    return runOnce('storageBackends', force, async () => {
+      const response = await listStorageBackendCapabilities()
+      storageBackends.value = response?.data ?? []
+      defaultStorageBackendID.value = response?.default_storage_backend_id ?? ''
+      loadedAt.value.storageBackends = Date.now()
     })
   }
 
-  function resolveUsableStorageProvider(candidate?: string): string {
-    return pickUsableStorageProvider(
-      candidate,
-      storageStatus.value || [],
-      storageAllowedProviders.value || [],
-    )
+  async function ensureVectorStores(force = false): Promise<void> {
+    return runOnce('vectorStores', force, async () => {
+      const response = await listVectorStoreCapabilities()
+      vectorStores.value = response?.data ?? []
+      defaultVectorStoreID.value = response?.default_vector_store_id ?? ''
+      loadedAt.value.vectorStores = Date.now()
+    })
   }
 
   async function ensureMcpServices(force = false): Promise<void> {
@@ -191,9 +174,10 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
   function invalidate(...keys: EditorResourceKey[]) {
     if (keys.length === 0) {
       loadedAt.value = {}
-      storageConfig.value = null
-      storageStatus.value = []
-      storageAllowedProviders.value = []
+      storageBackends.value = []
+      defaultStorageBackendID.value = ''
+      vectorStores.value = []
+      defaultVectorStoreID.value = ''
       mcpServices.value = []
       skills.value = []
       skillsAvailable.value = false
@@ -213,9 +197,10 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
   }
 
   return {
-    storageConfig,
-    storageStatus,
-    storageAllowedProviders,
+    storageBackends,
+    defaultStorageBackendID,
+    vectorStores,
+    defaultVectorStoreID,
     mcpServices,
     skills,
     skillsAvailable,
@@ -225,8 +210,8 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
     tenantRetrievalConfig,
     parserEngines,
     systemInfo,
-    ensureStorageEngine,
-    resolveUsableStorageProvider,
+    ensureStorageBackends,
+    ensureVectorStores,
     ensureMcpServices,
     ensureEmployeeSkills,
     ensureAgentTypePresets,

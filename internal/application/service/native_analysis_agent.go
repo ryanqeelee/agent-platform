@@ -23,25 +23,12 @@ func (s *customAgentService) nativeAnalysisAgent(ctx context.Context, id string,
 	}
 	agent.Config.SandboxConfigID = ""
 	platformSkillsMode := agent.Config.SkillsSelectionMode
-	if platformSkillsMode != "none" && settings.Capabilities.Tools && s.sandboxConfigs != nil {
-		if s.provisionEmployeeSandbox != nil {
-			if err := s.provisionEmployeeSandbox(ctx, tenantID); err != nil {
-				return nil, err
-			}
-		}
-		configs, err := s.sandboxConfigs.ListByTenant(ctx, tenantID)
+	if platformSkillsMode != "none" && settings.Capabilities.Tools && s.sandboxDefault != nil {
+		configID, err := s.sandboxDefault.DefaultSandboxConfigID(ctx)
 		if err != nil {
 			return nil, err
 		}
-		for _, config := range configs {
-			if config.Name != "employee-assistant" {
-				continue
-			}
-			if config.TenantID != tenantID || agent.Config.SandboxConfigID != "" {
-				return nil, fmt.Errorf("analysis sandbox configuration is ambiguous or outside workspace")
-			}
-			agent.Config.SandboxConfigID = config.ID
-		}
+		agent.Config.SandboxConfigID = configID
 	}
 	if agent.Config.SandboxConfigID == "" {
 		agent.Config.SkillsSelectionMode = "none"

@@ -20,9 +20,9 @@ import (
 // both grow a new snapshot from the current one, and interleaving them would
 // discard whichever wrote the pointer first.
 func (s *TenantSkillService) RemoveSkill(
-	ctx context.Context, tenantID uint64, configID, skillID string,
+	ctx context.Context, configID, skillID string,
 ) error {
-	skill, err := s.skills.GetSkill(ctx, tenantID, configID, skillID)
+	skill, err := s.skills.GetSkill(ctx, configID, skillID)
 	if err != nil {
 		return err
 	}
@@ -30,14 +30,14 @@ func (s *TenantSkillService) RemoveSkill(
 		return apperrors.NewNotFoundError("skill not found")
 	}
 
+	runID := uuid.NewString()
 	now := s.now()
-	skill.Status = types.SkillStatusRemoving
-	skill.Error = ""
-	skill.InstallingSince = &now
-	if err := s.skills.UpdateSkill(ctx, skill); err != nil {
+	if err := s.skills.BeginSkillRun(
+		ctx, configID, skillID, runID, types.SkillStatusRemoving, now,
+	); err != nil {
 		return err
 	}
-	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{
+	s.publishProgress(ctx, configID, skillID, SkillProgress{
 		Percent: 5, Stage: "accepted", Status: types.SkillStatusRemoving,
 	})
 
@@ -46,8 +46,8 @@ func (s *TenantSkillService) RemoveSkill(
 	// StopSkill rewrites the row, and the stuck-run reaper is the backup.
 	go func() {
 		bgCtx := context.WithoutCancel(ctx)
-		if err := s.withSkillRunLock(bgCtx, tenantID, configID, skillID, func(lockCtx context.Context) error {
-			return s.runRemove(lockCtx, tenantID, configID, skillID)
+		if err := s.withSkillRunLock(bgCtx, configID, skillID, func(lockCtx context.Context) error {
+			return s.runRemove(lockCtx, configID, skillID, runID)
 		}); err != nil {
 			logger.Errorf(bgCtx, "[skill] remove %s failed: %v", skillID, err)
 		}
@@ -56,11 +56,8 @@ func (s *TenantSkillService) RemoveSkill(
 }
 
 func (s *TenantSkillService) runRemove(
-	ctx context.Context, tenantID uint64, configID, skillID string,
+	ctx context.Context, configID, skillID, runID string,
 ) (err error) {
-	ctx = context.WithValue(ctx, types.TenantIDContextKey, tenantID)
-	ctx = types.WithSandboxTenantID(ctx, tenantID)
-
 	// An empty id never names a row; refusing here keeps the later GetSkill
 	// from being the only thing standing between us and a no-op that looks
 	// like success.
@@ -72,7 +69,7 @@ func (s *TenantSkillService) runRemove(
 	// queue two runs. The second has nothing to remove, and doing it anyway
 	// would boot a sandbox, wipe a directory that is not there and spend a
 	// snapshot plus a generation bump to produce an identical image.
-	existing, err := s.skills.GetSkill(ctx, tenantID, configID, skillID)
+	existing, err := s.skills.GetSkill(ctx, configID, skillID)
 	if err != nil {
 		return fmt.Errorf("load skill %s: %w", skillID, err)
 	}
@@ -82,7 +79,7 @@ func (s *TenantSkillService) runRemove(
 	// RemoveSkill queues this run before the per-config lock. A newer upload
 	// of the same name already flipped the row back to installing; deleting
 	// it (or wiping its directory) would discard that install.
-	if existing.Status != types.SkillStatusRemoving {
+	if existing.Status != types.SkillStatusRemoving || existing.InstallRunID != runID {
 		return nil
 	}
 
@@ -102,8 +99,7 @@ func (s *TenantSkillService) runRemove(
 	// detached here — each consumer calls cleanupContext so its budget starts
 	// when its work does, because a removal can run for minutes.
 	cleanupBase := context.WithoutCancel(ctx)
-	handle := s.lookupSkillRun(tenantID, configID, skillID)
-
+	handle := s.lookupSkillRun(configID, skillID)
 	// imageChanged marks the point of no return. Past it the skill is gone
 	// from the image every new session boots, so restoring the row to ready
 	// would advertise files that no longer exist.
@@ -118,17 +114,17 @@ func (s *TenantSkillService) runRemove(
 				skillID, err)
 			return
 		}
-		if !s.skillRunStillBound(tenantID, configID, skillID, handle) {
+		if !s.skillRunStillBound(configID, skillID, handle) {
 			return
 		}
 		// A half-removed skill is worse than a kept one: the image still has
 		// it, so put the row back the way the operator can retry from.
 		restoreCtx, cancelRestore := s.cleanupContext(cleanupBase)
 		defer cancelRestore()
-		s.restoreSkillAfterFailedRemoval(restoreCtx, tenantID, configID, skillID, err)
+		s.restoreSkillAfterFailedRemoval(restoreCtx, configID, skillID, runID, err)
 	}()
 
-	cfgEntity, err := s.configs.GetByID(ctx, tenantID, configID)
+	cfgEntity, err := s.configs.GetByID(ctx, configID)
 	if err != nil {
 		return fmt.Errorf("load sandbox config %s: %w", configID, err)
 	}
@@ -139,10 +135,10 @@ func (s *TenantSkillService) runRemove(
 	// A skill that never made it into any image needs no sandbox at all, and
 	// no live sandbox can be out of date over a skill it never carried.
 	if cfgEntity.Config != nil && cfgEntity.Config.SkillPreparation == "session" {
-		return s.finishRemoval(cleanupBase, tenantID, configID, skillID, true)
+		return s.finishRemoval(cleanupBase, configID, skillID, runID, true)
 	}
 	if currentSnapshotID(cfgEntity) == "" {
-		return s.finishRemoval(cleanupBase, tenantID, configID, skillID, false)
+		return s.finishRemoval(cleanupBase, configID, skillID, runID, false)
 	}
 
 	// Everything below either creates provider resources or moves the image
@@ -153,7 +149,7 @@ func (s *TenantSkillService) runRemove(
 		return fmt.Errorf("remove lock lost before the image changes: %w", err)
 	}
 
-	remaining, err := s.countRemainingSkills(ctx, tenantID, configID, skillID)
+	remaining, err := s.countRemainingSkills(ctx, configID, skillID)
 	if err != nil {
 		return err
 	}
@@ -163,15 +159,15 @@ func (s *TenantSkillService) runRemove(
 		// surely as a wipe would. Checked before the sandbox is started: the
 		// snapshot that work produced would be discarded unread.
 		if err := s.clearImagePointer(
-			ctx, tenantID, configID, currentGeneration(cfgEntity)+1,
+			ctx, configID, currentGeneration(cfgEntity)+1,
 		); err != nil {
 			return err
 		}
 		imageChanged = true
 		// No new ledger row exists to keep active: nothing points at a
 		// snapshot any more.
-		s.markPreviousSnapshotsSuperseded(ctx, tenantID, configID, "")
-		return s.finishRemoval(cleanupBase, tenantID, configID, skillID, true)
+		s.markPreviousSnapshotsSuperseded(ctx, configID, "")
+		return s.finishRemoval(cleanupBase, configID, skillID, runID, true)
 	}
 
 	// Remaining skills still live in the current snapshot, so it must be an
@@ -184,33 +180,34 @@ func (s *TenantSkillService) runRemove(
 	}
 	builtFingerprint := skillOwnerFingerprint(cfgEntity.Config)
 
-	// ResolveEffectiveConfig has already turned the current snapshot into the
-	// template, so this sandbox boots from the image the skill is in.
-	sess, mgr, err := s.startMaintenanceSession(ctx, tenantID, configID, "remove")
+	if s.executions == nil {
+		return fmt.Errorf("platform skill execution factory is not configured")
+	}
+	mgr, err := s.executions.StartPlatformSkillRun(ctx, configID, runID)
 	if err != nil {
 		return err
 	}
-	// Only the sandbox is released; the session and its messages stay, the
-	// same way an install keeps its transcript.
 	defer func() {
 		releaseCtx, cancelRelease := s.cleanupContext(cleanupBase)
 		defer cancelRelease()
-		s.releaseSandbox(releaseCtx, mgr, sess.ID)
+		if cleanupErr := mgr.Cleanup(releaseCtx); cleanupErr != nil {
+			logger.Warnf(releaseCtx, "[skill] destroy platform removal sandbox %s: %v", runID, cleanupErr)
+		}
 	}()
-	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{Percent: 30, Stage: "sandbox_ready"})
+	s.publishProgress(ctx, configID, skillID, SkillProgress{Percent: 30, Stage: "sandbox_ready"})
 
-	if err := s.removeSkillDirectory(ctx, mgr, sess.ID, skillDir); err != nil {
+	if err := s.removeSkillDirectory(ctx, mgr, runID, skillDir); err != nil {
 		return err
 	}
-	if err := s.removeManifestEntry(ctx, mgr, sess.ID, skillID); err != nil {
+	if err := s.removeManifestEntry(ctx, mgr, runID, skillID); err != nil {
 		return err
 	}
 	// Same reason as the install: the per-session workspace and the package
 	// caches must not reach the snapshot.
-	if err := s.cleanImageScratch(ctx, mgr, sess.ID); err != nil {
+	if err := s.cleanImageScratch(ctx, mgr, runID); err != nil {
 		return err
 	}
-	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{Percent: 60, Stage: "removed"})
+	s.publishProgress(ctx, configID, skillID, SkillProgress{Percent: 60, Stage: "removed"})
 
 	// Checked again: everything above is confined to a sandbox we are about
 	// to destroy, and the wipe itself takes minutes, so the lock may have been
@@ -218,14 +215,14 @@ func (s *TenantSkillService) runRemove(
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("remove lock lost before snapshot: %w", err)
 	}
-	owned, err := s.removeStillOwnsTheRow(ctx, tenantID, configID, skillID)
+	owned, err := s.removeStillOwnsTheRow(ctx, configID, skillID, runID)
 	if err != nil {
 		return err
 	}
 	if !owned {
 		return nil
 	}
-	ledger, err := s.skills.ListSnapshotsByConfig(ctx, tenantID, configID)
+	ledger, err := s.skills.ListSnapshotsByConfig(ctx, configID)
 	if err != nil {
 		return fmt.Errorf("list snapshots of config %s: %w", configID, err)
 	}
@@ -233,35 +230,35 @@ func (s *TenantSkillService) runRemove(
 	// The ledger row is written before the snapshot: a snapshot with no ledger
 	// entry is a provider resource nobody knows exists.
 	removeRowID := uuid.NewString()
-	snapshotName := skillSnapshotBuildName(tenantID, configID, generation, removeRowID)
+	snapshotName := skillSnapshotBuildName(configID, generation, removeRowID)
 	if err := s.skills.CreateSnapshotRow(ctx, &types.TenantSkillSnapshotEntity{
-		ID: removeRowID, TenantID: tenantID, SandboxConfigID: configID, SkillID: skillID,
+		ID: removeRowID, SandboxConfigID: configID, SkillID: skillID,
 		ParentSnapshotID: currentSnapshotID(cfgEntity), Generation: generation,
 		Trigger: types.SkillSnapshotTriggerRemove, State: types.SkillSnapshotStateBuilding,
 		PlannedName: snapshotName,
 	}); err != nil {
 		return err
 	}
-	ref, err := s.createSnapshot(ctx, mgr, sess.ID, snapshotName)
+	ref, err := s.createSnapshot(ctx, mgr, runID, snapshotName)
 	if err != nil {
 		return err
 	}
 	if err := s.skills.MarkSnapshotState(
-		ctx, tenantID, removeRowID, types.SkillSnapshotStateActive, ref.ID,
+		ctx, removeRowID, types.SkillSnapshotStateActive, ref.ID,
 	); err != nil {
 		// The snapshot's ID exists nowhere but this function's locals now, so
 		// it is as unreachable as one nothing points at.
-		s.abandonSnapshot(cleanupBase, tenantID, mgr, removeRowID, ref.ID)
+		s.abandonSnapshot(cleanupBase, mgr, removeRowID, ref.ID)
 		return err
 	}
 
-	if err := s.switchImagePointer(ctx, tenantID, configID, ref.ID, generation, builtFingerprint); err != nil {
-		s.abandonSnapshot(cleanupBase, tenantID, mgr, removeRowID, ref.ID)
+	if err := s.switchImagePointer(ctx, configID, ref.ID, generation, builtFingerprint); err != nil {
+		s.abandonSnapshot(cleanupBase, mgr, removeRowID, ref.ID)
 		return err
 	}
 	imageChanged = true
-	s.markPreviousSnapshotsSuperseded(ctx, tenantID, configID, removeRowID)
-	return s.finishRemoval(cleanupBase, tenantID, configID, skillID, true)
+	s.markPreviousSnapshotsSuperseded(ctx, configID, removeRowID)
+	return s.finishRemoval(cleanupBase, configID, skillID, runID, true)
 }
 
 // removeSkillDirectory wipes one skill's tree from the image. The per-skill
@@ -276,7 +273,7 @@ func (s *TenantSkillService) runRemove(
 // flow can reclaim from the base template; the alternative risks breaking
 // skills that still work.
 func (s *TenantSkillService) removeSkillDirectory(
-	ctx context.Context, mgr sandbox.Manager, sessionID, skillDir string,
+	ctx context.Context, mgr skillMaintenanceExecution, sessionID, skillDir string,
 ) error {
 	if err := guardSkillDir(skillDir); err != nil {
 		return err
@@ -296,13 +293,9 @@ func (s *TenantSkillService) removeSkillDirectory(
 // execution, and rewriting it from an empty value would erase the entries of
 // every other skill in the image.
 func (s *TenantSkillService) removeManifestEntry(
-	ctx context.Context, mgr sandbox.Manager, sessionID, skillID string,
+	ctx context.Context, mgr skillMaintenanceExecution, sessionID, skillID string,
 ) error {
-	reader, ok := mgr.(sandbox.SessionFileReader)
-	if !ok {
-		return nil
-	}
-	raw, err := reader.ReadSessionFile(ctx, sessionID, sandbox.SkillsManifestPath)
+	raw, err := mgr.ReadSessionFile(ctx, sessionID, sandbox.SkillsManifestPath)
 	if err != nil {
 		logger.Warnf(ctx, "[skill] read image manifest failed: %v", err)
 		return nil
@@ -342,9 +335,9 @@ func (s *TenantSkillService) removeManifestEntry(
 // still has the previously installed version's files in the image, and
 // dropping back to the base template would silently take those away too.
 func (s *TenantSkillService) countRemainingSkills(
-	ctx context.Context, tenantID uint64, configID, removedSkillID string,
+	ctx context.Context, configID, removedSkillID string,
 ) (int, error) {
-	skills, err := s.skills.ListSkillsByConfig(ctx, tenantID, configID)
+	skills, err := s.skills.ListSkillsByConfig(ctx, configID)
 	if err != nil {
 		return 0, fmt.Errorf("list skills of config %s: %w", configID, err)
 	}
@@ -362,9 +355,9 @@ func (s *TenantSkillService) countRemainingSkills(
 // the top of the run is minutes old, and writing it back would revert whatever
 // the config service persisted in the meantime.
 func (s *TenantSkillService) clearImagePointer(
-	ctx context.Context, tenantID uint64, configID string, generation int,
+	ctx context.Context, configID string, generation int,
 ) error {
-	cfgEntity, err := s.configs.GetByID(ctx, tenantID, configID)
+	cfgEntity, err := s.configs.GetByID(ctx, configID)
 	if err != nil {
 		return fmt.Errorf("re-read sandbox config %s: %w", configID, err)
 	}
@@ -381,7 +374,6 @@ func (s *TenantSkillService) clearImagePointer(
 		BaseTemplateID:   effectiveBaseTemplate(cfgEntity),
 		OwnerFingerprint: skillOwnerFingerprint(cfgEntity.Config),
 	}
-	cfgEntity.TenantID = tenantID
 	return s.configs.Update(ctx, cfgEntity)
 }
 
@@ -391,12 +383,12 @@ func (s *TenantSkillService) clearImagePointer(
 // the skill, which is also why the row delete is retried rather than
 // reported as a failed removal.
 func (s *TenantSkillService) finishRemoval(
-	cleanupBase context.Context, tenantID uint64, configID, skillID string, imageChanged bool,
+	cleanupBase context.Context, configID, skillID, runID string, imageChanged bool,
 ) error {
 	ctx, cancel := s.cleanupContext(cleanupBase)
 	defer cancel()
 
-	owned, err := s.removeStillOwnsTheRow(ctx, tenantID, configID, skillID)
+	owned, err := s.removeStillOwnsTheRow(ctx, configID, skillID, runID)
 	if err != nil {
 		return err
 	}
@@ -404,29 +396,26 @@ func (s *TenantSkillService) finishRemoval(
 		return nil
 	}
 
-	// Read before the delete: past it the only record of what this row named is
-	// gone, and a pinned archive would be left behind with nothing to reclaim it.
-	pinned := ""
-	if row, err := s.skills.GetSkill(ctx, tenantID, configID, skillID); err == nil && row != nil {
-		pinned = strings.TrimSpace(row.BundleRef)
-	}
+	deleted := false
 	if err := s.retrySkillBookkeeping(ctx, func() error {
-		return s.skills.DeleteSkill(ctx, tenantID, configID, skillID)
+		var deleteErr error
+		deleted, deleteErr = s.skills.DeleteSkillForRun(ctx, configID, skillID, runID)
+		return deleteErr
 	}); err != nil {
 		return fmt.Errorf("skill %s no longer exists in the image but its row remains: %w",
 			skillID, err)
 	}
-	// The definition's archive survives this; only an object no catalog and no
-	// other install names is reclaimed.
-	s.releaseInstallBundle(ctx, tenantID, pinned)
+	if !deleted {
+		return nil
+	}
 	// Only an image that actually changed can leave a bound sandbox out of
 	// date. Marking after a removal that moved no pointer would destroy and
 	// rebuild every live sandbox of the config - throwing away each session's
 	// /workspace scratch - for a change no sandbox can observe.
 	if imageChanged {
-		s.markConfigSandboxesStale(ctx, tenantID, configID)
+		s.markConfigSandboxesStale(ctx, configID)
 	}
-	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{
+	s.publishProgress(ctx, configID, skillID, SkillProgress{
 		Percent: 100, Stage: "done", Status: "removed",
 	})
 	return nil
@@ -434,14 +423,14 @@ func (s *TenantSkillService) finishRemoval(
 
 // restoreSkillAfterFailedRemoval puts back the row a failed removal borrowed.
 func (s *TenantSkillService) restoreSkillAfterFailedRemoval(
-	ctx context.Context, tenantID uint64, configID, skillID string, cause error,
+	ctx context.Context, configID, skillID, runID string, cause error,
 ) {
-	owned, err := s.removeStillOwnsTheRow(ctx, tenantID, configID, skillID)
+	owned, err := s.removeStillOwnsTheRow(ctx, configID, skillID, runID)
 	if err != nil || !owned {
 		return
 	}
 	status := types.SkillStatusFailed
-	_ = s.updateSkillFields(ctx, tenantID, configID, skillID,
+	matched, _ := s.updateSkillFieldsForRun(ctx, configID, skillID, runID,
 		func(e *types.TenantSkillEntity) {
 			// A skill that reached an image is still in it, so it goes back to
 			// ready and the operator can retry. One that never did has nothing
@@ -454,7 +443,10 @@ func (s *TenantSkillService) restoreSkillAfterFailedRemoval(
 			e.Error = cause.Error()
 			e.InstallingSince = nil
 		})
-	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{
+	if !matched {
+		return
+	}
+	s.publishProgress(ctx, configID, skillID, SkillProgress{
 		Percent: 100, Stage: "failed", Status: status, Log: cause.Error(),
 	})
 }
@@ -464,67 +456,15 @@ func (s *TenantSkillService) restoreSkillAfterFailedRemoval(
 // row back to installing; deleting it (or restoring it to ready/failed)
 // would discard that install.
 func (s *TenantSkillService) removeStillOwnsTheRow(
-	ctx context.Context, tenantID uint64, configID, skillID string,
+	ctx context.Context, configID, skillID, runID string,
 ) (bool, error) {
-	current, err := s.skills.GetSkill(ctx, tenantID, configID, skillID)
+	current, err := s.skills.GetSkill(ctx, configID, skillID)
 	if err != nil {
 		return false, fmt.Errorf("load skill %s: %w", skillID, err)
 	}
 	if current == nil {
 		return false, nil
 	}
-	return current.Status == types.SkillStatusRemoving, nil
-}
-
-// releaseInstallBundle drops an archive an install row has stopped naming,
-// unless something else still names it.
-//
-// The reference is not owned by one row. A definition's own object is shared by
-// every install of it, and one replaced archive is pinned by each install that
-// was built from it, so "this row let go" is not the same question as "nobody
-// needs these bytes". Both tables are checked before the object is deleted, and
-// an unreadable table means it is kept: a leaked archive costs storage, a
-// deleted one costs an install its files.
-func (s *TenantSkillService) releaseInstallBundle(
-	ctx context.Context, tenantID uint64, bundleRef string,
-) {
-	ref := strings.TrimSpace(bundleRef)
-	if ref == "" {
-		return
-	}
-	catalogs, err := s.skills.ListCatalogsByTenant(ctx, tenantID)
-	if err != nil {
-		logger.Warnf(ctx, "[skill] list catalogs before releasing bundle %s failed: %v", ref, err)
-		return
-	}
-	for _, cat := range catalogs {
-		if cat != nil && strings.TrimSpace(cat.BundleRef) == ref {
-			return
-		}
-	}
-	installs, err := s.skills.ListSkillsByTenant(ctx, tenantID)
-	if err != nil {
-		logger.Warnf(ctx, "[skill] list installs before releasing bundle %s failed: %v", ref, err)
-		return
-	}
-	for _, row := range installs {
-		if row != nil && strings.TrimSpace(row.BundleRef) == ref {
-			return
-		}
-	}
-	s.deleteBundleBestEffort(ctx, tenantID, ref)
-}
-
-func (s *TenantSkillService) deleteBundleBestEffort(
-	ctx context.Context, tenantID uint64, bundleRef string,
-) {
-	fs, err := s.fileServiceForTenant(ctx, tenantID)
-	if err != nil || fs == nil {
-		logger.Warnf(ctx, "[skill] resolve file service to delete bundle %s failed: %v",
-			bundleRef, err)
-		return
-	}
-	if err := fs.DeleteFile(ctx, bundleRef); err != nil {
-		logger.Warnf(ctx, "[skill] delete bundle %s failed: %v", bundleRef, err)
-	}
+	return current.Status == types.SkillStatusRemoving &&
+		(runID == "" || current.InstallRunID == runID), nil
 }

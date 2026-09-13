@@ -1,0 +1,3 @@
+-- Irreversible by design: the migration discards tenant ownership metadata.
+-- Restoring tenant_id would require an operator-supplied ownership map and
+-- must not be guessed during an automated down.

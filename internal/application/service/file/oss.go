@@ -30,6 +30,29 @@ type ossFileService struct {
 	tempBucketName string
 }
 
+func (s *ossFileService) putPlatformSkillArchive(ctx context.Context, key string, data []byte) (string, error) {
+	objectKey := strings.TrimSuffix(s.pathPrefix, "/") + "/" + key
+	if s.pathPrefix == "" {
+		objectKey = key
+	}
+	_, err := s.client.PutObject(ctx, &oss.PutObjectRequest{Bucket: oss.Ptr(s.bucketName), Key: oss.Ptr(objectKey), Body: bytes.NewReader(data), ContentType: oss.Ptr("application/octet-stream")})
+	if err != nil {
+		return "", fmt.Errorf("failed to upload platform skill archive to OSS: %w", err)
+	}
+	return fmt.Sprintf("oss://%s/%s", s.bucketName, objectKey), nil
+}
+
+func (s *ossFileService) platformSkillArchiveKey(ref string) (string, error) {
+	bucket, key, err := parseOssFilePath(ref)
+	if err != nil {
+		return "", err
+	}
+	if bucket != s.bucketName {
+		return "", fmt.Errorf("bucket mismatch in platform skill archive reference")
+	}
+	return platformSkillLogicalKey(key, s.pathPrefix)
+}
+
 const ossScheme = "oss://"
 
 // newOSSClient creates an OSS client using the official Aliyun SDK v2.

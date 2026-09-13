@@ -30,6 +30,26 @@ type ks3FileService struct {
 	pathPrefix string
 }
 
+func (s *ks3FileService) putPlatformSkillArchive(ctx context.Context, key string, data []byte) (string, error) {
+	objectKey := joinKS3Key(s.pathPrefix, key)
+	_, err := s.client.PutObject(&ks3s3.PutObjectInput{Bucket: ks3aws.String(s.bucketName), Key: ks3aws.String(objectKey), Body: bytes.NewReader(data), ContentType: ks3aws.String("application/octet-stream")})
+	if err != nil {
+		return "", fmt.Errorf("failed to upload platform skill archive to KS3: %w", err)
+	}
+	return fmt.Sprintf("%s%s/%s", ks3Scheme, s.bucketName, objectKey), nil
+}
+
+func (s *ks3FileService) platformSkillArchiveKey(ref string) (string, error) {
+	bucket, key, err := parseKS3FilePath(ref)
+	if err != nil {
+		return "", err
+	}
+	if bucket != s.bucketName {
+		return "", fmt.Errorf("bucket mismatch in platform skill archive reference")
+	}
+	return platformSkillLogicalKey(key, s.pathPrefix)
+}
+
 // NewKS3FileService creates a KS3 file service and ensures the bucket exists.
 func NewKS3FileService(endpoint, region, accessKey, secretKey, bucketName, pathPrefix string) (interfaces.FileService, error) {
 	client, err := newKS3Client(endpoint, region, accessKey, secretKey)

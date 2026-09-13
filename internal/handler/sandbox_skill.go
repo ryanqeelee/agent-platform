@@ -37,33 +37,33 @@ const (
 // writes are workspace-scoped by the service; the progress calls are not, which
 // is why every handler here resolves the skill for the caller's workspace first.
 type sandboxSkillService interface {
-	ListSkills(ctx context.Context, tenantID uint64, configID string) ([]*types.TenantSkillEntity, error)
-	GetSkill(ctx context.Context, tenantID uint64, configID, skillID string) (*types.TenantSkillEntity, error)
+	ListSkills(ctx context.Context, configID string) ([]*types.TenantSkillEntity, error)
+	GetSkill(ctx context.Context, configID, skillID string) (*types.TenantSkillEntity, error)
 	GetInstallTranscriptHistory(
-		ctx context.Context, tenantID uint64, configID, skillID string,
+		ctx context.Context, configID, skillID string,
 	) ([]*types.Message, error)
 	ListSkillFiles(
-		ctx context.Context, tenantID uint64, configID, skillID string,
+		ctx context.Context, configID, skillID string,
 	) ([]service.SkillFileEntry, error)
 	ReadSkillFile(
-		ctx context.Context, tenantID uint64, configID, skillID, relativePath string,
+		ctx context.Context, configID, skillID, relativePath string,
 	) (*service.SkillFileContent, error)
 	UpdateSkillAdmin(
-		ctx context.Context, tenantID uint64, configID, skillID string,
+		ctx context.Context, configID, skillID string,
 		update service.SkillAdminUpdate,
 	) (*types.TenantSkillEntity, error)
-	InstallSkill(ctx context.Context, tenantID uint64, configID string, archive []byte) (string, error)
+	InstallSkill(ctx context.Context, configID string, archive []byte) (string, error)
 	InstallSkillFromSource(
-		ctx context.Context, tenantID uint64, configID, source string,
+		ctx context.Context, configID, source string,
 	) (string, error)
-	ReinstallSkill(ctx context.Context, tenantID uint64, configID, skillID string) (string, error)
-	StopSkill(ctx context.Context, tenantID uint64, configID, skillID string) (*types.TenantSkillEntity, error)
-	RemoveSkill(ctx context.Context, tenantID uint64, configID, skillID string) error
+	ReinstallSkill(ctx context.Context, configID, skillID string) (string, error)
+	StopSkill(ctx context.Context, configID, skillID string) (*types.TenantSkillEntity, error)
+	RemoveSkill(ctx context.Context, configID, skillID string) error
 	LastProgress(
-		ctx context.Context, tenantID uint64, configID, skillID string,
+		ctx context.Context, configID, skillID string,
 	) (service.SkillProgress, bool)
 	SubscribeProgress(
-		ctx context.Context, tenantID uint64, configID, skillID string,
+		ctx context.Context, configID, skillID string,
 	) (<-chan service.SkillProgress, func(), error)
 }
 
@@ -82,7 +82,7 @@ type SandboxSkillHandler struct {
 	maxDuration  time.Duration
 }
 
-// NewSandboxSkillHandler constructs the admin HTTP surface for tenant skills.
+// NewSandboxSkillHandler constructs the admin HTTP surface for platform skills.
 func NewSandboxSkillHandler(
 	svc sandboxSkillService, streams interfaces.StreamManager,
 ) *SandboxSkillHandler {
@@ -107,8 +107,7 @@ type skillResponse struct {
 	Error               string    `json:"error,omitempty"`
 	BundleSHA256        string    `json:"bundle_sha256,omitempty"`
 	InstalledSnapshotID string    `json:"installed_snapshot_id,omitempty"`
-	InstallSessionID    string    `json:"install_session_id,omitempty"`
-	InstallMessageID    string    `json:"install_message_id,omitempty"`
+	InstallRunID        string    `json:"install_run_id,omitempty"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
 
@@ -155,8 +154,7 @@ func toSkillResponse(e *types.TenantSkillEntity) skillResponse {
 		Error:               e.Error,
 		BundleSHA256:        e.BundleSHA256,
 		InstalledSnapshotID: e.InstalledSnapshotID,
-		InstallSessionID:    e.InstallSessionID,
-		InstallMessageID:    e.InstallMessageID,
+		InstallRunID:        e.InstallRunID,
 		CreatedAt:           e.CreatedAt,
 		UpdatedAt:           e.UpdatedAt,
 		Envs:                toSkillEnvResponses(e.Envs),
@@ -184,10 +182,9 @@ func respondSkillServiceError(c *gin.Context, err error) {
 // @Failure      401  {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404  {object}  apperrors.AppError      "Sandbox config not found"
 // @Security     Bearer
-// @Param        tenant_id  path  int  true  "Enterprise ID"
-// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills [get]
+// @Router       /system/admin/sandbox-configs/{id}/skills [get]
 func (h *SandboxSkillHandler) List(c *gin.Context) {
-	skills, err := h.service.ListSkills(c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"))
+	skills, err := h.service.ListSkills(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		_ = c.Error(err)
 		return
@@ -210,8 +207,7 @@ func (h *SandboxSkillHandler) List(c *gin.Context) {
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404      {object}  apperrors.AppError      "Skill not found"
 // @Security     Bearer
-// @Param        tenant_id  path  int  true  "Enterprise ID"
-// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId} [get]
+// @Router       /system/admin/sandbox-configs/{id}/skills/{skillId} [get]
 func (h *SandboxSkillHandler) Get(c *gin.Context) {
 	skill, err := h.resolveSkill(c)
 	if err != nil {
@@ -232,11 +228,10 @@ func (h *SandboxSkillHandler) Get(c *gin.Context) {
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404      {object}  apperrors.AppError      "Skill or files not found"
 // @Security     Bearer
-// @Param        tenant_id  path  int  true  "Enterprise ID"
-// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/files [get]
+// @Router       /system/admin/sandbox-configs/{id}/skills/{skillId}/files [get]
 func (h *SandboxSkillHandler) ListFiles(c *gin.Context) {
 	files, err := h.service.ListSkillFiles(
-		c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"), c.Param("skillId"),
+		c.Request.Context(), c.Param("id"), c.Param("skillId"),
 	)
 	if err != nil {
 		_ = c.Error(err)
@@ -258,12 +253,10 @@ func (h *SandboxSkillHandler) ListFiles(c *gin.Context) {
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404      {object}  apperrors.AppError      "Skill or file not found"
 // @Security     Bearer
-// @Param        tenant_id  path  int  true  "Enterprise ID"
-// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/files/content [get]
+// @Router       /system/admin/sandbox-configs/{id}/skills/{skillId}/files/content [get]
 func (h *SandboxSkillHandler) GetFile(c *gin.Context) {
 	file, err := h.service.ReadSkillFile(
-		c.Request.Context(), sandboxConfigTenantID(c),
-		c.Param("id"), c.Param("skillId"), c.Query("path"),
+		c.Request.Context(), c.Param("id"), c.Param("skillId"), c.Query("path"),
 	)
 	if err != nil {
 		_ = c.Error(err)
@@ -297,8 +290,7 @@ func (h *SandboxSkillHandler) GetFile(c *gin.Context) {
 // @Failure      401   {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404   {object}  apperrors.AppError      "Sandbox config not found"
 // @Security     Bearer
-// @Param        tenant_id  path  int  true  "Enterprise ID"
-// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills [post]
+// @Router       /system/admin/sandbox-configs/{id}/skills [post]
 func (h *SandboxSkillHandler) Upload(c *gin.Context) {
 	maxBytes := secutils.GetMaxSkillBundleSize()
 	limitSkillUploadBody(c, maxBytes)
@@ -335,7 +327,7 @@ func (h *SandboxSkillHandler) Upload(c *gin.Context) {
 	}
 
 	skillID, err := h.service.InstallSkill(
-		c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"), archive,
+		c.Request.Context(), c.Param("id"), archive,
 	)
 	if err != nil {
 		respondSkillServiceError(c, err)
@@ -371,7 +363,7 @@ func (h *SandboxSkillHandler) installFromSource(c *gin.Context) {
 	}
 
 	skillID, err := h.service.InstallSkillFromSource(
-		c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"), source,
+		c.Request.Context(), c.Param("id"), source,
 	)
 	if err != nil {
 		respondSkillServiceError(c, err)
@@ -392,11 +384,10 @@ func (h *SandboxSkillHandler) installFromSource(c *gin.Context) {
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404      {object}  apperrors.AppError      "Skill not found"
 // @Security     Bearer
-// @Param        tenant_id  path  int  true  "Enterprise ID"
-// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/reinstall [post]
+// @Router       /system/admin/sandbox-configs/{id}/skills/{skillId}/reinstall [post]
 func (h *SandboxSkillHandler) Reinstall(c *gin.Context) {
 	skillID, err := h.service.ReinstallSkill(
-		c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"), c.Param("skillId"),
+		c.Request.Context(), c.Param("id"), c.Param("skillId"),
 	)
 	if err != nil {
 		respondSkillServiceError(c, err)
@@ -417,11 +408,10 @@ func (h *SandboxSkillHandler) Reinstall(c *gin.Context) {
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404      {object}  apperrors.AppError      "Skill not found"
 // @Security     Bearer
-// @Param        tenant_id  path  int  true  "Enterprise ID"
-// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/stop [post]
+// @Router       /system/admin/sandbox-configs/{id}/skills/{skillId}/stop [post]
 func (h *SandboxSkillHandler) Stop(c *gin.Context) {
 	skill, err := h.service.StopSkill(
-		c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"), c.Param("skillId"),
+		c.Request.Context(), c.Param("id"), c.Param("skillId"),
 	)
 	if err != nil {
 		respondSkillServiceError(c, err)
@@ -471,8 +461,7 @@ type skillPatchRequest struct {
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404      {object}  apperrors.AppError      "Skill not found"
 // @Security     Bearer
-// @Param        tenant_id  path  int  true  "Enterprise ID"
-// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId} [patch]
+// @Router       /system/admin/sandbox-configs/{id}/skills/{skillId} [patch]
 func (h *SandboxSkillHandler) Patch(c *gin.Context) {
 	limitJSONBody(c, skillSourceJSONMaxBytes)
 	var req skillPatchRequest
@@ -490,7 +479,6 @@ func (h *SandboxSkillHandler) Patch(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	tenantID := sandboxConfigTenantID(c)
 	configID, skillID := c.Param("id"), c.Param("skillId")
 
 	// Both fields go down in one call so the request is all-or-nothing: two
@@ -500,7 +488,7 @@ func (h *SandboxSkillHandler) Patch(c *gin.Context) {
 	if req.Envs != nil {
 		update.EnvValues = *req.Envs
 	}
-	updated, err := h.service.UpdateSkillAdmin(ctx, tenantID, configID, skillID, update)
+	updated, err := h.service.UpdateSkillAdmin(ctx, configID, skillID, update)
 	if err != nil {
 		_ = c.Error(err)
 		return
@@ -525,12 +513,11 @@ func (h *SandboxSkillHandler) Patch(c *gin.Context) {
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404      {object}  apperrors.AppError      "Skill not found"
 // @Security     Bearer
-// @Param        tenant_id  path  int  true  "Enterprise ID"
-// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId} [delete]
+// @Router       /system/admin/sandbox-configs/{id}/skills/{skillId} [delete]
 func (h *SandboxSkillHandler) Delete(c *gin.Context) {
 	skillID := c.Param("skillId")
 	err := h.service.RemoveSkill(
-		c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"), skillID,
+		c.Request.Context(), c.Param("id"), skillID,
 	)
 	if err != nil {
 		_ = c.Error(err)
@@ -613,11 +600,9 @@ func terminalSkillEvent(skill *types.TenantSkillEntity) (skillInstallEvent, bool
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404      {object}  apperrors.AppError      "Skill not found"
 // @Security     Bearer
-// @Param        tenant_id  path  int  true  "Enterprise ID"
-// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/install-events [get]
+// @Router       /system/admin/sandbox-configs/{id}/skills/{skillId}/install-events [get]
 func (h *SandboxSkillHandler) InstallEvents(c *gin.Context) {
 	ctx := c.Request.Context()
-	tenantID := sandboxConfigTenantID(c)
 	configID, skillID := c.Param("id"), c.Param("skillId")
 
 	// The progress key is workspace-scoped, so this lookup is not what isolates
@@ -631,7 +616,7 @@ func (h *SandboxSkillHandler) InstallEvents(c *gin.Context) {
 
 	// Subscribing before the first read means an event published between the
 	// two is delivered rather than missed.
-	events, release, err := h.service.SubscribeProgress(ctx, tenantID, configID, skillID)
+	events, release, err := h.service.SubscribeProgress(ctx, configID, skillID)
 	if err != nil {
 		_ = c.Error(err)
 		return
@@ -643,7 +628,7 @@ func (h *SandboxSkillHandler) InstallEvents(c *gin.Context) {
 	// lastPercent is what a detached frame reports, so giving up on following
 	// a run does not appear to reset its progress.
 	lastPercent := 0
-	if last, ok := h.service.LastProgress(ctx, tenantID, configID, skillID); ok {
+	if last, ok := h.service.LastProgress(ctx, configID, skillID); ok {
 		event := skillEventFromProgress(last)
 		lastPercent = event.Percent
 		if !h.emit(c, event) || event.Done {
@@ -691,7 +676,7 @@ func (h *SandboxSkillHandler) InstallEvents(c *gin.Context) {
 				return
 			}
 		case <-poll.C:
-			current, err := h.service.GetSkill(ctx, tenantID, configID, skillID)
+			current, err := h.service.GetSkill(ctx, configID, skillID)
 			if err != nil {
 				logger.Warnf(ctx, "[skill] re-read %s while streaming failed: %v", skillID, err)
 				if !h.emitComment(c) {
@@ -739,8 +724,7 @@ func (h *SandboxSkillHandler) InstallEvents(c *gin.Context) {
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404      {object}  apperrors.AppError      "Skill or transcript not found"
 // @Security     Bearer
-// @Param        tenant_id  path  int  true  "Enterprise ID"
-// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/transcript [get]
+// @Router       /system/admin/sandbox-configs/{id}/skills/{skillId}/transcript [get]
 //
 // The transcript deliberately does not reuse /sessions/continue-stream. That
 // endpoint authorizes by "does this chat session belong to you", while an
@@ -756,8 +740,8 @@ func (h *SandboxSkillHandler) InstallTranscript(c *gin.Context) {
 		_ = c.Error(err)
 		return
 	}
-	sessionID, messageID := skill.InstallSessionID, skill.InstallMessageID
-	if sessionID == "" || messageID == "" {
+	runID, messageID := skill.InstallRunID, skill.ID
+	if runID == "" {
 		// The skill row exists the moment the upload is accepted; locators
 		// are written only after the installer sandbox is up. A 404 here is
 		// "not yet", not "gone", and the access log would WARN on every poll.
@@ -773,7 +757,7 @@ func (h *SandboxSkillHandler) InstallTranscript(c *gin.Context) {
 		return
 	}
 
-	events, offset, err := h.streams.GetEvents(ctx, sessionID, messageID, 0)
+	events, offset, err := h.streams.GetEvents(ctx, runID, messageID, 0)
 	if err != nil {
 		logger.Errorf(ctx, "[skill] read install transcript of %s failed: %v", skill.ID, err)
 		_ = c.Error(apperrors.NewInternalServerError(err.Error()))
@@ -789,7 +773,7 @@ func (h *SandboxSkillHandler) InstallTranscript(c *gin.Context) {
 
 	setSandboxSkillSSEHeaders(c)
 
-	done := h.emitTranscript(c, sessionID, messageID, events)
+	done := h.emitTranscript(c, runID, messageID, events)
 	if done {
 		return
 	}
@@ -809,13 +793,13 @@ func (h *SandboxSkillHandler) InstallTranscript(c *gin.Context) {
 		case <-deadline.C:
 			return
 		case <-tick.C:
-			newEvents, newOffset, err := h.streams.GetEvents(ctx, sessionID, messageID, offset)
+			newEvents, newOffset, err := h.streams.GetEvents(ctx, runID, messageID, offset)
 			if err != nil {
 				logger.Warnf(ctx, "[skill] tail install transcript of %s failed: %v", skill.ID, err)
 				return
 			}
 			offset = newOffset
-			if h.emitTranscript(c, sessionID, messageID, newEvents) {
+			if h.emitTranscript(c, runID, messageID, newEvents) {
 				return
 			}
 		}
@@ -824,21 +808,19 @@ func (h *SandboxSkillHandler) InstallTranscript(c *gin.Context) {
 
 // InstallTranscriptHistory godoc
 // @Summary      Read an install's durable transcript history
-// @Description  Returns only the persisted user prompt and assistant message identified by this tenant-scoped skill installation.
+// @Description  Returns the persisted user prompt and assistant message for this platform skill installation's latest run.
 // @Tags         SandboxConfig
 // @Produce      json
-// @Param        tenant_id  path      int     true  "Enterprise ID"
 // @Param        id         path      string  true  "Sandbox config ID"
 // @Param        skillId    path      string  true  "Skill ID"
 // @Success      200        {object}  map[string]interface{}  "Persisted install messages"
 // @Failure      401        {object}  map[string]interface{}  "Unauthorized"
 // @Failure      404        {object}  apperrors.AppError      "Skill or transcript history not found"
 // @Security     Bearer
-// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/transcript/history [get]
+// @Router       /system/admin/sandbox-configs/{id}/skills/{skillId}/transcript/history [get]
 func (h *SandboxSkillHandler) InstallTranscriptHistory(c *gin.Context) {
 	messages, err := h.service.GetInstallTranscriptHistory(
 		c.Request.Context(),
-		sandboxConfigTenantID(c),
 		c.Param("id"),
 		c.Param("skillId"),
 	)
@@ -880,8 +862,7 @@ func (h *SandboxSkillHandler) emitTranscript(
 // resolveSkill loads the skill for the caller's workspace and config, and
 // returns the 404 every route renders when it is not reachable.
 func (h *SandboxSkillHandler) resolveSkill(c *gin.Context) (*types.TenantSkillEntity, error) {
-	skill, err := h.service.GetSkill(c.Request.Context(), sandboxConfigTenantID(c),
-		c.Param("id"), c.Param("skillId"))
+	skill, err := h.service.GetSkill(c.Request.Context(), c.Param("id"), c.Param("skillId"))
 	if err != nil {
 		return nil, err
 	}

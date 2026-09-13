@@ -21,7 +21,7 @@ import (
 // Narrower than the full config service so this handler cannot grow a dependency
 // on config mutation.
 type sandboxConfigLookup interface {
-	Get(ctx context.Context, tenantID uint64, id string) (*types.TenantSandboxConfigEntity, error)
+	Get(ctx context.Context, id string) (*types.TenantSandboxConfigEntity, error)
 }
 
 // CustomAgentHandler defines the HTTP handler for custom agent operations
@@ -183,23 +183,6 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 // @Router       /agents/{id} [get]
 func (h *CustomAgentHandler) GetAgent(c *gin.Context) {
 	h.getAgentByID(c, c.Param("id"))
-}
-
-// GetSkillInstallerAgent godoc
-// @Summary      获取企业技能安装器配置
-// @Description  获取指定企业的固定内置技能安装器配置
-// @Tags         Skills
-// @Accept       json
-// @Produce      json
-// @Param        tenant_id  path      int  true  "企业ID"
-// @Success      200        {object}  map[string]interface{}  "技能安装器配置"
-// @Failure      400        {object}  errors.AppError         "请求参数错误"
-// @Failure      403        {object}  errors.AppError         "需要平台管理员权限"
-// @Failure      404        {object}  errors.AppError         "企业或技能安装器不存在"
-// @Security     Bearer
-// @Router       /system/admin/tenants/{tenant_id}/skills/installer-agent [get]
-func (h *CustomAgentHandler) GetSkillInstallerAgent(c *gin.Context) {
-	h.getAgentByID(c, types.BuiltinSkillInstallerID)
 }
 
 func (h *CustomAgentHandler) getAgentByID(c *gin.Context, rawID string) {
@@ -379,24 +362,6 @@ func enrichAgentCreatorNames(ctx context.Context, userSvc interfaces.UserService
 // @Router       /agents/{id} [put]
 func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 	h.updateAgentByID(c, c.Param("id"))
-}
-
-// UpdateSkillInstallerAgent godoc
-// @Summary      更新企业技能安装器配置
-// @Description  更新指定企业的固定内置技能安装器配置
-// @Tags         Skills
-// @Accept       json
-// @Produce      json
-// @Param        tenant_id  path      int                 true  "企业ID"
-// @Param        request    body      UpdateAgentRequest  true  "技能安装器配置"
-// @Success      200        {object}  map[string]interface{}  "更新后的技能安装器配置"
-// @Failure      400        {object}  errors.AppError         "请求参数错误"
-// @Failure      403        {object}  errors.AppError         "需要平台管理员权限"
-// @Failure      404        {object}  errors.AppError         "企业或技能安装器不存在"
-// @Security     Bearer
-// @Router       /system/admin/tenants/{tenant_id}/skills/installer-agent [put]
-func (h *CustomAgentHandler) UpdateSkillInstallerAgent(c *gin.Context) {
-	h.updateAgentByID(c, types.BuiltinSkillInstallerID)
 }
 
 func (h *CustomAgentHandler) updateAgentByID(c *gin.Context, rawID string) {
@@ -769,11 +734,7 @@ func (h *CustomAgentHandler) validateAgentSandboxConfig(
 		// Empty means the deployment-wide default, which always exists.
 		return nil
 	}
-	tenantID, ok := types.TenantIDFromContext(ctx)
-	if !ok {
-		return errors.NewUnauthorizedError("Missing workspace context")
-	}
-	stored, err := h.sandboxConfigs.Get(ctx, tenantID, configID)
+	stored, err := h.sandboxConfigs.Get(ctx, configID)
 	if err != nil {
 		return errors.NewInternalServerError("Failed to verify sandbox config").
 			WithDetails(err.Error())

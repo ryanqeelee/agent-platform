@@ -5,7 +5,7 @@
       <p class="section-description">{{ t('vectorStoreSettings.description') }}</p>
     </div>
 
-    <PlatformRuntimeContext v-if="authStore.isSystemAdmin" context="retrieval" />
+    <t-alert v-if="!loading && !defaultStoreID" theme="warning" :message="t('vectorStoreSettings.defaultRequired')" />
     <t-alert v-if="loadError" theme="error" :message="loadError">
       <template #operation><t-button size="small" @click="loadAll">{{ t('common.retry') }}</t-button></template>
     </t-alert>
@@ -19,23 +19,18 @@
       <div class="settings-group">
         <h3 class="list-section-title">{{ t('vectorStoreSettings.storesTitle') }}</h3>
 
-        <!-- 与其它 settings 列表同形：左侧 engine 徽章 + 标题 + env pill + 副标题 + 测试动作。
-             env 来源是只读的 (engine_type / connection_config 由 .env 写入），所以没有更多菜单；
-             user 来源沿用三点菜单的编辑 / 删除入口；测试结果作为卡片底部的彩色条出现。 -->
+        <!-- 与其它 settings 列表同形：左侧 engine 徽章 + 标题 + 副标题 + 管理动作。 -->
         <div v-if="stores.length === 0 && !authStore.isSystemAdmin" class="empty-stores">
           <t-empty :description="t('vectorStoreSettings.emptyDesc')" />
         </div>
         <div v-else class="store-grid">
           <div
-            v-for="store in [...envStores, ...userStores]"
+            v-for="store in stores"
             :key="store.id"
             class="store-card"
             :class="[
               `store-card--${store.engine_type}`,
-              {
-                'store-card--env': store.source === 'env',
-                'store-card--clickable': isStoreCardClickable(store),
-              },
+              { 'store-card--clickable': isStoreCardClickable(store) },
             ]"
             :role="isStoreCardClickable(store) ? 'button' : undefined"
             :tabindex="isStoreCardClickable(store) ? 0 : undefined"
@@ -60,13 +55,7 @@
               <div class="store-card__body">
                 <div class="store-card__header">
                   <h3 class="store-card__title" :title="store.name">{{ store.name }}</h3>
-                  <span v-if="store.source === 'env'" class="store-card__pill">
-                    {{ t('vectorStoreSettings.envTag') }}
-                  </span>
-                  <!--
-                    测试连接已挪到编辑抽屉的 footer，外层菜单不再有"测试"入口。
-                    env 来源（.env 写入）也不需要 dropdown — 没有可执行的动作。
-                  -->
+                  <t-tag v-if="store.id === defaultStoreID" theme="primary" variant="light" size="small">{{ t('vectorStoreSettings.defaultTag') }}</t-tag>
                   <div
                     v-if="authStore.isSystemAdmin && storeActionsFor(store).length > 0"
                     class="store-card__actions"
@@ -366,18 +355,17 @@ import {
   updateVectorStore,
   deleteVectorStore as deleteVectorStoreAPI,
   testVectorStoreRaw,
+  setDefaultVectorStore,
   type VectorStoreEntity,
   type VectorStoreTypeInfo,
 } from '@/api/vector-store'
 import { useAuthStore } from '@/stores/auth'
 import { providerLogo } from './providerLogos'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
-import PlatformRuntimeContext from './components/PlatformRuntimeContext.vue'
-import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
-const platformTenantID = usePlatformTenantControlID()
+const defaultStoreID = ref('')
 
 // ===== State =====
 const stores = ref<VectorStoreEntity[]>([])
@@ -416,8 +404,6 @@ watch(
 )
 
 // ===== Computed =====
-const envStores = computed(() => stores.value.filter(s => s.source === 'env'))
-const userStores = computed(() => stores.value.filter(s => s.source === 'user'))
 const selectedType = computed(() => storeTypes.value.find(st => st.type === form.value.engine_type))
 
 // Drawer header logo — 与列表 .store-card__badge 同源（providerLogo()），让
@@ -454,15 +440,16 @@ const canTestConnection = computed(() => {
   return true
 })
 
-// Per-store dropdown options. env 来源由 .env 写入，UI 不允许 edit / delete；
-// 测试连接已挪到编辑抽屉的 footer，外层菜单不再露出"测试"项。env 来源没有
-// 编辑/删除入口 → 整个 dropdown 都不需要展示。
+// Per-store dropdown options. Connectivity testing lives in the editor drawer.
 const storeActionsFor = (store: VectorStoreEntity) => {
-  if (store.source === 'env') return []
-  return [
+  const actions = [
     { content: t('common.edit'), value: 'edit' },
     { content: t('common.delete'), value: 'delete', theme: 'error' as const },
   ]
+  if (store.id !== defaultStoreID.value) {
+    actions.unshift({ content: t('vectorStoreSettings.setDefault'), value: 'default' })
+  }
+  return actions
 }
 
 const formRules = computed(() => {
@@ -594,10 +581,11 @@ const indexNumberTextProxy = new Proxy(indexNumberText, {
 
 const loadStores = async () => {
   try {
-    const response = await listVectorStores(platformTenantID.value)
+    const response = await listVectorStores()
     if (response.data && Array.isArray(response.data)) {
       stores.value = response.data
     }
+    defaultStoreID.value = response.default_vector_store_id || ''
   } catch (error) {
     loadError.value = (error as any)?.message || t('common.loadFailed')
     console.error('Failed to load vector stores:', error)
@@ -606,7 +594,7 @@ const loadStores = async () => {
 
 const loadStoreTypes = async () => {
   try {
-    storeTypes.value = await listVectorStoreTypes(platformTenantID.value)
+    storeTypes.value = await listVectorStoreTypes()
   } catch (error) {
     loadError.value = (error as any)?.message || t('common.loadFailed')
     console.error('Failed to load vector store types:', error)
@@ -626,9 +614,8 @@ const openAddDialog = () => {
   showDialog.value = true
 }
 
-// env 来源由 .env 注入，与列表菜单一致：不可点击编辑
 const isStoreCardClickable = (store: VectorStoreEntity) =>
-  authStore.isSystemAdmin && store.source !== 'env'
+  authStore.isSystemAdmin && !!store.id
 
 const onStoreCardClick = (event: Event, store: VectorStoreEntity) => {
   if (!isStoreCardClickable(store)) return
@@ -643,9 +630,6 @@ const onStoreCardClick = (event: Event, store: VectorStoreEntity) => {
 }
 
 const editStore = (store: VectorStoreEntity) => {
-  if (store.source === 'env') {
-    return
-  }
   editingStore.value = store
   showAdvanced.value = false
   form.value = {
@@ -675,7 +659,7 @@ const onDrawerConfirm = async () => {
   saving.value = true
   try {
     if (editingStore.value) {
-      await updateVectorStore(editingStore.value.id!, { name: form.value.name.trim() }, platformTenantID.value)
+      await updateVectorStore(editingStore.value.id!, { name: form.value.name.trim() })
       MessagePlugin.success(t('vectorStoreSettings.toasts.storeUpdated'))
     } else {
       const data: Partial<VectorStoreEntity> = {
@@ -684,7 +668,7 @@ const onDrawerConfirm = async () => {
         connection_config: { ...form.value.connection_config },
         index_config: showAdvanced.value ? { ...form.value.index_config } : {},
       }
-      await createVectorStore(data, platformTenantID.value)
+      await createVectorStore(data)
       MessagePlugin.success(t('vectorStoreSettings.toasts.storeCreated'))
     }
     showDialog.value = false
@@ -707,6 +691,11 @@ const handleAction = (action: { value: string }, store: VectorStoreEntity) => {
     editStore(store)
   } else if (action.value === 'delete') {
     confirmDelete(store)
+  } else if (action.value === 'default') {
+    void setDefaultVectorStore(store.id!).then(() => {
+      defaultStoreID.value = store.id!
+      MessagePlugin.success(t('vectorStoreSettings.defaultUpdated'))
+    })
   }
 }
 
@@ -718,7 +707,7 @@ const confirmDelete = (store: VectorStoreEntity) => {
     theme: 'warning',
     onConfirm: async () => {
       try {
-        await deleteVectorStoreAPI(store.id!, platformTenantID.value)
+        await deleteVectorStoreAPI(store.id!)
         MessagePlugin.success(t('vectorStoreSettings.toasts.storeDeleted'))
         await loadStores()
       } catch (error: any) {
@@ -739,7 +728,7 @@ const onDrawerTest = async () => {
       engine_type: form.value.engine_type,
       connection_config: { ...form.value.connection_config },
     }
-    const res = await testVectorStoreRaw(data, platformTenantID.value)
+    const res = await testVectorStoreRaw(data)
     lastTestOk.value = !!res.success
     if (res.success) {
       MessagePlugin.success(t('vectorStoreSettings.toasts.testSuccess'))

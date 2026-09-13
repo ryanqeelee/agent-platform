@@ -822,32 +822,6 @@
                       </div>
                     </div>
 
-                    <!-- 图片存储 Provider（企业运行时资源，平台定义不绑定） -->
-                    <div v-if="authStore.isSystemAdmin && !isPlatformMode && formData.config.image_upload_enabled" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.imageUpload.storageProvider') }}</label>
-                        <p class="desc">{{ $t('agentEditor.imageUpload.storageProviderDesc') }}</p>
-                      </div>
-                      <div class="setting-control" style="flex-direction: column; align-items: flex-end;">
-                        <t-select v-model="formData.config.image_storage_provider" style="width: 280px;"
-                          :placeholder="$t('agentEditor.imageUpload.storageProviderPlaceholder')" clearable>
-                          <t-option value="" :label="$t('agentEditor.imageUpload.storageDefault')" />
-                          <t-option v-for="opt in imageStorageOptions" :key="opt.value" :value="opt.value"
-                            :label="opt.label" :disabled="opt.disabled">
-                            <span class="select-option-with-tag">
-                              <span>{{ opt.label }}</span>
-                              <t-tag v-if="opt.disabled" theme="warning" variant="light" size="small">{{
-                                $t('agentEditor.imageUpload.notConfigured') }}</t-tag>
-                            </span>
-                          </t-option>
-                        </t-select>
-                        <a href="javascript:void(0)" class="go-settings-link"
-                          @click.prevent="uiStore.openSettings('storage')">
-                          {{ $t('agentEditor.imageUpload.goStorageSettings') }}
-                        </a>
-                      </div>
-                    </div>
-
                     <!-- 音频上传开关 -->
                     <div class="setting-row">
                       <div class="setting-info">
@@ -1703,7 +1677,6 @@ import { type ModelConfig } from '@/api/model';
 import { type AgentNotReadyReasonKey, agentRequiresRerankModel } from '@/utils/agent-readiness';
 import { type WebSearchProviderEntity } from '@/api/web-search-provider';
 import {
-  type StorageEngineStatusItem,
   type PromptTemplate,
   type PromptTemplatesConfig,
 } from '@/api/system';
@@ -1938,22 +1911,6 @@ const showMcpServiceSelect = computed(() =>
   mcpOptions.value.length > 0 || (formData.value.config.mcp_services?.length ?? 0) > 0,
 );
 const webSearchProviderList = ref<WebSearchProviderEntity[]>([]);
-// 存储引擎可用状态（用于图片存储 provider 选择）
-const storageEngineStatus = ref<StorageEngineStatusItem[]>([]);
-const imageStorageOptions = computed(() => {
-  const statusMap: Record<string, boolean> = {};
-  for (const e of storageEngineStatus.value) {
-    statusMap[e.name] = e.available;
-  }
-  return [
-    { value: 'local', label: t('settings.storage.engineLocal'), disabled: false },
-    { value: 'minio', label: 'MinIO', disabled: statusMap.minio === false },
-    { value: 'cos', label: t('settings.storage.engineCos'), disabled: statusMap.cos === false },
-    { value: 'tos', label: t('settings.storage.engineTos'), disabled: statusMap.tos === false },
-    { value: 's3', label: 'Amazon S3', disabled: statusMap.s3 === false },
-    { value: 'oss', label: t('settings.storage.engineOss'), disabled: statusMap.oss === false },
-  ];
-});
 
 // 系统默认配置（用于内置智能体显示默认提示词）
 // Agent (smart-reasoning) 模式的默认系统提示词。直接从 prompt-templates
@@ -2398,7 +2355,6 @@ const defaultFormData = {
     // 附件上传设置
     image_upload_enabled: false,
     vlm_model_id: '',
-    image_storage_provider: '',
     // 附件图片理解 / 扫描件 OCR 开关（默认关闭，避免解析耗时增加）
     attachment_image_understanding: false,
     // 扫描件 OCR 最大页数（0 = 使用全局默认）
@@ -3398,14 +3354,9 @@ watch(isAgentMode, (isAgent) => {
 watch(() => uiStore.showSettingsModal, async (visible, prevVisible) => {
   if (authStore.isSystemAdmin && prevVisible && !visible && props.visible) {
     try {
-      const refreshes = [chatResources.ensureModels(true)];
-      if (!isPlatformMode.value) refreshes.push(editorResources.ensureStorageEngine(true));
-      await Promise.all(refreshes);
+      await chatResources.ensureModels(true);
       if (chatResources.allModels.length > 0) {
         allModels.value = chatResources.allModels;
-      }
-      if (editorResources.storageStatus.length > 0) {
-        storageEngineStatus.value = editorResources.storageStatus;
       }
     } catch (e) {
       console.warn('Failed to refresh data after settings closed', e);
@@ -3484,7 +3435,6 @@ const loadDependencies = async () => {
       applyPromptTemplateDefaults(promptTemplatesResponse?.data ?? null);
       kbOptions.value = [];
       webSearchProviderList.value = [];
-      storageEngineStatus.value = [];
       return;
     }
     if (enterpriseScenarioAdmin.value) {
@@ -3506,7 +3456,6 @@ const loadDependencies = async () => {
       dependencies.push(
         chatResources.ensureModels(),
         chatResources.ensureWebSearchProviders(),
-        editorResources.ensureStorageEngine(),
       );
     }
     await Promise.all(dependencies);
@@ -3524,8 +3473,6 @@ const loadDependencies = async () => {
 
     agentTypePresets.value = editorResources.agentTypePresets as AgentTypePreset[];
     applyPromptTemplateDefaults(editorResources.promptTemplates);
-
-    storageEngineStatus.value = editorResources.storageStatus;
 
     webSearchProviderList.value = chatResources.webSearchProviders as WebSearchProviderEntity[];
 
@@ -4447,8 +4394,10 @@ const handleSave = async () => {
 
   saving.value = true;
   try {
+    const payload = JSON.parse(JSON.stringify(formData.value));
+    delete payload.config.image_storage_provider;
     if (editorMode.value === 'create') {
-      const result: any = await createAgent(formData.value);
+      const result: any = await createAgent(payload);
       const created = result?.data as CustomAgent | undefined;
       if (!created?.id) {
         throw new Error(result?.message || t('agent.messages.saveFailed'));
@@ -4480,7 +4429,7 @@ const handleSave = async () => {
           config,
         });
       } else {
-        await updateAgent(formData.value.id, formData.value);
+        await updateAgent(formData.value.id, payload);
       }
       MessagePlugin.success(t('agent.messages.updated'));
       emit('success');

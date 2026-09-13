@@ -1,9 +1,7 @@
 package handler
 
 import (
-	"context"
 	"net/http"
-	"os"
 
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -52,17 +50,10 @@ type TestStoreRequest struct {
 
 // --- helpers ---
 
-// getTenantID extracts tenant ID from gin context (set by auth middleware).
-func (h *VectorStoreHandler) getTenantID(c *gin.Context) uint64 {
-	return c.GetUint64(types.TenantIDContextKey.String())
-}
-
-// getOwnedStore loads a store and verifies it belongs to the given tenant.
+// getStore loads a global store by ID.
 // Returns (nil, status, msg) on failure so callers can respond immediately.
-func (h *VectorStoreHandler) getOwnedStore(
-	ctx context.Context, tenantID uint64, id string,
-) (*types.VectorStore, int, string) {
-	store, err := h.repo.GetByID(ctx, tenantID, id)
+func (h *VectorStoreHandler) getStore(c *gin.Context, id string) (*types.VectorStore, int, string) {
+	store, err := h.repo.GetByID(c.Request.Context(), id)
 	if err != nil {
 		return nil, http.StatusInternalServerError, "failed to query vector store"
 	}
@@ -72,16 +63,11 @@ func (h *VectorStoreHandler) getOwnedStore(
 	return store, http.StatusOK, ""
 }
 
-// envStoreReadonlyError returns a 400 error for attempting to modify env stores.
-func envStoreReadonlyError() gin.H {
-	return gin.H{"success": false, "error": "environment-configured vector stores cannot be modified via API"}
-}
-
 // --- endpoints ---
 
 // CreateStore godoc
 // @Summary      Create vector store
-// @Description  Create a new vector store configuration for the current workspace
+// @Description  Create a platform-global vector store configuration. System administrator access is required.
 // @Tags         VectorStore
 // @Accept       json
 // @Produce      json
@@ -89,18 +75,11 @@ func envStoreReadonlyError() gin.H {
 // @Success      201      {object}  map[string]interface{}   "Created vector store"
 // @Failure      400      {object}  errors.AppError          "Invalid request or validation error"
 // @Failure      401      {object}  map[string]interface{}   "Unauthorized"
-// @Failure      409      {object}  errors.AppError          "Duplicate endpoint and index"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @Router       /vector-stores [post]
+// @Router       /system/admin/vector-stores [post]
 func (h *VectorStoreHandler) CreateStore(c *gin.Context) {
 	ctx := c.Request.Context()
-
-	tenantID := h.getTenantID(c)
-	if tenantID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: workspace context missing"})
-		return
-	}
 
 	var req CreateStoreRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -110,7 +89,6 @@ func (h *VectorStoreHandler) CreateStore(c *gin.Context) {
 	}
 
 	store := &types.VectorStore{
-		TenantID:         tenantID,
 		Name:             req.Name,
 		EngineType:       req.EngineType,
 		ConnectionConfig: req.ConnectionConfig,
@@ -123,64 +101,73 @@ func (h *VectorStoreHandler) CreateStore(c *gin.Context) {
 		return
 	}
 	emitPlatformConfigAudit(ctx, h.audit, types.AuditActionSystemRetrievalProcessingChanged,
-		"create", "vector_store", store.ID, "enterprise_assigned",
+		"create", "vector_store", store.ID, "platform_shared",
 		platformConfigRevision(store.CreatedAt, store.UpdatedAt),
 		[]string{"name", "engine_type", "connection_config", "index_config"})
 
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
-		"data":    types.NewVectorStoreResponse(store, "user", false),
+		"data":    types.NewVectorStoreResponse(store),
 	})
 }
 
 // ListStores godoc
 // @Summary      List vector stores
-// @Description  List all vector stores for the current workspace, including environment-configured and user-created stores
+// @Description  List all platform-global vector stores with credentials masked. System administrator access is required.
 // @Tags         VectorStore
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}   "List of vector stores (env + DB)"
+// @Success      200  {object}  map[string]interface{}   "List of vector stores"
 // @Failure      401  {object}  map[string]interface{}   "Unauthorized"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @Router       /vector-stores [get]
+// @Router       /system/admin/vector-stores [get]
 func (h *VectorStoreHandler) ListStores(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	tenantID := h.getTenantID(c)
-	if tenantID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: workspace context missing"})
-		return
-	}
-
-	dbStores, err := h.repo.List(ctx, tenantID)
+	dbStores, err := h.repo.List(ctx)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to list vector stores: %v", err)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
-	// DB stores → VectorStoreResponse (masked)
+	// Mask connection secrets in administrator responses.
 	maskedDBStores := make([]types.VectorStoreResponse, len(dbStores))
+	defaultID := ""
 	for i, s := range dbStores {
-		maskedDBStores[i] = types.NewVectorStoreResponse(s, "user", false)
+		maskedDBStores[i] = types.NewVectorStoreResponse(s)
+		if s.IsDefault {
+			defaultID = s.ID
+		}
 	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": maskedDBStores, "default_vector_store_id": defaultID})
+}
 
-	// env stores → VectorStore → VectorStoreResponse (masked)
-	envStores := types.BuildEnvVectorStores(os.Getenv("RETRIEVE_DRIVER"), os.Getenv)
-	maskedEnvStores := make([]types.VectorStoreResponse, len(envStores))
-	for i := range envStores {
-		maskedEnvStores[i] = types.NewVectorStoreResponse(&envStores[i], "env", true)
+func (h *VectorStoreHandler) ListCapabilities(c *gin.Context) {
+	stores, err := h.repo.List(c.Request.Context())
+	if err != nil {
+		c.Error(err)
+		return
 	}
-
-	// Merge: env stores first, then DB stores
-	allStores := append(maskedEnvStores, maskedDBStores...)
-
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": allStores})
+	type capability struct {
+		ID         string                    `json:"id"`
+		Name       string                    `json:"name"`
+		EngineType types.RetrieverEngineType `json:"engine_type"`
+	}
+	result := make([]capability, 0, len(stores))
+	defaultID := ""
+	for _, store := range stores {
+		result = append(result, capability{ID: store.ID, Name: store.Name, EngineType: store.EngineType})
+		if store.IsDefault {
+			defaultID = store.ID
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": result, "default_vector_store_id": defaultID})
 }
 
 // GetStore godoc
 // @Summary      Get vector store
-// @Description  Retrieve a single vector store by ID. Supports both DB stores and env stores (__env_* IDs)
+// @Description  Retrieve a single platform vector store by ID.
 // @Tags         VectorStore
 // @Produce      json
 // @Param        id   path      string  true  "Vector store ID"
@@ -189,34 +176,10 @@ func (h *VectorStoreHandler) ListStores(c *gin.Context) {
 // @Failure      404  {object}  map[string]interface{}   "Vector store not found"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @Router       /vector-stores/{id} [get]
+// @Router       /system/admin/vector-stores/{id} [get]
 func (h *VectorStoreHandler) GetStore(c *gin.Context) {
-	ctx := c.Request.Context()
-
-	tenantID := h.getTenantID(c)
-	if tenantID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: workspace context missing"})
-		return
-	}
-
 	id := c.Param("id")
-
-	// Handle env store
-	if types.IsEnvStoreID(id) {
-		envStore := types.FindEnvVectorStore(os.Getenv("RETRIEVE_DRIVER"), os.Getenv, id)
-		if envStore == nil {
-			c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "vector store not found"})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{
-			"success": true,
-			"data":    types.NewVectorStoreResponse(envStore, "env", true),
-		})
-		return
-	}
-
-	// DB store
-	store, status, msg := h.getOwnedStore(ctx, tenantID, id)
+	store, status, msg := h.getStore(c, id)
 	if status != http.StatusOK {
 		c.JSON(status, gin.H{"success": false, "error": msg})
 		return
@@ -224,44 +187,31 @@ func (h *VectorStoreHandler) GetStore(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    types.NewVectorStoreResponse(store, "user", false),
+		"data":    types.NewVectorStoreResponse(store),
 	})
 }
 
 // UpdateStore godoc
 // @Summary      Update vector store
-// @Description  Update a vector store (name only). Engine type, connection config, and index config are immutable. Env stores cannot be modified.
+// @Description  Update a vector store (name only). Engine type, connection config, and index config are immutable.
 // @Tags         VectorStore
 // @Accept       json
 // @Produce      json
 // @Param        id       path      string               true  "Vector store ID"
 // @Param        request  body      UpdateStoreRequest   true  "Updated fields"
 // @Success      200      {object}  map[string]interface{}   "Updated vector store"
-// @Failure      400      {object}  map[string]interface{}   "Env store or validation error"
+// @Failure      400      {object}  map[string]interface{}   "Validation error"
 // @Failure      401      {object}  map[string]interface{}   "Unauthorized"
 // @Failure      404      {object}  map[string]interface{}   "Vector store not found"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @Router       /vector-stores/{id} [put]
+// @Router       /system/admin/vector-stores/{id} [put]
 func (h *VectorStoreHandler) UpdateStore(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	tenantID := h.getTenantID(c)
-	if tenantID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: workspace context missing"})
-		return
-	}
-
 	id := c.Param("id")
 
-	// env stores are read-only
-	if types.IsEnvStoreID(id) {
-		c.JSON(http.StatusBadRequest, envStoreReadonlyError())
-		return
-	}
-
-	// Ownership check
-	if _, status, msg := h.getOwnedStore(ctx, tenantID, id); status != http.StatusOK {
+	if _, status, msg := h.getStore(c, id); status != http.StatusOK {
 		c.JSON(status, gin.H{"success": false, "error": msg})
 		return
 	}
@@ -273,9 +223,8 @@ func (h *VectorStoreHandler) UpdateStore(c *gin.Context) {
 	}
 
 	updated := &types.VectorStore{
-		ID:       id,
-		TenantID: tenantID,
-		Name:     req.Name,
+		ID:   id,
+		Name: req.Name,
 	}
 
 	if err := h.service.UpdateStore(ctx, updated); err != nil {
@@ -285,17 +234,17 @@ func (h *VectorStoreHandler) UpdateStore(c *gin.Context) {
 	}
 
 	// Re-fetch to return full state
-	result, err := h.repo.GetByID(ctx, tenantID, id)
+	result, err := h.repo.GetByID(ctx, id)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to re-fetch vector store %s after update: %v", id, err)
 	}
 	if result != nil {
 		emitPlatformConfigAudit(ctx, h.audit, types.AuditActionSystemRetrievalProcessingChanged,
-			"update", "vector_store", result.ID, "enterprise_assigned",
+			"update", "vector_store", result.ID, "platform_shared",
 			platformConfigRevision(result.CreatedAt, result.UpdatedAt), []string{"name"})
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
-			"data":    types.NewVectorStoreResponse(result, "user", false),
+			"data":    types.NewVectorStoreResponse(result),
 		})
 	} else {
 		c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
@@ -304,50 +253,55 @@ func (h *VectorStoreHandler) UpdateStore(c *gin.Context) {
 
 // DeleteStore godoc
 // @Summary      Delete vector store
-// @Description  Soft-delete a vector store. Env stores cannot be deleted.
+// @Description  Soft-delete a platform vector store. The platform default or a store referenced by any knowledge base cannot be deleted.
 // @Tags         VectorStore
 // @Produce      json
 // @Param        id   path      string  true  "Vector store ID"
 // @Success      200  {object}  map[string]interface{}   "Deletion success"
-// @Failure      400  {object}  map[string]interface{}   "Env store cannot be deleted"
+// @Failure      400  {object}  map[string]interface{}   "Store is default or referenced"
 // @Failure      401  {object}  map[string]interface{}   "Unauthorized"
 // @Failure      404  {object}  map[string]interface{}   "Vector store not found"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @Router       /vector-stores/{id} [delete]
+// @Router       /system/admin/vector-stores/{id} [delete]
 func (h *VectorStoreHandler) DeleteStore(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	tenantID := h.getTenantID(c)
-	if tenantID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: workspace context missing"})
-		return
-	}
-
 	id := c.Param("id")
 
-	// env stores are read-only
-	if types.IsEnvStoreID(id) {
-		c.JSON(http.StatusBadRequest, envStoreReadonlyError())
-		return
-	}
-
-	// Ownership check
-	store, status, msg := h.getOwnedStore(ctx, tenantID, id)
+	store, status, msg := h.getStore(c, id)
 	if status != http.StatusOK {
 		c.JSON(status, gin.H{"success": false, "error": msg})
 		return
 	}
 
-	if err := h.service.DeleteStore(ctx, tenantID, id); err != nil {
+	if err := h.service.DeleteStore(ctx, id); err != nil {
 		logger.Warnf(ctx, "Failed to delete vector store %s: %v", id, err)
 		c.Error(err)
 		return
 	}
 	emitPlatformConfigAudit(ctx, h.audit, types.AuditActionSystemRetrievalProcessingChanged,
-		"delete", "vector_store", id, "enterprise_assigned",
+		"delete", "vector_store", id, "platform_shared",
 		platformConfigRevision(store.CreatedAt, store.UpdatedAt), nil)
 
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func (h *VectorStoreHandler) SetDefaultStore(c *gin.Context) {
+	ctx := c.Request.Context()
+	id := c.Param("id")
+	store, status, msg := h.getStore(c, id)
+	if status != http.StatusOK {
+		c.JSON(status, gin.H{"success": false, "error": msg})
+		return
+	}
+	if err := h.service.SetDefaultStore(ctx, id); err != nil {
+		c.Error(err)
+		return
+	}
+	emitPlatformConfigAudit(ctx, h.audit, types.AuditActionSystemRetrievalProcessingChanged,
+		"set_default", "vector_store", store.ID, "platform_shared",
+		platformConfigRevision(store.CreatedAt, store.UpdatedAt), []string{"default"})
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
@@ -357,7 +311,7 @@ func (h *VectorStoreHandler) DeleteStore(c *gin.Context) {
 // @Tags         VectorStore
 // @Produce      json
 // @Success      200  {object}  map[string]interface{}   "List of engine types with config schemas"
-// @Router       /vector-stores/types [get]
+// @Router       /system/admin/vector-stores/types [get]
 func (h *VectorStoreHandler) ListStoreTypes(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -367,7 +321,7 @@ func (h *VectorStoreHandler) ListStoreTypes(c *gin.Context) {
 
 // TestStoreByID godoc
 // @Summary      Test vector store connection by ID
-// @Description  Test connectivity of an existing saved or env store. Returns detected server version. For DB stores, the version is automatically saved to connection_config.
+// @Description  Test connectivity of an existing saved store. Returns the detected server version and saves it to connection_config.
 // @Tags         VectorStore
 // @Produce      json
 // @Param        id   path      string  true  "Vector store ID"
@@ -376,38 +330,13 @@ func (h *VectorStoreHandler) ListStoreTypes(c *gin.Context) {
 // @Failure      404  {object}  map[string]interface{}   "Vector store not found"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @Router       /vector-stores/{id}/test [post]
+// @Router       /system/admin/vector-stores/{id}/test [post]
 func (h *VectorStoreHandler) TestStoreByID(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	tenantID := h.getTenantID(c)
-	if tenantID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: workspace context missing"})
-		return
-	}
-
 	id := c.Param("id")
 
-	// env store — test with unmasked config
-	if types.IsEnvStoreID(id) {
-		envStore := types.FindEnvVectorStore(os.Getenv("RETRIEVE_DRIVER"), os.Getenv, id)
-		if envStore == nil {
-			c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "vector store not found"})
-			return
-		}
-		version, err := h.service.TestConnection(ctx, envStore.EngineType, envStore.ConnectionConfig)
-		if err != nil {
-			safeError := sanitizeStorageCheckError(err)
-			logger.Warnf(ctx, "Vector store connection test failed: %s", safeError)
-			c.JSON(http.StatusOK, gin.H{"success": false, "error": safeError})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"success": true, "version": version})
-		return
-	}
-
-	// DB store
-	store, status, msg := h.getOwnedStore(ctx, tenantID, id)
+	store, status, msg := h.getStore(c, id)
 	if status != http.StatusOK {
 		c.JSON(status, gin.H{"success": false, "error": msg})
 		return
@@ -425,11 +354,11 @@ func (h *VectorStoreHandler) TestStoreByID(c *gin.Context) {
 	if version != "" && version != store.ConnectionConfig.Version {
 		if updateErr := h.service.SaveDetectedVersion(ctx, store, version); updateErr != nil {
 			logger.Warnf(ctx, "Failed to update detected version for store %s: %s", store.ID, sanitizeStorageCheckError(updateErr))
-		} else if updatedStore, loadErr := h.repo.GetByID(ctx, tenantID, store.ID); loadErr != nil {
+		} else if updatedStore, loadErr := h.repo.GetByID(ctx, store.ID); loadErr != nil {
 			logger.Warnf(ctx, "Failed to load updated vector store %s: %s", store.ID, sanitizeStorageCheckError(loadErr))
 		} else if updatedStore != nil {
 			emitPlatformConfigAudit(ctx, h.audit, types.AuditActionSystemRetrievalProcessingChanged,
-				"detected_version_updated", "vector_store", updatedStore.ID, "enterprise_assigned",
+				"detected_version_updated", "vector_store", updatedStore.ID, "platform_shared",
 				platformConfigRevision(updatedStore.CreatedAt, updatedStore.UpdatedAt), []string{"connection_config.version"})
 		}
 	}
@@ -449,15 +378,9 @@ func (h *VectorStoreHandler) TestStoreByID(c *gin.Context) {
 // @Failure      401      {object}  map[string]interface{}   "Unauthorized"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @Router       /vector-stores/test [post]
+// @Router       /system/admin/vector-stores/test [post]
 func (h *VectorStoreHandler) TestStoreRaw(c *gin.Context) {
 	ctx := c.Request.Context()
-
-	tenantID := h.getTenantID(c)
-	if tenantID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: workspace context missing"})
-		return
-	}
 
 	var req TestStoreRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -467,7 +390,7 @@ func (h *VectorStoreHandler) TestStoreRaw(c *gin.Context) {
 
 	// Raw user input: TestRawConnection applies the engine-type allowlist,
 	// required-field, and SSRF checks before any dial (unlike TestStoreByID,
-	// which probes trusted stored/env configs).
+	// which probes a trusted stored config).
 	version, err := h.service.TestRawConnection(ctx, req.EngineType, req.ConnectionConfig)
 	if err != nil {
 		safeError := sanitizeStorageCheckError(err)

@@ -1,6 +1,7 @@
 package file
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -26,6 +27,33 @@ type obsFileService struct {
 	region      string
 	pathPrefix  string
 	proxyDomain string
+}
+
+func (s *obsFileService) putPlatformSkillArchive(ctx context.Context, key string, data []byte) (string, error) {
+	objectKey := strings.Trim(s.pathPrefix, "/") + "/" + key
+	if strings.Trim(s.pathPrefix, "/") == "" {
+		objectKey = key
+	}
+	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(s.bucketName), Key: aws.String(objectKey), Body: bytes.NewReader(data), ContentType: aws.String("application/octet-stream")})
+	if err != nil {
+		return "", fmt.Errorf("failed to upload platform skill archive to OBS: %w", err)
+	}
+	prefix := s.getPrifix()
+	if s.proxyDomain != "" {
+		return fmt.Sprintf("%s%s", prefix, objectKey), nil
+	}
+	return fmt.Sprintf("%s%s/%s", prefix, s.bucketName, objectKey), nil
+}
+
+func (s *obsFileService) platformSkillArchiveKey(ref string) (string, error) {
+	if !strings.HasPrefix(ref, s.getPrifix()) {
+		return "", fmt.Errorf("invalid OBS platform skill archive reference")
+	}
+	key, err := s.parseObsFilePath(ref)
+	if err != nil {
+		return "", err
+	}
+	return platformSkillLogicalKey(key, s.pathPrefix)
 }
 
 type obsEndpointResolver struct {

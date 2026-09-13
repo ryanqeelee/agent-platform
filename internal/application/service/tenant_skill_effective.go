@@ -12,12 +12,12 @@ import (
 // to the one method this derivation needs so a chat turn cannot reach the
 // config write surface.
 type skillImageConfigReader interface {
-	GetByID(ctx context.Context, tenantID uint64, id string) (*types.TenantSandboxConfigEntity, error)
+	GetByID(ctx context.Context, id string) (*types.TenantSandboxConfigEntity, error)
 }
 
 // installedSkillLister lists the skills installed onto one sandbox config.
 type installedSkillLister interface {
-	ListSkillsByConfig(ctx context.Context, tenantID uint64, configID string) ([]*types.TenantSkillEntity, error)
+	ListSkillsByConfig(ctx context.Context, configID string) ([]*types.TenantSkillEntity, error)
 }
 
 // skillsForRun returns the sandbox config this run's sandbox boots and the
@@ -82,7 +82,7 @@ func effectiveTenantSkills(
 		return nil
 	}
 
-	cfgEntity, err := configs.GetByID(ctx, tenantID, configID)
+	cfgEntity, err := configs.GetByID(ctx, configID)
 	if err != nil {
 		logger.Warnf(ctx, "[skill] load sandbox config %s for skill injection failed: %v",
 			configID, err)
@@ -101,7 +101,7 @@ func effectiveTenantSkills(
 		return nil
 	}
 
-	rows, err := skills.ListSkillsByConfig(ctx, tenantID, configID)
+	rows, err := skills.ListSkillsByConfig(ctx, configID)
 	if err != nil {
 		logger.Warnf(ctx, "[skill] list skills of sandbox config %s failed: %v", configID, err)
 		return nil

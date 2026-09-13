@@ -27,25 +27,13 @@ func (s *customAgentService) employeeAssistant(ctx context.Context, tenantID uin
 	}
 	agent.Config.SandboxConfigID = ""
 	agent.Config.SelectedSkills = nil
-	if platformSkillsMode != "none" && settings.Capabilities.Tools && s.sandboxConfigs != nil {
-		if s.provisionEmployeeSandbox != nil {
-			if err := s.provisionEmployeeSandbox(ctx, tenantID); err != nil {
-				return nil, err
-			}
-		}
-
-		configs, err := s.sandboxConfigs.ListByTenant(ctx, tenantID)
+	if platformSkillsMode != "none" && settings.Capabilities.Tools && s.sandboxDefault != nil {
+		configID, err := s.sandboxDefault.DefaultSandboxConfigID(ctx)
 		if err != nil {
 			return nil, err
 		}
-		for _, config := range configs {
-			if config.Name != "employee-assistant" {
-				continue
-			}
-			if config.TenantID != tenantID || agent.Config.SandboxConfigID != "" {
-				return nil, fmt.Errorf("employee assistant sandbox configuration is ambiguous or outside the workspace")
-			}
-			agent.Config.SandboxConfigID = config.ID
+		if configID != "" {
+			agent.Config.SandboxConfigID = configID
 			agent.Config.SkillsSelectionMode = platformSkillsMode
 		}
 	}

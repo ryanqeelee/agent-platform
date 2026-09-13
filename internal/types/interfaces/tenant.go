@@ -138,9 +138,6 @@ type TenantRepository interface {
 	UpdateTenant(ctx context.Context, tenant *types.Tenant) error
 	// UpdateTenantProfile updates only name/description fields owned by the tenant profile command.
 	UpdateTenantProfile(ctx context.Context, id uint64, name, description *string) error
-	// SetDefaultStorageBackend updates only the activation-critical default
-	// backend reference, avoiding stale full-row writes during lifecycle races.
-	SetDefaultStorageBackend(ctx context.Context, tenantID uint64, backendID string) error
 	// DeleteTenant deletes a tenant
 	DeleteTenant(ctx context.Context, id uint64) error
 	// AdjustStorageUsed adjusts the storage used for a tenant

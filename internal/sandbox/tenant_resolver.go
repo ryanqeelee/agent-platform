@@ -1,7 +1,8 @@
-// Package sandbox: per-config sandbox manager resolution.
+// Package sandbox: platform-config sandbox manager resolution.
 //
-// A manager is built for one (tenant, sandbox config) pair — a workspace holds
-// several named configs and each agent selects one. Managers are built per
+// A manager is built for one (tenant runtime, platform config) pair. The
+// tenant remains mandatory because sandbox instances and private environment
+// values are tenant-owned; the credential-bearing config is global. Managers are built per
 // request and deliberately NOT cached, mirroring modelService, which rebuilds
 // model clients on every call (see internal/application/service/model.go).
 //
@@ -62,7 +63,7 @@ type ResolvedTenantSandboxConfig struct {
 // Implemented in the application layer so this package stays free of
 // repository dependencies.
 type TenantSandboxConfigLoader interface {
-	Load(ctx context.Context, tenantID uint64, configID string) (ResolvedTenantSandboxConfig, error)
+	Load(ctx context.Context, configID string) (ResolvedTenantSandboxConfig, error)
 }
 
 // TenantSandboxResolver produces the Manager for a (tenant, config) pair.
@@ -159,10 +160,10 @@ func (r *tenantSandboxResolver) Resolve(
 		return NewDisabledManager(), nil
 	}
 
-	resolved, err := r.deps.Loader.Load(ctx, tenantID, configID)
+	resolved, err := r.deps.Loader.Load(ctx, configID)
 	if err != nil {
 		return nil, fmt.Errorf(
-			"sandbox: load workspace %d config %q: %w", tenantID, configID, err)
+			"sandbox: load platform config %q: %w", configID, err)
 	}
 	if !resolved.Found {
 		return nil, fmt.Errorf("%w: %s", ErrSandboxConfigNotFound, configID)

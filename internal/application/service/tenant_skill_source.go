@@ -98,12 +98,12 @@ type skillSourceArchiveHandoff struct {
 // registry's handoff targets may see it, and there is no private registry to
 // validate that against yet.
 func (s *TenantSkillService) InstallSkillFromSource(
-	ctx context.Context, tenantID uint64, configID, source string,
+	ctx context.Context, configID, source string,
 ) (string, error) {
 	// The config is authorized before the fetch, not by InstallSkill after it.
 	// The source is a caller-supplied host, so an unknown config ID must not
 	// be able to spend an outbound request and a body-sized download first.
-	cfgEntity, err := s.configs.GetByID(ctx, tenantID, configID)
+	cfgEntity, err := s.configs.GetByID(ctx, configID)
 	if err != nil {
 		return "", err
 	}
@@ -115,7 +115,7 @@ func (s *TenantSkillService) InstallSkillFromSource(
 	if err != nil {
 		return "", err
 	}
-	return s.installParsedSkill(ctx, tenantID, configID, bundle, archive)
+	return s.installParsedSkill(ctx, configID, bundle, archive, nil)
 }
 
 func skillSourceHTTPClient(override *http.Client) *http.Client {

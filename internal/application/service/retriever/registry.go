@@ -267,7 +267,7 @@ func (r *RetrieveEngineRegistry) GetOrLoadByStoreID(
 		if svc, lookupErr := r.GetByStoreID(storeID); lookupErr == nil {
 			return svc, nil
 		}
-		store, err := r.repo.GetByID(buildCtx, tenantID, storeID)
+		store, err := r.repo.GetByID(buildCtx, storeID)
 		if err != nil {
 			// The store may well exist; the metadata database just could not
 			// answer. Saying "not found" here would make async workers discard

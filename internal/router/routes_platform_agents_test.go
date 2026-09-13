@@ -52,20 +52,25 @@ func (platformAgentHTTPModels) GetByID(context.Context, uint64, string) (*types.
 func TestPlatformAgentRoutesRequireSystemAdmin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
+	g := &rbacGuards{cfg: &config.Config{}, apiKeyAuthorizer: middleware.NewAPIKeyRouteAuthorizer()}
 	r.Use(func(c *gin.Context) {
 		ctx := context.WithValue(c.Request.Context(), types.TenantRoleContextKey, types.TenantRoleOwner)
-		if c.GetHeader("X-Test-System-Admin") == "true" {
+		if c.GetHeader("X-Test-API-Key") == "true" {
+			ctx = types.WithTenantAPIKeyScope(ctx, types.TenantAPIKeyScope{ScopeType: types.APIKeyScopePlatform, FullAccess: true})
+		} else if c.GetHeader("X-Test-System-Admin") == "true" {
 			ctx = context.WithValue(ctx, types.SystemAdminContextKey, true)
 		}
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	})
+	r.Use(g.apiKeyAuthorizer.Middleware())
 	h := &handler.PlatformAgentHandler{}
-	RegisterPlatformAgentRoutes(r.Group("/api/v1"), h, &rbacGuards{cfg: &config.Config{}})
+	RegisterPlatformAgentRoutes(r.Group("/api/v1"), h, g)
 
 	for _, path := range []string{
 		"/api/v1/system/admin/agents",
 		"/api/v1/system/admin/agents/builtin-quick-answer",
+		"/api/v1/system/admin/agents/builtin-skill-installer",
 		"/api/v1/system/admin/agents/type-presets",
 		"/api/v1/system/admin/agents/placeholders",
 		"/api/v1/system/admin/agents/prompt-templates",
@@ -75,25 +80,33 @@ func TestPlatformAgentRoutesRequireSystemAdmin(t *testing.T) {
 		require.Equal(t, http.StatusForbidden, w.Code, path)
 	}
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/api/v1/system/admin/agents/builtin-quick-answer", bytes.NewBufferString(`{"config":{"agent_mode":"quick-answer"}}`)))
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/api/v1/system/admin/agents/builtin-skill-installer", bytes.NewBufferString(`{"config":{"agent_mode":"smart-reasoning"}}`)))
 	require.Equal(t, http.StatusForbidden, w.Code)
+
+	for _, method := range []string{http.MethodGet, http.MethodPut} {
+		request := httptest.NewRequest(method, "/api/v1/system/admin/agents/builtin-skill-installer", bytes.NewBufferString(`{"config":{"agent_mode":"smart-reasoning"}}`))
+		request.Header.Set("X-Test-API-Key", "true")
+		response := httptest.NewRecorder()
+		r.ServeHTTP(response, request)
+		require.Equal(t, http.StatusForbidden, response.Code)
+	}
 }
 
 func TestPlatformAgentHTTPRoundTripIsTenantless(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	previous, existed := types.BuiltinAgentRegistry[types.BuiltinQuickAnswerID]
-	types.BuiltinAgentRegistry[types.BuiltinQuickAnswerID] = func(tenantID uint64) *types.CustomAgent {
-		return &types.CustomAgent{ID: types.BuiltinQuickAnswerID, TenantID: tenantID, IsBuiltin: true, Name: "Quick Answer", Config: types.CustomAgentConfig{AgentMode: types.AgentModeQuickAnswer}}
+	previous, existed := types.BuiltinAgentRegistry[types.BuiltinSkillInstallerID]
+	types.BuiltinAgentRegistry[types.BuiltinSkillInstallerID] = func(tenantID uint64) *types.CustomAgent {
+		return &types.CustomAgent{ID: types.BuiltinSkillInstallerID, TenantID: tenantID, IsBuiltin: true, Name: "Skill Installer", Config: types.CustomAgentConfig{AgentMode: types.AgentModeSmartReasoning}}
 	}
 	restore := types.OverrideBuiltinAgentEntriesForTest(map[string]*types.BuiltinAgentEntry{
-		types.BuiltinQuickAnswerID: {ID: types.BuiltinQuickAnswerID, IsBuiltin: true, I18n: map[string]types.BuiltinAgentI18n{"default": {Name: "Quick Answer"}}, Config: types.CustomAgentConfig{AgentMode: types.AgentModeQuickAnswer}},
+		types.BuiltinSkillInstallerID: {ID: types.BuiltinSkillInstallerID, IsBuiltin: true, I18n: map[string]types.BuiltinAgentI18n{"default": {Name: "Skill Installer"}}, Config: types.CustomAgentConfig{AgentMode: types.AgentModeSmartReasoning}},
 	})
 	t.Cleanup(func() {
 		restore()
 		if existed {
-			types.BuiltinAgentRegistry[types.BuiltinQuickAnswerID] = previous
+			types.BuiltinAgentRegistry[types.BuiltinSkillInstallerID] = previous
 		} else {
-			delete(types.BuiltinAgentRegistry, types.BuiltinQuickAnswerID)
+			delete(types.BuiltinAgentRegistry, types.BuiltinSkillInstallerID)
 		}
 	})
 
@@ -109,12 +122,12 @@ func TestPlatformAgentHTTPRoundTripIsTenantless(t *testing.T) {
 	g := &rbacGuards{cfg: &config.Config{}, apiKeyAuthorizer: middleware.NewAPIKeyRouteAuthorizer()}
 	RegisterPlatformAgentRoutes(r.Group("/api/v1"), h, g)
 
-	body, err := json.Marshal(handler.UpdatePlatformAgentRequest{Config: types.CustomAgentConfig{AgentMode: types.AgentModeQuickAnswer, SystemPrompt: "saved globally", KBSelectionMode: "all"}})
+	body, err := json.Marshal(handler.UpdatePlatformAgentRequest{Config: types.CustomAgentConfig{AgentMode: types.AgentModeSmartReasoning, SystemPrompt: "saved globally"}})
 	require.NoError(t, err)
 	for _, request := range []*http.Request{
 		httptest.NewRequest(http.MethodGet, "/api/v1/system/admin/agents", nil),
-		httptest.NewRequest(http.MethodGet, "/api/v1/system/admin/agents/builtin-quick-answer", nil),
-		httptest.NewRequest(http.MethodPut, "/api/v1/system/admin/agents/builtin-quick-answer", bytes.NewReader(body)),
+		httptest.NewRequest(http.MethodGet, "/api/v1/system/admin/agents/builtin-skill-installer", nil),
+		httptest.NewRequest(http.MethodPut, "/api/v1/system/admin/agents/builtin-skill-installer", bytes.NewReader(body)),
 	} {
 		request.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
@@ -123,9 +136,11 @@ func TestPlatformAgentHTTPRoundTripIsTenantless(t *testing.T) {
 	}
 	require.NotNil(t, repo.row)
 	require.Zero(t, repo.row.TenantID)
+	require.Equal(t, types.BuiltinSkillInstallerID, repo.row.ID)
 	require.Equal(t, "saved globally", repo.row.Config.SystemPrompt)
 	for _, route := range []struct{ method, path string }{
 		{http.MethodGet, "/api/v1/system/admin/agents"},
+		{http.MethodGet, "/api/v1/system/admin/agents/:id"},
 		{http.MethodPut, "/api/v1/system/admin/agents/:id"},
 	} {
 		if _, ok := g.apiKeyAuthorizer.Lookup(route.method, route.path); ok {

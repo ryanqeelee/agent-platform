@@ -10,6 +10,11 @@ import (
 	"gorm.io/gorm"
 )
 
+// SkillMaintenanceSessionMarker identifies the real tenant-owned transcript
+// session used when a runtime session prepares a skill. Tenantless platform
+// installs never create business session rows.
+const SkillMaintenanceSessionMarker = "skill_maintenance:"
+
 // FallbackStrategy represents the fallback strategy type
 type FallbackStrategy string
 

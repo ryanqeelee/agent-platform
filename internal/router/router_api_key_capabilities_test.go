@@ -406,8 +406,8 @@ func TestPlatformInfrastructureRoutesRejectWorkspaceAPIKeys(t *testing.T) {
 		{http.MethodPut, "/api/v1/system/admin/mcp-services/:id/credentials", types.APIKeyCapabilityManageMCPServices},
 		{http.MethodGet, "/api/v1/system/admin/web-search-providers", types.APIKeyCapabilityManageWebSearch},
 		{http.MethodPost, "/api/v1/system/admin/web-search-providers/test", types.APIKeyCapabilityManageWebSearch},
-		{http.MethodGet, "/api/v1/vector-stores", types.APIKeyCapabilityManageVectorStores},
-		{http.MethodGet, "/api/v1/storage-backends", types.APIKeyCapabilityManageStorageBackends},
+		{http.MethodGet, "/api/v1/system/admin/vector-stores", types.APIKeyCapabilityManageVectorStores},
+		{http.MethodGet, "/api/v1/system/admin/storage-backends", types.APIKeyCapabilityManageStorageBackends},
 		{http.MethodGet, "/api/v1/models/weknoracloud/status", types.APIKeyCapabilityManageModels},
 	} {
 		policy, declared := g.apiKeyAuthorizer.Lookup(tc.method, tc.path)

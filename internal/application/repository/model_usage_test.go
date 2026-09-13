@@ -294,11 +294,11 @@ func TestCustomAgentSandboxConfigReferences(t *testing.T) {
 		uuid.New().String(), "other-tenant-agent", 2, `{"sandbox_config_id":"sandbox-cfg-1"}`,
 	).Error)
 
-	count, err := repo.CountBySandboxConfigID(ctx, 1, configID)
+	count, err := repo.CountBySandboxConfigID(ctx, configID)
 	require.NoError(t, err)
-	assert.Equal(t, int64(1), count)
+	assert.Equal(t, int64(2), count)
 
-	names, err := repo.ListNamesBySandboxConfigID(ctx, 1, configID)
+	names, err := repo.ListNamesBySandboxConfigID(ctx, configID)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"analysis-agent"}, names)
+	assert.Equal(t, []string{"analysis-agent", "other-tenant-agent"}, names)
 }

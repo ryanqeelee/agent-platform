@@ -16,6 +16,16 @@ type pinTestManager struct {
 	typ sandbox.SandboxType
 }
 
+type pinTestPlatformDefault struct {
+	id    string
+	calls int
+}
+
+func (d *pinTestPlatformDefault) DefaultSandboxConfigID(context.Context) (string, error) {
+	d.calls++
+	return d.id, nil
+}
+
 func (m *pinTestManager) Execute(context.Context, *sandbox.ExecuteConfig) (*sandbox.ExecuteResult, error) {
 	return nil, nil
 }
@@ -153,7 +163,7 @@ func TestResolveSandboxForExecutionDoesNotPinStatelessBackend(t *testing.T) {
 
 	got, configID, err := resolveSandboxForExecution(
 		context.Background(), stubSandboxResolver{mgr: want}, nil, pinner,
-		7, "s-1", "cfg-local", nil,
+		7, "s-1", "cfg-local", nil, nil,
 	)
 
 	require.NoError(t, err)
@@ -170,7 +180,7 @@ func TestResolveSandboxForExecutionPinsRemoteBackend(t *testing.T) {
 
 	got, configID, err := resolveSandboxForExecution(
 		context.Background(), stubSandboxResolver{mgr: want}, nil, pinner,
-		7, "s-1", "cfg-cube", nil,
+		7, "s-1", "cfg-cube", nil, nil,
 	)
 
 	require.NoError(t, err)
@@ -190,7 +200,7 @@ func TestResolveSandboxForExecutionPinsDockerBackend(t *testing.T) {
 
 	got, configID, err := resolveSandboxForExecution(
 		context.Background(), stubSandboxResolver{mgr: want}, nil, pinner,
-		7, "s-1", "cfg-docker", nil,
+		7, "s-1", "cfg-docker", nil, nil,
 	)
 
 	require.NoError(t, err)
@@ -209,11 +219,49 @@ func TestResolveSandboxForExecutionKeepsExistingRemotePin(t *testing.T) {
 
 	got, configID, err := resolveSandboxForExecution(
 		context.Background(), stubSandboxResolver{mgr: want}, nil, pinner,
-		7, "s-1", "cfg-new-agent-choice", nil,
+		7, "s-1", "cfg-new-agent-choice", nil, nil,
 	)
 
 	require.NoError(t, err)
 	require.Same(t, want, got)
 	require.Equal(t, "cfg-existing", configID,
 		"re-pointing an agent must not move an existing remote session")
+}
+
+func TestDefaultChangeDoesNotMoveAnExistingSessionPin(t *testing.T) {
+	pinner := NewSessionSandboxPinner(newPinTestDB(t))
+	_, err := pinner.Pin(context.Background(), "s-1", "cfg-old-default")
+	require.NoError(t, err)
+	currentDefault := &pinTestPlatformDefault{id: "cfg-new-default"}
+	want := &pinTestManager{typ: sandbox.SandboxTypeE2B}
+
+	got, configID, err := resolveSandboxForExecution(
+		context.Background(), stubSandboxResolver{mgr: want}, nil, pinner,
+		7, "s-1", "", nil, currentDefault,
+	)
+
+	require.NoError(t, err)
+	require.Same(t, want, got)
+	require.Equal(t, "cfg-old-default", configID)
+	require.Zero(t, currentDefault.calls,
+		"a pinned session must not consult a changed platform default")
+}
+
+func TestResolveSandboxForExecutionBlocksDisabledWorkspaceScripts(t *testing.T) {
+	pinner := NewSessionSandboxPinner(newPinTestDB(t))
+	configured := &pinTestManager{typ: sandbox.SandboxTypeE2B}
+
+	got, configID, err := resolveSandboxForExecution(
+		context.Background(), stubSandboxResolver{mgr: configured}, nil, pinner,
+		7, "s-1", "cfg-shared", stubWorkspaceSandboxPolicy{disabled: true}, nil,
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, "cfg-shared", configID)
+	require.Equal(t, sandbox.SandboxTypeDisabled, got.GetType())
+	_, err = got.Execute(context.Background(), &sandbox.ExecuteConfig{})
+	require.ErrorIs(t, err, sandbox.ErrSandboxDisabled)
+	pinned, err := pinner.Read(context.Background(), "s-1")
+	require.NoError(t, err)
+	require.Empty(t, pinned)
 }

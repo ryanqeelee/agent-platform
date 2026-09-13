@@ -116,19 +116,23 @@ type Tenant struct {
 	SeatsTotal *int `yaml:"seats_total" json:"seats_total" gorm:"column:seats_total"`
 	// Ringxun activation receipt. These fields are private persistence state
 	// for the platform adapter and must never leak through general tenant APIs.
-	RingxunActivationID            *string `yaml:"-" json:"-" gorm:"column:ringxun_activation_id;type:varchar(128);uniqueIndex:idx_tenants_ringxun_activation_id_unique"`
-	RingxunActivationIdempotencyKeySHA256 *string `yaml:"-" json:"-" gorm:"column:ringxun_activation_idempotency_key_sha256;type:varchar(64);uniqueIndex:idx_tenants_ringxun_activation_idempotency_unique"`
-	RingxunActivationRequestSHA256 *string `yaml:"-" json:"-" gorm:"column:ringxun_activation_request_sha256;type:varchar(64)"`
-	RingxunActivationPlanVersionID *string `yaml:"-" json:"-" gorm:"column:ringxun_activation_plan_version_id;type:text"`
-	RingxunInitialOwnerUserID      *string `yaml:"-" json:"-" gorm:"column:ringxun_initial_owner_user_id;type:varchar(36)"`
-	RingxunActivationCompletedAt   *time.Time `yaml:"-" json:"-" gorm:"column:ringxun_activation_completed_at"`
-	RingxunActivationLastErrorCode *string `yaml:"-" json:"-" gorm:"column:ringxun_activation_last_error_code;type:varchar(64)"`
+	RingxunActivationID                   *string    `yaml:"-" json:"-" gorm:"column:ringxun_activation_id;type:varchar(128);uniqueIndex:idx_tenants_ringxun_activation_id_unique"`
+	RingxunActivationIdempotencyKeySHA256 *string    `yaml:"-" json:"-" gorm:"column:ringxun_activation_idempotency_key_sha256;type:varchar(64);uniqueIndex:idx_tenants_ringxun_activation_idempotency_unique"`
+	RingxunActivationRequestSHA256        *string    `yaml:"-" json:"-" gorm:"column:ringxun_activation_request_sha256;type:varchar(64)"`
+	RingxunActivationPlanVersionID        *string    `yaml:"-" json:"-" gorm:"column:ringxun_activation_plan_version_id;type:text"`
+	RingxunInitialOwnerUserID             *string    `yaml:"-" json:"-" gorm:"column:ringxun_initial_owner_user_id;type:varchar(36)"`
+	RingxunActivationCompletedAt          *time.Time `yaml:"-" json:"-" gorm:"column:ringxun_activation_completed_at"`
+	RingxunActivationLastErrorCode        *string    `yaml:"-" json:"-" gorm:"column:ringxun_activation_last_error_code;type:varchar(64)"`
 	// GovernedEnterpriseID is the immutable external key shared with Center.
 	// It is never inferred from a tenant name or browser-selected value.
 	GovernedEnterpriseID *string `yaml:"-" json:"-" gorm:"column:governed_enterprise_id;type:varchar(128);uniqueIndex:idx_tenants_governed_enterprise_id_unique"`
 	// AnalysisEnabled is the enterprise product entitlement. Connection health
 	// and binding state must not grant or revoke historical-result access.
 	AnalysisEnabled bool `yaml:"-" json:"-" gorm:"column:analysis_enabled;not null;default:false"`
+	// SandboxScriptsDisabled is the enterprise-owned execution permission. It
+	// gates both direct script execution and skill preparation for every
+	// platform sandbox config the tenant references.
+	SandboxScriptsDisabled bool `yaml:"sandbox_scripts_disabled" json:"sandbox_scripts_disabled" gorm:"column:sandbox_scripts_disabled;not null;default:false"`
 	// Platform-owned connection binding. Center can only submit node revocation.
 	GovernedEdgeBinding *GovernedEdgeBinding `yaml:"-" json:"-" gorm:"type:jsonb"`
 	// Retriever engines
@@ -143,10 +147,6 @@ type Tenant struct {
 	ContextConfig *ContextConfig `yaml:"context_config"      json:"context_config"      gorm:"type:jsonb"`
 	// Credentials config: third-party provider credentials (e.g. WeKnoraCloud AppID/AppSecret)
 	Credentials *CredentialsConfig `yaml:"credentials" json:"credentials" gorm:"type:jsonb"`
-	// Storage engine config: parameters for Local, MinIO, COS. Used for document/file storage and docreader.
-	StorageEngineConfig *StorageEngineConfig `yaml:"storage_engine_config" json:"storage_engine_config" gorm:"type:jsonb"`
-	// DefaultStorageBackendID is the workspace default concrete storage instance.
-	DefaultStorageBackendID *string `yaml:"default_storage_backend_id" json:"default_storage_backend_id,omitempty" gorm:"column:default_storage_backend_id;type:varchar(36)"`
 	// Chat history config: knowledge base configuration for indexing and searching chat messages via vector search
 	ChatHistoryConfig *ChatHistoryConfig `yaml:"chat_history_config" json:"chat_history_config" gorm:"type:jsonb"`
 	// Retrieval config: global search/retrieval parameters shared by knowledge search and message search
@@ -590,8 +590,8 @@ func (c *ParserEngineConfig) Scan(value interface{}) error {
 	return nil
 }
 
-// StorageEngineConfig holds tenant-level storage engine parameters for Local, MinIO, COS, TOS, S3, OSS, KS3, and OBS.
-// Knowledge bases select which provider to use; parameters are read from here.
+// StorageEngineConfig is the internal provider-driver configuration produced
+// from a platform storage backend.
 type StorageEngineConfig struct {
 	DefaultProvider string             `json:"default_provider"` // "local", "minio", "cos", "tos", "s3", "oss", "ks3", "obs"
 	Local           *LocalEngineConfig `json:"local,omitempty"`

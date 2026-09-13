@@ -175,7 +175,7 @@ func TestValidateConnectionAddrSSRF_Completeness(t *testing.T) {
 func TestTestRawConnection_Rejections(t *testing.T) {
 	withSSRFWhitelist(t, "vector.allowed.test")
 	repo := &mockVectorStoreRepo{}
-	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
+	svc := NewVectorStoreService(repo, nil, nil, nil)
 
 	tests := []struct {
 		name       string
@@ -214,10 +214,9 @@ func TestTestRawConnection_Rejections(t *testing.T) {
 func TestCreateStore_SSRFRejected(t *testing.T) {
 	withSSRFWhitelist(t, "vector.allowed.test")
 	repo := &mockVectorStoreRepo{}
-	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
+	svc := NewVectorStoreService(repo, nil, nil, nil)
 
 	store := &types.VectorStore{
-		TenantID:   1,
 		Name:       "es-internal",
 		EngineType: types.ElasticsearchRetrieverEngineType,
 		ConnectionConfig: types.ConnectionConfig{

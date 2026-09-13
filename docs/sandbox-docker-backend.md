@@ -116,7 +116,7 @@ archive 接口里只剩 `HEAD` 还在用，且仅用于读固定路径的活跃�
 
 在「设置 → 沙箱后端」中新建配置并选择 Docker：
 
-系统管理员可在「设置 → 系统设置 → 网络安全」打开 Docker 沙箱（立即生效）。未落库时回退到 `WEKNORA_SANDBOX_DOCKER_ENABLED`。默认关闭，因为能保存 Docker 配置的空间管理员可以在本进程够得到的 Engine API 上创建容器，而本机 `docker.sock` 等同宿主机 root。设置页始终有 Docker 标签；未打开时没有添加按钮，只提示如何启用。
+系统管理员可在「设置 → 系统设置 → 网络安全」打开 Docker 沙箱（立即生效）。未落库时回退到 `WEKNORA_SANDBOX_DOCKER_ENABLED`。默认关闭，因为平台管理员保存的 Docker 配置可以在本进程够得到的 Engine API 上创建容器，而本机 `docker.sock` 等同宿主机 root。设置页始终有 Docker 标签；未打开时没有添加按钮，只提示如何启用。
 
 | 字段 | 说明 |
 | --- | --- |
@@ -127,7 +127,7 @@ archive 接口里只剩 `HEAD` 还在用，且仅用于读固定路径的活跃�
 | CPU / 内存 / 进程数上限 | 单个沙箱的资源上限。留空 2 核 / 2048 MB / 512 进程 |
 | 网络模式 | 只接受 `bridge`（默认）与 `none`（完全禁止出网）。`host`、`container:` 以及自定义网络名一律拒绝：常见部署通过挂载的 `docker.sock` 连 daemon，填上部署自身的 compose 网络就会让沙箱与 Postgres / Redis 同网 |
 
-`tcp://` daemon 的连接与其它后端的租户端点同一口径：保存时校验地址，实际拨号时再按
+`tcp://` daemon 的连接与其它平台沙箱端点同一口径：保存时校验地址，实际拨号时再按
 「允许访问私网地址」开关过一遍 `SafeDialControl`，这样保存校验解析到公网、连接时被
 重解析到 169.254.169.254 的情况也拦得住。unix socket 不经过这一层。
 
@@ -165,7 +165,7 @@ socket 改成非 root 组的 `660`。
 
 ## 快照
 
-「空间级管理沙箱装 skill → commit 成快照 → 会话从快照起容器 → 增量出下一版」这套流程已经接入：
+「平台管理沙箱装 skill → commit 成快照 → 会话从快照起容器 → 增量出下一版」这套流程已经接入：
 `DockerRemoteClient` 实现 `RemoteSnapshotManager`，`docker commit` 打出带
 `com.weknora.sandbox.skill-snapshot` 标签的本地镜像（命名空间 `weknora-skill/`），
 会话启动时用该镜像覆盖配置里的基础 image。安装器用 root `shell_exec` 写

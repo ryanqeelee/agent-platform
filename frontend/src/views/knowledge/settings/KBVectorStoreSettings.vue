@@ -21,26 +21,13 @@
           <t-select
             v-model="localVectorStoreId"
             size="medium"
-            :placeholder="$t('kbSettings.vectorStore.systemDefault')"
-            :clearable="true"
+            :placeholder="$t('kbSettings.vectorStore.selectPlaceholder')"
+            :clearable="false"
             style="width: 100%; min-width: 220px;"
             @change="handleChange"
           >
-            <t-option :value="''" :label="$t('kbSettings.vectorStore.systemDefault')">
-              <span class="select-option">
-                <span>{{ $t('kbSettings.vectorStore.systemDefault') }}</span>
-                <t-tag
-                  v-if="envEngineType"
-                  theme="primary"
-                  variant="light"
-                  size="small"
-                >
-                  {{ envEngineType }}
-                </t-tag>
-              </span>
-            </t-option>
             <t-option
-              v-for="s in userStores"
+              v-for="s in allStores"
               :key="s.id"
               :value="s.id || ''"
               :label="s.name"
@@ -50,9 +37,13 @@
                 <t-tag theme="success" variant="light" size="small">
                   {{ s.engine_type }}
                 </t-tag>
+                <t-tag v-if="s.id === defaultVectorStoreId" variant="light" size="small">
+                  {{ $t('kbSettings.vectorStore.defaultTag') }}
+                </t-tag>
               </span>
             </t-option>
           </t-select>
+          <p v-if="!defaultVectorStoreId" class="option-hint change-warning">{{ $t('kbSettings.vectorStore.defaultRequired') }}</p>
           <p class="option-hint">{{ $t('kbSettings.vectorStore.immutableHint') }}</p>
           <a
             href="javascript:void(0)"
@@ -92,10 +83,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useUIStore } from '@/stores/ui'
-import { listVectorStores, type VectorStoreEntity } from '@/api/vector-store'
+import type { VectorStoreCapability } from '@/api/vector-store'
+import { useEditorResourcesStore } from '@/stores/editorResources'
 import type { VectorStoreSource, VectorStoreStatus } from '@/api/knowledge-base'
 import VectorStoreBadge from '@/components/VectorStoreBadge.vue'
 
@@ -116,26 +108,12 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const uiStore = useUIStore()
+const editorResources = useEditorResourcesStore()
 
 const loading = ref(false)
-const allStores = ref<VectorStoreEntity[]>([])
+const allStores = ref<VectorStoreCapability[]>([])
+const defaultVectorStoreId = ref('')
 const localVectorStoreId = ref<string>(props.vectorStoreId || '')
-
-// Only show user-defined stores in the dropdown. The env store is
-// surfaced via the explicit "System default" entry at the top of the
-// list; including it twice would confuse users about which one is the
-// fallback path.
-const userStores = computed(() => allStores.value.filter((s) => s.source === 'user'))
-
-// Engine type for the env store, shown as a tag next to the "System
-// default" label so users know which storage backend handles unbound
-// KBs (e.g. "postgres"). When the env-store entry is missing or its
-// engine type is not populated, the tag is hidden entirely rather than
-// showing a placeholder.
-const envEngineType = computed(() => {
-  const envStore = allStores.value.find((s) => s.source === 'env')
-  return envStore?.engine_type || ''
-})
 
 watch(
   () => props.vectorStoreId,
@@ -144,10 +122,8 @@ watch(
   },
 )
 
-const handleChange = (val: string | undefined) => {
-  // t-select's clear emits undefined; normalize to empty string so the
-  // parent treats both as "use system default".
-  emit('update:vectorStoreId', val || '')
+const handleChange = (val: string) => {
+  emit('update:vectorStoreId', val)
 }
 
 // Open the global Settings panel directly on the Vector Stores
@@ -164,12 +140,14 @@ onMounted(async () => {
   if (props.mode !== 'create') return
   loading.value = true
   try {
-    const resp = await listVectorStores()
-    if (resp.success) allStores.value = resp.data || []
+    await editorResources.ensureVectorStores()
+    allStores.value = editorResources.vectorStores
+    defaultVectorStoreId.value = editorResources.defaultVectorStoreID
+    if (!localVectorStoreId.value) {
+      localVectorStoreId.value = defaultVectorStoreId.value
+      if (localVectorStoreId.value) handleChange(localVectorStoreId.value)
+    }
   } catch (e) {
-    // Graceful degradation: if vector-store listing fails the dropdown
-    // simply renders only the "System default" entry, which is exactly
-    // the legacy behavior. The KB editor remains usable.
     console.warn('[KBVectorStoreSettings] failed to load vector stores', e)
   } finally {
     loading.value = false

@@ -1,4 +1,4 @@
-// Package service - per-tenant sandbox resolution helpers.
+// Package service - platform-config sandbox resolution helpers.
 //
 // The sandbox package must not depend on repositories, so the config lookup is
 // adapted here and injected as sandbox.TenantSandboxConfigLoader.
@@ -15,7 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// tenantSandboxConfigLoader reads one named sandbox config for a workspace.
+// tenantSandboxConfigLoader reads one platform sandbox config.
 type tenantSandboxConfigLoader struct {
 	repo repository.TenantSandboxConfigRepository
 	now  func() time.Time
@@ -35,13 +35,12 @@ func NewTenantSandboxConfigLoader(
 // about to be replaced.
 func (l *tenantSandboxConfigLoader) Load(
 	ctx context.Context,
-	tenantID uint64,
 	configID string,
 ) (sandbox.ResolvedTenantSandboxConfig, error) {
 	if l.repo == nil {
 		return sandbox.ResolvedTenantSandboxConfig{}, nil
 	}
-	entity, err := l.repo.GetByID(ctx, tenantID, configID)
+	entity, err := l.repo.GetByID(ctx, configID)
 	if err != nil {
 		return sandbox.ResolvedTenantSandboxConfig{}, err
 	}
@@ -59,6 +58,31 @@ func (l *tenantSandboxConfigLoader) Load(
 // entire workspace, including agents bound to any named backend config.
 type WorkspaceSandboxPolicy interface {
 	WorkspaceScriptsDisabled(ctx context.Context, tenantID uint64) (bool, error)
+}
+
+// PlatformSandboxDefault resolves the config selected for new sessions.
+type PlatformSandboxDefault interface {
+	DefaultSandboxConfigID(ctx context.Context) (string, error)
+}
+
+type platformSandboxDefaultResolver struct {
+	repo repository.TenantSandboxConfigRepository
+}
+
+func NewPlatformSandboxDefaultResolver(
+	repo repository.TenantSandboxConfigRepository,
+) PlatformSandboxDefault {
+	return &platformSandboxDefaultResolver{repo: repo}
+}
+
+func (r *platformSandboxDefaultResolver) DefaultSandboxConfigID(
+	ctx context.Context,
+) (string, error) {
+	entity, err := r.repo.GetDefault(ctx)
+	if err != nil || entity == nil {
+		return "", err
+	}
+	return entity.ID, nil
 }
 
 // resolveTenantSandboxForConfig returns the Manager for an explicit config.
@@ -79,10 +103,9 @@ func resolveTenantSandboxForConfig(
 	if policy != nil && tenantID != 0 {
 		disabled, err := policy.WorkspaceScriptsDisabled(ctx, tenantID)
 		if err != nil {
-			logger.Warnf(ctx,
-				"[sandbox] failed to read workspace sandbox policy for %d: %v",
-				tenantID, err)
-		} else if disabled {
+			return nil, fmt.Errorf("read workspace sandbox policy for %d: %w", tenantID, err)
+		}
+		if disabled {
 			return sandbox.NewDisabledManager(), nil
 		}
 	}
@@ -100,7 +123,7 @@ func resolveTenantSandboxForConfig(
 	}
 	if resolver == nil {
 		return nil, fmt.Errorf(
-			"sandbox: resolve config %q: per-tenant resolver unavailable", configID)
+			"sandbox: resolve config %q: platform resolver unavailable", configID)
 	}
 	mgr, err := resolver.Resolve(ctx, tenantID, configID)
 	if err != nil {

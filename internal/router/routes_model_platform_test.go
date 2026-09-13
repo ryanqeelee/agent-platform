@@ -21,6 +21,7 @@ func (routeMCPServiceStub) ListMCPServices(context.Context) ([]*types.MCPService
 func TestPlatformInfrastructureRoutesRequireSystemAdmin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
+	r.Use(gin.Recovery())
 	r.Use(func(c *gin.Context) {
 		ctx := context.WithValue(c.Request.Context(), types.TenantRoleContextKey, types.TenantRoleOwner)
 		if c.GetHeader("X-Test-System-Admin") == "true" {
@@ -61,11 +62,10 @@ func TestPlatformInfrastructureRoutesRequireSystemAdmin(t *testing.T) {
 		{http.MethodGet, "/api/v1/platform/retrieval-processing-settings"},
 		{http.MethodPost, "/api/v1/initialization/initialize/kb-1"},
 		{http.MethodGet, "/api/v1/initialization/ollama/models"},
-		{http.MethodGet, "/api/v1/vector-stores/types"},
-		{http.MethodGet, "/api/v1/storage-backends/types"},
+		{http.MethodGet, "/api/v1/system/admin/vector-stores/types"},
+		{http.MethodGet, "/api/v1/system/admin/storage-backends/types"},
 		{http.MethodGet, "/api/v1/models/weknoracloud/status"},
 		{http.MethodGet, "/api/v1/system/admin/parser-engine-config"},
-		{http.MethodGet, "/api/v1/system/storage-engine-status"},
 		{http.MethodGet, "/api/v1/system/admin/capabilities"},
 		{http.MethodGet, "/api/v1/web-search/providers"},
 		{http.MethodGet, "/api/v1/system/admin/mcp-services"},
@@ -82,6 +82,13 @@ func TestPlatformInfrastructureRoutesRequireSystemAdmin(t *testing.T) {
 	r.ServeHTTP(enterpriseCatalog, httptest.NewRequest(http.MethodGet, "/api/v1/mcp-services", nil))
 	if enterpriseCatalog.Code != http.StatusOK {
 		t.Fatalf("enterprise Owner safe MCP catalog status = %d, want %d", enterpriseCatalog.Code, http.StatusOK)
+	}
+	for _, path := range []string{"/api/v1/vector-stores", "/api/v1/storage-backends"} {
+		response := httptest.NewRecorder()
+		r.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Code == http.StatusForbidden {
+			t.Fatalf("enterprise Viewer must reach safe connection capabilities at %s", path)
+		}
 	}
 
 	allowed := httptest.NewRecorder()

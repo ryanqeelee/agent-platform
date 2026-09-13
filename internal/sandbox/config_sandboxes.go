@@ -14,7 +14,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -45,11 +44,11 @@ func MetadataSessionIDKey() string {
 	return remoteMetadataSessionID
 }
 
-// configSandboxFilter narrows a listing to one workspace's one config.
-func configSandboxFilter(tenantID uint64, configID string) RemoteListFilter {
+// configSandboxFilter narrows a listing to one platform config across all
+// tenant-owned runtime instances.
+func configSandboxFilter(configID string) RemoteListFilter {
 	return RemoteListFilter{
 		Metadata: map[string]string{
-			remoteMetadataTenantID: strconv.FormatUint(tenantID, 10),
 			remoteMetadataConfigID: NormalizeConfigID(configID),
 		},
 		// Paused sandboxes are not idle leftovers: they bill, and a session
@@ -59,21 +58,29 @@ func configSandboxFilter(tenantID uint64, configID string) RemoteListFilter {
 	}
 }
 
+// tenantConfigSandboxFilter is the runtime orphan-reaper scope. Runtime
+// sandboxes remain tenant-owned even though the configuration they use is
+// platform-global.
+func tenantConfigSandboxFilter(tenantID uint64, configID string) RemoteListFilter {
+	filter := configSandboxFilter(configID)
+	filter.Metadata[remoteMetadataTenantID] = fmt.Sprintf("%d", tenantID)
+	return filter
+}
+
 // ListConfigSandboxes returns the sandboxes a config currently owns.
 func ListConfigSandboxes(
 	ctx context.Context,
 	client ConfigSandboxLister,
-	tenantID uint64,
 	configID string,
 ) ([]RemoteSandboxSummary, error) {
 	if client == nil {
 		return nil, fmt.Errorf("sandbox: listing requires a client")
 	}
-	summaries, err := client.List(ctx, configSandboxFilter(tenantID, configID))
+	summaries, err := client.List(ctx, configSandboxFilter(configID))
 	if err != nil {
 		return nil, fmt.Errorf(
-			"sandbox: list workspace %d config %q sandboxes: %w",
-			tenantID, NormalizeConfigID(configID), err)
+			"sandbox: list platform config %q sandboxes: %w",
+			NormalizeConfigID(configID), err)
 	}
 	return summaries, nil
 }
@@ -94,10 +101,9 @@ func ListConfigSandboxes(
 func ReleaseConfigSandboxes(
 	ctx context.Context,
 	client ConfigSandboxClient,
-	tenantID uint64,
 	configID string,
 ) (int, error) {
-	summaries, err := ListConfigSandboxes(ctx, client, tenantID, configID)
+	summaries, err := ListConfigSandboxes(ctx, client, configID)
 	if err != nil {
 		return 0, err
 	}

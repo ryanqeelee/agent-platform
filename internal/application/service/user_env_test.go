@@ -24,8 +24,7 @@ func userEnvCtx(tenantID uint64, principalID string) context.Context {
 	})
 }
 
-// userEnvConfigRepo is the sandbox-config slice UserEnvService needs: names for
-// the listing, and a workspace-scoped lookup that refuses a foreign config.
+// userEnvConfigRepo is the platform sandbox-config slice UserEnvService needs.
 type userEnvConfigRepo struct {
 	rows []*types.TenantSandboxConfigEntity
 }
@@ -35,41 +34,33 @@ func (r *userEnvConfigRepo) Create(context.Context, *types.TenantSandboxConfigEn
 }
 
 func (r *userEnvConfigRepo) GetByID(
-	_ context.Context, tenantID uint64, id string,
+	_ context.Context, id string,
 ) (*types.TenantSandboxConfigEntity, error) {
 	for _, row := range r.rows {
-		if row.TenantID == tenantID && row.ID == id {
+		if row.ID == id {
 			return row, nil
 		}
 	}
 	return nil, nil
 }
 
-func (r *userEnvConfigRepo) ListByTenant(
-	_ context.Context, tenantID uint64,
-) ([]*types.TenantSandboxConfigEntity, error) {
-	var out []*types.TenantSandboxConfigEntity
-	for _, row := range r.rows {
-		if row.TenantID == tenantID {
-			out = append(out, row)
-		}
-	}
-	return out, nil
-}
-
 func (r *userEnvConfigRepo) ListAll(context.Context) ([]*types.TenantSandboxConfigEntity, error) {
-	panic("ListAll is outside the user env surface")
+	return r.rows, nil
 }
+func (r *userEnvConfigRepo) GetDefault(context.Context) (*types.TenantSandboxConfigEntity, error) {
+	return nil, nil
+}
+func (r *userEnvConfigRepo) SetDefault(context.Context, string) error { return nil }
 func (r *userEnvConfigRepo) Update(context.Context, *types.TenantSandboxConfigEntity) error {
 	panic("Update is outside the user env surface")
 }
-func (r *userEnvConfigRepo) SoftDelete(context.Context, uint64, string) error {
+func (r *userEnvConfigRepo) SoftDelete(context.Context, string) error {
 	panic("SoftDelete is outside the user env surface")
 }
-func (r *userEnvConfigRepo) SetCordon(context.Context, uint64, string, time.Time) error {
+func (r *userEnvConfigRepo) SetCordon(context.Context, string, time.Time) error {
 	panic("SetCordon is outside the user env surface")
 }
-func (r *userEnvConfigRepo) ClearCordon(context.Context, uint64, string) error {
+func (r *userEnvConfigRepo) ClearCordon(context.Context, string) error {
 	panic("ClearCordon is outside the user env surface")
 }
 
@@ -85,7 +76,7 @@ func newUserEnvFixture(t *testing.T) (*UserEnvService, *installSkillRepo) {
 	ctx := context.Background()
 	for _, skill := range []*types.TenantSkillEntity{
 		{
-			ID: "sk-ready", TenantID: userEnvTenantID, SandboxConfigID: "cfg-1",
+			ID: "sk-ready", SandboxConfigID: "cfg-1",
 			Name: "pdf-tools", Description: "Extracts text from PDFs",
 			Enabled: true, Status: types.SkillStatusReady,
 			Envs: types.SkillEnvVars{
@@ -95,21 +86,21 @@ func newUserEnvFixture(t *testing.T) (*UserEnvService, *installSkillRepo) {
 			},
 		},
 		{
-			ID: "sk-no-declaration", TenantID: userEnvTenantID, SandboxConfigID: "cfg-1",
+			ID: "sk-no-declaration", SandboxConfigID: "cfg-1",
 			Name: "plain", Enabled: true, Status: types.SkillStatusReady,
 		},
 		{
-			ID: "sk-disabled", TenantID: userEnvTenantID, SandboxConfigID: "cfg-1",
+			ID: "sk-disabled", SandboxConfigID: "cfg-1",
 			Name: "hidden", Enabled: false, Status: types.SkillStatusReady,
 			Envs: types.SkillEnvVars{{Name: "HIDDEN_TOKEN"}},
 		},
 		{
-			ID: "sk-installing", TenantID: userEnvTenantID, SandboxConfigID: "cfg-2",
+			ID: "sk-installing", SandboxConfigID: "cfg-2",
 			Name: "half-done", Enabled: true, Status: types.SkillStatusInstalling,
 			Envs: types.SkillEnvVars{{Name: "HALF_TOKEN"}},
 		},
 		{
-			ID: "sk-foreign", TenantID: 8, SandboxConfigID: "cfg-9",
+			ID: "sk-global", SandboxConfigID: "cfg-9",
 			Name: "theirs", Enabled: true, Status: types.SkillStatusReady,
 			Envs: types.SkillEnvVars{{Name: "THEIR_TOKEN"}},
 		},
@@ -117,9 +108,9 @@ func newUserEnvFixture(t *testing.T) (*UserEnvService, *installSkillRepo) {
 		require.NoError(t, repo.CreateSkill(ctx, skill))
 	}
 	configs := &userEnvConfigRepo{rows: []*types.TenantSandboxConfigEntity{
-		{ID: "cfg-1", TenantID: userEnvTenantID, Name: "Production", Description: "Prod cluster"},
-		{ID: "cfg-2", TenantID: userEnvTenantID, Name: "Staging"},
-		{ID: "cfg-9", TenantID: 8, Name: "Theirs"},
+		{ID: "cfg-1", Name: "Production", Description: "Prod cluster"},
+		{ID: "cfg-2", Name: "Staging"},
+		{ID: "cfg-9", Name: "Shared"},
 	}}
 	return NewUserEnvService(repo, configs), repo
 }
@@ -188,11 +179,12 @@ func TestListMineListsEveryConfigWithItsName(t *testing.T) {
 	groups, err := svc.ListMine(userEnvCtx(userEnvTenantID, "alice"))
 
 	require.NoError(t, err)
-	require.Len(t, groups, 2)
+	require.Len(t, groups, 3)
 	require.Equal(t, "Production", groups[0].SandboxConfigName)
 	require.Equal(t, "Prod cluster", groups[0].Description)
-	require.Equal(t, "Staging", groups[1].SandboxConfigName)
-	require.Empty(t, groups[1].Description)
+	require.Equal(t, "Shared", groups[1].SandboxConfigName)
+	require.Equal(t, "Staging", groups[2].SandboxConfigName)
+	require.Empty(t, groups[2].Description)
 	require.Empty(t, configByID(t, groups, "cfg-2").Skills)
 }
 
@@ -309,24 +301,24 @@ func envNameForIndex(i int) string {
 	return "VAR_" + string(rune('A'+i/26)) + string(rune('A'+i%26))
 }
 
-// Without this check a member could write rows against another workspace's
-// skill ID, which the resolver would then inject into that workspace's run.
-func TestSetMineRefusesASkillOfAnotherWorkspace(t *testing.T) {
+func TestSetMineUsesGlobalSkillButKeepsValueOnCallingTenant(t *testing.T) {
 	svc, repo := newUserEnvFixture(t)
 
-	err := svc.SetMineSkill(userEnvCtx(userEnvTenantID, "alice"), "sk-foreign", "THEIR_TOKEN", "v")
+	err := svc.SetMineSkill(userEnvCtx(userEnvTenantID, "alice"), "sk-global", "THEIR_TOKEN", "v")
 
-	require.Error(t, err)
-	require.Empty(t, repo.userEnvs)
+	require.NoError(t, err)
+	require.Len(t, repo.userEnvs, 1)
+	require.Equal(t, userEnvTenantID, repo.userEnvs[0].TenantID)
 }
 
-func TestSetMineSandboxRefusesAConfigOfAnotherWorkspace(t *testing.T) {
+func TestSetMineAcceptsEveryPlatformConfig(t *testing.T) {
 	svc, repo := newUserEnvFixture(t)
 
 	err := svc.SetMineSandbox(userEnvCtx(userEnvTenantID, "alice"), "cfg-9", "TOKEN", "v")
 
-	require.Error(t, err)
-	require.Empty(t, repo.userEnvs)
+	require.NoError(t, err)
+	require.Len(t, repo.userEnvs, 1)
+	require.Equal(t, userEnvTenantID, repo.userEnvs[0].TenantID)
 }
 
 // A missing principal is an error, never a default: falling back would let one
@@ -382,7 +374,7 @@ func TestDeleteMineSkillWorksAfterTheSkillIsDisabled(t *testing.T) {
 	svc, repo := newUserEnvFixture(t)
 	ctx := userEnvCtx(userEnvTenantID, "alice")
 	require.NoError(t, svc.SetMineSkill(ctx, "sk-ready", "USER_TOKEN", "alice-secret"))
-	skill, err := repo.GetSkill(context.Background(), userEnvTenantID, "cfg-1", "sk-ready")
+	skill, err := repo.GetSkill(context.Background(), "cfg-1", "sk-ready")
 	require.NoError(t, err)
 	skill.Enabled = false
 	require.NoError(t, repo.UpdateSkill(context.Background(), skill))

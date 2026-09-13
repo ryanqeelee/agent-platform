@@ -64,14 +64,14 @@ func TestListConfigSandboxesIncludesPausedAndScopesToConfig(t *testing.T) {
 		summary("sb-3", "8", "cfg-a"),
 	}}
 
-	got, err := ListConfigSandboxes(context.Background(), client, 7, "cfg-a")
+	got, err := ListConfigSandboxes(context.Background(), client, "cfg-a")
 	require.NoError(t, err)
-	require.Len(t, got, 1)
+	require.Len(t, got, 2, "platform lifecycle inventory spans every tenant instance")
 	require.Equal(t, "sb-1", got[0].ID)
 
 	require.Len(t, client.filters, 1)
 	require.Equal(t, "cfg-a", client.filters[0].Metadata[remoteMetadataConfigID])
-	require.Equal(t, "7", client.filters[0].Metadata[remoteMetadataTenantID])
+	require.NotContains(t, client.filters[0].Metadata, remoteMetadataTenantID)
 	require.ElementsMatch(t,
 		[]RemoteSandboxState{RemoteStateRunning, RemoteStatePaused},
 		client.filters[0].States,
@@ -83,7 +83,7 @@ func TestListConfigSandboxesUsesSentinelForGlobalDefault(t *testing.T) {
 		summary("sb-1", "7", types.SandboxConfigIDGlobalDefault),
 	}}
 
-	got, err := ListConfigSandboxes(context.Background(), client, 7, "")
+	got, err := ListConfigSandboxes(context.Background(), client, "")
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 }
@@ -100,7 +100,7 @@ func TestReleaseConfigSandboxesLeavesSiblingConfigAlone(t *testing.T) {
 		summary("sb-2", "7", "cfg-b"),
 	}}
 
-	deleted, err := ReleaseConfigSandboxes(context.Background(), client, 7, "cfg-a")
+	deleted, err := ReleaseConfigSandboxes(context.Background(), client, "cfg-a")
 	require.NoError(t, err)
 	require.Equal(t, 1, deleted)
 	require.Equal(t, []string{"sb-1"}, client.deleted)
@@ -118,7 +118,7 @@ func TestReleaseConfigSandboxesContinuesAndReturnsDeleteFailures(t *testing.T) {
 		},
 	}
 
-	deleted, err := ReleaseConfigSandboxes(context.Background(), client, 7, "cfg-a")
+	deleted, err := ReleaseConfigSandboxes(context.Background(), client, "cfg-a")
 	require.Error(t, err)
 	require.ErrorContains(t, err, "sb-2")
 	require.Equal(t, 2, deleted)

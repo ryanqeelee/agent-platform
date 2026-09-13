@@ -48,7 +48,7 @@ func TestSystemAdminParserRoutesUseBrowserOnlyAdminGuard(t *testing.T) {
 	}}
 	parserConfig := service.NewPlatformParserConfigService(repo)
 	systemHandler := handler.NewSystemHandler(
-		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, parserConfig,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, parserConfig,
 	)
 	router := gin.New()
 	router.Use(middleware.ErrorHandler())

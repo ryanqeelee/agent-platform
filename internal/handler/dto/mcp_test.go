@@ -108,7 +108,6 @@ func TestMCPServiceOptionResponseContainsNoInfrastructureDetail(t *testing.T) {
 	url := "https://private.example.com"
 	body, err := json.Marshal(NewMCPServiceOptionResponses([]*types.MCPService{{
 		ID:            "svc-1",
-		TenantID:      7,
 		Name:          "经营数据",
 		Description:   "读取经营数据",
 		Enabled:       true,

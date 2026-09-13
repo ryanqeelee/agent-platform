@@ -205,20 +205,7 @@ func newIMFileServiceResolver(
 	defaultSvc interfaces.FileService,
 	storageResolvers ...interfaces.StorageBackendResolver,
 ) *storageurl.FileServiceResolver {
-	return storageurl.NewFileServiceResolver(tenant, defaultSvc, storageResolvers...)
-}
-
-func buildIMFileServiceForProvider(
-	tenant *types.Tenant,
-	provider string,
-	defaultSvc interfaces.FileService,
-) interfaces.FileService {
-	return storageurl.BuildFileServiceForProvider(tenant, provider, defaultSvc)
-}
-
-// resolveIMFileServiceForPath is a test/helper entry point without caching.
-func resolveIMFileServiceForPath(tenant *types.Tenant, filePath string, defaultSvc interfaces.FileService) interfaces.FileService {
-	return newIMFileServiceResolver(tenant, defaultSvc).ResolveFileService(filePath)
+	return storageurl.NewFileServiceResolver(defaultSvc, storageResolvers...)
 }
 
 const (
@@ -315,7 +302,7 @@ type Service struct {
 	streamManager interfaces.StreamManager
 
 	// defaultFileSvc is the process-wide storage backend (STORAGE_TYPE / env).
-	// Used when tenant StorageEngineConfig cannot build a service for the URL scheme.
+	// Used when no global backend resolver was provided for the URL scheme.
 	defaultFileSvc  interfaces.FileService
 	documentReader  interfaces.DocumentReader
 	storageResolver interfaces.StorageBackendResolver

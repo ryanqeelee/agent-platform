@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -93,10 +94,6 @@ func setupPresignedTestServer(t *testing.T) (engine *gin.Engine, baseDir string,
 
 	tenant := &types.Tenant{
 		ID: 1,
-		StorageEngineConfig: &types.StorageEngineConfig{
-			DefaultProvider: "local",
-			Local:           &types.LocalEngineConfig{},
-		},
 	}
 	stubTS := &stubTenantService{
 		get: func(_ context.Context, id uint64) (*types.Tenant, error) {
@@ -108,7 +105,8 @@ func setupPresignedTestServer(t *testing.T) (engine *gin.Engine, baseDir string,
 	}
 
 	engine = gin.New()
-	handler := presignedFileHandler(stubTS, baseDir)
+	localFiles := filesvc.NewLocalFileService(baseDir, "")
+	handler := presignedFileHandler(stubTS, baseDir, storageResolverFor(localFiles))
 	engine.GET("/api/v1/files/presigned", handler)
 	engine.HEAD("/api/v1/files/presigned", handler)
 

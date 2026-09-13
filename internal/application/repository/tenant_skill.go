@@ -10,55 +10,75 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// TenantSkillRepository persists skills installed onto sandbox configs and the
-// snapshot chain ledger.
+// TenantSkillRepository persists the platform-global skill catalog,
+// installations and snapshot ledger. User environment
+// values remain tenant scoped in the same concrete repository but are never
+// deleted as a side effect of platform maintenance.
 type TenantSkillRepository interface {
 	// CreateSkill inserts a metadata projection row before provider-side image work starts.
 	CreateSkill(ctx context.Context, e *types.TenantSkillEntity) error
 	// GetSkill returns nil (no error) when the skill does not exist or belongs
 	// to another workspace/config, so callers can render a 404 directly.
-	GetSkill(ctx context.Context, tenantID uint64, configID, skillID string) (*types.TenantSkillEntity, error)
+	GetSkill(ctx context.Context, configID, skillID string) (*types.TenantSkillEntity, error)
 	// GetSkillByName scopes lookup by config because skill names are only unique within a config.
-	GetSkillByName(ctx context.Context, tenantID uint64, configID, name string) (*types.TenantSkillEntity, error)
+	GetSkillByName(ctx context.Context, configID, name string) (*types.TenantSkillEntity, error)
 	// ListSkillsByConfig returns the installed skill projection for one sandbox config.
-	ListSkillsByConfig(ctx context.Context, tenantID uint64, configID string) ([]*types.TenantSkillEntity, error)
-	// ListSkillsByTenant spans every sandbox config of one workspace, for the
-	// views that are about the user rather than about a config.
-	ListSkillsByTenant(ctx context.Context, tenantID uint64) ([]*types.TenantSkillEntity, error)
+	ListSkillsByConfig(ctx context.Context, configID string) ([]*types.TenantSkillEntity, error)
+	ListSkills(ctx context.Context) ([]*types.TenantSkillEntity, error)
 	// UpdateSkill writes the mutable projection fields after install/remove
-	// state changes. It never touches envs; see the implementation.
+	// state changes. It never touches admin-owned envs/enabled or run-owned
+	// transcript/token fields; see the implementation.
 	UpdateSkill(ctx context.Context, e *types.TenantSkillEntity) error
+	// BeginSkillRun atomically hands the row to a new install/remove token and
+	// clears the previous install transcript.
+	BeginSkillRun(
+		ctx context.Context, configID, skillID, runID, status string, startedAt time.Time,
+	) error
+	// UpdateSkillForRun updates lifecycle fields only while runID still owns
+	// the row. matched=false means a newer operation took ownership.
+	UpdateSkillForRun(
+		ctx context.Context, e *types.TenantSkillEntity, runID string,
+	) (matched bool, err error)
+	// UpdateInstallTranscript persists the latest prompt/assistant projection
+	// only while the supplied install token remains current.
+	UpdateInstallTranscript(
+		ctx context.Context, configID, skillID, runID string, transcript types.JSON,
+	) (matched bool, err error)
 	// UpdateSkillEnvs writes the declared environment variables alone.
 	UpdateSkillEnvs(
-		ctx context.Context, tenantID uint64, configID, skillID string, envs types.SkillEnvVars,
+		ctx context.Context, configID, skillID string, envs types.SkillEnvVars,
 	) error
+	UpdateSkillEnvsForRun(
+		ctx context.Context, configID, skillID, runID string, envs types.SkillEnvVars,
+	) (matched bool, err error)
 	// UpdateSkillAdminState writes visibility and declared values together, as
 	// one admin request.
 	UpdateSkillAdminState(
 		ctx context.Context,
-		tenantID uint64,
 		configID, skillID string,
 		enabled bool,
 		envs types.SkillEnvVars,
 	) error
-	// DeleteSkill soft-deletes the metadata row and, in the same transaction,
-	// hard-deletes the per-principal env values hanging off it. Image cleanup is
-	// represented by snapshots. When the scoped key matches no skill, nothing is
-	// deleted and the call succeeds.
-	DeleteSkill(ctx context.Context, tenantID uint64, configID, skillID string) error
+	// DeleteSkill soft-deletes only the platform metadata row. Tenant-owned
+	// per-principal environment values are never deleted by platform maintenance.
+	DeleteSkill(ctx context.Context, configID, skillID string) error
+	DeleteSkillForRun(
+		ctx context.Context, configID, skillID, runID string,
+	) (matched bool, err error)
 	// ListStaleInstalling finds abandoned install/remove runs for the reaper.
 	ListStaleInstalling(ctx context.Context, olderThan time.Time) ([]*types.TenantSkillEntity, error)
 
 	// CreateSnapshotRow records provider work before creating the billable snapshot.
 	CreateSnapshotRow(ctx context.Context, e *types.TenantSkillSnapshotEntity) error
 	// MarkSnapshotState updates ledger state and stores the provider snapshot ID once known.
-	MarkSnapshotState(ctx context.Context, tenantID uint64, id, state, snapshotID string) error
+	MarkSnapshotState(ctx context.Context, id, state, snapshotID string) error
 	// ListSnapshotsByConfig returns the full chain for audit and troubleshooting.
-	ListSnapshotsByConfig(ctx context.Context, tenantID uint64, configID string) ([]*types.TenantSkillSnapshotEntity, error)
+	ListSnapshotsByConfig(ctx context.Context, configID string) ([]*types.TenantSkillSnapshotEntity, error)
 	// DeleteSnapshotRowsByConfig removes ledger rows only when an entire sandbox
 	// config is deleted and its provider-side snapshots are already gone; never
 	// call this during an ordinary image switch (old snapshots stay in the ledger).
-	DeleteSnapshotRowsByConfig(ctx context.Context, tenantID uint64, configID string) error
+	DeleteSnapshotRowsByConfig(ctx context.Context, configID string) error
+	CountUserEnvVarsByConfig(ctx context.Context, configID string) (int64, error)
 
 	// ListUserEnvVars returns one principal's own values for one scope,
 	// decrypted. An empty skillID selects the config-wide variables.
@@ -78,24 +98,17 @@ type TenantSkillRepository interface {
 	DeleteUserEnvVar(
 		ctx context.Context, tenantID uint64, p types.Principal, configID, skillID, name string,
 	) error
-	// DeleteUserEnvVarsByConfig removes every principal's values for a config,
-	// including the config-wide ones DeleteSkill never sees.
-	DeleteUserEnvVarsByConfig(ctx context.Context, tenantID uint64, configID string) error
-
-	// CreateCatalog inserts a tenant-level skill definition.
+	// CreateCatalog inserts a platform skill definition.
 	CreateCatalog(ctx context.Context, e *types.TenantSkillCatalogEntity) error
-	// GetCatalog returns nil when the row is missing or belongs to another workspace.
-	GetCatalog(ctx context.Context, tenantID uint64, catalogID string) (*types.TenantSkillCatalogEntity, error)
-	// GetCatalogByName scopes lookup by workspace because names are unique per tenant.
-	GetCatalogByName(ctx context.Context, tenantID uint64, name string) (*types.TenantSkillCatalogEntity, error)
-	// ListCatalogsByTenant returns every live catalog row of one workspace.
-	ListCatalogsByTenant(ctx context.Context, tenantID uint64) ([]*types.TenantSkillCatalogEntity, error)
+	GetCatalog(ctx context.Context, catalogID string) (*types.TenantSkillCatalogEntity, error)
+	GetCatalogByName(ctx context.Context, name string) (*types.TenantSkillCatalogEntity, error)
+	ListCatalogs(ctx context.Context) ([]*types.TenantSkillCatalogEntity, error)
 	// UpdateCatalog writes mutable definition fields (bundle, description, version).
 	UpdateCatalog(ctx context.Context, e *types.TenantSkillCatalogEntity) error
 	// DeleteCatalog soft-deletes a definition. Install rows are not touched.
-	DeleteCatalog(ctx context.Context, tenantID uint64, catalogID string) error
+	DeleteCatalog(ctx context.Context, catalogID string) error
 	// ListSkillsByCatalog returns installations of one catalog skill.
-	ListSkillsByCatalog(ctx context.Context, tenantID uint64, catalogID string) ([]*types.TenantSkillEntity, error)
+	ListSkillsByCatalog(ctx context.Context, catalogID string) ([]*types.TenantSkillEntity, error)
 }
 
 type tenantSkillRepository struct{ db *gorm.DB }
@@ -110,11 +123,11 @@ func (r *tenantSkillRepository) CreateSkill(ctx context.Context, e *types.Tenant
 }
 
 func (r *tenantSkillRepository) GetSkill(
-	ctx context.Context, tenantID uint64, configID, skillID string,
+	ctx context.Context, configID, skillID string,
 ) (*types.TenantSkillEntity, error) {
 	var e types.TenantSkillEntity
 	err := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND sandbox_config_id = ? AND id = ?", tenantID, configID, skillID).
+		Where("sandbox_config_id = ? AND id = ?", configID, skillID).
 		First(&e).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
@@ -126,11 +139,11 @@ func (r *tenantSkillRepository) GetSkill(
 }
 
 func (r *tenantSkillRepository) GetSkillByName(
-	ctx context.Context, tenantID uint64, configID, name string,
+	ctx context.Context, configID, name string,
 ) (*types.TenantSkillEntity, error) {
 	var e types.TenantSkillEntity
 	err := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND sandbox_config_id = ? AND name = ?", tenantID, configID, name).
+		Where("sandbox_config_id = ? AND name = ?", configID, name).
 		First(&e).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
@@ -142,11 +155,11 @@ func (r *tenantSkillRepository) GetSkillByName(
 }
 
 func (r *tenantSkillRepository) ListSkillsByConfig(
-	ctx context.Context, tenantID uint64, configID string,
+	ctx context.Context, configID string,
 ) ([]*types.TenantSkillEntity, error) {
 	var list []*types.TenantSkillEntity
 	err := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND sandbox_config_id = ?", tenantID, configID).
+		Where("sandbox_config_id = ?", configID).
 		Order("created_at ASC").
 		Find(&list).Error
 	if err != nil {
@@ -155,12 +168,11 @@ func (r *tenantSkillRepository) ListSkillsByConfig(
 	return list, nil
 }
 
-func (r *tenantSkillRepository) ListSkillsByTenant(
-	ctx context.Context, tenantID uint64,
+func (r *tenantSkillRepository) ListSkills(
+	ctx context.Context,
 ) ([]*types.TenantSkillEntity, error) {
 	var list []*types.TenantSkillEntity
 	err := r.db.WithContext(ctx).
-		Where("tenant_id = ?", tenantID).
 		Order("created_at ASC").
 		Find(&list).Error
 	if err != nil {
@@ -178,38 +190,97 @@ func (r *tenantSkillRepository) ListSkillsByTenant(
 // heartbeat that read the row a moment before a declaration was recorded put
 // the stale list — or a NULL — back. UpdateSkillEnvs and UpdateSkillAdminState
 // are the only writers of that column.
+func skillProjectionUpdates(e *types.TenantSkillEntity) map[string]any {
+	return map[string]any{
+		"name":                  e.Name,
+		"version":               e.Version,
+		"description":           e.Description,
+		"instructions":          e.Instructions,
+		"bundle_ref":            e.BundleRef,
+		"bundle_sha256":         e.BundleSHA256,
+		"installed_snapshot_id": e.InstalledSnapshotID,
+		"catalog_id":            e.CatalogID,
+		"status":                e.Status,
+		"error":                 e.Error,
+		"installing_since":      e.InstallingSince,
+		"updated_at":            time.Now(),
+	}
+}
+
 func (r *tenantSkillRepository) UpdateSkill(ctx context.Context, e *types.TenantSkillEntity) error {
 	return r.db.WithContext(ctx).
 		Model(&types.TenantSkillEntity{}).
-		Where("tenant_id = ? AND sandbox_config_id = ? AND id = ?", e.TenantID, e.SandboxConfigID, e.ID).
+		Where("sandbox_config_id = ? AND id = ?", e.SandboxConfigID, e.ID).
+		Updates(skillProjectionUpdates(e)).Error
+}
+
+func (r *tenantSkillRepository) BeginSkillRun(
+	ctx context.Context, configID, skillID, runID, status string, startedAt time.Time,
+) error {
+	updates := map[string]any{
+		"install_run_id":   runID,
+		"status":           status,
+		"error":            "",
+		"installing_since": &startedAt,
+		"updated_at":       time.Now(),
+	}
+	// A new install owns a new transcript. Removal still needs the same
+	// compare-and-set token for terminal writes, but retains the last install
+	// history if the image operation fails and the skill is restored.
+	if status == types.SkillStatusInstalling {
+		updates["install_transcript"] = nil
+	}
+	return r.db.WithContext(ctx).
+		Model(&types.TenantSkillEntity{}).
+		Where("sandbox_config_id = ? AND id = ?", configID, skillID).
+		Updates(updates).Error
+}
+
+func (r *tenantSkillRepository) UpdateSkillForRun(
+	ctx context.Context, e *types.TenantSkillEntity, runID string,
+) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&types.TenantSkillEntity{}).
+		Where("sandbox_config_id = ? AND id = ? AND install_run_id = ?",
+			e.SandboxConfigID, e.ID, runID).
+		Updates(skillProjectionUpdates(e))
+	return result.RowsAffected == 1, result.Error
+}
+
+func (r *tenantSkillRepository) UpdateInstallTranscript(
+	ctx context.Context, configID, skillID, runID string, transcript types.JSON,
+) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&types.TenantSkillEntity{}).
+		Where("sandbox_config_id = ? AND id = ? AND install_run_id = ?",
+			configID, skillID, runID).
 		Updates(map[string]any{
-			"name":                  e.Name,
-			"version":               e.Version,
-			"description":           e.Description,
-			"instructions":          e.Instructions,
-			"bundle_ref":            e.BundleRef,
-			"bundle_sha256":         e.BundleSHA256,
-			"enabled":               e.Enabled,
-			"installed_snapshot_id": e.InstalledSnapshotID,
-			"install_session_id":    e.InstallSessionID,
-			"install_message_id":    e.InstallMessageID,
-			"catalog_id":            e.CatalogID,
-			"status":                e.Status,
-			"error":                 e.Error,
-			"installing_since":      e.InstallingSince,
-			"updated_at":            time.Now(),
-		}).Error
+			"install_transcript": transcript,
+			"updated_at":         time.Now(),
+		})
+	return result.RowsAffected == 1, result.Error
 }
 
 // UpdateSkillEnvs writes the declaration column alone, so recording what a
 // skill needs cannot disturb the install state written next to it.
 func (r *tenantSkillRepository) UpdateSkillEnvs(
-	ctx context.Context, tenantID uint64, configID, skillID string, envs types.SkillEnvVars,
+	ctx context.Context, configID, skillID string, envs types.SkillEnvVars,
 ) error {
 	return r.db.WithContext(ctx).
 		Model(&types.TenantSkillEntity{}).
-		Where("tenant_id = ? AND sandbox_config_id = ? AND id = ?", tenantID, configID, skillID).
+		Where("sandbox_config_id = ? AND id = ?", configID, skillID).
 		Updates(map[string]any{"envs": envs, "updated_at": time.Now()}).Error
+}
+
+func (r *tenantSkillRepository) UpdateSkillEnvsForRun(
+	ctx context.Context, configID, skillID, runID string, envs types.SkillEnvVars,
+) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&types.TenantSkillEntity{}).
+		Where("sandbox_config_id = ? AND id = ? AND install_run_id = ?",
+			configID, skillID, runID).
+		Updates(map[string]any{"envs": envs, "updated_at": time.Now()})
+	return result.RowsAffected == 1, result.Error
 }
 
 // UpdateSkillAdminState writes the two columns an admin request owns, together,
@@ -217,14 +288,13 @@ func (r *tenantSkillRepository) UpdateSkillEnvs(
 // rather than two that can half apply.
 func (r *tenantSkillRepository) UpdateSkillAdminState(
 	ctx context.Context,
-	tenantID uint64,
 	configID, skillID string,
 	enabled bool,
 	envs types.SkillEnvVars,
 ) error {
 	return r.db.WithContext(ctx).
 		Model(&types.TenantSkillEntity{}).
-		Where("tenant_id = ? AND sandbox_config_id = ? AND id = ?", tenantID, configID, skillID).
+		Where("sandbox_config_id = ? AND id = ?", configID, skillID).
 		Updates(map[string]any{
 			"enabled":    enabled,
 			"envs":       envs,
@@ -232,30 +302,24 @@ func (r *tenantSkillRepository) UpdateSkillAdminState(
 		}).Error
 }
 
-// DeleteSkill soft-deletes the skill and hard-deletes the user values that
-// belonged to it, in one transaction. The cleanup cannot be a cascading foreign
-// key: tenant_skills is soft-deleted, so ON DELETE CASCADE would never fire and
-// the credentials would outlive the skill they were entered for.
+// DeleteSkill soft-deletes only the platform installation projection. Tenant
+// user values are business data and are not deleted by platform maintenance.
 func (r *tenantSkillRepository) DeleteSkill(
-	ctx context.Context, tenantID uint64, configID, skillID string,
+	ctx context.Context, configID, skillID string,
 ) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		res := tx.
-			Where("tenant_id = ? AND sandbox_config_id = ? AND id = ?", tenantID, configID, skillID).
-			Delete(&types.TenantSkillEntity{})
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected == 0 {
-			return nil
-		}
-		if err := tx.
-			Where("tenant_id = ? AND skill_id = ?", tenantID, skillID).
-			Delete(&types.TenantUserEnvVar{}).Error; err != nil {
-			return err
-		}
-		return nil
-	})
+	return r.db.WithContext(ctx).
+		Where("sandbox_config_id = ? AND id = ?", configID, skillID).
+		Delete(&types.TenantSkillEntity{}).Error
+}
+
+func (r *tenantSkillRepository) DeleteSkillForRun(
+	ctx context.Context, configID, skillID, runID string,
+) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Where("sandbox_config_id = ? AND id = ? AND install_run_id = ?",
+			configID, skillID, runID).
+		Delete(&types.TenantSkillEntity{})
+	return result.RowsAffected == 1, result.Error
 }
 
 func (r *tenantSkillRepository) ListStaleInstalling(
@@ -281,7 +345,7 @@ func (r *tenantSkillRepository) CreateSnapshotRow(
 // MarkSnapshotState moves a ledger row and, when the snapshot has just been
 // created, records its provider-side ID.
 func (r *tenantSkillRepository) MarkSnapshotState(
-	ctx context.Context, tenantID uint64, id, state, snapshotID string,
+	ctx context.Context, id, state, snapshotID string,
 ) error {
 	updates := map[string]any{"state": state, "updated_at": time.Now()}
 	if snapshotID != "" {
@@ -293,16 +357,16 @@ func (r *tenantSkillRepository) MarkSnapshotState(
 	}
 	return r.db.WithContext(ctx).
 		Model(&types.TenantSkillSnapshotEntity{}).
-		Where("tenant_id = ? AND id = ?", tenantID, id).
+		Where("id = ?", id).
 		Updates(updates).Error
 }
 
 func (r *tenantSkillRepository) ListSnapshotsByConfig(
-	ctx context.Context, tenantID uint64, configID string,
+	ctx context.Context, configID string,
 ) ([]*types.TenantSkillSnapshotEntity, error) {
 	var list []*types.TenantSkillSnapshotEntity
 	err := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND sandbox_config_id = ?", tenantID, configID).
+		Where("sandbox_config_id = ?", configID).
 		Order("generation ASC").
 		Find(&list).Error
 	if err != nil {
@@ -318,11 +382,20 @@ func (r *tenantSkillRepository) ListSnapshotsByConfig(
 // and deleting rows would leave those IDs dangling. Here the config itself no
 // longer exists, so keeping rows would point at a deleted config instead.
 func (r *tenantSkillRepository) DeleteSnapshotRowsByConfig(
-	ctx context.Context, tenantID uint64, configID string,
+	ctx context.Context, configID string,
 ) error {
 	return r.db.WithContext(ctx).
-		Where("tenant_id = ? AND sandbox_config_id = ?", tenantID, configID).
+		Where("sandbox_config_id = ?", configID).
 		Delete(&types.TenantSkillSnapshotEntity{}).Error
+}
+
+func (r *tenantSkillRepository) CountUserEnvVarsByConfig(
+	ctx context.Context, configID string,
+) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&types.TenantUserEnvVar{}).
+		Where("sandbox_config_id = ?", configID).Count(&count).Error
+	return count, err
 }
 
 func (r *tenantSkillRepository) ListUserEnvVars(
@@ -397,24 +470,16 @@ func (r *tenantSkillRepository) DeleteUserEnvVar(
 	return nil
 }
 
-func (r *tenantSkillRepository) DeleteUserEnvVarsByConfig(
-	ctx context.Context, tenantID uint64, configID string,
-) error {
-	return r.db.WithContext(ctx).
-		Where("tenant_id = ? AND sandbox_config_id = ?", tenantID, configID).
-		Delete(&types.TenantUserEnvVar{}).Error
-}
-
 func (r *tenantSkillRepository) CreateCatalog(ctx context.Context, e *types.TenantSkillCatalogEntity) error {
 	return r.db.WithContext(ctx).Create(e).Error
 }
 
 func (r *tenantSkillRepository) GetCatalog(
-	ctx context.Context, tenantID uint64, catalogID string,
+	ctx context.Context, catalogID string,
 ) (*types.TenantSkillCatalogEntity, error) {
 	var e types.TenantSkillCatalogEntity
 	err := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND id = ?", tenantID, catalogID).
+		Where("id = ?", catalogID).
 		First(&e).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
@@ -426,11 +491,11 @@ func (r *tenantSkillRepository) GetCatalog(
 }
 
 func (r *tenantSkillRepository) GetCatalogByName(
-	ctx context.Context, tenantID uint64, name string,
+	ctx context.Context, name string,
 ) (*types.TenantSkillCatalogEntity, error) {
 	var e types.TenantSkillCatalogEntity
 	err := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND name = ?", tenantID, name).
+		Where("name = ?", name).
 		First(&e).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
@@ -441,12 +506,11 @@ func (r *tenantSkillRepository) GetCatalogByName(
 	return &e, nil
 }
 
-func (r *tenantSkillRepository) ListCatalogsByTenant(
-	ctx context.Context, tenantID uint64,
+func (r *tenantSkillRepository) ListCatalogs(
+	ctx context.Context,
 ) ([]*types.TenantSkillCatalogEntity, error) {
 	var list []*types.TenantSkillCatalogEntity
 	err := r.db.WithContext(ctx).
-		Where("tenant_id = ?", tenantID).
 		Order("created_at ASC").
 		Find(&list).Error
 	if err != nil {
@@ -458,7 +522,7 @@ func (r *tenantSkillRepository) ListCatalogsByTenant(
 func (r *tenantSkillRepository) UpdateCatalog(ctx context.Context, e *types.TenantSkillCatalogEntity) error {
 	return r.db.WithContext(ctx).
 		Model(&types.TenantSkillCatalogEntity{}).
-		Where("tenant_id = ? AND id = ?", e.TenantID, e.ID).
+		Where("id = ?", e.ID).
 		Updates(map[string]any{
 			"name":          e.Name,
 			"version":       e.Version,
@@ -470,18 +534,18 @@ func (r *tenantSkillRepository) UpdateCatalog(ctx context.Context, e *types.Tena
 		}).Error
 }
 
-func (r *tenantSkillRepository) DeleteCatalog(ctx context.Context, tenantID uint64, catalogID string) error {
+func (r *tenantSkillRepository) DeleteCatalog(ctx context.Context, catalogID string) error {
 	return r.db.WithContext(ctx).
-		Where("tenant_id = ? AND id = ?", tenantID, catalogID).
+		Where("id = ?", catalogID).
 		Delete(&types.TenantSkillCatalogEntity{}).Error
 }
 
 func (r *tenantSkillRepository) ListSkillsByCatalog(
-	ctx context.Context, tenantID uint64, catalogID string,
+	ctx context.Context, catalogID string,
 ) ([]*types.TenantSkillEntity, error) {
 	var list []*types.TenantSkillEntity
 	err := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND catalog_id = ?", tenantID, catalogID).
+		Where("catalog_id = ?", catalogID).
 		Order("created_at ASC").
 		Find(&list).Error
 	if err != nil {

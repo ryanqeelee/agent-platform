@@ -35,6 +35,7 @@ import (
 
 	"github.com/google/uuid"
 	"golang.org/x/sync/singleflight"
+	"gorm.io/gorm"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
@@ -215,26 +216,14 @@ type sandboxSnapshotReleaser interface {
 // sandboxConfigSkillStore is the skill/ledger slice Delete needs to destroy
 // snapshots and drop rows that would dangle after SoftDelete.
 type sandboxConfigSkillStore interface {
-	ListSnapshotsByConfig(
-		ctx context.Context, tenantID uint64, configID string,
-	) ([]*types.TenantSkillSnapshotEntity, error)
-	MarkSnapshotState(ctx context.Context, tenantID uint64, id, state, snapshotID string) error
-	ListSkillsByConfig(ctx context.Context, tenantID uint64, configID string) ([]*types.TenantSkillEntity, error)
-	DeleteSkill(ctx context.Context, tenantID uint64, configID, skillID string) error
-	// The tenant-wide lists answer who else still reads an archive the
-	// deleted install rows had pinned.
-	ListSkillsByTenant(ctx context.Context, tenantID uint64) ([]*types.TenantSkillEntity, error)
-	ListCatalogsByTenant(ctx context.Context, tenantID uint64) ([]*types.TenantSkillCatalogEntity, error)
-	DeleteSnapshotRowsByConfig(ctx context.Context, tenantID uint64, configID string) error
-	DeleteUserEnvVarsByConfig(ctx context.Context, tenantID uint64, configID string) error
-}
-
-// sandboxConfigBundleResolver locates the tenant file service so config
-// deletion can drop skill archives after the ledger is released.
-type sandboxConfigBundleResolver interface {
-	ResolveFileService(
-		ctx context.Context, tenant *types.Tenant, backendID, provider, localBaseDir string,
-	) (interfaces.FileService, string, error)
+	ListSnapshotsByConfig(ctx context.Context, configID string) ([]*types.TenantSkillSnapshotEntity, error)
+	MarkSnapshotState(ctx context.Context, id, state, snapshotID string) error
+	ListSkillsByConfig(ctx context.Context, configID string) ([]*types.TenantSkillEntity, error)
+	DeleteSkill(ctx context.Context, configID, skillID string) error
+	ListSkills(ctx context.Context) ([]*types.TenantSkillEntity, error)
+	ListCatalogs(ctx context.Context) ([]*types.TenantSkillCatalogEntity, error)
+	DeleteSnapshotRowsByConfig(ctx context.Context, configID string) error
+	CountUserEnvVarsByConfig(ctx context.Context, configID string) (int64, error)
 }
 
 // SandboxInventory describes what a config holds and who a change disturbs.
@@ -242,6 +231,7 @@ type SandboxInventory struct {
 	SandboxCount int      `json:"sandbox_count"`
 	SessionIDs   []string `json:"session_ids,omitempty"`
 	AgentNames   []string `json:"agent_names,omitempty"`
+	UserEnvCount int64    `json:"user_env_count,omitempty"`
 
 	// Unverifiable reports that SandboxCount is unknown rather than zero
 	// because the provider could not be reached. The management page must say
@@ -280,10 +270,9 @@ type SandboxTemplateCatalog struct {
 	Provisioned        bool                     `json:"provisioned"`
 }
 
-// SandboxConfigAgentRepo is the slice of the agent repository this service
-// needs. Agent references are warnings, never grounds for refusing a change.
+// SandboxConfigAgentRepo inventories references across every tenant.
 type SandboxConfigAgentRepo interface {
-	ListNamesBySandboxConfigID(ctx context.Context, tenantID uint64, configID string) ([]string, error)
+	ListNamesBySandboxConfigID(ctx context.Context, configID string) ([]string, error)
 }
 
 // TenantSandboxConfigService owns the sandbox config lifecycle.
@@ -297,7 +286,8 @@ type TenantSandboxConfigService struct {
 	// and drop install rows. Catalog archives are owned by the skill
 	// definition and are not deleted here.
 	skills sandboxConfigSkillStore
-	files  sandboxConfigBundleResolver
+	files  interfaces.PlatformSkillArchiveStore
+	pinner *SessionSandboxPinner
 
 	// newClient is injectable so tests can supply a provider inventory.
 	newClient func(*sandbox.Config) (sandbox.ConfigSandboxClient, error)
@@ -315,7 +305,8 @@ func NewTenantSandboxConfigService(
 	agents SandboxConfigAgentRepo,
 	globalCfg *sandbox.Config,
 	skills repository.TenantSkillRepository,
-	files sandboxConfigBundleResolver,
+	files interfaces.PlatformSkillArchiveStore,
+	pinner *SessionSandboxPinner,
 ) *TenantSandboxConfigService {
 	return &TenantSandboxConfigService{
 		repo:      repo,
@@ -324,6 +315,7 @@ func NewTenantSandboxConfigService(
 		now:       time.Now,
 		skills:    skills,
 		files:     files,
+		pinner:    pinner,
 		newClient: func(cfg *sandbox.Config) (sandbox.ConfigSandboxClient, error) {
 			return sandbox.NewRemoteClientForCheck(cfg)
 		},
@@ -415,78 +407,9 @@ func validateNamedSandboxBackend(cfg *types.TenantSandboxConfig) error {
 	return sandbox.EnsureDockerBackendAllowed(sandbox.SandboxType(cfg.SandboxType))
 }
 
-func filterPublicSandboxConfigs(
-	list []*types.TenantSandboxConfigEntity,
-) []*types.TenantSandboxConfigEntity {
-	if len(list) == 0 {
-		return list
-	}
-	out := make([]*types.TenantSandboxConfigEntity, 0, len(list))
-	for _, e := range list {
-		if types.IsSandboxWorkspacePolicyRow(e) {
-			continue
-		}
-		out = append(out, e)
-	}
-	return out
-}
-
-func findWorkspacePolicyRow(
-	list []*types.TenantSandboxConfigEntity,
-) *types.TenantSandboxConfigEntity {
-	for _, e := range list {
-		if types.IsSandboxWorkspacePolicyRow(e) {
-			return e
-		}
-	}
-	return nil
-}
-
-// WorkspaceScriptsDisabled reports whether the workspace-wide kill switch is
-// active, regardless of which named backend an agent selected.
-func (s *TenantSandboxConfigService) WorkspaceScriptsDisabled(
-	ctx context.Context, tenantID uint64,
-) (bool, error) {
-	list, err := s.repo.ListByTenant(ctx, tenantID)
-	if err != nil {
-		return false, err
-	}
-	return findWorkspacePolicyRow(list) != nil, nil
-}
-
-// SetWorkspaceScriptsDisabled toggles script execution for the entire
-// workspace, across all named backend types.
-func (s *TenantSandboxConfigService) SetWorkspaceScriptsDisabled(
-	ctx context.Context, tenantID uint64, disabled bool,
-) error {
-	list, err := s.repo.ListByTenant(ctx, tenantID)
-	if err != nil {
-		return err
-	}
-	existing := findWorkspacePolicyRow(list)
-	if disabled {
-		if existing != nil {
-			return nil
-		}
-		entity := &types.TenantSandboxConfigEntity{
-			ID:          uuid.New().String(),
-			TenantID:    tenantID,
-			Name:        types.SandboxWorkspacePolicyConfigName,
-			Description: "",
-			SandboxType: string(sandbox.SandboxTypeDisabled),
-			Config:      &types.TenantSandboxConfig{SandboxType: string(sandbox.SandboxTypeDisabled)},
-		}
-		return s.repo.Create(ctx, entity)
-	}
-	if existing == nil {
-		return nil
-	}
-	return s.repo.SoftDelete(ctx, tenantID, existing.ID)
-}
-
 // Create stores a new config.
 func (s *TenantSandboxConfigService) Create(
-	ctx context.Context, tenantID uint64, in CreateSandboxConfigInput,
+	ctx context.Context, in CreateSandboxConfigInput,
 ) (*types.TenantSandboxConfigEntity, error) {
 	if err := validateNamedSandboxBackend(in.Config); err != nil {
 		return nil, err
@@ -501,7 +424,6 @@ func (s *TenantSandboxConfigService) Create(
 	}
 	entity := &types.TenantSandboxConfigEntity{
 		ID:          uuid.New().String(),
-		TenantID:    tenantID,
 		Name:        name,
 		Description: in.Description,
 		Config:      merged,
@@ -515,36 +437,44 @@ func (s *TenantSandboxConfigService) Create(
 	return entity, nil
 }
 
-// List returns the workspace's user-facing configs (policy row excluded).
+// List returns the platform sandbox configs.
 func (s *TenantSandboxConfigService) List(
-	ctx context.Context, tenantID uint64,
+	ctx context.Context,
 ) ([]*types.TenantSandboxConfigEntity, error) {
-	list, err := s.repo.ListByTenant(ctx, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	return filterPublicSandboxConfigs(list), nil
+	return s.repo.ListAll(ctx)
 }
 
 // Get returns one config, or nil when absent.
 func (s *TenantSandboxConfigService) Get(
-	ctx context.Context, tenantID uint64, id string,
+	ctx context.Context, id string,
 ) (*types.TenantSandboxConfigEntity, error) {
-	entity, err := s.repo.GetByID(ctx, tenantID, id)
-	if err != nil || entity == nil {
-		return nil, err
+	return s.repo.GetByID(ctx, id)
+}
+
+// GetDefault returns the connection selected for new sessions. Existing
+// session pins are never rewritten when this changes.
+func (s *TenantSandboxConfigService) GetDefault(
+	ctx context.Context,
+) (*types.TenantSandboxConfigEntity, error) {
+	return s.repo.GetDefault(ctx)
+}
+
+// SetDefault delegates to the repository's single transactional authority.
+func (s *TenantSandboxConfigService) SetDefault(ctx context.Context, id string) error {
+	if err := s.repo.SetDefault(ctx, strings.TrimSpace(id)); err != nil {
+		if stderrors.Is(err, gorm.ErrRecordNotFound) {
+			return apperrors.NewNotFoundError("sandbox config not found")
+		}
+		return err
 	}
-	if types.IsSandboxWorkspacePolicyRow(entity) {
-		return nil, nil
-	}
-	return entity, nil
+	return nil
 }
 
 // QueryTemplates reads the provider's template catalog and optionally installs
 // the standard WeKnora image when it is absent. This is intentionally driven by
-// workspace credentials instead of deployment environment variables.
+// platform-managed credentials instead of deployment environment variables.
 func (s *TenantSandboxConfigService) QueryTemplates(
-	ctx context.Context, tenantID uint64, in SandboxTemplateQueryInput,
+	ctx context.Context, in SandboxTemplateQueryInput,
 ) (*SandboxTemplateCatalog, error) {
 	if in.ReplaceStandard && strings.TrimSpace(in.ConfigID) == "" {
 		return nil, apperrors.NewBadRequestError(
@@ -552,11 +482,11 @@ func (s *TenantSandboxConfigService) QueryTemplates(
 	}
 	var existing *types.TenantSandboxConfig
 	if strings.TrimSpace(in.ConfigID) != "" {
-		entity, err := s.repo.GetByID(ctx, tenantID, in.ConfigID)
+		entity, err := s.repo.GetByID(ctx, in.ConfigID)
 		if err != nil {
 			return nil, err
 		}
-		if entity == nil || types.IsSandboxWorkspacePolicyRow(entity) {
+		if entity == nil {
 			return nil, apperrors.NewNotFoundError("sandbox config not found")
 		}
 		existing = entity.Config
@@ -569,7 +499,7 @@ func (s *TenantSandboxConfigService) QueryTemplates(
 		return nil, apperrors.NewBadRequestError("sandbox config is required")
 	}
 	if in.ReplaceStandard {
-		if err := s.refuseClusterSkillTemplateReplace(ctx, tenantID, merged); err != nil {
+		if err := s.refuseClusterSkillTemplateReplace(ctx, merged); err != nil {
 			return nil, err
 		}
 	}
@@ -650,7 +580,7 @@ func (s *TenantSandboxConfigService) QueryTemplates(
 		if in.ReplaceStandard {
 			op = "replace"
 		}
-		key := op + ":" + ensureTemplateKey(tenantID, sandbox.IdentityOf(merged))
+		key := op + ":" + ensureTemplateKey(sandbox.IdentityOf(merged))
 		ensured, ensureErr, _ := s.ensureTemplate.Do(key, func() (any, error) {
 			if in.ReplaceStandard {
 				return catalog.ReplaceStandardTemplate(ctx)
@@ -668,7 +598,7 @@ func (s *TenantSandboxConfigService) QueryTemplates(
 		if sandbox.IsTemplateReady(standard.Status) {
 			result.Provisioned = true
 			if in.ReplaceStandard {
-				persistErr := s.persistSpawnTemplateID(ctx, tenantID, merged, standard.ID, oldStandardIDs)
+				persistErr := s.persistSpawnTemplateID(ctx, merged, standard.ID, oldStandardIDs)
 				if persistErr != nil {
 					logger.Warnf(ctx, "[sandbox] persist rebuilt template id: %v; keeping previous templates",
 						persistErr)
@@ -721,22 +651,22 @@ func standardTemplateIDs(items []sandbox.RemoteTemplate) []string {
 }
 
 func (s *TenantSandboxConfigService) refuseClusterSkillTemplateReplace(
-	ctx context.Context, tenantID uint64, merged *types.TenantSandboxConfig,
+	ctx context.Context, merged *types.TenantSandboxConfig,
 ) error {
 	identity := sandbox.IdentityOf(merged)
-	list, err := s.repo.ListByTenant(ctx, tenantID)
+	list, err := s.repo.ListAll(ctx)
 	if err != nil {
 		return err
 	}
 	for _, entity := range list {
-		if entity == nil || types.IsSandboxWorkspacePolicyRow(entity) {
+		if entity == nil {
 			continue
 		}
 		if sandbox.IdentityOf(entity.Config) != identity {
 			continue
 		}
 		if configHasSkillSnapshot(entity.Config) ||
-			s.configHasInFlightSkill(ctx, entity.TenantID, entity.ID) {
+			s.configHasInFlightSkill(ctx, entity.ID) {
 			return ErrSkillSnapshotBlocksTemplateChange
 		}
 	}
@@ -744,12 +674,12 @@ func (s *TenantSandboxConfigService) refuseClusterSkillTemplateReplace(
 }
 
 func (s *TenantSandboxConfigService) configHasInFlightSkill(
-	ctx context.Context, tenantID uint64, configID string,
+	ctx context.Context, configID string,
 ) bool {
 	if s == nil || s.skills == nil || strings.TrimSpace(configID) == "" {
 		return false
 	}
-	rows, err := s.skills.ListSkillsByConfig(ctx, tenantID, configID)
+	rows, err := s.skills.ListSkillsByConfig(ctx, configID)
 	if err != nil {
 		logger.Warnf(ctx, "[sandbox] cannot read skills of config %s while judging a retarget: %v",
 			configID, err)
@@ -769,7 +699,6 @@ func (s *TenantSandboxConfigService) configHasInFlightSkill(
 
 func (s *TenantSandboxConfigService) persistSpawnTemplateID(
 	ctx context.Context,
-	tenantID uint64,
 	merged *types.TenantSandboxConfig,
 	newID string,
 	oldIDs []string,
@@ -785,13 +714,13 @@ func (s *TenantSandboxConfigService) persistSpawnTemplateID(
 		}
 	}
 	identity := sandbox.IdentityOf(merged)
-	list, err := s.repo.ListByTenant(ctx, tenantID)
+	list, err := s.repo.ListAll(ctx)
 	if err != nil {
 		return fmt.Errorf("list configs: %w", err)
 	}
 	var persistErr error
 	for _, entity := range list {
-		if entity == nil || entity.Config == nil || types.IsSandboxWorkspacePolicyRow(entity) {
+		if entity == nil || entity.Config == nil {
 			continue
 		}
 		if sandbox.IdentityOf(entity.Config) != identity {
@@ -862,12 +791,12 @@ func pickStandardTemplate(items []sandbox.RemoteTemplate) *sandbox.RemoteTemplat
 	return best
 }
 
-// ensureTemplateKey names one cluster as seen by one tenant. The identity
+// ensureTemplateKey names one provider cluster. The identity
 // carries an API key, so it is hashed rather than formatted: this string is
 // only ever compared, and it should not be able to surface a credential in a
 // panic trace or a heap dump.
-func ensureTemplateKey(tenantID uint64, identity sandbox.SandboxIdentity) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%d|%#v", tenantID, identity)))
+func ensureTemplateKey(identity sandbox.SandboxIdentity) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%#v", identity)))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -927,17 +856,20 @@ func templateStatusRank(status string) int {
 // error: the management page still has to render the card, and the agent names
 // it warns about come from our own database.
 func (s *TenantSandboxConfigService) Inventory(
-	ctx context.Context, tenantID uint64, id string,
+	ctx context.Context, id string,
 ) (SandboxInventory, error) {
-	entity, err := s.repo.GetByID(ctx, tenantID, id)
+	entity, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return SandboxInventory{}, err
 	}
 	if entity == nil {
 		return SandboxInventory{}, apperrors.NewNotFoundError("sandbox config not found")
 	}
-	summaries, err := s.listSandboxes(ctx, entity.Config, tenantID, id)
-	inv := s.inventoryFromSummaries(ctx, tenantID, id, summaries)
+	summaries, err := s.listSandboxes(ctx, entity.Config, id)
+	inv, refsErr := s.inventoryFromSummaries(ctx, id, summaries)
+	if refsErr != nil {
+		return SandboxInventory{}, refsErr
+	}
 	if err != nil {
 		logger.Warnf(ctx, "[sandbox] inventory of config %s is unverifiable: %v", id, err)
 		inv.Unverifiable = true
@@ -950,7 +882,6 @@ func (s *TenantSandboxConfigService) Inventory(
 func (s *TenantSandboxConfigService) listSandboxes(
 	ctx context.Context,
 	cfg *types.TenantSandboxConfig,
-	tenantID uint64,
 	id string,
 ) ([]sandbox.RemoteSandboxSummary, error) {
 	client, err := s.clientFor(cfg)
@@ -960,21 +891,18 @@ func (s *TenantSandboxConfigService) listSandboxes(
 	if client == nil {
 		return nil, nil
 	}
-	return sandbox.ListConfigSandboxes(ctx, client, tenantID, id)
+	return sandbox.ListConfigSandboxes(ctx, client, id)
 }
 
 // Update applies an edit. Identity edits are cordoned before inventory and
 // swept afterwards using the old client so credentials are never overwritten
 // while they still own provider resources.
 func (s *TenantSandboxConfigService) Update(
-	ctx context.Context, tenantID uint64, id string, in UpdateSandboxConfigInput,
+	ctx context.Context, id string, in UpdateSandboxConfigInput,
 ) (*types.TenantSandboxConfigEntity, error) {
-	entity, err := s.repo.GetByID(ctx, tenantID, id)
+	entity, err := s.repo.GetByID(ctx, id)
 	if err != nil || entity == nil {
 		return nil, err
-	}
-	if types.IsSandboxWorkspacePolicyRow(entity) {
-		return nil, apperrors.NewBadRequestError("workspace policy cannot be edited here")
 	}
 	if in.Config != nil && strings.TrimSpace(in.Config.SandboxType) != "" {
 		if err := validateNamedSandboxBackend(in.Config); err != nil {
@@ -989,17 +917,17 @@ func (s *TenantSandboxConfigService) Update(
 		return nil, err
 	}
 	if skillSnapshotBlocksConnectionChange(entity.Config, merged) ||
-		(skillRetargetWouldChange(entity.Config, merged) && s.configHasInFlightSkill(ctx, tenantID, id)) {
+		(skillRetargetWouldChange(entity.Config, merged) && s.configHasInFlightSkill(ctx, id)) {
 		return nil, ErrSkillSnapshotBlocksTemplateChange
 	}
 	if !SandboxIdentityChanged(entity.Config, merged) {
 		return s.writeConfig(ctx, entity, in, merged)
 	}
 
-	if err := s.repo.SetCordon(ctx, tenantID, id, s.now()); err != nil {
+	if err := s.repo.SetCordon(ctx, id, s.now()); err != nil {
 		return nil, err
 	}
-	defer s.clearCordonAfterRequest(ctx, tenantID, id)
+	defer s.clearCordonAfterRequest(ctx, id)
 
 	// When old credentials no longer reach the provider we cannot enumerate
 	// sandboxes to refuse the edit — but blocking the save traps the admin on
@@ -1013,14 +941,17 @@ func (s *TenantSandboxConfigService) Update(
 		oldClient = nil
 	}
 	if oldClient != nil {
-		summaries, listErr := sandbox.ListConfigSandboxes(ctx, oldClient, tenantID, id)
+		summaries, listErr := sandbox.ListConfigSandboxes(ctx, oldClient, id)
 		if listErr != nil {
 			logger.Warnf(ctx,
 				"[sandbox] config %s: cannot verify sandbox inventory with old credentials: %v; proceeding",
 				id, listErr)
 			oldClient = nil
 		} else if len(summaries) > 0 {
-			inv := s.inventoryFromSummaries(ctx, tenantID, id, summaries)
+			inv, refsErr := s.inventoryFromSummaries(ctx, id, summaries)
+			if refsErr != nil {
+				return nil, refsErr
+			}
 			return nil, &SandboxesStillLiveError{Inventory: inv}
 		}
 	}
@@ -1031,14 +962,15 @@ func (s *TenantSandboxConfigService) Update(
 	}
 
 	if oldClient != nil {
-		s.sweepAfterWrite(ctx, oldClient, tenantID, id)
+		s.sweepAfterWrite(ctx, oldClient, id)
 	}
 	return updated, nil
 }
 
-// Delete refuses while the config still owns sandboxes, and while skill
-// snapshots on its ledger cannot be destroyed. Agent references are permanent
-// state and are surfaced as warnings by callers, not blockers.
+// Delete refuses while any tenant runtime still references the config, while
+// the config still owns provider sandboxes, or while skill snapshots on its
+// ledger cannot be destroyed. The reference inventory spans all tenants
+// because the credential-bearing config has one platform identity.
 //
 // force covers two cases we cannot complete from here: the provider could not
 // be reached to list sandboxes, and a skill snapshot could not be destroyed.
@@ -1049,21 +981,28 @@ func (s *TenantSandboxConfigService) Update(
 // otherwise the forced deletion would be precisely the permanent leak this
 // whole flow prevents.
 func (s *TenantSandboxConfigService) Delete(
-	ctx context.Context, tenantID uint64, id string, force bool,
+	ctx context.Context, id string, force bool,
 ) error {
-	entity, err := s.repo.GetByID(ctx, tenantID, id)
+	entity, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return err
 	}
 	// Reporting success for a config that is not there would let the UI drop a
-	// card the workspace still has, so absence is an explicit 404.
+	// card the platform still has, so absence is an explicit 404.
 	if entity == nil {
 		return apperrors.NewNotFoundError("sandbox config not found")
 	}
-	if types.IsSandboxWorkspacePolicyRow(entity) {
-		return apperrors.NewBadRequestError("workspace policy cannot be deleted here")
+	if entity.IsDefault {
+		return repository.ErrDeleteDefaultSandboxConfig
 	}
-	summaries, listErr := s.listSandboxes(ctx, entity.Config, tenantID, id)
+	refs, err := s.inventoryFromSummaries(ctx, id, nil)
+	if err != nil {
+		return err
+	}
+	if len(refs.SessionIDs) > 0 || len(refs.AgentNames) > 0 || refs.UserEnvCount > 0 {
+		return &SandboxesStillLiveError{Inventory: refs}
+	}
+	summaries, listErr := s.listSandboxes(ctx, entity.Config, id)
 	if listErr != nil {
 		if !force {
 			return fmt.Errorf("%w: %v", ErrSandboxInventoryUnverifiable, listErr)
@@ -1073,13 +1012,16 @@ func (s *TenantSandboxConfigService) Delete(
 			id, listErr)
 	}
 	if len(summaries) > 0 {
-		inv := s.inventoryFromSummaries(ctx, tenantID, id, summaries)
+		inv, refsErr := s.inventoryFromSummaries(ctx, id, summaries)
+		if refsErr != nil {
+			return refsErr
+		}
 		return &SandboxesStillLiveError{Inventory: inv}
 	}
-	if err := s.releaseSkillSnapshots(ctx, entity, tenantID, id, force); err != nil {
+	if err := s.releaseSkillSnapshots(ctx, entity, id, force); err != nil {
 		return err
 	}
-	return s.repo.SoftDelete(ctx, tenantID, id)
+	return s.repo.SoftDelete(ctx, id)
 }
 
 func snapshotReleaserFrom(client sandbox.ConfigSandboxClient) (sandboxSnapshotReleaser, bool) {
@@ -1137,7 +1079,7 @@ func resolveAbandonedBuildIDs(
 		logger.Warnf(ctx, "[sandbox] list snapshots to release abandoned builds failed: %v", err)
 		return
 	}
-	prefix := skillSnapshotNamePrefix(unresolved[0].TenantID, unresolved[0].SandboxConfigID)
+	prefix := skillSnapshotNamePrefix(unresolved[0].SandboxConfigID)
 	listed = snapshotsNotFromOtherConfig(listed, prefix)
 	for _, row := range unresolved {
 		id := matchSnapshotByName(listed, row.PlannedName)
@@ -1174,7 +1116,6 @@ func skillSnapshotName(row *types.TenantSkillSnapshotEntity) string {
 func (s *TenantSandboxConfigService) releaseSkillSnapshots(
 	ctx context.Context,
 	entity *types.TenantSandboxConfigEntity,
-	tenantID uint64,
 	configID string,
 	force bool,
 ) error {
@@ -1182,7 +1123,7 @@ func (s *TenantSandboxConfigService) releaseSkillSnapshots(
 		return nil
 	}
 
-	rows, err := s.skills.ListSnapshotsByConfig(ctx, tenantID, configID)
+	rows, err := s.skills.ListSnapshotsByConfig(ctx, configID)
 	if err != nil {
 		if !force {
 			return fmt.Errorf("%w: list snapshots: %v", ErrSkillSnapshotReleaseFailed, err)
@@ -1203,7 +1144,7 @@ func (s *TenantSandboxConfigService) releaseSkillSnapshots(
 			configID, strings.Join(remaining, ", "))
 	}
 
-	s.cleanupSkillMetadata(ctx, tenantID, configID)
+	s.cleanupSkillMetadata(ctx, configID)
 	return nil
 }
 
@@ -1234,7 +1175,7 @@ func (s *TenantSandboxConfigService) destroyPendingSnapshots(
 			continue
 		}
 		if err := s.skills.MarkSnapshotState(
-			ctx, row.TenantID, row.ID, types.SkillSnapshotStateDeleted, row.SnapshotID,
+			ctx, row.ID, types.SkillSnapshotStateDeleted, row.SnapshotID,
 		); err != nil {
 			logger.Warnf(ctx, "[sandbox] mark snapshot %s deleted failed: %v", row.ID, err)
 			remaining = append(remaining, skillSnapshotName(row))
@@ -1291,9 +1232,9 @@ func deleteProviderSnapshot(
 }
 
 func (s *TenantSandboxConfigService) cleanupSkillMetadata(
-	ctx context.Context, tenantID uint64, configID string,
+	ctx context.Context, configID string,
 ) {
-	skills, err := s.skills.ListSkillsByConfig(ctx, tenantID, configID)
+	skills, err := s.skills.ListSkillsByConfig(ctx, configID)
 	if err != nil {
 		logger.Warnf(ctx, "[sandbox] list skills for config %s cleanup failed: %v", configID, err)
 	}
@@ -1309,22 +1250,16 @@ func (s *TenantSandboxConfigService) cleanupSkillMetadata(
 				pinned = append(pinned, ref)
 			}
 		}
-		if err := s.skills.DeleteSkill(ctx, tenantID, configID, skill.ID); err != nil {
+		if err := s.skills.DeleteSkill(ctx, configID, skill.ID); err != nil {
 			logger.Warnf(ctx, "[sandbox] delete skill %s on config %s failed: %v",
 				skill.ID, configID, err)
 		}
 	}
 	// After the rows are gone, never before: each ref is named by the very row
 	// being deleted, so asking first would always find a reader.
-	s.releasePinnedBundles(ctx, tenantID, pinned)
-	if err := s.skills.DeleteSnapshotRowsByConfig(ctx, tenantID, configID); err != nil {
+	s.releasePinnedBundles(ctx, pinned)
+	if err := s.skills.DeleteSnapshotRowsByConfig(ctx, configID); err != nil {
 		logger.Warnf(ctx, "[sandbox] delete snapshot ledger for config %s failed: %v",
-			configID, err)
-	}
-	// DeleteSkill only takes the values filed under a skill; the config-wide
-	// ones have no skill to hang off and would outlive the config.
-	if err := s.skills.DeleteUserEnvVarsByConfig(ctx, tenantID, configID); err != nil {
-		logger.Warnf(ctx, "[sandbox] delete member env vars for config %s failed: %v",
 			configID, err)
 	}
 }
@@ -1344,17 +1279,17 @@ func (s *TenantSandboxConfigService) cleanupSkillMetadata(
 // keeps the archive: a leaked one costs storage, a deleted one costs some other
 // sandbox its files.
 func (s *TenantSandboxConfigService) releasePinnedBundles(
-	ctx context.Context, tenantID uint64, refs []string,
+	ctx context.Context, refs []string,
 ) {
 	if len(refs) == 0 || s.files == nil || s.skills == nil {
 		return
 	}
-	catalogs, err := s.skills.ListCatalogsByTenant(ctx, tenantID)
+	catalogs, err := s.skills.ListCatalogs(ctx)
 	if err != nil {
 		logger.Warnf(ctx, "[sandbox] list catalogs before releasing skill archives failed: %v", err)
 		return
 	}
-	installs, err := s.skills.ListSkillsByTenant(ctx, tenantID)
+	installs, err := s.skills.ListSkills(ctx)
 	if err != nil {
 		logger.Warnf(ctx, "[sandbox] list installs before releasing skill archives failed: %v", err)
 		return
@@ -1371,21 +1306,11 @@ func (s *TenantSandboxConfigService) releasePinnedBundles(
 		}
 	}
 
-	var fs interfaces.FileService
 	for _, ref := range refs {
 		if _, still := held[ref]; still {
 			continue
 		}
-		if fs == nil {
-			resolved, _, resolveErr := s.files.ResolveFileService(ctx, &types.Tenant{ID: tenantID}, "", "", "")
-			if resolveErr != nil || resolved == nil {
-				logger.Warnf(ctx, "[sandbox] resolve file service to release skill archives failed: %v",
-					resolveErr)
-				return
-			}
-			fs = resolved
-		}
-		if err := fs.DeleteFile(ctx, ref); err != nil {
+		if err := s.files.Delete(ctx, ref); err != nil {
 			logger.Warnf(ctx, "[sandbox] delete skill archive %s failed: %v", ref, err)
 		}
 	}
@@ -1435,37 +1360,54 @@ func (s *TenantSandboxConfigService) writeConfig(
 
 func (s *TenantSandboxConfigService) inventoryFromSummaries(
 	ctx context.Context,
-	tenantID uint64,
 	id string,
 	summaries []sandbox.RemoteSandboxSummary,
-) SandboxInventory {
+) (SandboxInventory, error) {
 	inv := SandboxInventory{SandboxCount: len(summaries)}
+	seenSessions := make(map[string]struct{}, len(summaries))
 	for _, summary := range summaries {
 		if sessionID := summary.Metadata[sandbox.MetadataSessionIDKey()]; sessionID != "" {
-			inv.SessionIDs = append(inv.SessionIDs, sessionID)
+			seenSessions[sessionID] = struct{}{}
 		}
 	}
-	if s.agents == nil {
-		return inv
+	if s.pinner != nil {
+		refs, err := s.pinner.ListReferencesByConfigID(ctx, id)
+		if err != nil {
+			return SandboxInventory{}, fmt.Errorf("list session references for config %s: %w", id, err)
+		}
+		for _, ref := range refs {
+			seenSessions[ref.SessionID] = struct{}{}
+		}
 	}
-	names, err := s.agents.ListNamesBySandboxConfigID(ctx, tenantID, id)
-	if err != nil {
-		logger.Warnf(ctx, "[sandbox] list agents for config %s: %v", id, err)
-		return inv
+	for sessionID := range seenSessions {
+		inv.SessionIDs = append(inv.SessionIDs, sessionID)
 	}
-	inv.AgentNames = names
-	return inv
+	sort.Strings(inv.SessionIDs)
+	if s.agents != nil {
+		names, err := s.agents.ListNamesBySandboxConfigID(ctx, id)
+		if err != nil {
+			return SandboxInventory{}, fmt.Errorf("list agent references for config %s: %w", id, err)
+		}
+		inv.AgentNames = names
+	}
+	if s.skills != nil {
+		count, err := s.skills.CountUserEnvVarsByConfig(ctx, id)
+		if err != nil {
+			return SandboxInventory{}, fmt.Errorf("count user environment references for config %s: %w", id, err)
+		}
+		inv.UserEnvCount = count
+	}
+	return inv, nil
 }
 
 func (s *TenantSandboxConfigService) clearCordonAfterRequest(
 	ctx context.Context,
-	tenantID uint64,
 	id string,
 ) {
 	cleanupCtx, cancel := context.WithTimeout(
 		context.WithoutCancel(ctx), sandboxConfigCleanupTimeout)
 	defer cancel()
-	if err := s.repo.ClearCordon(cleanupCtx, tenantID, id); err != nil {
+	if err := s.repo.ClearCordon(cleanupCtx, id); err != nil {
 		logger.Warnf(ctx, "[sandbox] clear cordon on config %s: %v", id, err)
 	}
 }
@@ -1473,13 +1415,12 @@ func (s *TenantSandboxConfigService) clearCordonAfterRequest(
 func (s *TenantSandboxConfigService) sweepAfterWrite(
 	ctx context.Context,
 	oldClient sandbox.ConfigSandboxClient,
-	tenantID uint64,
 	id string,
 ) {
 	cleanupCtx, cancel := context.WithTimeout(
 		context.WithoutCancel(ctx), sandboxConfigCleanupTimeout)
 	defer cancel()
-	deleted, err := sandbox.ReleaseConfigSandboxes(cleanupCtx, oldClient, tenantID, id)
+	deleted, err := sandbox.ReleaseConfigSandboxes(cleanupCtx, oldClient, id)
 	if err != nil {
 		logger.Warnf(ctx, "[sandbox] post-write sweep of config %s failed: %v", id, err)
 		return
@@ -1491,7 +1432,7 @@ func (s *TenantSandboxConfigService) sweepAfterWrite(
 	}
 }
 
-// sandboxConfigEndpoints returns every non-empty tenant-supplied URL.
+// sandboxConfigEndpoints returns every non-empty platform-configured URL.
 func sandboxConfigEndpoints(cfg *types.TenantSandboxConfig) []string {
 	if cfg == nil {
 		return nil

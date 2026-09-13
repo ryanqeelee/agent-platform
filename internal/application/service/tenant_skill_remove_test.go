@@ -24,7 +24,7 @@ func TestRunRemoveProducesANewSnapshotWithoutTheSkillDir(t *testing.T) {
 	// and spends no snapshot at all (the test below).
 	fx.seedInstalledSkill("sk-2", "snap-old", 2)
 
-	err := fx.svc.runRemove(context.Background(), 7, "cfg-1", "sk-1")
+	err := fx.svc.runRemove(context.Background(), "cfg-1", "sk-1", "run-1")
 
 	require.NoError(t, err)
 	require.Contains(t, fx.commands, removeSkillDirCommand)
@@ -34,18 +34,11 @@ func TestRunRemoveProducesANewSnapshotWithoutTheSkillDir(t *testing.T) {
 		"the ledger records the old snapshot ID, so it must stay resolvable")
 	require.Equal(t, []string{"sess-1"}, fx.destroyedSandboxes,
 		"the maintenance sandbox is released, and only that one")
-	require.Equal(t, []string{"CreateSession"}, fx.sessionCalls,
-		"the maintenance session is kept for troubleshooting")
-	require.Equal(t, []string{"Skill remove"}, fx.sessionTitles,
-		"the transcript is kept to troubleshoot this operation, so it must name it")
-	// The seeded row owns a pre-catalog object: no definition and no sibling
-	// install names it, so letting the row go is what makes it unreachable.
-	// A row that reads the definition's copy has nothing of its own to reclaim,
-	// which is the case the catalog test below covers.
-	require.Equal(t, []string{"file://sk-1.zip"}, fx.deletedBundles,
-		"an archive this row alone named is reclaimed with it")
+	require.Empty(t, fx.sessionCalls, "platform removal must not create a business session")
+	require.Empty(t, fx.deletedBundles,
+		"the platform catalog owns archives independently of one sandbox installation")
 
-	skill, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	skill, err := fx.skillRepo.GetSkill(context.Background(), "cfg-1", "sk-1")
 	require.NoError(t, err)
 	require.Nil(t, skill, "the DB row goes away only after the image no longer has the skill")
 
@@ -73,7 +66,7 @@ func listSnapshotRows(
 	t *testing.T, fx *installFixture,
 ) []*types.TenantSkillSnapshotEntity {
 	t.Helper()
-	rows, err := fx.skillRepo.ListSnapshotsByConfig(context.Background(), 7, "cfg-1")
+	rows, err := fx.skillRepo.ListSnapshotsByConfig(context.Background(), "cfg-1")
 	require.NoError(t, err)
 	return rows
 }
@@ -83,7 +76,7 @@ func TestRunRemoveDropsTheSkillFromTheImageManifest(t *testing.T) {
 	fx.seedInstalledSkill("sk-1", "snap-old", 2)
 	fx.seedInstalledSkill("sk-2", "snap-old", 2)
 
-	require.NoError(t, fx.svc.runRemove(context.Background(), 7, "cfg-1", "sk-1"))
+	require.NoError(t, fx.svc.runRemove(context.Background(), "cfg-1", "sk-1", "run-1"))
 
 	var manifest skillImageManifest
 	require.NoError(t, json.Unmarshal(
@@ -97,7 +90,7 @@ func TestRunRemoveFallsBackToBaseTemplateWhenNoSkillsRemain(t *testing.T) {
 	fx := newInstallFixture(t)
 	fx.seedInstalledSkill("sk-1", "snap-old", 2)
 
-	require.NoError(t, fx.svc.runRemove(context.Background(), 7, "cfg-1", "sk-1"))
+	require.NoError(t, fx.svc.runRemove(context.Background(), "cfg-1", "sk-1", "run-1"))
 
 	require.Empty(t, fx.configRepo.saved.Config.SkillImage.SnapshotID,
 		"an image with no skills left is just the base template; do not spend a snapshot on it")
@@ -106,7 +99,7 @@ func TestRunRemoveFallsBackToBaseTemplateWhenNoSkillsRemain(t *testing.T) {
 			"still rebuild from the base template")
 	require.Empty(t, fx.commands)
 
-	skill, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	skill, err := fx.skillRepo.GetSkill(context.Background(), "cfg-1", "sk-1")
 	require.NoError(t, err)
 	require.Nil(t, skill)
 
@@ -129,7 +122,7 @@ func TestRunRemoveRefusesAnImageThatBelongsToAnotherProviderAccount(t *testing.T
 	fx.seedInstalledSkill("sk-2", "snap-old", 2)
 	fx.configRepo.entity.Config.E2B.APIKey = "key-2"
 
-	err := fx.svc.runRemove(context.Background(), 7, "cfg-1", "sk-1")
+	err := fx.svc.runRemove(context.Background(), "cfg-1", "sk-1", "run-1")
 
 	require.Error(t, err)
 	require.ErrorContains(t, err, "provider account")
@@ -138,7 +131,7 @@ func TestRunRemoveRefusesAnImageThatBelongsToAnotherProviderAccount(t *testing.T
 	require.Nil(t, fx.configRepo.saved,
 		"moving the pointer here would commit a loss that restoring the credentials still undoes")
 
-	skill, _ := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	skill, _ := fx.skillRepo.GetSkill(context.Background(), "cfg-1", "sk-1")
 	require.NotNil(t, skill)
 	require.Equal(t, types.SkillStatusReady, skill.Status,
 		"every other skill in that image is still ready, and so is this one")
@@ -153,7 +146,7 @@ func TestRunRemoveStopsBeforeClearingThePointerWhenTheLockIsLost(t *testing.T) {
 	defer cancel()
 	fx.cancelDuringConfigRead = cancel
 
-	err := fx.svc.runRemove(ctx, 7, "cfg-1", "sk-1")
+	err := fx.svc.runRemove(ctx, "cfg-1", "sk-1", "run-1")
 
 	require.Error(t, err)
 	require.ErrorContains(t, err, "lock lost",
@@ -170,16 +163,16 @@ func TestRunRemoveAbortsWhenANewerInstallOwnsTheRow(t *testing.T) {
 	fx.seedInstalledSkill("sk-1", "snap-old", 2)
 	fx.seedInstalledSkill("sk-2", "snap-old", 2)
 	require.NoError(t, fx.skillRepo.UpdateSkill(context.Background(), &types.TenantSkillEntity{
-		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
+		ID: "sk-1", SandboxConfigID: "cfg-1",
 		Name: "skill-sk-1", BundleSHA256: strings.Repeat("c", 64),
 		Status: types.SkillStatusInstalling, InstalledSnapshotID: "snap-old",
 	}))
 
-	require.NoError(t, fx.svc.runRemove(context.Background(), 7, "cfg-1", "sk-1"))
+	require.NoError(t, fx.svc.runRemove(context.Background(), "cfg-1", "sk-1", "run-1"))
 
 	require.Empty(t, fx.events, "a queued remove must not wipe a skill a newer upload already claimed")
 	require.Nil(t, fx.configRepo.saved)
-	skill, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	skill, err := fx.skillRepo.GetSkill(context.Background(), "cfg-1", "sk-1")
 	require.NoError(t, err)
 	require.NotNil(t, skill)
 	require.Equal(t, types.SkillStatusInstalling, skill.Status)
@@ -190,7 +183,7 @@ func TestRunRemoveClearsTheLastSkillWhenCredentialsRotated(t *testing.T) {
 	fx.seedInstalledSkill("sk-1", "snap-old", 2)
 	fx.configRepo.entity.Config.E2B.APIKey = "key-2"
 
-	require.NoError(t, fx.svc.runRemove(context.Background(), 7, "cfg-1", "sk-1"))
+	require.NoError(t, fx.svc.runRemove(context.Background(), "cfg-1", "sk-1", "run-1"))
 
 	require.Empty(t, fx.configRepo.saved.Config.SkillImage.SnapshotID,
 		"the last skill can fall back to the base template without booting the unreadable snapshot")
@@ -199,7 +192,7 @@ func TestRunRemoveClearsTheLastSkillWhenCredentialsRotated(t *testing.T) {
 	// snapshot the live credentials can no longer resolve, so leaving them bound
 	// keeps them on an image nothing can rebuild.
 	require.Equal(t, []string{"switch-pointer", "mark-stale"}, fx.events)
-	skill, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	skill, err := fx.skillRepo.GetSkill(context.Background(), "cfg-1", "sk-1")
 	require.NoError(t, err)
 	require.Nil(t, skill)
 }
@@ -208,9 +201,9 @@ func TestRunRemoveDoesNothingWhenTheSkillIsAlreadyGone(t *testing.T) {
 	fx := newInstallFixture(t)
 	fx.seedInstalledSkill("sk-1", "snap-old", 2)
 	fx.seedInstalledSkill("sk-2", "snap-old", 2)
-	require.NoError(t, fx.skillRepo.DeleteSkill(context.Background(), 7, "cfg-1", "sk-1"))
+	require.NoError(t, fx.skillRepo.DeleteSkill(context.Background(), "cfg-1", "sk-1"))
 
-	require.NoError(t, fx.svc.runRemove(context.Background(), 7, "cfg-1", "sk-1"))
+	require.NoError(t, fx.svc.runRemove(context.Background(), "cfg-1", "sk-1", "run-1"))
 
 	require.Empty(t, fx.events, "no session, no sandbox, no snapshot")
 	require.Empty(t, fx.commands)
@@ -228,14 +221,14 @@ func TestRunRemoveDeletesTheSnapshotWhenTheLedgerCannotRecordIt(t *testing.T) {
 		return state == types.SkillSnapshotStateActive
 	}
 
-	err := fx.svc.runRemove(context.Background(), 7, "cfg-1", "sk-1")
+	err := fx.svc.runRemove(context.Background(), "cfg-1", "sk-1", "run-1")
 
 	require.Error(t, err)
 	require.Contains(t, fx.deletedSnapshots, "snap-1",
 		"a snapshot no row names is unreachable and billed; it must not be leaked")
 	require.Nil(t, fx.configRepo.saved)
 
-	skill, _ := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	skill, _ := fx.skillRepo.GetSkill(context.Background(), "cfg-1", "sk-1")
 	require.NotNil(t, skill)
 	require.Equal(t, types.SkillStatusReady, skill.Status)
 }
@@ -251,7 +244,7 @@ func TestRunRemoveDeletesTheOrphanSnapshotAfterTheLockIsLost(t *testing.T) {
 	defer cancel()
 	fx.cancelDuringSnapshot = cancel
 
-	err := fx.svc.runRemove(ctx, 7, "cfg-1", "sk-1")
+	err := fx.svc.runRemove(ctx, "cfg-1", "sk-1", "run-1")
 
 	require.Error(t, err)
 	require.Nil(t, fx.configRepo.saved, "the pointer switch runs on the dead context and fails")
@@ -268,7 +261,7 @@ func TestRunRemoveKeepsTheBundleWhenTheRowCannotBeDeleted(t *testing.T) {
 	fx.seedInstalledSkill("sk-2", "snap-old", 2)
 	fx.skillRepo.deleteSkillErr = errUpdateBoom
 
-	err := fx.svc.runRemove(context.Background(), 7, "cfg-1", "sk-1")
+	err := fx.svc.runRemove(context.Background(), "cfg-1", "sk-1", "run-1")
 
 	require.Error(t, err)
 	require.Equal(t, 3, fx.skillRepo.deleteSkillAttempts,
@@ -276,7 +269,7 @@ func TestRunRemoveKeepsTheBundleWhenTheRowCannotBeDeleted(t *testing.T) {
 	require.Empty(t, fx.deletedBundles,
 		"a surviving row must keep pointing at an archive that still exists")
 
-	skill, _ := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	skill, _ := fx.skillRepo.GetSkill(context.Background(), "cfg-1", "sk-1")
 	require.NotNil(t, skill)
 }
 
@@ -286,14 +279,14 @@ func TestRunRemoveKeepsTheSkillWhenTheImageStepFails(t *testing.T) {
 	fx.seedInstalledSkill("sk-2", "snap-old", 2)
 	fx.rmExitCode = 1
 
-	err := fx.svc.runRemove(context.Background(), 7, "cfg-1", "sk-1")
+	err := fx.svc.runRemove(context.Background(), "cfg-1", "sk-1", "run-1")
 
 	require.Error(t, err)
 	require.Nil(t, fx.configRepo.saved)
 	require.NotContains(t, fx.events, "create-snapshot")
 	require.Equal(t, []string{"sess-1"}, fx.destroyedSandboxes)
 
-	skill, _ := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	skill, _ := fx.skillRepo.GetSkill(context.Background(), "cfg-1", "sk-1")
 	require.NotNil(t, skill, "a failed removal must leave the skill usable, not half-deleted")
 	require.Equal(t, types.SkillStatusReady, skill.Status)
 	require.NotEmpty(t, skill.Error, "the admin's only diagnostic is this row")
@@ -305,16 +298,16 @@ func TestRunRemoveLeavesANeverInstalledSkillFailed(t *testing.T) {
 	fx := newInstallFixture(t)
 	fx.seedInstalledSkill("sk-1", "snap-old", 2)
 	fx.seedInstalledSkill("sk-2", "snap-old", 2)
-	require.NoError(t, fx.svc.updateSkillFields(context.Background(), 7, "cfg-1", "sk-1",
+	require.NoError(t, fx.svc.updateSkillFields(context.Background(), "cfg-1", "sk-1",
 		func(e *types.TenantSkillEntity) {
 			e.InstalledSnapshotID = ""
 			e.Status = types.SkillStatusRemoving
 		}))
 	fx.rmExitCode = 1
 
-	require.Error(t, fx.svc.runRemove(context.Background(), 7, "cfg-1", "sk-1"))
+	require.Error(t, fx.svc.runRemove(context.Background(), "cfg-1", "sk-1", "run-1"))
 
-	skill, _ := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	skill, _ := fx.skillRepo.GetSkill(context.Background(), "cfg-1", "sk-1")
 	require.Equal(t, types.SkillStatusFailed, skill.Status,
 		"calling a skill ready when no image ever carried it sends the agent at missing files")
 }
@@ -323,7 +316,7 @@ func TestRunRemoveRefusesAnEmptySkillID(t *testing.T) {
 	fx := newInstallFixture(t)
 	fx.seedInstalledSkill("sk-1", "snap-old", 2)
 
-	err := fx.svc.runRemove(context.Background(), 7, "cfg-1", "")
+	err := fx.svc.runRemove(context.Background(), "cfg-1", "", "run-1")
 
 	require.Error(t, err)
 	require.ErrorContains(t, err, "skill id is required")
@@ -334,10 +327,10 @@ func TestRunRemoveRefusesAnEmptySkillID(t *testing.T) {
 func TestRunRemoveRefusesASkillNameThatCollapsesToTheSkillsRoot(t *testing.T) {
 	fx := newInstallFixture(t)
 	fx.seedInstalledSkill("sk-1", "snap-old", 2)
-	require.NoError(t, fx.svc.updateSkillFields(context.Background(), 7, "cfg-1", "sk-1",
+	require.NoError(t, fx.svc.updateSkillFields(context.Background(), "cfg-1", "sk-1",
 		func(e *types.TenantSkillEntity) { e.Name = "" }))
 
-	err := fx.svc.runRemove(context.Background(), 7, "cfg-1", "sk-1")
+	err := fx.svc.runRemove(context.Background(), "cfg-1", "sk-1", "run-1")
 
 	require.Error(t, err,
 		"an empty skill name collapses to the skills root, and rm -rf there destroys every skill")
@@ -355,7 +348,7 @@ func TestRunRemoveStopsWhenTheLockIsLost(t *testing.T) {
 	fx.cancelDuringRemove = cancel
 	defer cancel()
 
-	err := fx.svc.runRemove(ctx, 7, "cfg-1", "sk-1")
+	err := fx.svc.runRemove(ctx, "cfg-1", "sk-1", "run-1")
 
 	require.Error(t, err)
 	require.NotContains(t, fx.events, "create-snapshot",
@@ -364,7 +357,7 @@ func TestRunRemoveStopsWhenTheLockIsLost(t *testing.T) {
 	require.Equal(t, []string{"sess-1"}, fx.destroyedSandboxes,
 		"a sandbox left running on the provider is billed until its TTL expires")
 
-	skill, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	skill, err := fx.skillRepo.GetSkill(context.Background(), "cfg-1", "sk-1")
 	require.NoError(t, err)
 	require.Equal(t, types.SkillStatusReady, skill.Status,
 		"a row stuck at removing blocks the next attempt and tells the admin nothing")
@@ -381,14 +374,14 @@ func TestRunRemoveCleanupSurvivesARemovalLongerThanTheCleanupBudget(t *testing.T
 	fx.removeDelay = 200 * time.Millisecond
 
 	start := time.Now()
-	err := fx.svc.runRemove(context.Background(), 7, "cfg-1", "sk-1")
+	err := fx.svc.runRemove(context.Background(), "cfg-1", "sk-1", "run-1")
 	require.Greater(t, time.Since(start), fx.svc.cleanupTimeout,
 		"the removal must outlast the cleanup budget for this test to mean anything")
 
 	require.NoError(t, err)
 	require.Equal(t, []string{"sess-1"}, fx.destroyedSandboxes)
 
-	skill, getErr := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	skill, getErr := fx.skillRepo.GetSkill(context.Background(), "cfg-1", "sk-1")
 	require.NoError(t, getErr)
 	require.Nil(t, skill, "the row must still be dropped after the image lost the skill")
 }
@@ -399,7 +392,7 @@ func TestRunRemoveDeletesTheSnapshotWhenSwitchFails(t *testing.T) {
 	fx.seedInstalledSkill("sk-2", "snap-old", 2)
 	fx.configRepo.updateErr = errUpdateBoom
 
-	err := fx.svc.runRemove(context.Background(), 7, "cfg-1", "sk-1")
+	err := fx.svc.runRemove(context.Background(), "cfg-1", "sk-1", "run-1")
 
 	require.Error(t, err)
 	require.Contains(t, fx.deletedSnapshots, "snap-1",
@@ -407,7 +400,7 @@ func TestRunRemoveDeletesTheSnapshotWhenSwitchFails(t *testing.T) {
 	require.NotContains(t, fx.deletedSnapshots, "snap-old",
 		"the previous image keeps serving and the ledger still names it")
 
-	skill, _ := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	skill, _ := fx.skillRepo.GetSkill(context.Background(), "cfg-1", "sk-1")
 	require.NotNil(t, skill)
 	require.Equal(t, types.SkillStatusReady, skill.Status)
 }

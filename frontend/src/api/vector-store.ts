@@ -1,6 +1,6 @@
 import { get, post, put, del } from '@/utils/request'
-import { platformTenantPath } from './platform-tenant-path'
-const basePath = (tenantId?: number) => tenantId === undefined ? '/api/v1/vector-stores' : platformTenantPath(tenantId, 'vector-stores')
+const basePath = '/api/v1/system/admin/vector-stores'
+const capabilityPath = '/api/v1/vector-stores'
 
 // ===== Types =====
 
@@ -10,11 +10,20 @@ export interface VectorStoreEntity {
   engine_type: string
   connection_config: Record<string, any>
   index_config: Record<string, any>
-  source: 'env' | 'user'
-  readonly: boolean
-  tenant_id?: number
   created_at?: string
   updated_at?: string
+}
+
+export interface VectorStoreCapability {
+  id: string
+  name: string
+  engine_type: string
+}
+
+export interface VectorStoreCapabilitiesResponse {
+  success: boolean
+  data: VectorStoreCapability[]
+  default_vector_store_id?: string | null
 }
 
 export interface VectorStoreTypeInfo {
@@ -45,27 +54,36 @@ export interface FieldSchema {
 
 // ===== API Functions =====
 
-export function listVectorStoreTypes(tenantId?: number): Promise<VectorStoreTypeInfo[]> {
-  return get(`${basePath(tenantId)}/types`).then((res: any) => {
+export function listVectorStoreTypes(): Promise<VectorStoreTypeInfo[]> {
+  return get(`${basePath}/types`).then((res: any) => {
     return res.success && res.data ? res.data : []
   })
 }
 
-export function listVectorStores(tenantId?: number): Promise<{ success: boolean; data: VectorStoreEntity[] }> {
-  return get(basePath(tenantId))
+export function listVectorStores(): Promise<{ success: boolean; data: VectorStoreEntity[]; default_vector_store_id?: string | null }> {
+  return get(basePath)
 }
 
-export function createVectorStore(data: Partial<VectorStoreEntity>, tenantId?: number) { return post(basePath(tenantId), data)
+export function listVectorStoreCapabilities(): Promise<VectorStoreCapabilitiesResponse> { return get(capabilityPath) }
+
+export function createVectorStore(data: Partial<VectorStoreEntity>) {
+  return post(basePath, data)
 }
 
-export function updateVectorStore(id: string, data: Partial<VectorStoreEntity>, tenantId?: number) { return put(`${basePath(tenantId)}/${id}`, data)
+export function updateVectorStore(id: string, data: Partial<VectorStoreEntity>) {
+  return put(`${basePath}/${id}`, data)
 }
 
-export function deleteVectorStore(id: string, tenantId?: number) { return del(`${basePath(tenantId)}/${id}`)
+export function deleteVectorStore(id: string) {
+  return del(`${basePath}/${id}`)
 }
 
-export function testVectorStoreRaw(data: { engine_type: string; connection_config: any }, tenantId?: number): Promise<any> { return post(`${basePath(tenantId)}/test`, data)
+export function testVectorStoreRaw(data: { engine_type: string; connection_config: any }): Promise<any> {
+  return post(`${basePath}/test`, data)
 }
 
-export function testVectorStoreById(id: string, tenantId?: number): Promise<any> { return post(`${basePath(tenantId)}/${id}/test`, {})
+export function testVectorStoreById(id: string): Promise<any> {
+  return post(`${basePath}/${id}/test`, {})
 }
+
+export function setDefaultVectorStore(id: string) { return put(`${basePath}/${id}/default`, {}) }

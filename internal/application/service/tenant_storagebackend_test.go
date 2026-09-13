@@ -2,7 +2,6 @@ package service_test
 
 import (
 	"context"
-	"os"
 	"strings"
 	"testing"
 
@@ -10,36 +9,28 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
-func TestCreateTenantCreatesConcreteDefaultStorageBackend(t *testing.T) {
-	t.Setenv("STORAGE_TYPE", "local")
+func TestCreateTenantDoesNotCreateStorageBackend(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&types.Tenant{}, &types.StorageBackend{}, &types.WebSearchProviderEntity{}))
 	tenantRepo := repository.NewTenantRepository(db)
-	storageRepo := repository.NewStorageBackendRepository(db)
-	tenantSvc := service.NewTenantService(tenantRepo, storageRepo)
+	tenantSvc := service.NewTenantService(tenantRepo)
 
 	tenant, err := tenantSvc.CreateTenant(context.Background(), &types.Tenant{Name: "workspace"})
 	require.NoError(t, err)
-	require.NotNil(t, tenant.DefaultStorageBackendID)
-
-	backend, err := storageRepo.GetByID(context.Background(), tenant.ID, *tenant.DefaultStorageBackendID)
-	require.NoError(t, err)
-	require.NotNil(t, backend)
-	assert.Equal(t, "local", backend.Provider)
-	assert.Equal(t, types.StorageBackendSourceEnv, backend.Source)
-	assert.True(t, backend.LegacyAlias)
+	require.NotZero(t, tenant.ID)
+	var backendCount int64
+	require.NoError(t, db.Model(&types.StorageBackend{}).Count(&backendCount).Error)
+	require.Zero(t, backendCount)
 }
 
-func TestEnterpriseActivationResumesDefaultBackendBeforeOpening(t *testing.T) {
-	t.Setenv("STORAGE_TYPE", "unsupported-for-test")
-	db, err := gorm.Open(sqlite.Open("file:activation-storage?mode=memory&cache=shared"), &gorm.Config{})
+func TestEnterpriseActivationDoesNotCreatePlatformStorageBackend(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(
 		&types.Tenant{}, &types.User{}, &types.TenantMember{}, &types.StorageBackend{},
@@ -47,8 +38,7 @@ func TestEnterpriseActivationResumesDefaultBackendBeforeOpening(t *testing.T) {
 		&types.TenantAICapabilityPlanAssignment{},
 	))
 	tenantRepo := repository.NewTenantRepository(db)
-	storageRepo := repository.NewStorageBackendRepository(db)
-	tenantSvc := service.NewTenantService(tenantRepo, storageRepo)
+	tenantSvc := service.NewTenantService(tenantRepo)
 	require.NoError(t, db.Create(&types.User{
 		ID: "activation-owner", Username: "activation-owner", Email: "activation-owner@example.invalid", IsActive: true,
 	}).Error)
@@ -68,34 +58,32 @@ func TestEnterpriseActivationResumesDefaultBackendBeforeOpening(t *testing.T) {
 		FirstOwnerUserID: "activation-owner", DesiredState: types.EnterpriseActivationStatePrepared,
 	}
 
-	// The durable receipt remains prepared when backend materialization fails.
 	activationSvc := tenantSvc.(interfaces.EnterpriseActivationService)
-	_, err = activationSvc.ApplyEnterpriseActivation(context.Background(), command)
-	require.Error(t, err)
-	var prepared types.Tenant
-	require.NoError(t, db.Where("ringxun_activation_id = ?", command.ActivationID).Take(&prepared).Error)
-	require.Equal(t, types.TenantStatusProvisioning, prepared.Status)
-	require.Nil(t, prepared.DefaultStorageBackendID)
+	prepared, err := activationSvc.ApplyEnterpriseActivation(context.Background(), command)
+	require.NoError(t, err)
+	require.Equal(t, types.EnterpriseActivationStatePrepared, prepared.State)
 
-	require.NoError(t, os.Setenv("STORAGE_TYPE", "local"))
 	command.DesiredState = types.EnterpriseActivationStateActive
 	result, err := activationSvc.ApplyEnterpriseActivation(context.Background(), command)
 	require.NoError(t, err)
-	require.NotNil(t, result)
 	require.Equal(t, types.EnterpriseActivationStateActive, result.State)
-	require.NoError(t, db.First(&prepared, result.TenantID).Error)
-	require.NotNil(t, prepared.DefaultStorageBackendID)
-	backend, err := storageRepo.GetByID(context.Background(), prepared.ID, *prepared.DefaultStorageBackendID)
+
+	replayed, err := activationSvc.ApplyEnterpriseActivation(context.Background(), command)
 	require.NoError(t, err)
-	require.NotNil(t, backend)
+	require.Equal(t, result.TenantID, replayed.TenantID)
+	require.Equal(t, result.OwnerMembershipID, replayed.OwnerMembershipID)
+	require.Equal(t, types.EnterpriseActivationStateActive, replayed.State)
+
 	var member types.TenantMember
 	require.NoError(t, db.First(&member, result.OwnerMembershipID).Error)
+	require.Equal(t, types.TenantRoleAdmin, member.Role)
 	require.Equal(t, types.TenantMemberStatusActive, member.Status)
+
 	var tenantCount, memberCount, backendCount int64
 	require.NoError(t, db.Model(&types.Tenant{}).Count(&tenantCount).Error)
 	require.NoError(t, db.Model(&types.TenantMember{}).Count(&memberCount).Error)
 	require.NoError(t, db.Model(&types.StorageBackend{}).Count(&backendCount).Error)
 	require.Equal(t, int64(1), tenantCount)
 	require.Equal(t, int64(1), memberCount)
-	require.Equal(t, int64(1), backendCount)
+	require.Zero(t, backendCount)
 }

@@ -30,6 +30,29 @@ type cosFileService struct {
 	region        string
 }
 
+func (s *cosFileService) putPlatformSkillArchive(ctx context.Context, key string, data []byte) (string, error) {
+	objectKey := strings.Trim(s.cosPathPrefix, "/") + "/" + key
+	if strings.Trim(s.cosPathPrefix, "/") == "" {
+		objectKey = key
+	}
+	if _, err := s.client.Object.Put(ctx, objectKey, bytes.NewReader(data), nil); err != nil {
+		return "", fmt.Errorf("failed to upload platform skill archive to COS: %w", err)
+	}
+	return fmt.Sprintf("cos://%s/%s/%s", s.bucketName, s.region, objectKey), nil
+}
+
+func (s *cosFileService) platformSkillArchiveKey(ref string) (string, error) {
+	prefix := fmt.Sprintf("cos://%s/%s/", s.bucketName, s.region)
+	if !strings.HasPrefix(ref, prefix) {
+		return "", fmt.Errorf("bucket or region mismatch in platform skill archive reference")
+	}
+	key, err := s.parseCosObjectName(ref)
+	if err != nil {
+		return "", err
+	}
+	return platformSkillLogicalKey(key, s.cosPathPrefix)
+}
+
 const cosScheme = "cos://"
 
 func newCOSHTTPClient(secretID, secretKey string) *http.Client {

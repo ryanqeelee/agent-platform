@@ -1,354 +1,128 @@
 # Skills API
 
-平台技能目录和沙箱技能由 tenantless SystemAdmin 通过路径中的 `tenant_id` 显式管理；平台 API Key 与企业成员不能调用这些控制面接口。
+沙箱连接、技能目录、安装与安装器智能体都是平台共享配置。这些接口不接受 `tenant_id`，只允许 tenantless SystemAdmin 的浏览器会话调用；平台 API Key 与企业成员都不能调用。
+
+企业的脚本执行禁用策略仍属于企业，由当前登录身份通过 `GET/PUT /sandbox-policy` 读写。平台管理员可以为技能保存平台通用默认变量；用户私有变量仍按真实企业和 principal 隔离。
 
 [返回目录](./README.md)
 
-| 方法 | 路径      | 描述               |
-| ---- | --------- | ------------------ |
-| GET  | `/system/admin/tenants/{tenant_id}/skills` | 获取预装 Skills 列表 |
-| GET  | `/system/admin/tenants/{tenant_id}/skills/installer-agent` | 获取固定技能安装器的企业配置 |
-| PUT  | `/system/admin/tenants/{tenant_id}/skills/installer-agent` | 更新固定技能安装器的企业配置 |
-| POST | `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills` | 安装技能（zip 上传或托管平台 source） |
-| POST | `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/reinstall` | 用已保存的安装包重试安装 |
-| POST | `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/stop` | 停止卡住的安装 |
-| GET  | `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/transcript` | 实时跟随本次安装记录 |
-| GET  | `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/transcript/history` | 读取本次安装的持久化消息 |
-| GET  | `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/files` | 列出已安装技能的文件 |
-| GET  | `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/files/content` | 读取已安装技能中的单个文件 |
-| PATCH | `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}` | 启用/停用技能，或设置空间级环境变量 |
-| GET  | `/me/env-vars` | 列出自己的环境变量与各技能的声明 |
-| PUT  | `/me/env-vars/skill` | 设置自己在某个技能上的变量值 |
-| DELETE | `/me/env-vars/skill` | 删除自己在某个技能上的变量值 |
-| PUT  | `/me/env-vars/sandbox` | 设置自己在某个沙箱配置上的变量值 |
-| DELETE | `/me/env-vars/sandbox` | 删除自己在某个沙箱配置上的变量值 |
+## 平台技能目录
 
-## GET `/system/admin/tenants/{tenant_id}/skills` - 获取预装 Skills 列表
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/system/admin/skills` | 列出目录技能及其沙箱安装情况 |
+| POST | `/system/admin/skills` | 从 zip 或 `source` 注册目录技能 |
+| POST | `/system/admin/skills/{id}/install` | 安装到一个或多个沙箱连接 |
+| DELETE | `/system/admin/skills/{id}` | 删除未被安装引用的目录技能 |
+| GET | `/system/admin/skills/{id}/files` | 列出目录存档文件 |
+| GET | `/system/admin/skills/{id}/files/content?path=...` | 读取目录存档文件 |
 
-获取系统中所有预装的智能体技能列表。
-
-**请求**:
+上传 zip 或从公开来源注册：
 
 ```curl
-curl --location 'http://localhost:8080/api/v1/system/admin/tenants/{tenant_id}/skills' \
---header 'Authorization: Bearer <system-admin-token>' \
---header 'Content-Type: application/json'
-```
-
-**响应**:
-
-```json
-{
-    "data": [
-        {
-            "name": "web_search",
-            "description": "搜索互联网获取最新信息"
-        },
-        {
-            "name": "code_interpreter",
-            "description": "执行代码并返回结果"
-        },
-        {
-            "name": "image_generation",
-            "description": "根据文本描述生成图片"
-        }
-    ],
-    "skills_available": true,
-    "success": true
-}
-```
-
-当系统未配置 Skills 时，`skills_available` 返回 `false`，`data` 为空数组：
-
-```json
-{
-    "data": [],
-    "skills_available": false,
-    "success": true
-}
-```
-
-## GET / PUT `/system/admin/tenants/{tenant_id}/skills/installer-agent` - 技能安装器配置
-
-获取或更新该企业固定内置技能安装器使用的模型。路径不接受任意智能体 ID；平台管理员通过企业路径选择作用域，身份本身保持 tenantless。
-
-```curl
-curl --location 'http://localhost:8080/api/v1/system/admin/tenants/{tenant_id}/skills/installer-agent' \
---header 'Authorization: Bearer <system-admin-token>'
-```
-
-更新时沿用智能体配置请求体，但服务端始终把请求应用到固定的 `builtin-skill-installer`：
-
-```curl
-curl --location --request PUT \
-'http://localhost:8080/api/v1/system/admin/tenants/{tenant_id}/skills/installer-agent' \
---header 'Authorization: Bearer <system-admin-token>' \
---header 'Content-Type: application/json' \
---data '{"config":{"model_id":"model-id"}}'
-```
-
-## POST `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills` - 安装技能
-
-把技能安装到指定沙箱配置的镜像上。安装会启动沙箱并运行数分钟，本接口只负责受理，随后通过
-`GET /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/install-events` 跟随进度。
-
-两种请求体二选一：
-
-### 1. 上传 zip（multipart）
-
-```curl
-curl --location 'http://localhost:8080/api/v1/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills' \
+curl --location 'http://localhost:8080/api/v1/system/admin/skills' \
 --header 'Authorization: Bearer <system-admin-token>' \
 --form 'file=@"skill.zip"'
-```
 
-### 2. 从托管平台安装（JSON）
-
-`source` 只接受一种明确写法，不会根据下载结果猜测：
-
-| 输入 | 含义 |
-| --- | --- |
-| `@owner/slug`、`@owner/slug@1.2.0` | ClawHub（默认 registry） |
-| `my-skill`、`my-skill@1.2.0`（不含 `/`） | ClawHub slug |
-| `https://clawhub.ai/skills-sh/owner/repo/slug`、`skills-sh:owner/repo/slug` | ClawHub 上的 skills.sh 联邦条目（经 ClawHub install API 解析到钉死的 GitHub commit；仓库内路径可能比 URL slug 更深） |
-| `https://clawhub.ai/...`、`https://skillhub.cn/...`、自托管 SkillHub 页面 | 对应 registry |
-| `https://github.com/...`、`https://gitlab.com/...`、`https://skills.sh/...` | Git 托管；`skills.sh` 的 `owner/repo/slug` 页面同样走 ClawHub resolver |
-| `https://…/foo.zip` 或 `…/SKILL.md` | 直接下载 |
-
-`owner/slug`（无 `@`、无 URL）会 400：它既是 ClawHub id 也是 GitHub 仓库，请改成 `@owner/slug` 或粘贴完整链接。
-
-来源必须可匿名读取：服务端不会为这次下载附带任何凭据，因此私有仓库/私有 registry 需要先自行导出 zip 再上传。
-
-```curl
-curl --location 'http://localhost:8080/api/v1/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills' \
+curl --location 'http://localhost:8080/api/v1/system/admin/skills' \
 --header 'Authorization: Bearer <system-admin-token>' \
 --header 'Content-Type: application/json' \
 --data '{"source":"@owner/slug"}'
 ```
 
-**响应**（202）:
+`source` 可以是 ClawHub slug、ClawHub/SkillHub/skills.sh/GitHub/GitLab 页面，或直接的 zip / `SKILL.md` URL。来源必须可匿名读取；私有源请先导出 zip 再上传。
 
-```json
-{
-    "success": true,
-    "data": {
-        "skill_id": "..."
-    }
-}
-```
-
-## POST `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/reinstall` - 重试安装
-
-用服务端已保存的安装包重新跑一遍安装，无需重新上传 zip 或重新提供 source。适用于安装失败的原因与安装包本身无关的情况：沙箱不可达、依赖源超时、安装过程被中断等。
-
-与安装接口一样只负责受理，进度同样通过
-`GET /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/install-events` 跟随。技能会复用同一个 `skill_id`，不会产生新记录。
-
-已经在当前镜像中正常服务、且安装包未变的技能会被跳过，不会重复构建快照。若该技能的安装包已不在存储中，返回 400，此时只能重新上传。
+安装已注册技能：
 
 ```curl
-curl --location --request POST \
-'http://localhost:8080/api/v1/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/reinstall' \
---header 'Authorization: Bearer <system-admin-token>'
-```
-
-**响应**（202）:
-
-```json
-{
-    "success": true,
-    "data": {
-        "skill_id": "..."
-    }
-}
-```
-
-## POST `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/stop` - 停止安装
-
-中止进行中的安装，之后可以重试或卸载。服务重启后安装行可能一直停在 `installing` 且没有存活进程，本接口会立刻改写该行，不必等 stuck-run reaper。卸载不受影响。
-
-状态变为 `failed`，错误为「安装已停止」。
-
-```curl
-curl --location --request POST \
-'http://localhost:8080/api/v1/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/stop' \
---header 'Authorization: Bearer <system-admin-token>'
-```
-
-**响应**（200）:
-
-```json
-{
-    "success": true,
-    "data": {
-        "id": "...",
-        "status": "failed",
-        "error": "安装已停止"
-    }
-}
-```
-
-若技能不是 `installing`（且不是已经 `failed`），返回 400。已经 `failed` 的停止是幂等成功。
-
-## GET `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/transcript/history` - 持久化安装记录
-
-根据当前企业、沙箱配置与技能行保存的安装 locator，返回该次安装的用户提示和对应 assistant 消息。客户端不能提交任意 session 或 message ID，因此该接口不能读取普通企业会话。
-
-```curl
-curl --location \
-'http://localhost:8080/api/v1/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/transcript/history' \
---header 'Authorization: Bearer <system-admin-token>'
-```
-
-成功响应沿用持久化消息结构：
-
-```json
-{
-    "success": true,
-    "data": [
-        { "id": "...", "session_id": "...", "role": "user", "content": "install ..." },
-        { "id": "...", "session_id": "...", "role": "assistant", "content": "installed", "agent_steps": [] }
-    ]
-}
-```
-
-安装中且 locator 尚未产生时返回 `200` 和空数组。安装已结束但 locator 或匹配消息不存在时返回 `404`。进行中的安装仍使用 `/transcript` SSE。
-
-## GET `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/files` - 列出技能文件
-
-返回该技能存档里的文件路径与大小。路径相对技能根目录（`SKILL.md` 所在目录），不启动沙箱。
-
-```curl
-curl --location 'http://localhost:8080/api/v1/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/files' \
---header 'Authorization: Bearer <system-admin-token>'
-```
-
-**响应**:
-
-```json
-{
-    "success": true,
-    "data": [
-        { "path": "SKILL.md", "size": 412 },
-        { "path": "scripts/extract.py", "size": 1280 }
-    ]
-}
-```
-
-## GET `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/files/content` - 读取技能文件
-
-`path` 为技能根目录相对路径。文本以 UTF-8 返回；较小的图片为 base64；其它二进制文件不返回正文，并设置 `binary: true`。
-
-```curl
-curl --location 'http://localhost:8080/api/v1/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}/files/content?path=SKILL.md' \
---header 'Authorization: Bearer <system-admin-token>'
-```
-
-**响应**:
-
-```json
-{
-    "success": true,
-    "data": {
-        "path": "SKILL.md",
-        "size": 412,
-        "encoding": "utf-8",
-        "media_type": "text/markdown",
-        "content": "---\nname: pdf-tools\n..."
-    }
-}
-```
-
-## 技能的环境变量
-
-技能安装时会声明自己需要哪些环境变量（名称、说明、是否必填）。变量的**值**分两层，执行时按「本人的值 → 空间级值」的顺序取，取不到必填项则拒绝执行：
-
-| 层级 | 谁能写 | 作用范围 | 接口 |
-| --- | --- | --- | --- |
-| 空间级 | SystemAdmin | 该空间所有人 | `PATCH /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}` |
-| 个人级 | 任何登录成员 | 仅本人 | `PUT /me/env-vars/skill` |
-
-任何接口都**不会**回读已保存的值，只返回 `unset` / `workspace` / `user` 三种状态。清空一个值用 DELETE，而不是写入空字符串——「没填」和「不需要」是两种状态。
-
-个人级的值按**调用身份**存放，而不是按用户 ID。用 API Key 驱动的调用与网页登录是不同身份：在网页 Settings 里填的值不会作用于 API Key 发起的执行，反之亦然。集成方若通过 API Key 运行需要凭据的技能，请让管理员配置空间级值。
-
-### PATCH `/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}` - 更新技能
-
-`enabled` 与 `envs` 都是可选的，可只送其一，但不能都不送（400）。`envs` 只写技能已声明的名称，未声明的名称会被忽略而不是报错；值为空字符串表示清空该值并保留声明。
-
-```curl
-curl --location --request PATCH \
-'http://localhost:8080/api/v1/system/admin/tenants/{tenant_id}/sandbox-configs/{id}/skills/{skillId}' \
+curl --location 'http://localhost:8080/api/v1/system/admin/skills/{id}/install' \
 --header 'Authorization: Bearer <system-admin-token>' \
 --header 'Content-Type: application/json' \
---data '{"enabled":true,"envs":{"TAVILY_API_KEY":"tvly-xxxxx"}}'
+--data '{"sandbox_config_ids":["cfg-1","cfg-2"]}'
 ```
 
-### GET `/me/env-vars` - 列出自己的环境变量
+响应中 `installs` 是 `sandbox_config_id -> skill_id` 映射；部分失败时 `errors` 保留各沙箱的失败原因。
 
-按沙箱配置分组，返回本人的配置级变量，以及该配置下每个已启用技能声明的变量。`source` 表示这次执行实际会用哪一层的值。
+## 技能安装器智能体
+
+安装器是固定的平台内置智能体 `builtin-skill-installer`，沿用平台智能体接口：
 
 ```curl
-curl --location 'http://localhost:8080/api/v1/me/env-vars' \
---header 'Authorization: Bearer <token>'
-```
+curl --location 'http://localhost:8080/api/v1/system/admin/agents/builtin-skill-installer' \
+--header 'Authorization: Bearer <system-admin-token>'
 
-**响应**:
-
-```json
-{
-    "success": true,
-    "data": [
-        {
-            "sandbox_config_id": "cfg-1",
-            "sandbox_config_name": "默认沙箱",
-            "description": "日常对话用的沙箱",
-            "vars": [
-                { "name": "HTTP_PROXY", "source": "user", "updated_at": "2026-08-27T10:00:00Z" }
-            ],
-            "skills": [
-                {
-                    "skill_id": "sk-1",
-                    "skill_name": "web-search",
-                    "description": "通过 Tavily 检索网页",
-                    "vars": [
-                        { "name": "TAVILY_API_KEY", "description": "Tavily 搜索密钥", "required": true, "source": "workspace" },
-                        { "name": "REGION", "source": "unset" }
-                    ]
-                }
-            ]
-        }
-    ]
-}
-```
-
-### PUT / DELETE `/me/env-vars/skill` - 设置或删除自己在技能上的值
-
-`name` 必须是该技能声明过的名称，否则 400。删除后该技能重新回落到空间级值（若有）。
-
-```curl
-curl --location --request PUT 'http://localhost:8080/api/v1/me/env-vars/skill' \
---header 'Authorization: Bearer <token>' \
+curl --location --request PUT \
+'http://localhost:8080/api/v1/system/admin/agents/builtin-skill-installer' \
+--header 'Authorization: Bearer <system-admin-token>' \
 --header 'Content-Type: application/json' \
---data '{"skill_id":"sk-1","name":"TAVILY_API_KEY","value":"tvly-xxxxx"}'
+--data '{"config":{"model_id":"model-id"}}'
 ```
+
+## 沙箱连接与默认值
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET/POST | `/system/admin/sandbox-configs` | 列出或创建平台沙箱连接 |
+| GET/PUT/DELETE | `/system/admin/sandbox-configs/{id}` | 读取、更新或删除连接 |
+| PUT | `/system/admin/sandbox-configs/default` | 设置新会话使用的默认连接 |
+| POST | `/system/admin/sandbox-configs/check` | 检查未保存或已保存连接 |
+| POST | `/system/admin/sandbox-configs/templates/query` | 查询或构建标准模板 |
+| GET | `/system/admin/sandbox-configs/{id}/sandboxes` | 查看跨企业的当前占用 |
+
+`GET` 返回的每条连接都含 `is_default`。切换默认值：
 
 ```curl
-curl --location --request DELETE 'http://localhost:8080/api/v1/me/env-vars/skill' \
---header 'Authorization: Bearer <token>' \
+curl --location --request PUT \
+'http://localhost:8080/api/v1/system/admin/sandbox-configs/default' \
+--header 'Authorization: Bearer <system-admin-token>' \
 --header 'Content-Type: application/json' \
---data '{"skill_id":"sk-1","name":"TAVILY_API_KEY"}'
+--data '{"config_id":"cfg-2"}'
 ```
 
-删除一个本就没设过的值返回 404。
+切换默认值不改写已有会话的沙箱绑定。
 
-### PUT / DELETE `/me/env-vars/sandbox` - 设置或删除自己的配置级变量
+## 沙箱上的技能
 
-配置级变量不依附于任何技能，名称自定，会注入本人在该沙箱配置上的每一次技能脚本与 shell 命令。`WEKNORA_` 前缀与 `PATH` 等保留名会被拒绝。
+以下接口都以 `/system/admin/sandbox-configs/{id}/skills` 为根：
+
+| 方法 | 相对路径 | 说明 |
+| --- | --- | --- |
+| GET/POST | `/` | 列出或安装技能 |
+| GET/PATCH/DELETE | `/{skillId}` | 读取、启停、设置平台默认变量或卸载技能 |
+| POST | `/{skillId}/reinstall` | 用目录存档重试安装 |
+| POST | `/{skillId}/stop` | 停止进行中的安装 |
+| GET | `/{skillId}/install-events` | 通过 SSE 跟随进度 |
+| GET | `/{skillId}/transcript` | 通过 SSE 跟随安装器记录 |
+| GET | `/{skillId}/transcript/history` | 读取持久化的安装记录 |
+| GET | `/{skillId}/files` | 列出已安装文件 |
+| GET | `/{skillId}/files/content?path=...` | 读取已安装文件 |
+
+安装、重装与卸载是异步操作。使用 `install-events` 中的 `done` 字段判定完成。安装记录保存在技能安装行，不会创建企业业务会话。
+
+## 企业脚本策略
 
 ```curl
-curl --location --request PUT 'http://localhost:8080/api/v1/me/env-vars/sandbox' \
---header 'Authorization: Bearer <token>' \
+curl --location 'http://localhost:8080/api/v1/sandbox-policy' \
+--header 'Authorization: Bearer <enterprise-admin-token>'
+
+curl --location --request PUT 'http://localhost:8080/api/v1/sandbox-policy' \
+--header 'Authorization: Bearer <enterprise-admin-token>' \
 --header 'Content-Type: application/json' \
---data '{"sandbox_config_id":"cfg-1","name":"HTTP_PROXY","value":"http://127.0.0.1:7890"}'
+--data '{"scripts_disabled":true}'
 ```
+
+服务端从认证上下文取得企业，路径和请求体都不接受 `tenant_id`。禁用后，该企业不能准备或执行技能脚本。
+
+## 平台默认变量与用户私有变量
+
+技能安装会声明所需变量的名称、说明和是否必填。SystemAdmin 可通过 `PATCH /system/admin/sandbox-configs/{id}/skills/{skillId}` 的 `envs` 字段保存平台通用默认值；接口只返回是否已设置，不回读明文。用户没有私有值时才使用平台默认值。
+
+用户私有值使用以下接口，并按当前认证上下文中的真实企业和 principal 保存。一个企业的私有值不会被另一个企业读取或执行，网页登录与 API Key 也是不同 principal。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/me/env-vars` | 列出当前 principal 可见的变量声明与设置状态 |
+| PUT/DELETE | `/me/env-vars/skill` | 设置或删除当前 principal 的技能变量 |
+| PUT/DELETE | `/me/env-vars/sandbox` | 设置或删除当前 principal 的沙箱变量 |
+
+这些接口也不会回读已保存的明文值。

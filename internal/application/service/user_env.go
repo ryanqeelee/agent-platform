@@ -107,11 +107,11 @@ func (s *UserEnvService) ListMine(ctx context.Context) ([]ConfigEnvGroup, error)
 	if err != nil {
 		return nil, err
 	}
-	configs, err := s.configs.ListByTenant(ctx, tenantID)
+	configs, err := s.configs.ListAll(ctx)
 	if err != nil {
 		return nil, err
 	}
-	skills, err := s.skills.ListSkillsByTenant(ctx, tenantID)
+	skills, err := s.skills.ListSkills(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -251,7 +251,7 @@ func (s *UserEnvService) CaptureSkillEnv(
 	if err != nil {
 		return err
 	}
-	skill, err := s.skills.GetSkillByName(ctx, tenantID, configID, strings.TrimSpace(skillName))
+	skill, err := s.skills.GetSkillByName(ctx, configID, strings.TrimSpace(skillName))
 	if err != nil {
 		return err
 	}
@@ -329,7 +329,7 @@ func (s *UserEnvService) DeleteMineSkill(ctx context.Context, skillID, name stri
 	}
 	// The config is read off the caller's own row rather than the request, so a
 	// delete cannot be aimed at another config.
-	rows, err := s.skills.ListSkillsByTenant(ctx, tenantID)
+	rows, err := s.skills.ListSkills(ctx)
 	if err != nil {
 		return err
 	}
@@ -430,7 +430,7 @@ func (s *UserEnvService) visibleConfigID(
 	if configID == "" {
 		return "", apperrors.NewBadRequestError("sandbox_config_id is required")
 	}
-	cfg, err := s.configs.GetByID(ctx, tenantID, configID)
+	cfg, err := s.configs.GetByID(ctx, configID)
 	if err != nil {
 		return "", err
 	}
@@ -453,7 +453,7 @@ func (s *UserEnvService) findVisibleSkill(
 	if skillID == "" {
 		return nil, apperrors.NewBadRequestError("skill_id is required")
 	}
-	rows, err := s.skills.ListSkillsByTenant(ctx, tenantID)
+	rows, err := s.skills.ListSkills(ctx)
 	if err != nil {
 		return nil, err
 	}

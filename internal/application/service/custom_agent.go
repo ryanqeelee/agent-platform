@@ -119,8 +119,6 @@ func preserveAgentPlatformBindings(next *types.CustomAgentConfig, current types.
 
 // customAgentService implements the CustomAgentService interface
 type customAgentService struct {
-	provisionEmployeeSandbox func(context.Context, uint64) error
-
 	repo                 interfaces.CustomAgentRepository
 	chunkRepo            interfaces.ChunkRepository
 	kbService            interfaces.KnowledgeBaseService
@@ -131,7 +129,7 @@ type customAgentService struct {
 	scenarioCapabilities interfaces.AssistantScenarioCapabilityResolver
 	mcpServices          interfaces.MCPServiceService
 	webSearchProviders   interfaces.WebSearchProviderRepository
-	sandboxConfigs       repository.TenantSandboxConfigRepository
+	sandboxDefault       PlatformSandboxDefault
 }
 
 // NewCustomAgentService creates a new custom agent service
@@ -146,7 +144,7 @@ func NewCustomAgentService(
 	scenarioCapabilities interfaces.AssistantScenarioCapabilityResolver,
 	mcpServices interfaces.MCPServiceService,
 	webSearchProviders interfaces.WebSearchProviderRepository,
-	sandboxConfigs repository.TenantSandboxConfigRepository,
+	sandboxDefault PlatformSandboxDefault,
 ) interfaces.CustomAgentService {
 	return &customAgentService{
 		repo:                 repo,
@@ -159,7 +157,7 @@ func NewCustomAgentService(
 		scenarioCapabilities: scenarioCapabilities,
 		mcpServices:          mcpServices,
 		webSearchProviders:   webSearchProviders,
-		sandboxConfigs:       sandboxConfigs,
+		sandboxDefault:       sandboxDefault,
 	}
 }
 
@@ -471,26 +469,7 @@ func (s *customAgentService) GetAgentByID(ctx context.Context, id string) (*type
 		return s.nativeAnalysisAgent(ctx, id, tenantID)
 	}
 	if id == types.BuiltinSkillInstallerID {
-		agent, err := s.repo.GetAgentByID(ctx, id, tenantID)
-		if err != nil {
-			if !errors.Is(err, repository.ErrCustomAgentNotFound) {
-				return nil, err
-			}
-			agent = types.GetBuiltinAgentWithContext(ctx, id, tenantID)
-			if agent == nil {
-				return nil, ErrAgentNotFound
-			}
-		}
-		cloned, err := cloneCustomAgentDefinition(agent)
-		if err != nil {
-			return nil, err
-		}
-		cloned.ID = id
-		cloned.TenantID = tenantID
-		cloned.IsBuiltin = true
-		types.ApplyBuiltinAgentLocalization(ctx, cloned)
-		cloned.EnsureDefaults()
-		return cloned, nil
+		return nil, ErrAgentNotFound
 	}
 
 	// Check if it's a built-in agent using the registry
@@ -638,7 +617,7 @@ func cloneCustomAgentDefinition(agent *types.CustomAgent) (*types.CustomAgent, e
 
 // UpdateAgent updates an agent's information
 func (s *customAgentService) UpdateAgent(ctx context.Context, agent *types.CustomAgent) (*types.CustomAgent, error) {
-	if types.IsPlatformManagedBuiltinAgentID(agent.ID) {
+	if types.IsPlatformManageableBuiltinAgentID(agent.ID) {
 		return nil, ErrCannotModifyBuiltin
 	}
 	if agent.ID == "" {
@@ -652,12 +631,8 @@ func (s *customAgentService) UpdateAgent(ctx context.Context, agent *types.Custo
 		return nil, ErrInvalidTenantID
 	}
 
-	// Tenant authoring cannot change platform-owned built-in definitions. The
-	// skill installer retains its dedicated tenant-scoped configuration path.
+	// Tenant authoring cannot change platform-owned built-in definitions.
 	if types.IsBuiltinAgentID(agent.ID) {
-		if agent.ID == types.BuiltinSkillInstallerID {
-			return s.updateBuiltinAgent(ctx, agent, tenantID)
-		}
 		return nil, ErrCannotModifyBuiltin
 	}
 
@@ -710,88 +685,6 @@ func (s *customAgentService) UpdateAgent(ctx context.Context, agent *types.Custo
 
 	logger.Infof(ctx, "Custom agent updated successfully, ID: %s", agent.ID)
 	return existingAgent, nil
-}
-
-// updateBuiltinAgent updates a built-in agent's configuration (but not basic info)
-func (s *customAgentService) updateBuiltinAgent(ctx context.Context, agent *types.CustomAgent, tenantID uint64) (*types.CustomAgent, error) {
-	// Persist locale-independent display fields (the YAML "default" locale) so
-	// read paths that skip builtin localization see a stable language.
-	defaultAgent := types.GetBuiltinAgent(agent.ID, tenantID)
-	if defaultAgent == nil {
-		return nil, ErrAgentNotFound
-	}
-
-	// Try to get existing customized config from database
-	existingAgent, err := s.repo.GetAgentByID(ctx, agent.ID, tenantID)
-	if err != nil && !errors.Is(err, repository.ErrCustomAgentNotFound) {
-		return nil, err
-	}
-
-	if existingAgent != nil {
-		// Update existing record - only update config, keep basic info unchanged
-		if !types.IsSystemAdminFromContext(ctx) {
-			preserveAgentPlatformBindings(&agent.Config, existingAgent.Config)
-		}
-		existingAgent.Config = agent.Config
-		existingAgent.UpdatedAt = time.Now()
-		existingAgent.EnsureDefaults()
-		if err := existingAgent.Config.QuestionSuggestions.Validate(); err != nil {
-			return nil, err
-		}
-		if err := s.validateAssistantScenarioConfig(ctx, tenantID, existingAgent.Config); err != nil {
-			return nil, err
-		}
-
-		logger.Infof(ctx, "Updating built-in agent config, ID: %s", agent.ID)
-
-		if err := s.repo.UpdateAgent(ctx, existingAgent); err != nil {
-			logger.ErrorWithFields(ctx, err, map[string]interface{}{
-				"agent_id": agent.ID,
-			})
-			return nil, err
-		}
-
-		logger.Infof(ctx, "Built-in agent config updated successfully, ID: %s", agent.ID)
-		types.ApplyBuiltinAgentLocalization(ctx, existingAgent)
-		return existingAgent, nil
-	}
-
-	// Create new record for built-in agent with customized config
-	if !types.IsSystemAdminFromContext(ctx) {
-		preserveAgentPlatformBindings(&agent.Config, defaultAgent.Config)
-	}
-	newAgent := &types.CustomAgent{
-		ID:          defaultAgent.ID,
-		Name:        defaultAgent.Name,
-		Description: defaultAgent.Description,
-		Avatar:      defaultAgent.Avatar,
-		IsBuiltin:   true,
-		TenantID:    tenantID,
-		Config:      agent.Config,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-	}
-	newAgent.EnsureDefaults()
-	if err := newAgent.Config.QuestionSuggestions.Validate(); err != nil {
-		return nil, err
-	}
-	if err := s.validateAssistantScenarioConfig(ctx, tenantID, newAgent.Config); err != nil {
-		return nil, err
-	}
-
-	logger.Infof(ctx, "Creating built-in agent config record, ID: %s, tenant ID: %d", agent.ID, tenantID)
-
-	if err := s.repo.CreateAgent(ctx, newAgent); err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"agent_id":  agent.ID,
-			"tenant_id": tenantID,
-		})
-		return nil, err
-	}
-
-	logger.Infof(ctx, "Built-in agent config record created successfully, ID: %s", agent.ID)
-	types.ApplyBuiltinAgentLocalization(ctx, newAgent)
-	return newAgent, nil
 }
 
 // DeleteAgent deletes an agent

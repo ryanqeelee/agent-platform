@@ -185,111 +185,6 @@ export function updateParserEngineConfig(config: ParserEngineConfig): Promise<{ 
   return put('/api/v1/system/admin/parser-engine-config', config)
 }
 
-// ---- 存储引擎配置（空间级，供文档/图片存储与 docreader 使用） ----
-
-export interface StorageEngineConfig {
-  default_provider: string // "local" | "minio" | "cos" | "tos" | "s3" | "oss" | "ks3" | "obs"
-  local: { path_prefix: string }
-  minio: { mode: string; endpoint: string; access_key_id: string; secret_access_key: string; bucket_name: string; use_ssl: boolean; path_prefix: string }
-  cos: {
-    secret_id: string
-    secret_key: string
-    region: string
-    bucket_name: string
-    app_id: string
-    path_prefix: string
-  }
-  tos: {
-    endpoint: string
-    region: string
-    access_key: string
-    secret_key: string
-    bucket_name: string
-    path_prefix: string
-  }
-  s3: {
-    endpoint: string // optional for standard AWS S3
-    region: string
-    access_key: string // both keys empty => AWS default credential chain
-    secret_key: string
-    bucket_name: string
-    path_prefix: string
-  }
-  oss: {
-    endpoint: string
-    region: string
-    access_key: string
-    secret_key: string
-    bucket_name: string
-    path_prefix: string
-    use_temp_bucket: boolean
-    temp_bucket_name: string
-    temp_region: string
-  }
-  ks3: {
-    endpoint: string
-    region: string
-    access_key: string
-    secret_key: string
-    bucket_name: string
-    path_prefix: string
-  }
-  obs: {
-    endpoint: string
-    region: string
-    access_key: string
-    secret_key: string
-    bucket_name: string
-    path_prefix: string
-  }
-}
-
-export interface StorageEngineStatusItem {
-  name: string
-  allowed?: boolean
-  available: boolean
-  description: string
-}
-
-export interface GetStorageEngineStatusResponse {
-  engines: StorageEngineStatusItem[]
-  allowed_providers?: string[]
-  minio_env_available: boolean
-}
-
-export function getStorageEngineConfig(): Promise<{ data: StorageEngineConfig }> {
-  return get('/api/v1/tenants/kv/storage-engine-config')
-}
-
-export function updateStorageEngineConfig(config: StorageEngineConfig): Promise<{ data: StorageEngineConfig }> {
-  return put('/api/v1/tenants/kv/storage-engine-config', config)
-}
-
-export function getStorageEngineStatus(): Promise<{ data: GetStorageEngineStatusResponse }> {
-  return get('/api/v1/system/storage-engine-status')
-}
-
-export interface StorageCheckRequest {
-  provider: string // "minio" | "cos" | "tos" | "s3" | "oss" | "ks3" | "obs"
-  minio?: StorageEngineConfig['minio']
-  cos?: StorageEngineConfig['cos']
-  tos?: StorageEngineConfig['tos']
-  s3?: StorageEngineConfig['s3']
-  oss?: StorageEngineConfig['oss']
-  ks3?: StorageEngineConfig['ks3']
-  obs?: StorageEngineConfig['obs']
-}
-
-export interface StorageCheckResponse {
-  ok: boolean
-  message: string
-  bucket_created?: boolean
-}
-
-export function checkStorageEngine(req: StorageCheckRequest): Promise<{ data: StorageCheckResponse }> {
-  return post('/api/v1/system/storage-engine-check', req)
-}
-
 // ---- System Admin Management ----
 
 export interface SystemAdminUser {
@@ -732,7 +627,7 @@ export async function purgeArchivedRuntimeTasks(
   return response as unknown as { success: boolean; deleted: number }
 }
 
-// --- Sandbox backend configuration (per workspace) ---
+// --- Platform sandbox backend configuration ---
 
 export interface SandboxVolumeMountConfig {
   enabled: boolean
@@ -890,6 +785,7 @@ export interface SandboxConfigRecord {
   name: string
   description?: string
   sandbox_type: string
+  is_default: boolean
   config: SandboxConfig
   created_at: string
   updated_at: string
@@ -917,60 +813,39 @@ export interface SandboxInventory {
   unverifiable?: boolean
 }
 
-/** Sandbox backends managed as named workspace configurations. */
+/** Sandbox backends managed as named platform configurations. */
 export const NAMED_SANDBOX_BACKEND_TYPES = ['cube', 'e2b', 'docker'] as const
 
 export function isNamedSandboxBackend(type: string): boolean {
   return (NAMED_SANDBOX_BACKEND_TYPES as readonly string[]).includes(type)
 }
 
-function platformSandboxConfigPath(tenantId: number): string {
-  if (!Number.isSafeInteger(tenantId) || Number(tenantId) <= 0) {
-    throw new Error('请先选择企业')
-  }
-  return `/api/v1/system/admin/tenants/${tenantId}/sandbox-configs`
-}
+const platformSandboxConfigPath = '/api/v1/system/admin/sandbox-configs'
 
-/** Returns every sandbox config of the workspace. No config means disabled. */
-export function listSandboxConfigs(tenantId: number): Promise<{
-  data: SandboxConfigRecord[]
-  workspace_scripts_disabled?: boolean
-}> {
-  return get(platformSandboxConfigPath(tenantId)) as unknown as Promise<{
-    data: SandboxConfigRecord[]
-    workspace_scripts_disabled?: boolean
-  }>
-}
-
-export function setSandboxWorkspacePolicy(tenantId: number, scriptsDisabled: boolean): Promise<{
-  workspace_scripts_disabled: boolean
-}> {
-  return put(`${platformSandboxConfigPath(tenantId)}/workspace-policy`, {
-    scripts_disabled: scriptsDisabled,
-  }) as unknown as Promise<{ workspace_scripts_disabled: boolean }>
+/** Returns every platform sandbox config. No config means sandbox execution is unavailable. */
+export function listSandboxConfigs(): Promise<{ data: SandboxConfigRecord[] }> {
+  return get(platformSandboxConfigPath) as unknown as Promise<{ data: SandboxConfigRecord[] }>
 }
 
 export function createSandboxConfig(
-  tenantId: number,
   payload: SandboxConfigUpsert,
 ): Promise<{ data: SandboxConfigRecord }> {
-  return post(platformSandboxConfigPath(tenantId), payload) as unknown as Promise<{
+  return post(platformSandboxConfigPath, payload) as unknown as Promise<{
     data: SandboxConfigRecord
   }>
 }
 
-export function getSandboxConfigById(tenantId: number, id: string): Promise<{ data: SandboxConfigRecord }> {
-  return get(`${platformSandboxConfigPath(tenantId)}/${id}`) as unknown as Promise<{
+export function getSandboxConfigById(id: string): Promise<{ data: SandboxConfigRecord }> {
+  return get(`${platformSandboxConfigPath}/${id}`) as unknown as Promise<{
     data: SandboxConfigRecord
   }>
 }
 
 export function updateSandboxConfigById(
-  tenantId: number,
   id: string,
   payload: SandboxConfigUpsert,
 ): Promise<{ data: SandboxConfigRecord }> {
-  return put(`${platformSandboxConfigPath(tenantId)}/${id}`, payload) as unknown as Promise<{
+  return put(`${platformSandboxConfigPath}/${id}`, payload) as unknown as Promise<{
     data: SandboxConfigRecord
   }>
 }
@@ -980,15 +855,19 @@ export function updateSandboxConfigById(
  * overrides sandboxes the backend can actually see. Ask for it exclusively in
  * response to a `sandbox_inventory_unverifiable` conflict.
  */
-export function deleteSandboxConfig(tenantId: number, id: string, force = false): Promise<void> {
+export function deleteSandboxConfig(id: string, force = false): Promise<void> {
   const query = force ? '?force=true' : ''
-  return del(`${platformSandboxConfigPath(tenantId)}/${id}${query}`) as unknown as Promise<void>
+  return del(`${platformSandboxConfigPath}/${id}${query}`) as unknown as Promise<void>
 }
 
-export function getSandboxConfigInventory(tenantId: number, id: string): Promise<{ data: SandboxInventory }> {
-  return get(`${platformSandboxConfigPath(tenantId)}/${id}/sandboxes`) as unknown as Promise<{
+export function getSandboxConfigInventory(id: string): Promise<{ data: SandboxInventory }> {
+  return get(`${platformSandboxConfigPath}/${id}/sandboxes`) as unknown as Promise<{
     data: SandboxInventory
   }>
+}
+
+export function setDefaultSandboxConfig(configId: string): Promise<{ success: boolean }> {
+  return put(`${platformSandboxConfigPath}/default`, { config_id: configId }) as unknown as Promise<{ success: boolean }>
 }
 
 /**
@@ -998,13 +877,13 @@ export function getSandboxConfigInventory(tenantId: number, id: string): Promise
  * (DNS, image) can take effect; it requires `config_id`. The returned
  * building item can be polled through the same endpoint.
  */
-export function querySandboxTemplates(tenantId: number, payload: {
+export function querySandboxTemplates(payload: {
   config: SandboxConfig
   config_id?: string
   ensure_standard?: boolean
   replace_standard?: boolean
 }): Promise<{ data: SandboxTemplateCatalog }> {
-  return post(`${platformSandboxConfigPath(tenantId)}/templates/query`, payload) as unknown as Promise<{
+  return post(`${platformSandboxConfigPath}/templates/query`, payload) as unknown as Promise<{
     data: SandboxTemplateCatalog
   }>
 }
@@ -1019,12 +898,12 @@ export function querySandboxTemplates(tenantId: number, payload: {
  * to validate the template ID, Cube's proxy data plane and outbound egress.
  * It consumes real sandbox time.
  */
-export function checkSandboxConfig(tenantId: number, payload: {
+export function checkSandboxConfig(payload: {
   config?: SandboxConfig
   config_id?: string
   deep?: boolean
 }): Promise<{ data: SandboxCheckResult }> {
-  return post(`${platformSandboxConfigPath(tenantId)}/check`, payload) as unknown as Promise<{
+  return post(`${platformSandboxConfigPath}/check`, payload) as unknown as Promise<{
     data: SandboxCheckResult
   }>
 }
@@ -1077,7 +956,7 @@ export type ConfigSkillStatus = 'installing' | 'ready' | 'failed' | 'removing' |
 
 /**
  * One environment variable the skill's installer declared. `is_set` reports
- * whether a workspace-wide value exists; the value itself is never returned,
+ * whether a platform default exists; the value itself is never returned,
  * so an editor can show that something is stored but not what.
  */
 export interface ConfigSkillEnv {
@@ -1097,11 +976,9 @@ export interface ConfigSkill {
   error?: string
   bundle_sha256?: string
   installed_snapshot_id?: string
-  // Locators for this skill's most recent install conversation. Absent for
-  // skills installed before transcripts existed, which is how the drawer
-  // decides whether to offer the "view install" entry point.
-  install_session_id?: string
-  install_message_id?: string
+  // Opaque correlation ID for this skill's latest platform install run.
+  // It is not an enterprise chat session.
+  install_run_id?: string
   created_at: string
   updated_at: string
   // Absent for a skill whose installer declared nothing, which is how the
@@ -1117,26 +994,25 @@ export interface ConfigSkillInstallEvent {
   done: boolean
 }
 
-export function listConfigSkills(tenantId: number, configId: string): Promise<{ data: ConfigSkill[] }> {
-  return get(`${platformSandboxConfigPath(tenantId)}/${configId}/skills`) as unknown as Promise<{ data: ConfigSkill[] }>
+export function listConfigSkills(configId: string): Promise<{ data: ConfigSkill[] }> {
+  return get(`${platformSandboxConfigPath}/${configId}/skills`) as unknown as Promise<{ data: ConfigSkill[] }>
 }
 
 export function uploadConfigSkill(
-  tenantId: number, configId: string, file: File, onProgress?: (percent: number) => void,
+  configId: string, file: File, onProgress?: (percent: number) => void,
 ): Promise<{ data: { skill_id: string } }> {
   const form = new FormData()
   form.append('file', file)
-  return postUpload(`${platformSandboxConfigPath(tenantId)}/${configId}/skills`, form, (e: any) => {
+  return postUpload(`${platformSandboxConfigPath}/${configId}/skills`, form, (e: any) => {
     if (e.total) onProgress?.(Math.round((e.loaded * 100) / e.total))
   }, { timeout: 5 * 60 * 1000 })
 }
 
 export function installConfigSkillFromSource(
-  tenantId: number,
   configId: string,
   payload: { source: string },
 ): Promise<{ data: { skill_id: string } }> {
-  return post(`${platformSandboxConfigPath(tenantId)}/${configId}/skills`, payload, {
+  return post(`${platformSandboxConfigPath}/${configId}/skills`, payload, {
     timeout: 2 * 60 * 1000,
   }) as unknown as Promise<{ data: { skill_id: string } }>
 }
@@ -1145,12 +1021,11 @@ export function installConfigSkillFromSource(
 // that had nothing to do with the bundle does not send the operator looking
 // for the original zip or registry URL.
 export function reinstallConfigSkill(
-  tenantId: number,
   configId: string,
   skillId: string,
 ): Promise<{ data: { skill_id: string } }> {
   return post(
-    `${platformSandboxConfigPath(tenantId)}/${configId}/skills/${skillId}/reinstall`,
+    `${platformSandboxConfigPath}/${configId}/skills/${skillId}/reinstall`,
     {},
   ) as unknown as Promise<{ data: { skill_id: string } }>
 }
@@ -1158,12 +1033,11 @@ export function reinstallConfigSkill(
 // Aborts an in-flight install so retry/uninstall become available.
 // After a process restart the row may still say installing with nothing running.
 export function stopConfigSkill(
-  tenantId: number,
   configId: string,
   skillId: string,
 ): Promise<{ data: ConfigSkill }> {
   return post(
-    `${platformSandboxConfigPath(tenantId)}/${configId}/skills/${skillId}/stop`,
+    `${platformSandboxConfigPath}/${configId}/skills/${skillId}/stop`,
     {},
   ) as unknown as Promise<{ data: ConfigSkill }>
 }
@@ -1174,55 +1048,51 @@ export function stopConfigSkill(
  * while keeping the declaration, and undeclared names are ignored server-side.
  */
 export function patchConfigSkill(
-  tenantId: number,
   configId: string,
   skillId: string,
   payload: { enabled?: boolean; envs?: Record<string, string> },
 ): Promise<{ data: ConfigSkill }> {
-  return patch(`${platformSandboxConfigPath(tenantId)}/${configId}/skills/${skillId}`, payload) as unknown as Promise<{
+  return patch(`${platformSandboxConfigPath}/${configId}/skills/${skillId}`, payload) as unknown as Promise<{
     data: ConfigSkill
   }>
 }
 
 export function deleteConfigSkill(
-  tenantId: number,
   configId: string,
   skillId: string,
 ): Promise<{ data: { skill_id: string } }> {
-  return del(`${platformSandboxConfigPath(tenantId)}/${configId}/skills/${skillId}`) as unknown as Promise<{
+  return del(`${platformSandboxConfigPath}/${configId}/skills/${skillId}`) as unknown as Promise<{
     data: { skill_id: string }
   }>
 }
 
 export function getConfigSkill(
-  tenantId: number,
   configId: string,
   skillId: string,
 ): Promise<{ data: ConfigSkill }> {
-  return get(`${platformSandboxConfigPath(tenantId)}/${configId}/skills/${skillId}`) as unknown as Promise<{
+  return get(`${platformSandboxConfigPath}/${configId}/skills/${skillId}`) as unknown as Promise<{
     data: ConfigSkill
   }>
 }
 
-export function configSkillInstallEventsUrl(tenantId: number, configId: string, skillId: string): string {
-  return `${platformSandboxConfigPath(tenantId)}/${configId}/skills/${skillId}/install-events`
+export function configSkillInstallEventsUrl(configId: string, skillId: string): string {
+  return `${platformSandboxConfigPath}/${configId}/skills/${skillId}/install-events`
 }
 
 // The installer agent's own transcript: its prompt, thinking, commands and
 // their output, replayed from the start and then followed live. Answers 404
 // once the event log has expired, which is the signal to read the durable
 // message history instead.
-export function configSkillTranscriptUrl(tenantId: number, configId: string, skillId: string): string {
-  return `${platformSandboxConfigPath(tenantId)}/${configId}/skills/${skillId}/transcript`
+export function configSkillTranscriptUrl(configId: string, skillId: string): string {
+  return `${platformSandboxConfigPath}/${configId}/skills/${skillId}/transcript`
 }
 
 export function getConfigSkillTranscriptHistory(
-  tenantId: number,
   configId: string,
   skillId: string,
 ): Promise<{ data: any[] }> {
   return get(
-    `${platformSandboxConfigPath(tenantId)}/${configId}/skills/${skillId}/transcript/history`,
+    `${platformSandboxConfigPath}/${configId}/skills/${skillId}/transcript/history`,
   ) as unknown as Promise<{ data: any[] }>
 }
 
@@ -1242,22 +1112,20 @@ export interface ConfigSkillFileContent {
 }
 
 export function listConfigSkillFiles(
-  tenantId: number,
   configId: string,
   skillId: string,
 ): Promise<{ data: ConfigSkillFileEntry[] }> {
-  return get(`${platformSandboxConfigPath(tenantId)}/${configId}/skills/${skillId}/files`) as unknown as Promise<{
+  return get(`${platformSandboxConfigPath}/${configId}/skills/${skillId}/files`) as unknown as Promise<{
     data: ConfigSkillFileEntry[]
   }>
 }
 
 export function getConfigSkillFile(
-  tenantId: number,
   configId: string,
   skillId: string,
   path: string,
 ): Promise<{ data: ConfigSkillFileContent }> {
-  return get(`${platformSandboxConfigPath(tenantId)}/${configId}/skills/${skillId}/files/content`, {
+  return get(`${platformSandboxConfigPath}/${configId}/skills/${skillId}/files/content`, {
     params: { path },
   }) as unknown as Promise<{ data: ConfigSkillFileContent }>
 }

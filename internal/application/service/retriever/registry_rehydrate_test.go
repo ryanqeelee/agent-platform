@@ -24,7 +24,7 @@ type fakeStoreRepo struct {
 	err   error
 }
 
-func (f *fakeStoreRepo) GetByID(_ context.Context, _ uint64, _ string) (*types.VectorStore, error) {
+func (f *fakeStoreRepo) GetByID(_ context.Context, _ string) (*types.VectorStore, error) {
 	return f.store, f.err
 }
 

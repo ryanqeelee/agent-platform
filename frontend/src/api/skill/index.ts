@@ -38,68 +38,54 @@ export interface SkillCatalogRegisterResult {
   description?: string;
 }
 
-function platformSkillPath(tenantId: number): string {
-  if (!Number.isSafeInteger(tenantId) || Number(tenantId) <= 0) {
-    throw new Error('请先选择企业')
-  }
-  return `/api/v1/system/admin/tenants/${tenantId}/skills`
+const platformSkillPath = '/api/v1/system/admin/skills';
+
+export function listSkillCatalog() {
+  return get<{ data: SkillCatalogItem[] }>(platformSkillPath);
 }
 
-// 获取当前沙箱配置上可执行的 Skills；未传 sandboxConfigId 或
-// skills_available 为 false 时，前端应隐藏/禁用 Skills 配置
-export function listSkills(tenantId: number, sandboxConfigId?: string) {
-  return get<{ data: SkillInfo[]; skills_available?: boolean }>(platformSkillPath(tenantId), {
-    params: sandboxConfigId ? { sandbox_config_id: sandboxConfigId } : {},
-  });
+export function getSkillInstallerAgent() {
+  return get<{ data: CustomAgent }>('/api/v1/system/admin/agents/builtin-skill-installer');
 }
 
-export function listSkillCatalog(tenantId: number) {
-  return get<{ data: SkillCatalogItem[] }>(`${platformSkillPath(tenantId)}/catalog`);
+export function updateSkillInstallerAgent(data: UpdateAgentRequest) {
+  return put<{ data: CustomAgent }>('/api/v1/system/admin/agents/builtin-skill-installer', data);
 }
 
-export function getSkillInstallerAgent(tenantId: number) {
-  return get<{ data: CustomAgent }>(`${platformSkillPath(tenantId)}/installer-agent`);
-}
-
-export function updateSkillInstallerAgent(tenantId: number, data: UpdateAgentRequest) {
-  return put<{ data: CustomAgent }>(`${platformSkillPath(tenantId)}/installer-agent`, data);
-}
-
-export function registerSkillCatalogFromSource(tenantId: number, source: string) {
-  return post<{ data: SkillCatalogRegisterResult }>(`${platformSkillPath(tenantId)}/catalog`, { source }, {
+export function registerSkillCatalogFromSource(source: string) {
+  return post<{ data: SkillCatalogRegisterResult }>(platformSkillPath, { source }, {
     timeout: 2 * 60 * 1000,
   });
 }
 
 export function registerSkillCatalogFromFile(
-  tenantId: number,
   file: File,
   onProgress?: (percent: number) => void,
 ) {
   const form = new FormData();
   form.append('file', file);
-  return postUpload(`${platformSkillPath(tenantId)}/catalog`, form, (e: any) => {
+  return postUpload(platformSkillPath, form, (e: any) => {
     if (e.total) onProgress?.(Math.round((e.loaded * 100) / e.total));
   }, { timeout: 5 * 60 * 1000 }) as Promise<{ data: SkillCatalogRegisterResult }>;
 }
 
-export function installSkillCatalog(tenantId: number, catalogId: string, sandboxConfigIds: string[]) {
+export function installSkillCatalog(catalogId: string, sandboxConfigIds: string[]) {
   return post<{ data: { installs: Record<string, string>; errors?: Record<string, string> } }>(
-    `${platformSkillPath(tenantId)}/catalog/${catalogId}/install`,
+    `${platformSkillPath}/${catalogId}/install`,
     { sandbox_config_ids: sandboxConfigIds },
   );
 }
 
-export function deleteSkillCatalog(tenantId: number, catalogId: string) {
-  return del(`${platformSkillPath(tenantId)}/catalog/${catalogId}`);
+export function deleteSkillCatalog(catalogId: string) {
+  return del(`${platformSkillPath}/${catalogId}`);
 }
 
-export function listCatalogSkillFiles(tenantId: number, catalogId: string) {
-  return get<{ data: ConfigSkillFileEntry[] }>(`${platformSkillPath(tenantId)}/catalog/${catalogId}/files`);
+export function listCatalogSkillFiles(catalogId: string) {
+  return get<{ data: ConfigSkillFileEntry[] }>(`${platformSkillPath}/${catalogId}/files`);
 }
 
-export function getCatalogSkillFile(tenantId: number, catalogId: string, path: string) {
-  return get<{ data: ConfigSkillFileContent }>(`${platformSkillPath(tenantId)}/catalog/${catalogId}/files/content`, {
+export function getCatalogSkillFile(catalogId: string, path: string) {
+  return get<{ data: ConfigSkillFileContent }>(`${platformSkillPath}/${catalogId}/files/content`, {
     params: { path },
   });
 }

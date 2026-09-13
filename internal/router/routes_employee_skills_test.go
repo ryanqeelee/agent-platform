@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestEmployeeSkillRoutesSeparateViewerAndAdminAuthority(t *testing.T) {
+func TestEmployeeSkillRoutesExposeReadOnlyPlatformSkills(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, tc := range []struct {
 		role         types.TenantRole
@@ -20,10 +20,10 @@ func TestEmployeeSkillRoutesSeparateViewerAndAdminAuthority(t *testing.T) {
 		status       int
 	}{
 		{types.TenantRoleViewer, "GET", "/employee-assistant/skills", 503},
-		{types.TenantRoleViewer, "GET", "/employee-assistant/skills/manage", 403},
-		{types.TenantRoleViewer, "PATCH", "/employee-assistant/skills/manage/skill-1", 403},
-		{types.TenantRoleAdmin, "GET", "/employee-assistant/skills/manage", 503},
-		{types.TenantRoleAdmin, "PATCH", "/employee-assistant/skills/manage/skill-1", 503},
+		{types.TenantRoleViewer, "GET", "/employee-assistant/skills/manage", 404},
+		{types.TenantRoleViewer, "PATCH", "/employee-assistant/skills/manage/skill-1", 404},
+		{types.TenantRoleAdmin, "GET", "/employee-assistant/skills/manage", 404},
+		{types.TenantRoleAdmin, "PATCH", "/employee-assistant/skills/manage/skill-1", 404},
 		{types.TenantRoleAdmin, "GET", "/skills", 404},
 	} {
 		t.Run(string(tc.role)+tc.method+tc.path, func(t *testing.T) {

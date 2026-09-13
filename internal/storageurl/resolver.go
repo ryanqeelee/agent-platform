@@ -5,7 +5,6 @@ import (
 	"os"
 	"strings"
 
-	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -27,23 +26,19 @@ func LocalStorageBaseDir() string {
 //
 // Not safe for concurrent use; Rewriter drives it from one goroutine at a time.
 type FileServiceResolver struct {
-	tenant          *types.Tenant
 	defaultSvc      interfaces.FileService
 	storageResolver interfaces.StorageBackendResolver
 	ctx             context.Context
 	cache           map[string]interfaces.FileService
 }
 
-// NewFileServiceResolver builds a resolver for tenant. defaultSvc is the
-// process-wide FileService used for `resource://` handles and as the fallback
-// when tenant storage config is missing.
+// NewFileServiceResolver builds a resolver. defaultSvc resolves resource://
+// handles; provider paths require the platform storage resolver.
 func NewFileServiceResolver(
-	tenant *types.Tenant,
 	defaultSvc interfaces.FileService,
 	storageResolvers ...interfaces.StorageBackendResolver,
 ) *FileServiceResolver {
 	resolver := &FileServiceResolver{
-		tenant:     tenant,
 		defaultSvc: defaultSvc,
 		ctx:        context.Background(),
 		cache:      make(map[string]interfaces.FileService),
@@ -70,59 +65,21 @@ func (r *FileServiceResolver) ResolveFileService(filePath string) interfaces.Fil
 	backendID, _, _ := types.ParseStorageBackendPath(filePath)
 	provider := types.ParseProviderScheme(filePath)
 	if provider == "" {
-		if r.tenant != nil && r.tenant.StorageEngineConfig != nil {
-			provider = strings.ToLower(strings.TrimSpace(r.tenant.StorageEngineConfig.DefaultProvider))
-		}
-		if provider == "" {
-			return nil
-		}
+		return nil
 	}
 	cacheKey := backendID + ":" + provider
 	if svc, ok := r.cache[cacheKey]; ok {
 		return svc
 	}
-	if r.storageResolver != nil && r.tenant != nil {
-		svc, _, err := r.storageResolver.ResolveFileService(r.ctx, r.tenant, backendID, provider, LocalStorageBaseDir())
+	if r.storageResolver != nil {
+		svc, _, err := r.storageResolver.ResolveFileService(r.ctx, backendID, LocalStorageBaseDir())
 		if err == nil {
 			r.cache[cacheKey] = svc
 			return svc
 		}
 		logger.Warnf(r.ctx, "resolve storage backend failed: backend_id=%s provider=%s err=%v",
 			backendID, provider, err)
-	}
-	svc := BuildFileServiceForProvider(r.tenant, provider, r.defaultSvc)
-	if svc != nil {
-		r.cache[cacheKey] = svc
-	}
-	return svc
-}
-
-// BuildFileServiceForProvider selects the FileService for a storage provider.
-// The reference's own scheme wins over the tenant DefaultProvider. It falls back
-// to the process-wide default FileService (STORAGE_TYPE / env) when tenant
-// config is missing — mirrors ImageMultimodalService.resolveFileServiceForPayload
-// (issue #1282).
-func BuildFileServiceForProvider(
-	tenant *types.Tenant,
-	provider string,
-	defaultSvc interfaces.FileService,
-) interfaces.FileService {
-	baseDir := LocalStorageBaseDir()
-	var sec *types.StorageEngineConfig
-	if tenant != nil {
-		sec = tenant.StorageEngineConfig
-	}
-
-	svc, _, err := filesvc.NewFileServiceFromStorageConfig(provider, sec, baseDir)
-	if err == nil {
-		return svc
-	}
-	if provider == "local" {
-		externalURL := strings.TrimSpace(os.Getenv("APP_EXTERNAL_URL"))
-		return filesvc.NewLocalFileService(baseDir, externalURL)
-	}
-	if defaultSvc != nil {
-		return defaultSvc
+		return nil
 	}
 	return nil
 }

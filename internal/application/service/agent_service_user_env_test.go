@@ -22,7 +22,7 @@ func TestAgentServiceUserEnvResolverNilWithoutDB(t *testing.T) {
 
 	resolver := s.userEnvResolver(context.Background(), &types.AgentConfig{
 		SandboxConfigID: "cfg-1",
-		TenantSkills:    []*types.TenantSkillEntity{{ID: "sk-1", TenantID: 7, Name: "web-search"}},
+		TenantSkills:    []*types.TenantSkillEntity{{ID: "sk-1", Name: "web-search"}},
 	})
 
 	require.Nil(t, resolver)
@@ -44,16 +44,15 @@ func TestAgentServiceUserEnvResolverBuiltWithoutInstalledSkills(t *testing.T) {
 	require.Empty(t, typed.byName)
 }
 
-// The tenant id is read off the row, matching tenantSkillSource, so the lookup
-// cannot resolve into a different workspace.
-func TestAgentServiceUserEnvResolverIndexesByNameAndRowTenant(t *testing.T) {
+func TestAgentServiceUserEnvResolverIndexesGlobalSkillsForContextTenant(t *testing.T) {
 	s := &agentService{db: &gorm.DB{}}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
 
-	resolver := s.userEnvResolver(context.Background(), &types.AgentConfig{
+	resolver := s.userEnvResolver(ctx, &types.AgentConfig{
 		SandboxConfigID: "cfg-1",
 		TenantSkills: []*types.TenantSkillEntity{
-			{ID: "sk-1", TenantID: 7, Name: "web-search"},
-			{ID: "sk-2", TenantID: 7, Name: "pdf"},
+			{ID: "sk-1", Name: "web-search"},
+			{ID: "sk-2", Name: "pdf"},
 		},
 	})
 

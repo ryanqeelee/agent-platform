@@ -19,11 +19,10 @@ type effectiveFixture struct {
 
 // usableSkillImageConfig is a config whose stored snapshot is the image its
 // sessions boot, which is the precondition for offering any installed skill.
-func usableSkillImageConfig(id string, tenantID uint64) *types.TenantSandboxConfigEntity {
+func usableSkillImageConfig(id string) *types.TenantSandboxConfigEntity {
 	fingerprint := sandbox.SkillImageFingerprint("e2b", "key-1", "https://e2b.example")
 	return &types.TenantSandboxConfigEntity{
 		ID:          id,
-		TenantID:    tenantID,
 		SandboxType: string(sandbox.SandboxTypeE2B),
 		Config: &types.TenantSandboxConfig{
 			SandboxType: string(sandbox.SandboxTypeE2B),
@@ -41,7 +40,7 @@ func usableSkillImageConfig(id string, tenantID uint64) *types.TenantSandboxConf
 func newEffectiveFixture(t *testing.T) *effectiveFixture {
 	t.Helper()
 	fx := &effectiveFixture{
-		configs: &installConfigRepo{entity: usableSkillImageConfig("cfg-1", 7)},
+		configs: &installConfigRepo{entity: usableSkillImageConfig("cfg-1")},
 		skills:  newInstallSkillRepo(),
 	}
 	rows := []*types.TenantSkillEntity{
@@ -53,7 +52,6 @@ func newEffectiveFixture(t *testing.T) *effectiveFixture {
 		{ID: "sk-6", Name: "second-ready", Status: types.SkillStatusReady, Enabled: true},
 	}
 	for _, row := range rows {
-		row.TenantID = 7
 		row.SandboxConfigID = "cfg-1"
 		require.NoError(t, fx.skills.CreateSkill(context.Background(), row))
 	}
@@ -139,9 +137,9 @@ func TestEffectiveTenantSkillsInjectsNothingWithoutASelectedConfig(t *testing.T)
 	require.Empty(t, effectiveTenantSkills(
 		context.Background(), fx.configs, fx.skills, 7, "cfg-other"),
 		"a config that does not exist for this workspace has no skills")
-	require.Empty(t, effectiveTenantSkills(
-		context.Background(), fx.configs, fx.skills, 9, "cfg-1"),
-		"another workspace must not see these skills")
+	require.ElementsMatch(t, []string{"ready-enabled", "second-ready"}, skillNames(
+		effectiveTenantSkills(context.Background(), fx.configs, fx.skills, 9, "cfg-1")),
+		"tenants share the platform installation attached to the same config")
 }
 
 // failingConfigRepo is the config read erroring the way the gorm repository
@@ -156,7 +154,7 @@ type failingConfigRepo struct {
 }
 
 func (r failingConfigRepo) GetByID(
-	context.Context, uint64, string,
+	context.Context, string,
 ) (*types.TenantSandboxConfigEntity, error) {
 	return r.entity, r.err
 }
@@ -168,7 +166,7 @@ func TestEffectiveTenantSkillsInjectsNothingWhenTheConfigLookupFails(t *testing.
 	fx := newEffectiveFixture(t)
 
 	failing := failingConfigRepo{
-		entity: usableSkillImageConfig("cfg-1", 7),
+		entity: usableSkillImageConfig("cfg-1"),
 		err:    errors.New("connection refused"),
 	}
 
@@ -197,10 +195,10 @@ type multiConfigRepo struct {
 }
 
 func (r *multiConfigRepo) GetByID(
-	_ context.Context, tenantID uint64, id string,
+	_ context.Context, id string,
 ) (*types.TenantSandboxConfigEntity, error) {
 	entity, ok := r.entities[id]
-	if !ok || entity.TenantID != tenantID {
+	if !ok {
 		return nil, nil
 	}
 	return entity, nil
@@ -211,13 +209,13 @@ func (r *multiConfigRepo) GetByID(
 func twoConfigFixture(t *testing.T) (*multiConfigRepo, *installSkillRepo) {
 	t.Helper()
 	configs := &multiConfigRepo{entities: map[string]*types.TenantSandboxConfigEntity{
-		"cfg-a": usableSkillImageConfig("cfg-a", 7),
-		"cfg-b": usableSkillImageConfig("cfg-b", 7),
+		"cfg-a": usableSkillImageConfig("cfg-a"),
+		"cfg-b": usableSkillImageConfig("cfg-b"),
 	}}
 	skills := newInstallSkillRepo()
 	for configID, name := range map[string]string{"cfg-a": "skill-of-a", "cfg-b": "skill-of-b"} {
 		require.NoError(t, skills.CreateSkill(context.Background(), &types.TenantSkillEntity{
-			ID: "sk-" + configID, Name: name, TenantID: 7, SandboxConfigID: configID,
+			ID: "sk-" + configID, Name: name, SandboxConfigID: configID,
 			Status: types.SkillStatusReady, Enabled: true,
 		}))
 	}

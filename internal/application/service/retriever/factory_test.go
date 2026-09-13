@@ -25,7 +25,8 @@ type fakeOwnership struct {
 	owned map[string]uint64
 	// err, when non-nil, is returned from every StoreOwnedBy call
 	// (used to simulate infrastructure failures).
-	err error
+	err       error
+	defaultID string
 	// calls records every (storeID, tenantID) pair asked. Tests use this
 	// to assert that the factory short-circuits to the fallback path
 	// without calling ownership when vectorStoreID is nil/empty.
@@ -37,16 +38,23 @@ type ownershipCall struct {
 	tenantID uint64
 }
 
-func (f *fakeOwnership) StoreOwnedBy(ctx context.Context, storeID string, tenantID uint64) (bool, error) {
+func (f *fakeOwnership) StoreUsable(ctx context.Context, storeID string) (bool, error) {
 	f.mu.Lock()
-	f.calls = append(f.calls, ownershipCall{storeID: storeID, tenantID: tenantID})
+	f.calls = append(f.calls, ownershipCall{storeID: storeID})
 	err := f.err
-	ownedTenant, ok := f.owned[storeID]
+	_, ok := f.owned[storeID]
 	f.mu.Unlock()
 	if err != nil {
 		return false, err
 	}
-	return ok && ownedTenant == tenantID, nil
+	return ok, nil
+}
+
+func (f *fakeOwnership) DefaultStoreID(context.Context) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	return f.defaultID, nil
 }
 
 // callCount returns the number of StoreOwnedBy calls recorded so far.
@@ -128,16 +136,6 @@ func registryWithStores(t *testing.T, stores map[string]*fakeEngine, engineTypes
 	return r
 }
 
-// newTenantCtx returns a context carrying a Tenant with the given
-// EffectiveEngines. Factory's unbound path consumes this via
-// types.TenantInfoFromContext.
-func newTenantCtx(engines []types.RetrieverEngineParams) context.Context {
-	tenant := &types.Tenant{
-		RetrieverEngines: types.RetrieverEngines{Engines: engines},
-	}
-	return context.WithValue(context.Background(), types.TenantInfoContextKey, tenant)
-}
-
 // ----- CreateRetrieveEngineForKB -----
 
 func TestCreateRetrieveEngineForKB_Unbound(t *testing.T) {
@@ -145,14 +143,8 @@ func TestCreateRetrieveEngineForKB_Unbound(t *testing.T) {
 		engineType: types.PostgresRetrieverEngineType,
 		support:    []types.RetrieverType{types.KeywordsRetrieverType, types.VectorRetrieverType},
 	}
-	registry := registryWithStores(t, nil, map[types.RetrieverEngineType]*fakeEngine{
-		types.PostgresRetrieverEngineType: postgresEngine,
-	})
-	ownership := &fakeOwnership{}
-
-	tenantCtx := newTenantCtx([]types.RetrieverEngineParams{
-		{RetrieverEngineType: types.PostgresRetrieverEngineType, RetrieverType: types.VectorRetrieverType},
-	})
+	registry := registryWithStores(t, map[string]*fakeEngine{"platform-default": postgresEngine}, nil)
+	ownership := &fakeOwnership{owned: map[string]uint64{"platform-default": 1}, defaultID: "platform-default"}
 
 	cases := []struct {
 		name  string
@@ -163,25 +155,24 @@ func TestCreateRetrieveEngineForKB_Unbound(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			engine, err := CreateRetrieveEngineForKB(tenantCtx, registry, ownership, 1, tc.store)
+			engine, err := CreateRetrieveEngineForKB(context.Background(), registry, ownership, 1, tc.store)
 			require.NoError(t, err)
 			require.NotNil(t, engine)
-			assert.Len(t, engine.engineInfos, 1, "unbound path uses tenant effective engines")
+			assert.Len(t, engine.engineInfos, 1, "unbound path uses the platform default")
 			assert.Same(t, postgresEngine, engine.engineInfos[0].retrieveEngine)
-			assert.Zero(t, ownership.callCount(),
-				"ownership must not be called on the unbound path")
+			assert.Positive(t, ownership.callCount())
 		})
 	}
 }
 
-func TestCreateRetrieveEngineForKB_UnboundMissingTenant(t *testing.T) {
+func TestCreateRetrieveEngineForKB_UnboundMissingDefault(t *testing.T) {
 	registry := registryWithStores(t, nil, nil)
 	ownership := &fakeOwnership{}
 
 	_, err := CreateRetrieveEngineForKB(context.Background(), registry, ownership, 1, nil)
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrTenantInfoMissing),
-		"err %q must wrap ErrTenantInfoMissing", err)
+	assert.True(t, errors.Is(err, ErrVectorStoreNotFound),
+		"err %q must wrap ErrVectorStoreNotFound", err)
 }
 
 func TestCreateRetrieveEngineForKB_StoreBound(t *testing.T) {
@@ -208,7 +199,7 @@ func TestCreateRetrieveEngineForKB_StoreBound(t *testing.T) {
 		"store-bound KB uses every retriever type the store supports")
 }
 
-func TestCreateRetrieveEngineForKB_CrossTenant(t *testing.T) {
+func TestCreateRetrieveEngineForKB_GlobalStoreUsableAcrossTenants(t *testing.T) {
 	esEngine := &fakeEngine{
 		engineType: types.ElasticsearchRetrieverEngineType,
 		support:    []types.RetrieverType{types.VectorRetrieverType},
@@ -217,20 +208,11 @@ func TestCreateRetrieveEngineForKB_CrossTenant(t *testing.T) {
 		map[string]*fakeEngine{"store-A": esEngine},
 		nil,
 	)
-	// store-A is owned by tenant 2, not tenant 1
 	ownership := &fakeOwnership{owned: map[string]uint64{"store-A": 2}}
 
 	storeID := "store-A"
 	_, err := CreateRetrieveEngineForKB(context.Background(), registry, ownership, 1, &storeID)
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrVectorStoreForbidden),
-		"cross-tenant access must yield ErrVectorStoreForbidden; got %q", err)
-	// Sanity: no store UUID in the sentinel's message — the structured log
-	// emitted inside the factory is where UUIDs live. The user-visible
-	// error is intentionally opaque.
-	assert.NotContains(t, err.Error(), "store-A",
-		"sentinel error must not expose store UUIDs to callers")
+	require.NoError(t, err)
 }
 
 func TestCreateRetrieveEngineForKB_StoreNotRegistered(t *testing.T) {
@@ -276,10 +258,8 @@ func TestCreateRetrieveEngineFromPayload_LegacyUnbound(t *testing.T) {
 		engineType: types.PostgresRetrieverEngineType,
 		support:    []types.RetrieverType{types.VectorRetrieverType},
 	}
-	registry := registryWithStores(t, nil, map[types.RetrieverEngineType]*fakeEngine{
-		types.PostgresRetrieverEngineType: postgresEngine,
-	})
-	ownership := &fakeOwnership{}
+	registry := registryWithStores(t, map[string]*fakeEngine{"platform-default": postgresEngine}, nil)
+	ownership := &fakeOwnership{owned: map[string]uint64{"platform-default": 1}, defaultID: "platform-default"}
 	engines := []types.RetrieverEngineParams{{
 		RetrieverEngineType: types.PostgresRetrieverEngineType,
 		RetrieverType:       types.VectorRetrieverType,
@@ -310,8 +290,7 @@ func TestCreateRetrieveEngineFromPayload_LegacyUnbound(t *testing.T) {
 			require.NotNil(t, engine)
 			require.Len(t, engine.engineInfos, 1)
 			assert.Same(t, postgresEngine, engine.engineInfos[0].retrieveEngine)
-			assert.Zero(t, ownership.callCount(),
-				"unbound payload must not trigger ownership lookup")
+			assert.Positive(t, ownership.callCount())
 		})
 	}
 }
@@ -337,13 +316,11 @@ func TestCreateRetrieveEngineFromPayload_Bound(t *testing.T) {
 	assert.Same(t, qdrantEngine, engine.engineInfos[0].retrieveEngine)
 }
 
-func TestCreateRetrieveEngineFromPayload_TamperedCrossTenant(t *testing.T) {
+func TestCreateRetrieveEngineFromPayload_GlobalStoreUsableAcrossTenants(t *testing.T) {
 	esEngine := &fakeEngine{engineType: types.ElasticsearchRetrieverEngineType,
 		support: []types.RetrieverType{types.VectorRetrieverType}}
 	registry := registryWithStores(t,
 		map[string]*fakeEngine{"store-A": esEngine}, nil)
-	// Store is owned by tenant 99, but the (possibly tampered) payload
-	// claims tenant 1. Factory must reject.
 	ownership := &fakeOwnership{owned: map[string]uint64{"store-A": 99}}
 
 	storeID := "store-A"
@@ -351,8 +328,7 @@ func TestCreateRetrieveEngineFromPayload_TamperedCrossTenant(t *testing.T) {
 		context.Background(), registry, ownership, 1,
 		[]types.RetrieverEngineParams{}, &storeID)
 
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrVectorStoreForbidden))
+	require.NoError(t, err)
 }
 
 // ----- Race -----
@@ -409,12 +385,12 @@ func TestVerifyBinding(t *testing.T) {
 		}
 	})
 
-	t.Run("not owned -> ErrVectorStoreForbidden", func(t *testing.T) {
+	t.Run("missing global store -> ErrVectorStoreNotFound", func(t *testing.T) {
 		registry := registryWithStores(t, nil, nil)
 		ownership := &fakeOwnership{owned: map[string]uint64{}}
 		err := VerifyBinding(ctx, registry, ownership, 1, "store-A")
-		if !errors.Is(err, ErrVectorStoreForbidden) {
-			t.Fatalf("expected ErrVectorStoreForbidden, got %v", err)
+		if !errors.Is(err, ErrVectorStoreNotFound) {
+			t.Fatalf("expected ErrVectorStoreNotFound, got %v", err)
 		}
 	})
 
@@ -438,17 +414,13 @@ func TestVerifyBinding(t *testing.T) {
 		}
 	})
 
-	t.Run("cross-tenant returns Forbidden (not Found)", func(t *testing.T) {
-		// store owned by tenant 2, queried by tenant 1
+	t.Run("global store is usable across tenants", func(t *testing.T) {
 		registry := registryWithStores(t,
 			map[string]*fakeEngine{"store-A": esEngine},
 			nil,
 		)
 		ownership := &fakeOwnership{owned: map[string]uint64{"store-A": 2}}
-		err := VerifyBinding(ctx, registry, ownership, 1, "store-A")
-		if !errors.Is(err, ErrVectorStoreForbidden) {
-			t.Fatalf("expected ErrVectorStoreForbidden, got %v", err)
-		}
+		require.NoError(t, VerifyBinding(ctx, registry, ownership, 1, "store-A"))
 	})
 }
 

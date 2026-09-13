@@ -29,32 +29,6 @@
       </div>
     </div>
 
-    <!--
-      Workspace-wide kill switch. It used to be a text button next to the type
-      tabs, where it read as a filter action; as a labelled switch row it is
-      clearly a persistent workspace setting instead.
-    -->
-    <div class="setting-row">
-      <div class="setting-info">
-        <label>{{ $t('settings.sandbox.scriptPolicyLabel') }}</label>
-        <p class="desc">{{ $t('settings.sandbox.scriptPolicyDesc') }}</p>
-      </div>
-      <div class="setting-control">
-        <!--
-          Only switching execution off needs a confirmation, and binding :value
-          one-way means the switch cannot flip until the change is accepted.
-        -->
-        <t-popconfirm v-if="!workspaceScriptsDisabled" theme="warning"
-          :content="$t('settings.sandbox.disableScriptsConfirm')"
-          :confirm-btn="{ content: $t('settings.sandbox.disableScripts'), theme: 'danger' }"
-          :cancel-btn="{ content: $t('common.cancel') }" placement="left"
-          @confirm="setScriptsDisabled(true)">
-          <t-switch :value="true" :loading="policySaving" />
-        </t-popconfirm>
-        <t-switch v-else :value="false" :loading="policySaving" @change="setScriptsDisabled(false)" />
-      </div>
-    </div>
-
     <div class="sandbox-tabs-row">
       <t-tabs v-model="activeType" class="sandbox-type-tabs">
         <t-tab-panel value="all" :label="`${$t('common.all')}(${records.length})`" />
@@ -88,6 +62,9 @@
           <div class="sandbox-card__body">
             <div class="sandbox-card__header">
               <h3 class="sandbox-card__title" :title="record.name">{{ record.name }}</h3>
+              <t-tag v-if="record.is_default" theme="success" variant="light" size="small">
+                {{ $t('common.default') }}
+              </t-tag>
               <t-tag v-if="isLegacyRecord(record)" theme="warning" variant="light" size="small">
                 {{ $t('settings.sandbox.legacyConfig') }}
               </t-tag>
@@ -211,7 +188,6 @@ import SandboxBackendBadge from '@/components/settings/SandboxBackendBadge.vue'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
-import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 import {
   deleteSandboxConfig,
   getSandboxConfigInventory,
@@ -219,7 +195,7 @@ import {
   listSandboxConfigs,
   NAMED_SANDBOX_BACKEND_TYPES,
   parseSandboxConflict,
-  setSandboxWorkspacePolicy,
+  setDefaultSandboxConfig,
   type SandboxConfigRecord,
   type SandboxInventory,
 } from '@/api/system'
@@ -227,7 +203,6 @@ import {
 const { t } = useI18n()
 const confirmDelete = useConfirmDelete()
 const deploymentCapabilities = useDeploymentCapabilitiesStore()
-const platformTenantID = usePlatformTenantControlID()
 const dockerBackendEnabled = computed(() =>
   deploymentCapabilities.isSupported('settings.sandbox.docker'),
 )
@@ -249,8 +224,6 @@ const createPresetType = computed(() => {
 })
 
 const loading = ref(false)
-const policySaving = ref(false)
-const workspaceScriptsDisabled = ref(false)
 const records = ref<SandboxConfigRecord[]>([])
 const activeType = ref<string>('all')
 
@@ -290,6 +263,9 @@ const cardMenu = (record: SandboxConfigRecord): CardMenuOption[] => {
   const options: CardMenuOption[] = [
     { content: t('common.edit'), value: 'edit' },
   ]
+  if (!record.is_default) {
+    options.push({ content: t('settings.sandbox.setDefault'), value: 'set-default' })
+  }
   if (record.sandbox_type === 'cube' || record.sandbox_type === 'e2b') {
     options.push({ content: t('settings.sandbox.viewSandboxes'), value: 'inventory' })
   }
@@ -336,7 +312,7 @@ function deleteConfirmText(record: SandboxConfigRecord): string {
 async function onDeleteConfirmOpen(visible: boolean, record: SandboxConfigRecord) {
   if (!visible || deleteAgents.value[record.id]) return
   try {
-    const res = await getSandboxConfigInventory(platformTenantID.value!, record.id)
+    const res = await getSandboxConfigInventory(record.id)
     deleteAgents.value = { ...deleteAgents.value, [record.id]: res?.data?.agent_names || [] }
   } catch {
     // An unreachable backend must not stop the admin from trying to delete.
@@ -424,28 +400,12 @@ function buildCardWarnings(record: SandboxConfigRecord): CardWarning[] {
 async function load() {
   loading.value = true
   try {
-    const res = await listSandboxConfigs(platformTenantID.value!)
+    const res = await listSandboxConfigs()
     records.value = res?.data || []
-    workspaceScriptsDisabled.value = res?.workspace_scripts_disabled === true
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('settings.sandbox.loadFailed'))
   } finally {
     loading.value = false
-  }
-}
-
-async function setScriptsDisabled(disabled: boolean) {
-  policySaving.value = true
-  try {
-    const res = await setSandboxWorkspacePolicy(platformTenantID.value!, disabled)
-    workspaceScriptsDisabled.value = res?.workspace_scripts_disabled === true
-    MessagePlugin.success(
-      disabled ? t('settings.sandbox.scriptsDisabled') : t('settings.sandbox.scriptsEnabled'),
-    )
-  } catch (e: any) {
-    MessagePlugin.error(e?.message || t('settings.sandbox.policySaveFailed'))
-  } finally {
-    policySaving.value = false
   }
 }
 
@@ -458,8 +418,22 @@ async function onMenuAction(action: string, record: SandboxConfigRecord) {
     await openInventory(record)
     return
   }
+  if (action === 'set-default') {
+    await makeDefault(record)
+    return
+  }
   if (action === 'delete') {
     void confirmRemove(record)
+  }
+}
+
+async function makeDefault(record: SandboxConfigRecord) {
+  try {
+    await setDefaultSandboxConfig(record.id)
+    records.value = records.value.map((item) => ({ ...item, is_default: item.id === record.id }))
+    MessagePlugin.success(t('settings.sandbox.defaultUpdated'))
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('settings.sandbox.defaultUpdateFailed'))
   }
 }
 
@@ -478,7 +452,7 @@ async function openInventory(record: SandboxConfigRecord) {
   inventoryLoading.value = true
   inventory.value = null
   try {
-    const res = await getSandboxConfigInventory(platformTenantID.value!, record.id)
+    const res = await getSandboxConfigInventory(record.id)
     inventory.value = res?.data || null
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('settings.sandbox.inventoryFailed'))
@@ -490,7 +464,7 @@ async function openInventory(record: SandboxConfigRecord) {
 
 async function removeRecord(record: SandboxConfigRecord, force = false) {
   try {
-    await deleteSandboxConfig(platformTenantID.value!, record.id, force)
+    await deleteSandboxConfig(record.id, force)
     MessagePlugin.success(t('settings.sandbox.deleted'))
     showInventory.value = false
     await load()

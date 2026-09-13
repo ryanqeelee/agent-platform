@@ -9,7 +9,7 @@ import (
 
 func TestTenantSandboxConfigEntityTableName(t *testing.T) {
 	e := &TenantSandboxConfigEntity{}
-	require.Equal(t, "tenant_sandbox_configs", e.TableName())
+	require.Equal(t, "platform_sandbox_configs", e.TableName())
 }
 
 // A cordon is a lease, not a permanent lock: a handler that crashes while

@@ -22,7 +22,7 @@ type stubSandboxConfigLookup struct {
 }
 
 func (s *stubSandboxConfigLookup) Get(
-	_ context.Context, _ uint64, id string,
+	_ context.Context, id string,
 ) (*types.TenantSandboxConfigEntity, error) {
 	s.lookups = append(s.lookups, id)
 	return s.entity, s.err
@@ -74,7 +74,7 @@ func TestAgentSandboxConfigValidationRejectsUnknownID(t *testing.T) {
 
 func TestAgentSandboxConfigValidationAcceptsExistingID(t *testing.T) {
 	lookup := &stubSandboxConfigLookup{
-		entity: &types.TenantSandboxConfigEntity{ID: "cfg-a", TenantID: 7},
+		entity: &types.TenantSandboxConfigEntity{ID: "cfg-a"},
 	}
 	h := &CustomAgentHandler{sandboxConfigs: lookup}
 

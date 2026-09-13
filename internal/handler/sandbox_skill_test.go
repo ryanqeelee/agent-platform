@@ -25,9 +25,9 @@ import (
 
 const testSkillTenantID = uint64(42)
 
-// fakeSandboxSkillService mirrors the real service surface: every method takes
-// the workspace ID the route resolved, and the progress subscription honours
-// the request context and hands back a closer the handler must call.
+// fakeSandboxSkillService mirrors the global platform service surface, and the
+// progress subscription honours the request context and hands back a closer
+// the handler must call.
 type fakeSandboxSkillService struct {
 	mu sync.Mutex
 
@@ -57,27 +57,19 @@ type fakeSandboxSkillService struct {
 	events    chan service.SkillProgress
 	subscribe error
 
-	// Recorded calls. Every one keeps the workspace ID so a route that
-	// forgot to scope its lookups fails the test.
-	listTenant    uint64
 	listConfig    string
 	getCalls      int
-	historyTenant uint64
 	historyConfig string
 	historySkill  string
-	installTenant uint64
 	installConfig string
 	installBytes  []byte
 
-	reinstallTenant uint64
 	reinstallConfig string
 	reinstallSkill  string
 
-	stopTenant uint64
 	stopConfig string
 	stopSkill  string
 
-	removeTenant uint64
 	removeConfig string
 	removeSkill  string
 	patchEnabled bool
@@ -94,9 +86,9 @@ type fakeSandboxSkillService struct {
 }
 
 func (f *fakeSandboxSkillService) ListSkills(
-	_ context.Context, tenantID uint64, configID string,
+	_ context.Context, configID string,
 ) ([]*types.TenantSkillEntity, error) {
-	f.listTenant, f.listConfig = tenantID, configID
+	f.listConfig = configID
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
@@ -108,7 +100,7 @@ func (f *fakeSandboxSkillService) ListSkills(
 }
 
 func (f *fakeSandboxSkillService) GetSkill(
-	_ context.Context, tenantID uint64, configID, skillID string,
+	_ context.Context, configID, skillID string,
 ) (*types.TenantSkillEntity, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -119,9 +111,6 @@ func (f *fakeSandboxSkillService) GetSkill(
 	if f.getErr != nil {
 		return nil, f.getErr
 	}
-	if tenantID != testSkillTenantID {
-		return nil, nil
-	}
 	skill := f.skills[skillID]
 	if skill == nil || skill.SandboxConfigID != configID {
 		return nil, nil
@@ -130,13 +119,13 @@ func (f *fakeSandboxSkillService) GetSkill(
 }
 
 func (f *fakeSandboxSkillService) GetInstallTranscriptHistory(
-	ctx context.Context, tenantID uint64, configID, skillID string,
+	ctx context.Context, configID, skillID string,
 ) ([]*types.Message, error) {
-	f.historyTenant, f.historyConfig, f.historySkill = tenantID, configID, skillID
+	f.historyConfig, f.historySkill = configID, skillID
 	if f.historyErr != nil {
 		return nil, f.historyErr
 	}
-	skill, err := f.GetSkill(ctx, tenantID, configID, skillID)
+	skill, err := f.GetSkill(ctx, configID, skillID)
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +140,7 @@ func (f *fakeSandboxSkillService) GetInstallTranscriptHistory(
 // that accepted any name would let the handler stop being the layer that keeps
 // the declaration meaningful.
 func (f *fakeSandboxSkillService) UpdateSkillAdmin(
-	_ context.Context, tenantID uint64, configID, skillID string,
+	_ context.Context, configID, skillID string,
 	update service.SkillAdminUpdate,
 ) (*types.TenantSkillEntity, error) {
 	f.patchCalls++
@@ -165,7 +154,7 @@ func (f *fakeSandboxSkillService) UpdateSkillAdmin(
 		f.patchEnvs = update.EnvValues
 	}
 	skill := f.skills[skillID]
-	if skill == nil || tenantID != testSkillTenantID || skill.SandboxConfigID != configID {
+	if skill == nil || skill.SandboxConfigID != configID {
 		return nil, nil
 	}
 	if update.Enabled != nil {
@@ -180,12 +169,12 @@ func (f *fakeSandboxSkillService) UpdateSkillAdmin(
 }
 
 func (f *fakeSandboxSkillService) ListSkillFiles(
-	_ context.Context, tenantID uint64, configID, skillID string,
+	_ context.Context, configID, skillID string,
 ) ([]service.SkillFileEntry, error) {
 	if f.filesErr != nil {
 		return nil, f.filesErr
 	}
-	skill, err := f.GetSkill(context.Background(), tenantID, configID, skillID)
+	skill, err := f.GetSkill(context.Background(), configID, skillID)
 	if err != nil {
 		return nil, err
 	}
@@ -196,13 +185,13 @@ func (f *fakeSandboxSkillService) ListSkillFiles(
 }
 
 func (f *fakeSandboxSkillService) ReadSkillFile(
-	_ context.Context, tenantID uint64, configID, skillID, relativePath string,
+	_ context.Context, configID, skillID, relativePath string,
 ) (*service.SkillFileContent, error) {
 	f.filePath = relativePath
 	if f.fileErr != nil {
 		return nil, f.fileErr
 	}
-	skill, err := f.GetSkill(context.Background(), tenantID, configID, skillID)
+	skill, err := f.GetSkill(context.Background(), configID, skillID)
 	if err != nil {
 		return nil, err
 	}
@@ -213,31 +202,31 @@ func (f *fakeSandboxSkillService) ReadSkillFile(
 }
 
 func (f *fakeSandboxSkillService) InstallSkill(
-	_ context.Context, tenantID uint64, configID string, archive []byte,
+	_ context.Context, configID string, archive []byte,
 ) (string, error) {
-	f.installTenant, f.installConfig, f.installBytes = tenantID, configID, archive
+	f.installConfig, f.installBytes = configID, archive
 	return f.installID, f.installErr
 }
 
 func (f *fakeSandboxSkillService) InstallSkillFromSource(
-	_ context.Context, tenantID uint64, configID, source string,
+	_ context.Context, configID, source string,
 ) (string, error) {
-	f.installTenant, f.installConfig = tenantID, configID
+	f.installConfig = configID
 	f.installSource = source
 	return f.installID, f.sourceErr
 }
 
 func (f *fakeSandboxSkillService) ReinstallSkill(
-	_ context.Context, tenantID uint64, configID, skillID string,
+	_ context.Context, configID, skillID string,
 ) (string, error) {
-	f.reinstallTenant, f.reinstallConfig, f.reinstallSkill = tenantID, configID, skillID
+	f.reinstallConfig, f.reinstallSkill = configID, skillID
 	return f.installID, f.reinstallErr
 }
 
 func (f *fakeSandboxSkillService) StopSkill(
-	_ context.Context, tenantID uint64, configID, skillID string,
+	_ context.Context, configID, skillID string,
 ) (*types.TenantSkillEntity, error) {
-	f.stopTenant, f.stopConfig, f.stopSkill = tenantID, configID, skillID
+	f.stopConfig, f.stopSkill = configID, skillID
 	if f.stopErr != nil {
 		return nil, f.stopErr
 	}
@@ -245,27 +234,27 @@ func (f *fakeSandboxSkillService) StopSkill(
 	if skill == nil {
 		return nil, apperrors.NewNotFoundError("skill not found")
 	}
-	if tenantID != testSkillTenantID || skill.SandboxConfigID != configID {
+	if skill.SandboxConfigID != configID {
 		return nil, apperrors.NewNotFoundError("skill not found")
 	}
 	return skill, nil
 }
 
 func (f *fakeSandboxSkillService) RemoveSkill(
-	_ context.Context, tenantID uint64, configID, skillID string,
+	_ context.Context, configID, skillID string,
 ) error {
-	f.removeTenant, f.removeConfig, f.removeSkill = tenantID, configID, skillID
+	f.removeConfig, f.removeSkill = configID, skillID
 	return f.removeErr
 }
 
 func (f *fakeSandboxSkillService) LastProgress(
-	_ context.Context, _ uint64, _, _ string,
+	_ context.Context, _, _ string,
 ) (service.SkillProgress, bool) {
 	return f.last, f.hasLast
 }
 
 func (f *fakeSandboxSkillService) SubscribeProgress(
-	ctx context.Context, _ uint64, _, _ string,
+	ctx context.Context, _, _ string,
 ) (<-chan service.SkillProgress, func(), error) {
 	if f.subscribe != nil {
 		return nil, func() {}, f.subscribe
@@ -312,22 +301,18 @@ func newSkillTestRouter(h *SandboxSkillHandler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(middleware.ErrorHandler())
-	r.Use(func(c *gin.Context) {
-		c.Set(types.TenantIDContextKey.String(), testSkillTenantID)
-		c.Next()
-	})
-	r.GET("/system/admin/tenants/42/sandbox-configs/:id/skills", h.List)
-	r.POST("/system/admin/tenants/42/sandbox-configs/:id/skills", h.Upload)
-	r.GET("/system/admin/tenants/42/sandbox-configs/:id/skills/:skillId", h.Get)
-	r.GET("/system/admin/tenants/42/sandbox-configs/:id/skills/:skillId/files", h.ListFiles)
-	r.GET("/system/admin/tenants/42/sandbox-configs/:id/skills/:skillId/files/content", h.GetFile)
-	r.POST("/system/admin/tenants/42/sandbox-configs/:id/skills/:skillId/reinstall", h.Reinstall)
-	r.POST("/system/admin/tenants/42/sandbox-configs/:id/skills/:skillId/stop", h.Stop)
-	r.PATCH("/system/admin/tenants/42/sandbox-configs/:id/skills/:skillId", h.Patch)
-	r.DELETE("/system/admin/tenants/42/sandbox-configs/:id/skills/:skillId", h.Delete)
-	r.GET("/system/admin/tenants/42/sandbox-configs/:id/skills/:skillId/install-events", h.InstallEvents)
-	r.GET("/system/admin/tenants/42/sandbox-configs/:id/skills/:skillId/transcript", h.InstallTranscript)
-	r.GET("/system/admin/tenants/42/sandbox-configs/:id/skills/:skillId/transcript/history", h.InstallTranscriptHistory)
+	r.GET("/system/admin/sandbox-configs/:id/skills", h.List)
+	r.POST("/system/admin/sandbox-configs/:id/skills", h.Upload)
+	r.GET("/system/admin/sandbox-configs/:id/skills/:skillId", h.Get)
+	r.GET("/system/admin/sandbox-configs/:id/skills/:skillId/files", h.ListFiles)
+	r.GET("/system/admin/sandbox-configs/:id/skills/:skillId/files/content", h.GetFile)
+	r.POST("/system/admin/sandbox-configs/:id/skills/:skillId/reinstall", h.Reinstall)
+	r.POST("/system/admin/sandbox-configs/:id/skills/:skillId/stop", h.Stop)
+	r.PATCH("/system/admin/sandbox-configs/:id/skills/:skillId", h.Patch)
+	r.DELETE("/system/admin/sandbox-configs/:id/skills/:skillId", h.Delete)
+	r.GET("/system/admin/sandbox-configs/:id/skills/:skillId/install-events", h.InstallEvents)
+	r.GET("/system/admin/sandbox-configs/:id/skills/:skillId/transcript", h.InstallTranscript)
+	r.GET("/system/admin/sandbox-configs/:id/skills/:skillId/transcript/history", h.InstallTranscriptHistory)
 	return r
 }
 
@@ -341,7 +326,7 @@ func skillUploadRequest(t *testing.T, configID string, archive []byte) *http.Req
 	require.NoError(t, err)
 	require.NoError(t, writer.Close())
 
-	req := httptest.NewRequest(http.MethodPost, "/system/admin/tenants/42/sandbox-configs/"+configID+"/skills", body)
+	req := httptest.NewRequest(http.MethodPost, "/system/admin/sandbox-configs/"+configID+"/skills", body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	return req
 }
@@ -397,8 +382,6 @@ func TestSandboxSkillUploadAcceptedReturnsSkillID(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
 	require.True(t, payload.Success)
 	require.Equal(t, "skill-7", payload.Data.SkillID)
-
-	require.Equal(t, testSkillTenantID, svc.installTenant)
 	require.Equal(t, "cfg-a", svc.installConfig)
 	require.Equal(t, []byte("zip-bytes"), svc.installBytes)
 }
@@ -408,14 +391,13 @@ func TestSandboxSkillInstallFromSourceAcceptedReturnsSkillID(t *testing.T) {
 	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
 	body := `{"source":"@owner/demo"}`
-	req := httptest.NewRequest(http.MethodPost, "/system/admin/tenants/42/sandbox-configs/cfg-a/skills",
+	req := httptest.NewRequest(http.MethodPost, "/system/admin/sandbox-configs/cfg-a/skills",
 		strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusAccepted, w.Code)
-	require.Equal(t, testSkillTenantID, svc.installTenant)
 	require.Equal(t, "cfg-a", svc.installConfig)
 	require.Equal(t, "@owner/demo", svc.installSource)
 	require.Nil(t, svc.installBytes, "a source install must not look like an upload")
@@ -425,7 +407,7 @@ func TestSandboxSkillInstallFromSourceRequiresSource(t *testing.T) {
 	svc := &fakeSandboxSkillService{}
 	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
-	req := httptest.NewRequest(http.MethodPost, "/system/admin/tenants/42/sandbox-configs/cfg-a/skills",
+	req := httptest.NewRequest(http.MethodPost, "/system/admin/sandbox-configs/cfg-a/skills",
 		strings.NewReader(`{"source":"  "}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -441,7 +423,7 @@ func TestSandboxSkillInstallFromSourceInvalidReturns400(t *testing.T) {
 	}
 	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
-	req := httptest.NewRequest(http.MethodPost, "/system/admin/tenants/42/sandbox-configs/cfg-a/skills",
+	req := httptest.NewRequest(http.MethodPost, "/system/admin/sandbox-configs/cfg-a/skills",
 		strings.NewReader(`{"source":"file:///etc/passwd"}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -458,7 +440,7 @@ func TestSandboxSkillInstallFromSourceAmbiguousShorthandReturns400(t *testing.T)
 	}
 	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
-	req := httptest.NewRequest(http.MethodPost, "/system/admin/tenants/42/sandbox-configs/cfg-a/skills",
+	req := httptest.NewRequest(http.MethodPost, "/system/admin/sandbox-configs/cfg-a/skills",
 		strings.NewReader(`{"source":"owner/slug"}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -473,7 +455,7 @@ func TestSandboxSkillInstallFromSourceRejectsAnOversizedJSONBody(t *testing.T) {
 	svc := &fakeSandboxSkillService{}
 	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
-	req := httptest.NewRequest(http.MethodPost, "/system/admin/tenants/42/sandbox-configs/cfg-a/skills",
+	req := httptest.NewRequest(http.MethodPost, "/system/admin/sandbox-configs/cfg-a/skills",
 		strings.NewReader(string(oversizedSkillSourceJSON(1))))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -489,7 +471,7 @@ func TestSandboxSkillUploadWithoutFileReturns400(t *testing.T) {
 	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/system/admin/tenants/42/sandbox-configs/cfg-a/skills",
+	req := httptest.NewRequest(http.MethodPost, "/system/admin/sandbox-configs/cfg-a/skills",
 		strings.NewReader(""))
 	req.Header.Set("Content-Type", "multipart/form-data; boundary=none")
 	router.ServeHTTP(w, req)
@@ -498,12 +480,12 @@ func TestSandboxSkillUploadWithoutFileReturns400(t *testing.T) {
 	require.Nil(t, svc.installBytes)
 }
 
-// Every route must scope to the caller's workspace, and a skill under another
-// workspace's config must be unreachable rather than merely empty.
-func TestSandboxSkillRoutesScopeToCallerWorkspace(t *testing.T) {
+// Every route scopes by the platform config identity, and a skill installed on
+// another config must be unreachable rather than merely empty.
+func TestSandboxSkillRoutesScopeToPlatformConfig(t *testing.T) {
 	svc := &fakeSandboxSkillService{skills: map[string]*types.TenantSkillEntity{
 		"skill-1": {
-			ID: "skill-1", TenantID: testSkillTenantID, SandboxConfigID: "cfg-a",
+			ID: "skill-1", SandboxConfigID: "cfg-a",
 			Name: "pdf", Status: types.SkillStatusReady, Enabled: true,
 		},
 	}}
@@ -518,20 +500,20 @@ func TestSandboxSkillRoutesScopeToCallerWorkspace(t *testing.T) {
 	}{
 		{
 			name: "get own skill", method: http.MethodGet,
-			target: "/system/admin/tenants/42/sandbox-configs/cfg-a/skills/skill-1", wantGot: http.StatusOK,
+			target: "/system/admin/sandbox-configs/cfg-a/skills/skill-1", wantGot: http.StatusOK,
 		},
 		{
 			name: "get skill of another config", method: http.MethodGet,
-			target: "/system/admin/tenants/42/sandbox-configs/cfg-b/skills/skill-1", wantGot: http.StatusNotFound,
+			target: "/system/admin/sandbox-configs/cfg-b/skills/skill-1", wantGot: http.StatusNotFound,
 		},
 		{
 			name: "patch skill of another config", method: http.MethodPatch,
-			target: "/system/admin/tenants/42/sandbox-configs/cfg-b/skills/skill-1", body: `{"enabled":false}`,
+			target: "/system/admin/sandbox-configs/cfg-b/skills/skill-1", body: `{"enabled":false}`,
 			wantGot: http.StatusNotFound,
 		},
 		{
 			name: "stream skill of another config", method: http.MethodGet,
-			target:  "/system/admin/tenants/42/sandbox-configs/cfg-b/skills/skill-1/install-events",
+			target:  "/system/admin/sandbox-configs/cfg-b/skills/skill-1/install-events",
 			wantGot: http.StatusNotFound,
 		},
 	} {
@@ -545,16 +527,15 @@ func TestSandboxSkillRoutesScopeToCallerWorkspace(t *testing.T) {
 	}
 
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/system/admin/tenants/42/sandbox-configs/cfg-a/skills", nil))
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/system/admin/sandbox-configs/cfg-a/skills", nil))
 	require.Equal(t, http.StatusOK, w.Code)
-	require.Equal(t, testSkillTenantID, svc.listTenant)
 	require.Equal(t, "cfg-a", svc.listConfig)
 }
 
 func TestSandboxSkillListReturnsProjection(t *testing.T) {
 	svc := &fakeSandboxSkillService{skills: map[string]*types.TenantSkillEntity{
 		"skill-1": {
-			ID: "skill-1", TenantID: testSkillTenantID, SandboxConfigID: "cfg-a",
+			ID: "skill-1", SandboxConfigID: "cfg-a",
 			Name: "pdf", Version: "1.2.0", Description: "read pdfs",
 			Status: types.SkillStatusReady, Enabled: true, BundleSHA256: "abc",
 			InstalledSnapshotID: "snap-1",
@@ -563,7 +544,7 @@ func TestSandboxSkillListReturnsProjection(t *testing.T) {
 	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/system/admin/tenants/42/sandbox-configs/cfg-a/skills", nil))
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/system/admin/sandbox-configs/cfg-a/skills", nil))
 
 	require.Equal(t, http.StatusOK, w.Code)
 	var payload struct {
@@ -588,14 +569,14 @@ func TestSandboxSkillListReturnsProjection(t *testing.T) {
 func TestSandboxSkillPatchTogglesEnabled(t *testing.T) {
 	svc := &fakeSandboxSkillService{skills: map[string]*types.TenantSkillEntity{
 		"skill-1": {
-			ID: "skill-1", TenantID: testSkillTenantID, SandboxConfigID: "cfg-a",
+			ID: "skill-1", SandboxConfigID: "cfg-a",
 			Name: "pdf", Status: types.SkillStatusReady, Enabled: true,
 		},
 	}}
 	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/system/admin/tenants/42/sandbox-configs/cfg-a/skills/skill-1",
+	req := httptest.NewRequest(http.MethodPatch, "/system/admin/sandbox-configs/cfg-a/skills/skill-1",
 		strings.NewReader(`{"enabled":false}`))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
@@ -614,7 +595,7 @@ func TestSandboxSkillPatchWithoutEnabledFieldReturns400(t *testing.T) {
 	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/system/admin/tenants/42/sandbox-configs/cfg-a/skills/skill-1",
+	req := httptest.NewRequest(http.MethodPatch, "/system/admin/sandbox-configs/cfg-a/skills/skill-1",
 		strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
@@ -626,13 +607,13 @@ func TestSandboxSkillPatchWithoutEnabledFieldReturns400(t *testing.T) {
 func TestSandboxSkillPatchRejectsAnOversizedJSONBody(t *testing.T) {
 	svc := &fakeSandboxSkillService{skills: map[string]*types.TenantSkillEntity{
 		"skill-1": {
-			ID: "skill-1", TenantID: testSkillTenantID, SandboxConfigID: "cfg-a",
+			ID: "skill-1", SandboxConfigID: "cfg-a",
 			Name: "pdf", Status: types.SkillStatusReady, Enabled: true,
 		},
 	}}
 	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
-	req := httptest.NewRequest(http.MethodPatch, "/system/admin/tenants/42/sandbox-configs/cfg-a/skills/skill-1",
+	req := httptest.NewRequest(http.MethodPatch, "/system/admin/sandbox-configs/cfg-a/skills/skill-1",
 		bytes.NewReader(oversizedSkillSourceJSON(1)))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -650,10 +631,9 @@ func TestSandboxSkillDeleteIsAccepted(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodDelete,
-		"/system/admin/tenants/42/sandbox-configs/cfg-a/skills/skill-1", nil))
+		"/system/admin/sandbox-configs/cfg-a/skills/skill-1", nil))
 
 	require.Equal(t, http.StatusAccepted, w.Code)
-	require.Equal(t, testSkillTenantID, svc.removeTenant)
 	require.Equal(t, "cfg-a", svc.removeConfig)
 	require.Equal(t, "skill-1", svc.removeSkill)
 }
@@ -666,11 +646,9 @@ func TestSandboxSkillReinstallIsAccepted(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodPost,
-		"/system/admin/tenants/42/sandbox-configs/cfg-a/skills/skill-1/reinstall", nil))
+		"/system/admin/sandbox-configs/cfg-a/skills/skill-1/reinstall", nil))
 
 	require.Equal(t, http.StatusAccepted, w.Code)
-	require.Equal(t, testSkillTenantID, svc.reinstallTenant,
-		"a retry must be scoped to the caller's workspace")
 	require.Equal(t, "cfg-a", svc.reinstallConfig)
 	require.Equal(t, "skill-1", svc.reinstallSkill)
 	require.Contains(t, w.Body.String(), `"skill_id":"skill-1"`)
@@ -689,11 +667,9 @@ func TestSandboxSkillStopReturnsTheSkill(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodPost,
-		"/system/admin/tenants/42/sandbox-configs/cfg-a/skills/skill-1/stop", nil))
+		"/system/admin/sandbox-configs/cfg-a/skills/skill-1/stop", nil))
 
 	require.Equal(t, http.StatusOK, w.Code)
-	require.Equal(t, testSkillTenantID, svc.stopTenant,
-		"a stop must be scoped to the caller's workspace")
 	require.Equal(t, "cfg-a", svc.stopConfig)
 	require.Equal(t, "skill-1", svc.stopSkill)
 	require.Contains(t, w.Body.String(), `"id":"skill-1"`)
@@ -707,7 +683,7 @@ func TestSandboxSkillStopReportsAMissingSkill(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodPost,
-		"/system/admin/tenants/42/sandbox-configs/cfg-a/skills/nope/stop", nil))
+		"/system/admin/sandbox-configs/cfg-a/skills/nope/stop", nil))
 
 	require.Equal(t, http.StatusNotFound, w.Code)
 }
@@ -720,7 +696,7 @@ func TestSandboxSkillReinstallReportsAMissingSkill(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodPost,
-		"/system/admin/tenants/42/sandbox-configs/cfg-a/skills/nope/reinstall", nil))
+		"/system/admin/sandbox-configs/cfg-a/skills/nope/reinstall", nil))
 
 	require.Equal(t, http.StatusNotFound, w.Code)
 }
@@ -756,7 +732,7 @@ func TestSandboxSkillInstallEventsFinishedInstallTerminatesImmediately(t *testin
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet,
-		"/system/admin/tenants/42/sandbox-configs/cfg-a/skills/skill-1/install-events", nil))
+		"/system/admin/sandbox-configs/cfg-a/skills/skill-1/install-events", nil))
 
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Contains(t, w.Header().Get("Content-Type"), "text/event-stream")
@@ -787,7 +763,7 @@ func TestSandboxSkillInstallEventsReplaysLastProgress(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet,
-		"/system/admin/tenants/42/sandbox-configs/cfg-a/skills/skill-1/install-events", nil))
+		"/system/admin/sandbox-configs/cfg-a/skills/skill-1/install-events", nil))
 
 	events := decodeSSEEvents(t, w.Body.String())
 	require.Len(t, events, 2)
@@ -814,7 +790,7 @@ func TestSandboxSkillInstallEventsFailureTerminatesStream(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet,
-		"/system/admin/tenants/42/sandbox-configs/cfg-a/skills/skill-1/install-events", nil))
+		"/system/admin/sandbox-configs/cfg-a/skills/skill-1/install-events", nil))
 
 	decoded := decodeSSEEvents(t, w.Body.String())
 	require.NotEmpty(t, decoded)
@@ -850,7 +826,7 @@ func TestSandboxSkillInstallEventsSynthesizesTerminalWhenRowDisappears(t *testin
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet,
-		"/system/admin/tenants/42/sandbox-configs/cfg-a/skills/skill-1/install-events", nil))
+		"/system/admin/sandbox-configs/cfg-a/skills/skill-1/install-events", nil))
 
 	events := decodeSSEEvents(t, w.Body.String())
 	require.NotEmpty(t, events)
@@ -871,7 +847,7 @@ func TestSandboxSkillInstallEventsWithoutRedisSendsStateAndCloses(t *testing.T) 
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet,
-		"/system/admin/tenants/42/sandbox-configs/cfg-a/skills/skill-1/install-events", nil))
+		"/system/admin/sandbox-configs/cfg-a/skills/skill-1/install-events", nil))
 
 	events := decodeSSEEvents(t, w.Body.String())
 	require.Len(t, events, 1)
@@ -895,7 +871,7 @@ func TestSandboxSkillInstallEventsStopsWhenClientDisconnects(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	req := httptest.NewRequest(http.MethodGet,
-		"/system/admin/tenants/42/sandbox-configs/cfg-a/skills/skill-1/install-events", nil).WithContext(ctx)
+		"/system/admin/sandbox-configs/cfg-a/skills/skill-1/install-events", nil).WithContext(ctx)
 
 	done := make(chan struct{})
 	go func() {
@@ -928,7 +904,7 @@ func TestSandboxSkillInstallEventsStopsFollowingAfterCap(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet,
-		"/system/admin/tenants/42/sandbox-configs/cfg-a/skills/skill-1/install-events", nil))
+		"/system/admin/sandbox-configs/cfg-a/skills/skill-1/install-events", nil))
 
 	events := decodeSSEEvents(t, w.Body.String())
 	require.NotEmpty(t, events)
@@ -938,27 +914,19 @@ func TestSandboxSkillInstallEventsStopsFollowingAfterCap(t *testing.T) {
 		"giving up on following must not be reported as a finished install")
 }
 
-// The transcript locators are the only way the console can find an install's
-// conversation, so they must survive the outward projection.
-func TestToSkillResponseCarriesTranscriptLocators(t *testing.T) {
+// The platform-run locator is how the console finds an install transcript.
+func TestToSkillResponseCarriesPlatformRunLocator(t *testing.T) {
 	got := toSkillResponse(&types.TenantSkillEntity{
-		ID:               "sk-1",
-		Name:             "pdf-tools",
-		Status:           types.SkillStatusReady,
-		InstallSessionID: "sess-1",
-		InstallMessageID: "msg-1",
+		ID: "sk-1", Name: "pdf-tools", Status: types.SkillStatusReady,
+		InstallRunID: "run-1",
 	})
-	require.Equal(t, "sess-1", got.InstallSessionID)
-	require.Equal(t, "msg-1", got.InstallMessageID)
+	require.Equal(t, "run-1", got.InstallRunID)
 }
 
-// A skill installed before this feature shipped has no locators; the fields
-// must be absent rather than empty so the console can hide the entry point.
-func TestToSkillResponseOmitsMissingTranscriptLocators(t *testing.T) {
+func TestToSkillResponseOmitsMissingPlatformRunLocator(t *testing.T) {
 	raw, err := json.Marshal(toSkillResponse(&types.TenantSkillEntity{ID: "sk-1"}))
 	require.NoError(t, err)
-	require.NotContains(t, string(raw), "install_session_id")
-	require.NotContains(t, string(raw), "install_message_id")
+	require.NotContains(t, string(raw), "install_run_id")
 }
 
 // transcriptStreamManager is the installer's event log. Appends land in the
@@ -1008,26 +976,26 @@ func transcriptSkillService() *fakeSandboxSkillService {
 	return &fakeSandboxSkillService{skills: map[string]*types.TenantSkillEntity{
 		"skill-1": {
 			ID: "skill-1", SandboxConfigID: "cfg-a", Status: types.SkillStatusInstalling,
-			InstallSessionID: "sess-9", InstallMessageID: "msg-9",
+			InstallRunID: "run-9",
 		},
 	}}
 }
 
 func transcriptRequest(configID, skillID string) *http.Request {
 	return httptest.NewRequest(http.MethodGet,
-		"/system/admin/tenants/42/sandbox-configs/"+configID+"/skills/"+skillID+"/transcript", nil)
+		"/system/admin/sandbox-configs/"+configID+"/skills/"+skillID+"/transcript", nil)
 }
 
 func transcriptHistoryRequest(configID, skillID string) *http.Request {
 	return httptest.NewRequest(http.MethodGet,
-		"/system/admin/tenants/42/sandbox-configs/"+configID+"/skills/"+skillID+"/transcript/history", nil)
+		"/system/admin/sandbox-configs/"+configID+"/skills/"+skillID+"/transcript/history", nil)
 }
 
 func TestSandboxSkillTranscriptHistoryReturnsOnlyServiceProjection(t *testing.T) {
 	svc := transcriptSkillService()
 	svc.history = []*types.Message{
-		{ID: "prompt", SessionID: "sess-9", Role: "user", Content: "install pdf"},
-		{ID: "msg-9", SessionID: "sess-9", Role: "assistant", Content: "installed"},
+		{ID: "prompt", Role: "user", Content: "install pdf"},
+		{ID: "answer", Role: "assistant", Content: "installed"},
 	}
 	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
@@ -1035,14 +1003,13 @@ func TestSandboxSkillTranscriptHistoryReturnsOnlyServiceProjection(t *testing.T)
 	router.ServeHTTP(w, transcriptHistoryRequest("cfg-a", "skill-1"))
 
 	require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
-	require.Equal(t, testSkillTenantID, svc.historyTenant)
 	require.Equal(t, "cfg-a", svc.historyConfig)
 	require.Equal(t, "skill-1", svc.historySkill)
 	require.Contains(t, w.Body.String(), `"id":"prompt"`)
-	require.Contains(t, w.Body.String(), `"id":"msg-9"`)
+	require.Contains(t, w.Body.String(), `"id":"answer"`)
 }
 
-func TestSandboxSkillTranscriptHistoryEnforcesConfigOwnership(t *testing.T) {
+func TestSandboxSkillTranscriptHistoryEnforcesConfigScope(t *testing.T) {
 	svc := transcriptSkillService()
 	svc.history = []*types.Message{{ID: "secret", Role: "assistant", Content: "secret output"}}
 	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
@@ -1085,7 +1052,7 @@ func TestSandboxSkillTranscriptReplaysTheInstallerConversation(t *testing.T) {
 		},
 		{ID: "done", Type: types.ResponseTypeComplete, Done: true},
 	} {
-		require.NoError(t, streams.AppendEvent(ctx, "sess-9", "msg-9", evt))
+		require.NoError(t, streams.AppendEvent(ctx, "run-9", "skill-1", evt))
 	}
 	router := newSkillTestRouter(NewSandboxSkillHandler(transcriptSkillService(), streams))
 
@@ -1093,7 +1060,7 @@ func TestSandboxSkillTranscriptReplaysTheInstallerConversation(t *testing.T) {
 	router.ServeHTTP(w, transcriptRequest("cfg-a", "skill-1"))
 
 	require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
-	require.Equal(t, "sess-9/msg-9", streams.readKey())
+	require.Equal(t, "run-9/skill-1", streams.readKey())
 
 	frames := parseTranscriptFrames(t, w.Body.String())
 	require.Equal(t, []string{"install_prompt", "thinking", "tool_call", "tool_result", "complete"},
@@ -1102,9 +1069,9 @@ func TestSandboxSkillTranscriptReplaysTheInstallerConversation(t *testing.T) {
 	// Every frame names the same turn, or the console would scatter one install
 	// across five messages.
 	for _, frame := range frames {
-		require.Equal(t, "msg-9", frame.ID)
-		require.Equal(t, "msg-9", frame.AssistantMessageID)
-		require.Equal(t, "sess-9", frame.SessionID)
+		require.Equal(t, "skill-1", frame.ID)
+		require.Equal(t, "skill-1", frame.AssistantMessageID)
+		require.Equal(t, "run-9", frame.SessionID)
 	}
 	require.Equal(t, "shell_exec", frames[2].Data["tool_name"])
 }
@@ -1114,7 +1081,7 @@ func TestSandboxSkillTranscriptReplaysTheInstallerConversation(t *testing.T) {
 func TestSandboxSkillTranscriptTailsARunningInstall(t *testing.T) {
 	streams := &transcriptStreamManager{}
 	ctx := context.Background()
-	require.NoError(t, streams.AppendEvent(ctx, "sess-9", "msg-9", interfaces.StreamEvent{
+	require.NoError(t, streams.AppendEvent(ctx, "run-9", "skill-1", interfaces.StreamEvent{
 		ID: "p", Type: types.ResponseTypeInstallPrompt, Content: "install web-search", Done: true,
 	}))
 	router := newSkillTestRouter(NewSandboxSkillHandler(transcriptSkillService(), streams))
@@ -1122,10 +1089,10 @@ func TestSandboxSkillTranscriptTailsARunningInstall(t *testing.T) {
 	// The engine keeps working after the console attaches.
 	go func() {
 		time.Sleep(30 * time.Millisecond)
-		_ = streams.AppendEvent(ctx, "sess-9", "msg-9", interfaces.StreamEvent{
+		_ = streams.AppendEvent(ctx, "run-9", "skill-1", interfaces.StreamEvent{
 			ID: "t", Type: types.ResponseTypeThinking, Content: "creating the venv",
 		})
-		_ = streams.AppendEvent(ctx, "sess-9", "msg-9", interfaces.StreamEvent{
+		_ = streams.AppendEvent(ctx, "run-9", "skill-1", interfaces.StreamEvent{
 			ID: "done", Type: types.ResponseTypeComplete, Done: true,
 		})
 	}()
@@ -1181,7 +1148,7 @@ func TestSandboxSkillTranscriptWhileInstallIsPreparingReturns204(t *testing.T) {
 // hold command output from another workspace's image build.
 func TestSandboxSkillTranscriptOfAnotherConfigReturns404(t *testing.T) {
 	streams := &transcriptStreamManager{}
-	require.NoError(t, streams.AppendEvent(context.Background(), "sess-9", "msg-9",
+	require.NoError(t, streams.AppendEvent(context.Background(), "run-9", "skill-1",
 		interfaces.StreamEvent{ID: "p", Type: types.ResponseTypeInstallPrompt, Content: "secret"}))
 	router := newSkillTestRouter(NewSandboxSkillHandler(transcriptSkillService(), streams))
 
@@ -1228,7 +1195,7 @@ func TestSandboxSkillListFilesReturnsTheArchive(t *testing.T) {
 	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/system/admin/tenants/42/sandbox-configs/cfg-a/skills/skill-1/files", nil)
+	req := httptest.NewRequest(http.MethodGet, "/system/admin/sandbox-configs/cfg-a/skills/skill-1/files", nil)
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
@@ -1245,7 +1212,7 @@ func TestSandboxSkillListFilesMissingSkillReturns404(t *testing.T) {
 	router := newSkillTestRouter(NewSandboxSkillHandler(&fakeSandboxSkillService{}, nil))
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/system/admin/tenants/42/sandbox-configs/cfg-a/skills/missing/files", nil)
+	req := httptest.NewRequest(http.MethodGet, "/system/admin/sandbox-configs/cfg-a/skills/missing/files", nil)
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusNotFound, w.Code, "body=%s", w.Body.String())
@@ -1267,7 +1234,7 @@ func TestSandboxSkillGetFileReturnsContent(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(
-		http.MethodGet, "/system/admin/tenants/42/sandbox-configs/cfg-a/skills/skill-1/files/content?path=scripts/run.py", nil,
+		http.MethodGet, "/system/admin/sandbox-configs/cfg-a/skills/skill-1/files/content?path=scripts/run.py", nil,
 	)
 	router.ServeHTTP(w, req)
 
@@ -1292,7 +1259,7 @@ func TestSandboxSkillGetFileInvalidPathReturns400(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(
-		http.MethodGet, "/system/admin/tenants/42/sandbox-configs/cfg-a/skills/skill-1/files/content?path=../secret", nil,
+		http.MethodGet, "/system/admin/sandbox-configs/cfg-a/skills/skill-1/files/content?path=../secret", nil,
 	)
 	router.ServeHTTP(w, req)
 

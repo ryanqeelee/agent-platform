@@ -217,7 +217,7 @@ func redactNestedKBInfrastructure(value map[string]interface{}) {
 func (h *KnowledgeBaseHandler) buildKBListResponse(
 	ctx context.Context, kbs []*types.KnowledgeBase, callerTenantID uint64,
 ) []interface{} {
-	defaultView := h.envDefaultStoreView(ctx)
+	defaultView := h.defaultStoreView(ctx)
 	storeViews := h.batchResolveKBStoreViews(ctx, kbs, callerTenantID)
 	out := make([]interface{}, 0, len(kbs))
 	for _, kb := range kbs {
@@ -275,17 +275,12 @@ func sharedKBRow(
 	return row
 }
 
-// envDefaultStoreView returns the env-fallback store display enriched with
-// the configured env-store engine type when the service is available. The
-// service path populates EngineType so the caller can show "postgres" or
-// "qdrant" on the env-default badge instead of leaving it blank. A nil
-// service (e.g. in narrow unit-test setups) falls back to the bare default
-// display rather than failing the list response.
-func (h *KnowledgeBaseHandler) envDefaultStoreView(ctx context.Context) types.StoreDisplay {
+// defaultStoreView returns the safe display projection of the platform default.
+func (h *KnowledgeBaseHandler) defaultStoreView(ctx context.Context) types.StoreDisplay {
 	if h.vectorStoreService == nil {
-		return types.DefaultStoreDisplay()
+		return types.UnavailableStoreDisplay()
 	}
-	return h.vectorStoreService.EnvDefaultStoreView(ctx)
+	return h.vectorStoreService.DefaultStoreView(ctx)
 }
 
 // batchResolveKBStoreViews collects the unique own-tenant store IDs across
@@ -315,7 +310,7 @@ func (h *KnowledgeBaseHandler) batchResolveKBStoreViews(
 	if len(storeIDs) == 0 {
 		return nil
 	}
-	views, err := h.vectorStoreService.BatchResolveStoreView(ctx, callerTenantID, storeIDs)
+	views, err := h.vectorStoreService.BatchResolveStoreView(ctx, storeIDs)
 	if err != nil {
 		logger.WarnWithFields(ctx, logger.Fields{
 			"tenant_id":   callerTenantID,
@@ -341,7 +336,7 @@ func (h *KnowledgeBaseHandler) resolveKBStoreView(
 	ctx context.Context, kb *types.KnowledgeBase, callerTenantID uint64,
 ) types.StoreDisplay {
 	if !kb.HasVectorStore() {
-		return h.envDefaultStoreView(ctx)
+		return h.defaultStoreView(ctx)
 	}
 	if kb.TenantID != callerTenantID {
 		return types.SharedStoreDisplay()
@@ -349,7 +344,7 @@ func (h *KnowledgeBaseHandler) resolveKBStoreView(
 	if h.vectorStoreService == nil {
 		return types.UnavailableStoreDisplay()
 	}
-	view, err := h.vectorStoreService.ResolveStoreView(ctx, kb.TenantID, *kb.VectorStoreID)
+	view, err := h.vectorStoreService.ResolveStoreView(ctx, *kb.VectorStoreID)
 	if err != nil {
 		logger.WarnWithFields(ctx, logger.Fields{
 			"kb_id":     secutils.SanitizeForLog(kb.ID),
@@ -1077,19 +1072,10 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 		}
 		// Pre-flight defense 3: compare concrete instance IDs, not just the
 		// provider type (COS-A and COS-B are different physical stores).
-		if tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); tenant != nil {
-			defaultID, defaultProvider := "", ""
-			if tenant.DefaultStorageBackendID != nil {
-				defaultID = *tenant.DefaultStorageBackendID
-			}
-			if tenant.StorageEngineConfig != nil {
-				defaultProvider = tenant.StorageEngineConfig.DefaultProvider
-			}
-			if !sourceKB.SharesStorageBackendWith(targetKB, defaultID, defaultProvider) {
-				c.Error(apperrors.NewBadRequestError(
-					"source and target knowledge bases use different storage instances; cross-storage-backend cloning is not supported"))
-				return
-			}
+		if !sourceKB.SharesStorageBackendWith(targetKB, "", "") {
+			c.Error(apperrors.NewBadRequestError(
+				"source and target knowledge bases use different storage instances; cross-storage-backend cloning is not supported"))
+			return
 		}
 	}
 

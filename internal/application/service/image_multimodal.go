@@ -69,14 +69,14 @@ type ImageMultimodalService struct {
 	knowledgeRepo  interfaces.KnowledgeRepository
 	tenantRepo     interfaces.TenantRepository
 	retrieveEngine interfaces.RetrieveEngineRegistry
-	ownership      retriever.TenantStoreOwnership
+	ownership      retriever.StoreConfigAvailability
 	ollamaService  *ollama.OllamaService
 	taskEnqueuer   interfaces.TaskEnqueuer
 	redisClient    *redis.Client
 	// fileSvc is the globally configured default FileService used as a fallback
 	// when the tenant-scoped storage config cannot produce a usable service
 	// (e.g. images were saved using the global MINIO_* env vars while the
-	// tenant's StorageEngineConfig.MinIO is empty). Mirrors the write-side
+	// the selected backend is unavailable). Mirrors the write-side
 	// fallback in knowledgeService.resolveFileService.
 	fileSvc         interfaces.FileService
 	storageResolver interfaces.StorageBackendResolver
@@ -97,7 +97,7 @@ func NewImageMultimodalService(
 	knowledgeRepo interfaces.KnowledgeRepository,
 	tenantRepo interfaces.TenantRepository,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
-	ownership retriever.TenantStoreOwnership,
+	ownership retriever.StoreConfigAvailability,
 	ollamaService *ollama.OllamaService,
 	taskEnqueuer interfaces.TaskEnqueuer,
 	redisClient *redis.Client,
@@ -545,19 +545,10 @@ func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID, knowledge
 	return model, vlmCfg, err
 }
 
-// resolveFileServiceForPayload resolves tenant/KB scoped file service for reading provider:// URLs.
-// Falls back to the globally configured default FileService when the tenant's
-// StorageEngineConfig does not carry a usable configuration for the URL's provider.
-// This mirrors the write-side fallback in knowledgeService.resolveFileService
-// and is required because images can be saved using global STORAGE_TYPE/MINIO_*
-// env vars while tenant.StorageEngineConfig.MinIO is left empty (issue #1282).
+// resolveFileServiceForPayload resolves the explicit backend carried by a
+// resource or storage:// reference, or the KB binding/platform default when
+// the reference is unqualified.
 func (s *ImageMultimodalService) resolveFileServiceForPayload(ctx context.Context, payload types.ImageMultimodalPayload) interfaces.FileService {
-	tenant, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
-	if err != nil || tenant == nil {
-		logger.Warnf(ctx, "[ImageMultimodal] GetTenantByID failed: tenant=%d err=%v", payload.TenantID, err)
-		return s.fileSvc
-	}
-
 	backendID, _, _ := types.ParseStorageBackendPath(payload.ImageURL)
 	provider := types.ParseProviderScheme(payload.ImageURL)
 	// A resource:// reference carries no provider/backend in the URL itself; the
@@ -591,9 +582,9 @@ func (s *ImageMultimodalService) resolveFileServiceForPayload(ctx context.Contex
 	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
 	logger.Infof(ctx, "[ImageMultimodal] resolving file service: tenant=%d provider=%q LOCAL_STORAGE_BASE_DIR=%q imageURL=%s",
 		payload.TenantID, provider, baseDir, payload.ImageURL)
-	fileSvc, _, svcErr := s.storageResolver.ResolveFileService(ctx, tenant, backendID, provider, baseDir)
+	fileSvc, _, svcErr := s.storageResolver.ResolveFileService(ctx, backendID, baseDir)
 	if svcErr != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] resolve file service failed (falling back to default): tenant=%d provider=%s err=%v",
+		logger.Warnf(ctx, "[ImageMultimodal] resolve file service failed: tenant=%d provider=%s err=%v",
 			payload.TenantID, provider, svcErr)
 		return s.fileSvc
 	}

@@ -11,9 +11,8 @@ import (
 // NewRequestRewriter builds the Rewriter for one API request or response stream.
 //
 // ModeHandle yields a disabled Rewriter, so the default path resolves nothing
-// and costs no access-grant rows. The tenant is taken from ctx because a
-// reference may live on a tenant-configured storage backend rather than the
-// process-wide default.
+// and costs no access-grant rows. Global backend selection is independent of
+// the tenant carried by ctx; tenant identity still controls resource access.
 //
 // No extra authorization gate applies here, unlike the `/files` proxy which
 // rejects KB-restricted API keys. That gate exists because `/files` takes an
@@ -29,12 +28,11 @@ func NewRequestRewriter(
 	if mode != ModePublic {
 		return NewRewriter(nil, "API")
 	}
-	tenant, _ := types.TenantInfoFromContext(ctx)
 	var resolvers []interfaces.StorageBackendResolver
 	if storageResolver != nil {
 		resolvers = append(resolvers, storageResolver)
 	}
-	resolver := NewFileServiceResolver(tenant, defaultSvc, resolvers...).WithContext(ctx)
+	resolver := NewFileServiceResolver(defaultSvc, resolvers...).WithContext(ctx)
 	return NewRewriter(resolver, "API")
 }
 

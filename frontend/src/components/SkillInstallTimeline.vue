@@ -12,7 +12,6 @@
         <AgentStreamDisplay
           v-else
           :session="msg"
-          :session-id="sessionId"
           :user-query="''"
           embedded-mode
         />
@@ -26,7 +25,6 @@ import { onUnmounted, reactive, ref, watch } from 'vue'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import { useChatStreamHandler } from '@/composables/useChatStreamHandler'
 import { configSkillTranscriptUrl, getConfigSkillTranscriptHistory } from '@/api/system'
-import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 import { getApiBaseUrl } from '@/utils/api-base'
 import { generateRandomString } from '@/utils/index'
 import { reconstructEventStreamFromSteps } from '@/utils/agent-event-history'
@@ -36,18 +34,15 @@ import i18n from '@/i18n'
 const props = defineProps<{
   configId: string
   skillId: string
-  // The durable rows behind the run, used when the event log has aged out.
-  sessionId: string
+  // Opaque stream correlation only; this is not an enterprise chat session.
+  runId: string
   messageId: string
-  // True while this skill is still installing. Locators are written after the
-  // sandbox is up; until then this component shows the waiting copy and does
-  // not hit /transcript.
+  // True while this skill is still installing.
   live?: boolean
   compact?: boolean
 }>()
 
 const messages = reactive<any[]>([])
-const platformTenantID = usePlatformTenantControlID()
 const loading = ref(false)
 const isReplying = ref(false)
 const currentAssistantMessageId = ref('')
@@ -96,9 +91,7 @@ function stop() {
 // reports whether it ever produced anything: a 404 means the event log has
 // expired and the durable history is the only remaining source.
 async function follow(run: number): Promise<boolean> {
-  const tenantId = platformTenantID.value
-  if (!tenantId) return false
-  const url = `${getApiBaseUrl()}${configSkillTranscriptUrl(tenantId, props.configId, props.skillId)}`
+  const url = `${getApiBaseUrl()}${configSkillTranscriptUrl(props.configId, props.skillId)}`
   const token = localStorage.getItem('weknora_token')
   const ac = new AbortController()
   controller = ac
@@ -154,9 +147,7 @@ async function follow(run: number): Promise<boolean> {
 }
 
 async function loadHistory(run: number): Promise<boolean> {
-  const tenantId = platformTenantID.value
-  if (!tenantId) return false
-  const response = await getConfigSkillTranscriptHistory(tenantId, props.configId, props.skillId)
+  const response = await getConfigSkillTranscriptHistory(props.configId, props.skillId)
   if (run !== openRun || closed || !response?.data?.length) return false
   const history = response.data.map((message: any) => {
     if (message.role !== 'assistant') return message
@@ -198,12 +189,7 @@ async function open() {
       return
     }
 
-    // Locators land after the installer sandbox is up. Hitting /transcript
-    // before that 404s every second (WARNING in the access log) and leaves
-    // the spinner up for the entire file seed, which can take minutes.
-    // The parent already polls the skill list; this watch re-opens when
-    // sessionId arrives.
-    if (!props.sessionId || !props.messageId) {
+    if (!props.runId || !props.messageId) {
       loading.value = false
       return
     }
@@ -225,7 +211,7 @@ async function open() {
 }
 
 watch(
-  () => [props.configId, props.skillId, props.sessionId, props.messageId, props.live] as const,
+  () => [props.configId, props.skillId, props.runId, props.messageId, props.live] as const,
   () => {
     stop()
     if (props.configId && props.skillId) void open()

@@ -453,17 +453,17 @@ docker run -d -p 8081:8081 weknora-docs
 - **E2B**：E2B Cloud，或任意 E2B 兼容控制面（含自托管）。
 - **CubeSandbox**：集群模板 + 网络策略。
 
-原 Local 配置需要按上面任一后端重建。每个空间可配多个沙箱实例，并可为每个配置设置**网络策略**（默认放行出站、关闭公网入站；可改成默认拒绝出站再写允许名单）。详见 [`docs/sandbox-docker-backend.md`](./sandbox-docker-backend.md) 与 [`docs/sandbox-protocol.md`](./sandbox-protocol.md)。
+原 Local 配置需要按上面任一后端重建。平台可配置多个沙箱连接，并可为每个连接设置**网络策略**（默认放行出站、关闭公网入站；可改成默认拒绝出站再写允许名单）。详见 [`docs/sandbox-docker-backend.md`](./sandbox-docker-backend.md) 与 [`docs/sandbox-protocol.md`](./sandbox-protocol.md)。
 
 ## 46. 技能目录和沙箱配置是什么关系？安装一直转圈怎么办？
 
-0.8.0 把技能做成空间级目录（迁移 `000086_tenant_skills` / `000090_skill_catalog`），再**按沙箱配置安装成快照**：
+技能目录现在由平台统一管理，再**按平台沙箱配置安装成快照**：
 
 1. 在 **设置 → 技能沙箱** 建好后端配置；
 2. 从 ClawHub（`@owner/slug`）、SkillHub / skills.sh、GitHub/GitLab URL 或 zip 上传安装；
 3. 安装抽屉会保持打开并显示环形进度；卡住时用「停止安装」，再用「重新安装」走已保存的安装包。
 
-环境变量分两层：**空间级**（Admin，该空间所有人共用）和**个人级**（`/api/v1/me/env-vars`，值永远不会读回）。技能声明的 `WEKNORA_*` 凭据可以按人填写。卸载沙箱里的技能不会删掉目录里的安装包。
+环境变量分两层：**平台通用默认值**（SystemAdmin 管理）和按真实企业/principal 隔离的**私有值**（`/api/v1/me/env-vars`，值永远不会读回）。技能声明的 `WEKNORA_*` 凭据可以按人填写。卸载沙箱里的技能不会删掉目录里的安装包。
 
 ## 47. 0.7.1 删了 Neo4j 会话记忆，0.8.0 的「长期记忆」是一回事吗？
 

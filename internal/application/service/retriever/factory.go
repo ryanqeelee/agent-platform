@@ -41,18 +41,11 @@ var (
 	ErrVectorStoreForbidden = errors.New("vector store access denied")
 )
 
-// TenantStoreOwnership abstracts the lookup used by factory functions to
-// verify that a given vector store ID is owned by the given tenant ID.
-//
-// Production implementations wrap the VectorStoreRepository; tests inject
-// in-memory fakes so they can cover the ownership branches without touching
-// a database.
-type TenantStoreOwnership interface {
-	// StoreOwnedBy reports whether the store with the given ID is owned
-	// by the given tenant. When the store does not exist, it returns
-	// (false, nil). Errors are reserved for infrastructure failures such as
-	// database connectivity issues.
-	StoreOwnedBy(ctx context.Context, storeID string, tenantID uint64) (bool, error)
+// StoreConfigAvailability verifies platform-global vector configuration.
+// Tenant data authorization remains in the repository/driver payload filters.
+type StoreConfigAvailability interface {
+	StoreUsable(ctx context.Context, storeID string) (bool, error)
+	DefaultStoreID(ctx context.Context) (string, error)
 }
 
 // VerifyBinding asserts that a non-empty storeID is owned by tenantID and
@@ -82,16 +75,16 @@ type TenantStoreOwnership interface {
 func VerifyBinding(
 	ctx context.Context,
 	registry interfaces.RetrieveEngineRegistry,
-	ownership TenantStoreOwnership,
+	availability StoreConfigAvailability,
 	tenantID uint64,
 	storeID string,
 ) error {
-	owned, err := ownership.StoreOwnedBy(ctx, storeID, tenantID)
+	usable, err := availability.StoreUsable(ctx, storeID)
 	if err != nil {
 		return err
 	}
-	if !owned {
-		return ErrVectorStoreForbidden
+	if !usable {
+		return ErrVectorStoreNotFound
 	}
 	if _, err := registry.GetOrLoadByStoreID(ctx, tenantID, storeID); err != nil {
 		return classifyLookupError(err)
@@ -129,9 +122,8 @@ func isContextError(err error) bool {
 //
 // Resolution rules:
 //
-//   - vectorStoreID == nil || *vectorStoreID == "" →
-//     falls back to the tenant's effective engines (env-store flow driven
-//     by RETRIEVE_DRIVER). TenantInfo is read from ctx.
+//   - vectorStoreID == nil || *vectorStoreID == "" → the platform default
+//     store ID is resolved from the typed configuration repository.
 //   - otherwise →
 //     1) ownership.StoreOwnedBy(*storeID, tenantID) must return true;
 //     cross-tenant attempts yield ErrVectorStoreForbidden.
@@ -147,21 +139,24 @@ func isContextError(err error) bool {
 func CreateRetrieveEngineForKB(
 	ctx context.Context,
 	registry interfaces.RetrieveEngineRegistry,
-	ownership TenantStoreOwnership,
+	availability StoreConfigAvailability,
 	tenantID uint64,
 	vectorStoreID *string,
 ) (*CompositeRetrieveEngine, error) {
 	// Normalize nil and empty-string pointer to "unbound" so that callers
 	// cannot accidentally route an empty UUID into GetByStoreID.
 	if vectorStoreID == nil || *vectorStoreID == "" {
-		tenantInfo, ok := types.TenantInfoFromContext(ctx)
-		if !ok {
-			return nil, ErrTenantInfoMissing
+		storeID, err := availability.DefaultStoreID(ctx)
+		if err != nil {
+			return nil, err
 		}
-		return NewCompositeRetrieveEngine(registry, tenantInfo.GetEffectiveEngines())
+		if storeID == "" {
+			return nil, ErrVectorStoreNotFound
+		}
+		return resolveBoundEngine(ctx, registry, availability, tenantID, storeID)
 	}
 
-	return resolveBoundEngine(ctx, registry, ownership, tenantID, *vectorStoreID)
+	return resolveBoundEngine(ctx, registry, availability, tenantID, *vectorStoreID)
 }
 
 // CreateRetrieveEngineFromPayload is the async-task variant. It does not
@@ -169,22 +164,30 @@ func CreateRetrieveEngineForKB(
 // Instead, tenantID is passed explicitly from the deserialized payload and
 // is verified against the store's tenant when vectorStoreID is non-empty.
 //
-// Tasks enqueued before vectorStoreID was added to the payload decode it as
-// nil and transparently fall back to the pre-serialized effectiveEngines
-// path — no in-flight task is lost across upgrades.
+// Tasks without a vectorStoreID resolve the typed platform default. The
+// effectiveEngines argument remains only for payload compatibility and is not
+// an environment fallback.
 func CreateRetrieveEngineFromPayload(
 	ctx context.Context,
 	registry interfaces.RetrieveEngineRegistry,
-	ownership TenantStoreOwnership,
+	availability StoreConfigAvailability,
 	tenantID uint64,
 	effectiveEngines []types.RetrieverEngineParams,
 	vectorStoreID *string,
 ) (*CompositeRetrieveEngine, error) {
+	_ = effectiveEngines
 	if vectorStoreID == nil || *vectorStoreID == "" {
-		return NewCompositeRetrieveEngine(registry, effectiveEngines)
+		storeID, err := availability.DefaultStoreID(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if storeID == "" {
+			return nil, ErrVectorStoreNotFound
+		}
+		return resolveBoundEngine(ctx, registry, availability, tenantID, storeID)
 	}
 
-	return resolveBoundEngine(ctx, registry, ownership, tenantID, *vectorStoreID)
+	return resolveBoundEngine(ctx, registry, availability, tenantID, *vectorStoreID)
 }
 
 // resolveBoundEngine is the shared ownership-verified lookup path used by
@@ -194,11 +197,11 @@ func CreateRetrieveEngineFromPayload(
 func resolveBoundEngine(
 	ctx context.Context,
 	registry interfaces.RetrieveEngineRegistry,
-	ownership TenantStoreOwnership,
+	availability StoreConfigAvailability,
 	tenantID uint64,
 	storeID string,
 ) (*CompositeRetrieveEngine, error) {
-	owned, err := ownership.StoreOwnedBy(ctx, storeID, tenantID)
+	usable, err := availability.StoreUsable(ctx, storeID)
 	if err != nil {
 		// This lookup queries the database with the caller's context, so it is
 		// where a shutdown or a disconnect is usually noticed first. Reporting
@@ -217,13 +220,9 @@ func resolveBoundEngine(
 		})
 		return nil, ErrVectorStoreUnavailable
 	}
-	if !owned {
-		// Cross-tenant attempt (or the store has been deleted in the
-		// meantime). Log with WARN so that audits can surface probing.
-		logger.Warnf(ctx,
-			"[retriever.factory] cross-tenant store access attempted: tenant=%d store=%s",
-			tenantID, storeID)
-		return nil, ErrVectorStoreForbidden
+	if !usable {
+		logger.Warnf(ctx, "[retriever.factory] vector store unavailable: store=%s", storeID)
+		return nil, ErrVectorStoreNotFound
 	}
 
 	svc, err := registry.GetOrLoadByStoreID(ctx, tenantID, storeID)

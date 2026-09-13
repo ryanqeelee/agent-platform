@@ -596,10 +596,9 @@ var builtinAgentIDsOrdered = []string{
 	BuiltinDocumentAssistantID,
 }
 
-// platformManagedBuiltinAgentIDsOrdered is the platform control-plane catalog.
-// It includes internal product definitions that are not shown in the employee
-// picker, but deliberately excludes the skill installer: that agent's fixed
-// identity is part of the privileged install trust boundary.
+// platformManagedBuiltinAgentIDsOrdered is the platform control-plane catalog
+// shown in the general agent settings list. The skill installer has a dedicated
+// settings surface, so it remains manageable without appearing in this list.
 var platformManagedBuiltinAgentIDsOrdered = []string{
 	BuiltinEmployeeAssistantID,
 	BuiltinQuickAnswerID,
@@ -619,16 +618,15 @@ func GetBuiltinAgentIDs() []string {
 	return builtinAgentIDsOrdered
 }
 
-// GetPlatformManagedBuiltinAgentIDs returns the canonical platform-editable
-// built-in definitions in stable display order. Missing optional definitions
-// are filtered by callers through GetBuiltinAgentWithContext.
+// GetPlatformManagedBuiltinAgentIDs returns platform definitions shown in the
+// general agent settings list, in stable display order. Dedicated definitions
+// such as the skill installer are intentionally omitted.
 func GetPlatformManagedBuiltinAgentIDs() []string {
 	return append([]string(nil), platformManagedBuiltinAgentIDsOrdered...)
 }
 
-// IsPlatformManagedBuiltinAgentID reports whether the platform agent control
-// plane owns this built-in definition. The skill installer is intentionally
-// false even though it remains registered for its dedicated runtime path.
+// IsPlatformManagedBuiltinAgentID reports whether a built-in definition uses
+// the general platform-managed runtime path.
 func IsPlatformManagedBuiltinAgentID(id string) bool {
 	for _, candidate := range platformManagedBuiltinAgentIDsOrdered {
 		if id == candidate {
@@ -636,6 +634,15 @@ func IsPlatformManagedBuiltinAgentID(id string) bool {
 		}
 	}
 	return false
+}
+
+// IsPlatformManageableBuiltinAgentID reports whether the platform control
+// plane may read or update a built-in definition. The skill installer uses a
+// dedicated settings surface and runtime resolver, so it is manageable without
+// entering the general platform list or picker. EnableSkillInstallMode still
+// exclusively grants its privileged runtime behavior by fixed ID.
+func IsPlatformManageableBuiltinAgentID(id string) bool {
+	return id == BuiltinSkillInstallerID || IsPlatformManagedBuiltinAgentID(id)
 }
 
 // IsBuiltinAgentID checks if the given ID is a built-in agent ID

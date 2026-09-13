@@ -20,15 +20,15 @@ const (
 // skillReaperStore is the skill-row slice ReapStuckRuns needs.
 type skillReaperStore interface {
 	ListStaleInstalling(ctx context.Context, olderThan time.Time) ([]*types.TenantSkillEntity, error)
-	GetSkill(ctx context.Context, tenantID uint64, configID, skillID string) (*types.TenantSkillEntity, error)
+	GetSkill(ctx context.Context, configID, skillID string) (*types.TenantSkillEntity, error)
 	UpdateSkill(ctx context.Context, e *types.TenantSkillEntity) error
-	DeleteSkill(ctx context.Context, tenantID uint64, configID, skillID string) error
+	DeleteSkill(ctx context.Context, configID, skillID string) error
 }
 
 // skillReaperConfigReader is the config read ReapStuckRuns needs to tell a
 // serving skill (pointer already switched) from a genuinely abandoned install.
 type skillReaperConfigReader interface {
-	GetByID(ctx context.Context, tenantID uint64, id string) (*types.TenantSandboxConfigEntity, error)
+	GetByID(ctx context.Context, id string) (*types.TenantSandboxConfigEntity, error)
 }
 
 // skillSnapshotLedger is the per-config chain: what ReconcileSnapshots compares
@@ -36,7 +36,7 @@ type skillReaperConfigReader interface {
 // stuck run's skill is still in the live image.
 type skillSnapshotLedger interface {
 	ListSnapshotsByConfig(
-		ctx context.Context, tenantID uint64, configID string,
+		ctx context.Context, configID string,
 	) ([]*types.TenantSkillSnapshotEntity, error)
 }
 
@@ -105,7 +105,7 @@ func (s *TenantSkillService) ReapStuckRuns(ctx context.Context) (int, error) {
 			// An unreadable config or ledger must not be treated as a failed
 			// install: the image may still be serving this skill.
 			if serving || !known {
-				if err := s.updateSkillFields(ctx, row.TenantID, row.SandboxConfigID, row.ID,
+				if err := s.updateSkillFields(ctx, row.SandboxConfigID, row.ID,
 					func(e *types.TenantSkillEntity) {
 						e.Status = types.SkillStatusReady
 						e.Error = ""
@@ -123,7 +123,7 @@ func (s *TenantSkillService) ReapStuckRuns(ctx context.Context) (int, error) {
 				reaped++
 				continue
 			}
-			if err := s.updateSkillFields(ctx, row.TenantID, row.SandboxConfigID, row.ID,
+			if err := s.updateSkillFields(ctx, row.SandboxConfigID, row.ID,
 				func(e *types.TenantSkillEntity) {
 					e.Status = types.SkillStatusFailed
 					e.Error = skillInstallInterruptedMessage
@@ -142,7 +142,7 @@ func (s *TenantSkillService) ReapStuckRuns(ctx context.Context) (int, error) {
 				continue
 			}
 			if serving {
-				if err := s.updateSkillFields(ctx, row.TenantID, row.SandboxConfigID, row.ID,
+				if err := s.updateSkillFields(ctx, row.SandboxConfigID, row.ID,
 					func(e *types.TenantSkillEntity) {
 						e.Status = types.SkillStatusReady
 						e.Error = ""
@@ -157,15 +157,10 @@ func (s *TenantSkillService) ReapStuckRuns(ctx context.Context) (int, error) {
 				reaped++
 				continue
 			}
-			pinned := strings.TrimSpace(row.BundleRef)
-			if err := s.skills.DeleteSkill(ctx, row.TenantID, row.SandboxConfigID, row.ID); err != nil {
+			if err := s.skills.DeleteSkill(ctx, row.SandboxConfigID, row.ID); err != nil {
 				logger.Warnf(ctx, "[skill] drop abandoned removal %s failed: %v", row.ID, err)
 				continue
 			}
-			// The row was the last thing naming an archive it owned outright,
-			// so the sweep that drops it is what makes those bytes reachable
-			// by nothing. A definition's own object has other names and stays.
-			s.releaseInstallBundle(ctx, row.TenantID, pinned)
 			reaped++
 		}
 	}
@@ -206,7 +201,7 @@ func (s *TenantSkillService) skillFilesInLiveImage(
 		// construction — the last removal of the config cleared the pointer.
 		return "", false, true
 	}
-	ledger, err := s.skills.ListSnapshotsByConfig(ctx, row.TenantID, row.SandboxConfigID)
+	ledger, err := s.skills.ListSnapshotsByConfig(ctx, row.SandboxConfigID)
 	if err != nil {
 		logger.Warnf(ctx, "[skill] reaper could not read the snapshot ledger of config %s: %v",
 			row.SandboxConfigID, err)
@@ -270,7 +265,7 @@ func (s *TenantSkillService) liveSnapshotID(
 	if row == nil || s.configs == nil {
 		return "", false
 	}
-	cfg, err := s.configs.GetByID(ctx, row.TenantID, row.SandboxConfigID)
+	cfg, err := s.configs.GetByID(ctx, row.SandboxConfigID)
 	if err != nil {
 		logger.Warnf(ctx, "[skill] reaper could not read sandbox config %s: %v",
 			row.SandboxConfigID, err)
@@ -285,12 +280,12 @@ func (s *TenantSkillService) liveSnapshotID(
 // shared across environments, and an extra here is often another environment's
 // live image.
 func (s *TenantSkillService) ReconcileSnapshots(
-	ctx context.Context, tenantID uint64, configID string,
+	ctx context.Context, configID string,
 ) (int, error) {
 	if s == nil || s.skills == nil {
 		return 0, nil
 	}
-	rows, err := s.skills.ListSnapshotsByConfig(ctx, tenantID, configID)
+	rows, err := s.skills.ListSnapshotsByConfig(ctx, configID)
 	if err != nil {
 		return 0, err
 	}
@@ -305,7 +300,7 @@ func (s *TenantSkillService) ReconcileSnapshots(
 		}
 		known[id] = struct{}{}
 	}
-	lister := snapshotListerFrom(ctx, s.sandboxes, tenantID, configID)
+	lister := s.snapshotManagerForConfig(ctx, configID)
 	if lister == nil {
 		return 0, nil
 	}
@@ -313,7 +308,6 @@ func (s *TenantSkillService) ReconcileSnapshots(
 	if err != nil {
 		return 0, err
 	}
-	listed = snapshotsNotFromOtherConfig(listed, skillSnapshotNamePrefix(tenantID, configID))
 	extras := 0
 	for _, snap := range listed {
 		id := strings.TrimSpace(snap.ID)
@@ -332,46 +326,36 @@ func (s *TenantSkillService) ReconcileSnapshots(
 	return extras, nil
 }
 
-func snapshotListerFrom(
-	ctx context.Context, resolver sandbox.TenantSandboxResolver, tenantID uint64, configID string,
-) skillSnapshotLister {
-	if resolver == nil {
+func (s *TenantSkillService) snapshotManagerForConfig(
+	ctx context.Context, configID string,
+) sandbox.RemoteSnapshotManager {
+	if s == nil || s.configs == nil {
 		return nil
 	}
-	mgr, err := resolver.Resolve(ctx, tenantID, configID)
+	entity, err := s.configs.GetByID(ctx, configID)
+	if err != nil || entity == nil || entity.Config == nil {
+		logger.Warnf(ctx, "[skill] load sandbox config %s for snapshot maintenance failed: %v", configID, err)
+		return nil
+	}
+	effective, err := sandbox.ResolveEffectiveConfig(entity.Config, sandbox.DefaultConfig())
 	if err != nil {
-		logger.Warnf(ctx, "[skill] resolve sandbox for snapshot reconcile of %s failed: %v", configID, err)
+		logger.Warnf(ctx, "[skill] resolve sandbox config %s for snapshot maintenance failed: %v", configID, err)
 		return nil
 	}
-	if mgr == nil {
+	newClient := s.newSnapshotClient
+	if newClient == nil {
+		newClient = sandbox.NewRemoteClientForCheck
+	}
+	client, err := newClient(effective)
+	if err != nil {
+		logger.Warnf(ctx, "[skill] build sandbox client %s for snapshot maintenance failed: %v", configID, err)
 		return nil
 	}
-	lister, ok := mgr.(skillSnapshotLister)
+	manager, ok := sandbox.SnapshotManagerFrom(client)
 	if !ok {
 		return nil
 	}
-	return lister
-}
-
-func snapshotDeleterFrom(
-	ctx context.Context, resolver sandbox.TenantSandboxResolver, tenantID uint64, configID string,
-) skillSnapshotDeleter {
-	if resolver == nil {
-		return nil
-	}
-	mgr, err := resolver.Resolve(ctx, tenantID, configID)
-	if err != nil {
-		logger.Warnf(ctx, "[skill] resolve sandbox for snapshot prune of %s failed: %v", configID, err)
-		return nil
-	}
-	if mgr == nil {
-		return nil
-	}
-	deleter, ok := mgr.(skillSnapshotDeleter)
-	if !ok {
-		return nil
-	}
-	return deleter
+	return manager
 }
 
 func (s *TenantSkillService) snapshotRetentionWindow() time.Duration {
@@ -444,7 +428,7 @@ func (s *TenantSkillService) PruneSupersededSnapshots(ctx context.Context) (int,
 	now := s.clock()
 	pruned := 0
 	for _, cfg := range configs {
-		if cfg == nil || types.IsSandboxWorkspacePolicyRow(cfg) {
+		if cfg == nil {
 			continue
 		}
 		cutoff := now().Add(-s.snapshotRetentionFor(cfg))
@@ -475,7 +459,7 @@ func (s *TenantSkillService) pruneConfigSnapshots(
 		logger.Warnf(ctx, "[skill] skip snapshot prune of config %s: %v", cfg.ID, err)
 		return 0, nil
 	}
-	rows, err := s.skills.ListSnapshotsByConfig(ctx, cfg.TenantID, cfg.ID)
+	rows, err := s.skills.ListSnapshotsByConfig(ctx, cfg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -490,7 +474,7 @@ func (s *TenantSkillService) pruneConfigSnapshots(
 			continue
 		}
 		if !resolved {
-			deleter = snapshotDeleterFrom(ctx, s.sandboxes, cfg.TenantID, cfg.ID)
+			deleter = s.snapshotManagerForConfig(ctx, cfg.ID)
 			resolved = true
 		}
 		if deleter == nil {
@@ -510,7 +494,7 @@ func (s *TenantSkillService) pruneConfigSnapshots(
 			continue
 		}
 		if err := s.skills.MarkSnapshotState(
-			ctx, cfg.TenantID, row.ID, types.SkillSnapshotStateDeleted, row.SnapshotID,
+			ctx, row.ID, types.SkillSnapshotStateDeleted, row.SnapshotID,
 		); err != nil {
 			logger.Warnf(ctx, "[skill] mark snapshot %s deleted after prune failed: %v", row.ID, err)
 			continue
@@ -549,12 +533,12 @@ func (s *TenantSkillService) reapAbandonedBuilds(
 	if len(pending) == 0 {
 		return 0
 	}
-	if s.configHasInFlightSkill(ctx, cfg.TenantID, cfg.ID) {
+	if s.configHasInFlightSkill(ctx, cfg.ID) {
 		return 0
 	}
 
-	lister := snapshotListerFrom(ctx, s.sandboxes, cfg.TenantID, cfg.ID)
-	deleter := snapshotDeleterFrom(ctx, s.sandboxes, cfg.TenantID, cfg.ID)
+	manager := s.snapshotManagerForConfig(ctx, cfg.ID)
+	lister, deleter := skillSnapshotLister(manager), skillSnapshotDeleter(manager)
 	if lister == nil || deleter == nil {
 		return 0
 	}
@@ -564,8 +548,6 @@ func (s *TenantSkillService) reapAbandonedBuilds(
 			cfg.ID, err)
 		return 0
 	}
-	listed = snapshotsNotFromOtherConfig(listed, skillSnapshotNamePrefix(cfg.TenantID, cfg.ID))
-
 	live := strings.TrimSpace(currentSnapshotID(cfg))
 	reaped := 0
 	for _, row := range pending {
@@ -588,7 +570,7 @@ func (s *TenantSkillService) reapAbandonedBuilds(
 			continue
 		}
 		if err := s.skills.MarkSnapshotState(
-			ctx, cfg.TenantID, row.ID, types.SkillSnapshotStateDeleted, found,
+			ctx, row.ID, types.SkillSnapshotStateDeleted, found,
 		); err != nil {
 			logger.Warnf(ctx, "[skill] mark abandoned build %s deleted failed: %v", row.ID, err)
 			continue
@@ -616,12 +598,12 @@ func abandonedBuild(row *types.TenantSkillSnapshotEntity, cutoff time.Time) bool
 }
 
 func (s *TenantSkillService) configHasInFlightSkill(
-	ctx context.Context, tenantID uint64, configID string,
+	ctx context.Context, configID string,
 ) bool {
 	if s == nil || s.skills == nil || strings.TrimSpace(configID) == "" {
 		return false
 	}
-	rows, err := s.skills.ListSkillsByConfig(ctx, tenantID, configID)
+	rows, err := s.skills.ListSkillsByConfig(ctx, configID)
 	if err != nil {
 		logger.Warnf(ctx, "[skill] cannot read skills of config %s while reaping abandoned builds: %v",
 			configID, err)
@@ -649,7 +631,7 @@ func (s *TenantSkillService) configHasInFlightSkill(
 func (s *TenantSkillService) buildStillRunning(
 	ctx context.Context, row *types.TenantSkillSnapshotEntity,
 ) bool {
-	skill, err := s.skills.GetSkill(ctx, row.TenantID, row.SandboxConfigID, row.SkillID)
+	skill, err := s.skills.GetSkill(ctx, row.SandboxConfigID, row.SkillID)
 	if err != nil {
 		// Cannot tell; refuse to guess before an irreversible delete.
 		return true
@@ -746,10 +728,10 @@ func (s *TenantSkillService) reconcileAllSnapshots(ctx context.Context) {
 		return
 	}
 	for _, cfg := range configs {
-		if cfg == nil || types.IsSandboxWorkspacePolicyRow(cfg) {
+		if cfg == nil {
 			continue
 		}
-		if _, err := s.ReconcileSnapshots(ctx, cfg.TenantID, cfg.ID); err != nil {
+		if _, err := s.ReconcileSnapshots(ctx, cfg.ID); err != nil {
 			logger.Warnf(ctx, "[skill] reconcile snapshots for config %s failed: %v", cfg.ID, err)
 		}
 	}

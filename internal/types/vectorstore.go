@@ -16,31 +16,21 @@ import (
 	"gorm.io/gorm"
 )
 
-// EnvStoreIDPrefix is the prefix for virtual env store IDs.
-const EnvStoreIDPrefix = "__env_"
-
 const (
 	envTencentVectorDBReplicaNumber     = "TENCENT_VECTORDB_REPLICA_NUMBER"
 	defaultTencentVectorDBReplicaNumber = 1
 )
 
-// IsEnvStoreID checks if the given ID is an env store virtual ID.
-func IsEnvStoreID(id string) bool {
-	return strings.HasPrefix(id, EnvStoreIDPrefix)
-}
-
 // EnvLookupFunc is a function type for looking up environment variables.
 // In production: os.Getenv, in tests: custom lookup function.
 type EnvLookupFunc func(string) string
 
-// VectorStore represents a configured vector database instance for a workspace.
-// Each workspace can register multiple VectorStore entries (even of the same engine type)
+// VectorStore represents a platform-global vector database connection.
+// The platform can register multiple VectorStore entries (even of the same engine type)
 // to support multi-store scenarios (e.g., ES-hot + ES-warm clusters).
 type VectorStore struct {
 	// Unique identifier (UUID, auto-generated)
 	ID string `yaml:"id" json:"id" gorm:"type:varchar(36);primaryKey"`
-	// Workspace ID for scoping
-	TenantID uint64 `yaml:"tenant_id" json:"tenant_id"`
 	// User-friendly name, e.g., "elasticsearch-hot"
 	Name string `yaml:"name" json:"name" gorm:"type:varchar(255);not null"`
 	// Engine type: postgres, elasticsearch, qdrant, milvus, weaviate, sqlite
@@ -49,6 +39,8 @@ type VectorStore struct {
 	ConnectionConfig ConnectionConfig `yaml:"connection_config" json:"connection_config" gorm:"type:json"`
 	// Optional index/collection configuration (engine-specific defaults if empty)
 	IndexConfig IndexConfig `yaml:"index_config" json:"index_config" gorm:"type:json"`
+	// IsDefault marks the sole platform fallback for an unset binding.
+	IsDefault bool `yaml:"is_default" json:"is_default" gorm:"not null;default:false"`
 	// Timestamps
 	CreatedAt time.Time      `yaml:"created_at" json:"created_at"`
 	UpdatedAt time.Time      `yaml:"updated_at" json:"updated_at"`
@@ -75,16 +67,13 @@ func (v *VectorStore) BeforeCreate(tx *gorm.DB) error {
 //
 // Excluded engines:
 //   - Infinity / ElasticFaiss — legacy/experimental, no standalone deployable instance.
-//   - Postgres / SQLite — only meaningful when bound to the app's default DB
-//     connection (UseDefaultConnection=true). The Postgres retriever's
-//     embeddings table is a single hard-coded name with no per-store
-//     partitioning, so registering a second Postgres store on the same
-//     instance has no separation effect — every KB sharing this engine
-//     ends up in the same physical table. These engines are still
-//     reachable via env stores (RETRIEVE_DRIVER=postgres/sqlite), which
-//     route through a separate code path (BuildEnvVectorStores) and do
-//     not pass through this validation.
+//
+// Postgres and SQLite are valid only with UseDefaultConnection=true. They
+// materialize the application database as an explicit platform connection;
+// tenant isolation remains in the retriever's tenant/knowledge filters.
 var validEngineTypes = map[RetrieverEngineType]bool{
+	PostgresRetrieverEngineType:        true,
+	SQLiteRetrieverEngineType:          true,
 	ElasticsearchRetrieverEngineType:   true,
 	QdrantRetrieverEngineType:          true,
 	MilvusRetrieverEngineType:          true,
@@ -107,8 +96,8 @@ func (v *VectorStore) Validate() error {
 	if !validEngineTypes[v.EngineType] {
 		return errors.NewValidationError(fmt.Sprintf("unsupported engine type: %s", v.EngineType))
 	}
-	if v.TenantID == 0 {
-		return errors.NewValidationError("tenant_id is required")
+	if (v.EngineType == PostgresRetrieverEngineType || v.EngineType == SQLiteRetrieverEngineType) && !v.ConnectionConfig.UseDefaultConnection {
+		return errors.NewValidationError("postgres and sqlite vector stores require use_default_connection=true")
 	}
 	return nil
 }
@@ -527,8 +516,7 @@ func ValidateIndexConfig(ic IndexConfig) error {
 // Kept as package-level constants so handlers and services share a single
 // vocabulary instead of repeating magic strings.
 const (
-	StoreSourceEnv         = "env"         // env-driven (RETRIEVE_DRIVER)
-	StoreSourceUser        = "user"        // DB-managed VectorStore row
+	StoreSourceUser        = "user"        // platform-managed VectorStore row
 	StoreSourceShared      = "shared"      // cross-tenant access — metadata suppressed
 	StoreSourceUnavailable = "unavailable" // bound store row missing / registry miss
 )
@@ -546,16 +534,6 @@ type StoreDisplay struct {
 	Source     string `json:"vector_store_source,omitempty"`
 	EngineType string `json:"vector_store_engine_type,omitempty"`
 	Status     string `json:"vector_store_status,omitempty"` // "available" / "unavailable"
-}
-
-// DefaultStoreDisplay is the display payload for KBs that fall back to the
-// tenant's env stores (VectorStoreID == nil).
-func DefaultStoreDisplay() StoreDisplay {
-	return StoreDisplay{
-		Name:   "System default",
-		Source: StoreSourceEnv,
-		Status: "available",
-	}
 }
 
 // UnavailableStoreDisplay is used when the bound store cannot be resolved
@@ -583,24 +561,17 @@ func SharedStoreDisplay() StoreDisplay {
 // VectorStoreResponse — API response DTO
 // ---------------------------------------------------------------------------
 
-// VectorStoreResponse is the API response DTO for vector store.
-// Wraps VectorStore with additional metadata (source, readonly).
+// VectorStoreResponse is the API response DTO for a platform vector store.
 type VectorStoreResponse struct {
 	VectorStore
-	Source   string `json:"source"`   // "env" or "user"
-	ReadOnly bool   `json:"readonly"` // env stores are read-only
 }
 
 // NewVectorStoreResponse creates a response DTO from a VectorStore
 // with sensitive fields masked.
-func NewVectorStoreResponse(store *VectorStore, source string, readonly bool) VectorStoreResponse {
+func NewVectorStoreResponse(store *VectorStore) VectorStoreResponse {
 	masked := *store
 	masked.ConnectionConfig = store.ConnectionConfig.MaskSensitiveFields()
-	return VectorStoreResponse{
-		VectorStore: masked,
-		Source:      source,
-		ReadOnly:    readonly,
-	}
+	return VectorStoreResponse{VectorStore: masked}
 }
 
 // ---------------------------------------------------------------------------
@@ -668,6 +639,20 @@ func GetVectorStoreTypes() []VectorStoreTypeInfo {
 
 	return []VectorStoreTypeInfo{
 		{
+			Type:        "postgres",
+			DisplayName: "PostgreSQL",
+			ConnectionFields: []VectorStoreFieldInfo{
+				{Name: "use_default_connection", Type: "boolean", Required: true, Description: "Use application database", Default: true},
+			},
+		},
+		{
+			Type:        "sqlite",
+			DisplayName: "SQLite",
+			ConnectionFields: []VectorStoreFieldInfo{
+				{Name: "use_default_connection", Type: "boolean", Required: true, Description: "Use application database", Default: true},
+			},
+		},
+		{
 			Type:        "elasticsearch",
 			DisplayName: "Elasticsearch",
 			ConnectionFields: []VectorStoreFieldInfo{
@@ -681,9 +666,6 @@ func GetVectorStoreTypes() []VectorStoreTypeInfo {
 				{Name: "number_of_replicas", Type: "number", Required: false, Description: "Replicas", Default: 1},
 			},
 		},
-		// PostgreSQL and SQLite are excluded from the type list because they only support
-		// the app's default DB connection (UseDefaultConnection=true). They appear as
-		// env stores when configured via RETRIEVE_DRIVER but cannot be added as DB stores.
 		{
 			Type:        "qdrant",
 			DisplayName: "Qdrant",
@@ -785,184 +767,3 @@ func GetVectorStoreTypes() []VectorStoreTypeInfo {
 
 // floatPtr returns a pointer to v, for setting VectorStoreFieldInfo Min/Max.
 func floatPtr(v float64) *float64 { return &v }
-
-// ---------------------------------------------------------------------------
-// BuildEnvVectorStores — virtual stores from RETRIEVE_DRIVER env var
-// ---------------------------------------------------------------------------
-
-// BuildEnvVectorStores builds virtual VectorStore entries from RETRIEVE_DRIVER.
-// Returns []VectorStore (not VectorStoreResponse) so that business logic (e.g.,
-// duplicate checking) can use them directly. API responses should wrap them
-// via NewVectorStoreResponse.
-//
-// Pure function — does not call os.Getenv directly.
-//
-// Usage:
-//
-//	types.BuildEnvVectorStores(os.Getenv("RETRIEVE_DRIVER"), os.Getenv)
-func BuildEnvVectorStores(retrieveDriver string, envLookup EnvLookupFunc) []VectorStore {
-	if retrieveDriver == "" {
-		return nil
-	}
-
-	drivers := strings.Split(retrieveDriver, ",")
-	var stores []VectorStore
-
-	for _, driver := range drivers {
-		driver = strings.TrimSpace(driver)
-		if driver == "" {
-			continue
-		}
-
-		store := buildEnvStoreForDriver(driver, envLookup)
-		if store != nil {
-			stores = append(stores, *store)
-		}
-	}
-	return stores
-}
-
-// FindEnvVectorStore finds a specific env store by its virtual ID.
-func FindEnvVectorStore(retrieveDriver string, envLookup EnvLookupFunc, id string) *VectorStore {
-	for _, s := range BuildEnvVectorStores(retrieveDriver, envLookup) {
-		if s.ID == id {
-			return &s
-		}
-	}
-	return nil
-}
-
-func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore {
-	switch driver {
-	case "postgres":
-		return &VectorStore{
-			ID:         "__env_postgres__",
-			Name:       "PostgreSQL",
-			EngineType: PostgresRetrieverEngineType,
-			ConnectionConfig: ConnectionConfig{
-				UseDefaultConnection: true,
-			},
-		}
-	case "sqlite":
-		return &VectorStore{
-			ID:         "__env_sqlite__",
-			Name:       "SQLite",
-			EngineType: SQLiteRetrieverEngineType,
-		}
-	case "elasticsearch_v8":
-		return &VectorStore{
-			ID:         "__env_elasticsearch_v8__",
-			Name:       "Elasticsearch v8",
-			EngineType: ElasticsearchRetrieverEngineType,
-			ConnectionConfig: ConnectionConfig{
-				Addr:     envLookup("ELASTICSEARCH_ADDR"),
-				Username: envLookup("ELASTICSEARCH_USERNAME"),
-				Password: envLookup("ELASTICSEARCH_PASSWORD"),
-			},
-			IndexConfig: IndexConfig{
-				IndexName: envLookup("ELASTICSEARCH_INDEX"),
-			},
-		}
-	case "elasticsearch_v7":
-		return &VectorStore{
-			ID:         "__env_elasticsearch_v7__",
-			Name:       "Elasticsearch v7",
-			EngineType: ElasticsearchRetrieverEngineType,
-			ConnectionConfig: ConnectionConfig{
-				Addr:     envLookup("ELASTICSEARCH_ADDR"),
-				Username: envLookup("ELASTICSEARCH_USERNAME"),
-				Password: envLookup("ELASTICSEARCH_PASSWORD"),
-			},
-			IndexConfig: IndexConfig{
-				IndexName: envLookup("ELASTICSEARCH_INDEX"),
-			},
-		}
-	case "opensearch":
-		return &VectorStore{
-			ID:         "__env_opensearch__",
-			Name:       "OpenSearch",
-			EngineType: OpenSearchRetrieverEngineType,
-			ConnectionConfig: ConnectionConfig{
-				Addr:               envLookup("OPENSEARCH_ADDR"),
-				Username:           envLookup("OPENSEARCH_USERNAME"),
-				Password:           envLookup("OPENSEARCH_PASSWORD"),
-				InsecureSkipVerify: strings.EqualFold(envLookup("OPENSEARCH_INSECURE_SKIP_VERIFY"), "true"),
-			},
-			IndexConfig: IndexConfig{
-				IndexName: envLookup("OPENSEARCH_INDEX"),
-			},
-		}
-	case "qdrant":
-		return &VectorStore{
-			ID:         "__env_qdrant__",
-			Name:       "Qdrant",
-			EngineType: QdrantRetrieverEngineType,
-			ConnectionConfig: ConnectionConfig{
-				Host:   envLookup("QDRANT_HOST"),
-				APIKey: envLookup("QDRANT_API_KEY"),
-			},
-		}
-	case "milvus":
-		return &VectorStore{
-			ID:         "__env_milvus__",
-			Name:       "Milvus",
-			EngineType: MilvusRetrieverEngineType,
-			ConnectionConfig: ConnectionConfig{
-				Addr:     envLookup("MILVUS_ADDRESS"),
-				Username: envLookup("MILVUS_USERNAME"),
-				Password: envLookup("MILVUS_PASSWORD"),
-			},
-		}
-	case "tencent_vectordb":
-		return &VectorStore{
-			ID:         "__env_tencent_vectordb__",
-			Name:       "Tencent VectorDB",
-			EngineType: TencentVectorDBRetrieverEngineType,
-			ConnectionConfig: ConnectionConfig{
-				Addr:     envLookup("TENCENT_VECTORDB_ADDR"),
-				Username: envLookup("TENCENT_VECTORDB_USERNAME"),
-				APIKey:   envLookup("TENCENT_VECTORDB_API_KEY"),
-				Database: envLookup("TENCENT_VECTORDB_DATABASE"),
-			},
-			IndexConfig: IndexConfig{
-				CollectionName: envLookup("TENCENT_VECTORDB_COLLECTION"),
-			},
-		}
-	case "weaviate":
-		return &VectorStore{
-			ID:         "__env_weaviate__",
-			Name:       "Weaviate",
-			EngineType: WeaviateRetrieverEngineType,
-			ConnectionConfig: ConnectionConfig{
-				Host:        envLookup("WEAVIATE_HOST"),
-				GrpcAddress: envLookup("WEAVIATE_GRPC_ADDRESS"),
-				Scheme:      envLookup("WEAVIATE_SCHEME"),
-				APIKey:      envLookup("WEAVIATE_API_KEY"),
-			},
-		}
-	case "doris":
-		httpPort := 0
-		if v := envLookup("DORIS_HTTP_PORT"); v != "" {
-			if p, err := strconv.Atoi(v); err == nil {
-				httpPort = p
-			}
-		}
-		return &VectorStore{
-			ID:         "__env_doris__",
-			Name:       "Apache Doris",
-			EngineType: DorisRetrieverEngineType,
-			ConnectionConfig: ConnectionConfig{
-				Addr:     envLookup("DORIS_ADDR"),
-				HTTPPort: httpPort,
-				Database: envLookup("DORIS_DATABASE"),
-				Username: envLookup("DORIS_USERNAME"),
-				Password: envLookup("DORIS_PASSWORD"),
-			},
-			IndexConfig: IndexConfig{
-				CollectionPrefix: envLookup("DORIS_TABLE_PREFIX"),
-			},
-		}
-	default:
-		return nil
-	}
-}

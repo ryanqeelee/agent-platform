@@ -17,7 +17,7 @@ import (
 // pointer to the uploaded archive.
 func skillWithEnvDeclaration() *types.TenantSkillEntity {
 	return &types.TenantSkillEntity{
-		ID: "skill-1", TenantID: testSkillTenantID, SandboxConfigID: "cfg-a",
+		ID: "skill-1", SandboxConfigID: "cfg-a",
 		Name: "pdf", Status: types.SkillStatusReady, Enabled: true,
 		Instructions: "run scripts/extract.py to read a pdf",
 		BundleRef:    "tenant/42/skills/pdf.zip",
@@ -54,7 +54,7 @@ func TestSkillResponsePatchWritesEnvValues(t *testing.T) {
 	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/system/admin/tenants/42/sandbox-configs/cfg-a/skills/skill-1",
+	req := httptest.NewRequest(http.MethodPatch, "/system/admin/sandbox-configs/cfg-a/skills/skill-1",
 		strings.NewReader(`{"envs":{"API_TOKEN":"rotated"}}`))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
@@ -74,7 +74,7 @@ func TestSkillResponsePatchAcceptsAnEmptyEnvsObject(t *testing.T) {
 	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/system/admin/tenants/42/sandbox-configs/cfg-a/skills/skill-1",
+	req := httptest.NewRequest(http.MethodPatch, "/system/admin/sandbox-configs/cfg-a/skills/skill-1",
 		strings.NewReader(`{"envs":{}}`))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
@@ -93,7 +93,7 @@ func TestSkillResponsePatchStillAcceptsEnabledAlone(t *testing.T) {
 	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/system/admin/tenants/42/sandbox-configs/cfg-a/skills/skill-1",
+	req := httptest.NewRequest(http.MethodPatch, "/system/admin/sandbox-configs/cfg-a/skills/skill-1",
 		strings.NewReader(`{"enabled":false}`))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
@@ -110,7 +110,7 @@ func TestSkillResponsePatchAcceptsEnabledAndEnvsTogether(t *testing.T) {
 	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/system/admin/tenants/42/sandbox-configs/cfg-a/skills/skill-1",
+	req := httptest.NewRequest(http.MethodPatch, "/system/admin/sandbox-configs/cfg-a/skills/skill-1",
 		strings.NewReader(`{"enabled":false,"envs":{"REGION":"eu"}}`))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)

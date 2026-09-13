@@ -28,39 +28,39 @@ type fakeSkillCatalog struct {
 	installCalls int
 }
 
-func (f *fakeSkillCatalog) ListCatalog(context.Context, uint64) ([]service.SkillCatalogView, error) {
+func (f *fakeSkillCatalog) ListCatalog(context.Context) ([]service.SkillCatalogView, error) {
 	return f.list, nil
 }
 
 func (f *fakeSkillCatalog) RegisterCatalogFromArchive(
-	context.Context, uint64, []byte,
+	context.Context, []byte,
 ) (*types.TenantSkillCatalogEntity, error) {
 	return &types.TenantSkillCatalogEntity{ID: f.registerID, Name: "pdf"}, nil
 }
 
 func (f *fakeSkillCatalog) RegisterCatalogFromSource(
-	_ context.Context, _ uint64, source string,
+	_ context.Context, source string,
 ) (*types.TenantSkillCatalogEntity, error) {
 	f.source = source
 	return &types.TenantSkillCatalogEntity{ID: f.registerID, Name: "pdf"}, nil
 }
 
 func (f *fakeSkillCatalog) InstallCatalogToConfigs(
-	context.Context, uint64, string, []string,
+	context.Context, string, []string,
 ) (*service.CatalogInstallResult, error) {
 	f.installCalls++
 	return &service.CatalogInstallResult{Installs: f.installs, Errors: f.installErrs}, nil
 }
 
-func (f *fakeSkillCatalog) DeleteCatalog(context.Context, uint64, string) error {
+func (f *fakeSkillCatalog) DeleteCatalog(context.Context, string) error {
 	return f.deleteErr
 }
 
-func (f *fakeSkillCatalog) ListCatalogFiles(context.Context, uint64, string) ([]service.SkillFileEntry, error) {
+func (f *fakeSkillCatalog) ListCatalogFiles(context.Context, string) ([]service.SkillFileEntry, error) {
 	return nil, nil
 }
 
-func (f *fakeSkillCatalog) ReadCatalogFile(context.Context, uint64, string, string) (*service.SkillFileContent, error) {
+func (f *fakeSkillCatalog) ReadCatalogFile(context.Context, string, string) (*service.SkillFileContent, error) {
 	return nil, nil
 }
 
@@ -68,14 +68,10 @@ func newCatalogRouter(h *SkillHandler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(middleware.ErrorHandler())
-	r.Use(func(c *gin.Context) {
-		c.Set(types.TenantIDContextKey.String(), testSkillTenantID)
-		c.Next()
-	})
-	r.GET("/system/admin/tenants/42/skills/catalog", h.ListCatalog)
-	r.POST("/system/admin/tenants/42/skills/catalog", h.RegisterCatalog)
-	r.POST("/system/admin/tenants/42/skills/catalog/:id/install", h.InstallCatalog)
-	r.DELETE("/system/admin/tenants/42/skills/catalog/:id", h.DeleteCatalog)
+	r.GET("/system/admin/skills", h.ListCatalog)
+	r.POST("/system/admin/skills", h.RegisterCatalog)
+	r.POST("/system/admin/skills/:id/install", h.InstallCatalog)
+	r.DELETE("/system/admin/skills/:id", h.DeleteCatalog)
 	return r
 }
 
@@ -93,7 +89,7 @@ func TestListCatalogReturnsDefinitionsAndInstallations(t *testing.T) {
 	router := newCatalogRouter(NewSkillHandler(&fakeUsableSkillLister{}, catalog))
 
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/system/admin/tenants/42/skills/catalog", nil))
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/system/admin/skills", nil))
 	require.Equal(t, http.StatusOK, w.Code)
 
 	var body struct {
@@ -113,7 +109,7 @@ func TestRegisterCatalogFromSource(t *testing.T) {
 
 	body, err := json.Marshal(map[string]string{"source": "@owner/pdf"})
 	require.NoError(t, err)
-	req := httptest.NewRequest(http.MethodPost, "/system/admin/tenants/42/skills/catalog", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/system/admin/skills", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -125,7 +121,7 @@ func TestRegisterCatalogFromSourceRejectsAnOversizedJSONBody(t *testing.T) {
 	catalog := &fakeSkillCatalog{registerID: "cat-9"}
 	router := newCatalogRouter(NewSkillHandler(&fakeUsableSkillLister{}, catalog))
 
-	req := httptest.NewRequest(http.MethodPost, "/system/admin/tenants/42/skills/catalog",
+	req := httptest.NewRequest(http.MethodPost, "/system/admin/skills",
 		bytes.NewReader(oversizedSkillSourceJSON(1)))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -140,7 +136,7 @@ func TestInstallCatalogRejectsAnOversizedJSONBody(t *testing.T) {
 	catalog := &fakeSkillCatalog{installs: map[string]string{"cfg-1": "sk-1"}}
 	router := newCatalogRouter(NewSkillHandler(&fakeUsableSkillLister{}, catalog))
 
-	req := httptest.NewRequest(http.MethodPost, "/system/admin/tenants/42/skills/catalog/cat-1/install",
+	req := httptest.NewRequest(http.MethodPost, "/system/admin/skills/cat-1/install",
 		bytes.NewReader(oversizedSkillSourceJSON(1)))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -157,7 +153,7 @@ func TestInstallCatalogAcceptsPerConfigIDs(t *testing.T) {
 
 	body, err := json.Marshal(map[string][]string{"sandbox_config_ids": {"cfg-1"}})
 	require.NoError(t, err)
-	req := httptest.NewRequest(http.MethodPost, "/system/admin/tenants/42/skills/catalog/cat-1/install", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/system/admin/skills/cat-1/install", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -173,7 +169,7 @@ func TestInstallCatalogIncludesPerConfigErrors(t *testing.T) {
 
 	body, err := json.Marshal(map[string][]string{"sandbox_config_ids": {"cfg-1", "cfg-2"}})
 	require.NoError(t, err)
-	req := httptest.NewRequest(http.MethodPost, "/system/admin/tenants/42/skills/catalog/cat-1/install", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/system/admin/skills/cat-1/install", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -199,6 +195,6 @@ func TestDeleteCatalogRefusesWhileInstalled(t *testing.T) {
 	router := newCatalogRouter(NewSkillHandler(&fakeUsableSkillLister{}, catalog))
 
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/system/admin/tenants/42/skills/catalog/cat-1", nil))
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/system/admin/skills/cat-1", nil))
 	require.Equal(t, http.StatusConflict, w.Code)
 }

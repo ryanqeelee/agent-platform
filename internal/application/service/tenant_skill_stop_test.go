@@ -12,7 +12,7 @@ import (
 func TestStopSkillFailsAnAbandonedInstall(t *testing.T) {
 	fx := newInstallFixture(t)
 
-	got, err := fx.svc.StopSkill(context.Background(), 7, "cfg-1", "sk-1")
+	got, err := fx.svc.StopSkill(context.Background(), "cfg-1", "sk-1")
 
 	require.NoError(t, err)
 	require.Equal(t, types.SkillStatusFailed, got.Status)
@@ -22,14 +22,14 @@ func TestStopSkillFailsAnAbandonedInstall(t *testing.T) {
 
 func TestStopSkillIsIdempotentWhenAlreadyFailed(t *testing.T) {
 	fx := newInstallFixture(t)
-	require.NoError(t, fx.svc.updateSkillFields(context.Background(), 7, "cfg-1", "sk-1",
+	require.NoError(t, fx.svc.updateSkillFields(context.Background(), "cfg-1", "sk-1",
 		func(e *types.TenantSkillEntity) {
 			e.Status = types.SkillStatusFailed
 			e.Error = "python verification failed"
 			e.InstallingSince = nil
 		}))
 
-	got, err := fx.svc.StopSkill(context.Background(), 7, "cfg-1", "sk-1")
+	got, err := fx.svc.StopSkill(context.Background(), "cfg-1", "sk-1")
 
 	require.NoError(t, err)
 	require.Equal(t, types.SkillStatusFailed, got.Status)
@@ -39,13 +39,13 @@ func TestStopSkillIsIdempotentWhenAlreadyFailed(t *testing.T) {
 
 func TestStopSkillRejectsAReadySkill(t *testing.T) {
 	fx := newInstallFixture(t)
-	require.NoError(t, fx.svc.updateSkillFields(context.Background(), 7, "cfg-1", "sk-1",
+	require.NoError(t, fx.svc.updateSkillFields(context.Background(), "cfg-1", "sk-1",
 		func(e *types.TenantSkillEntity) {
 			e.Status = types.SkillStatusReady
 			e.InstallingSince = nil
 		}))
 
-	_, err := fx.svc.StopSkill(context.Background(), 7, "cfg-1", "sk-1")
+	_, err := fx.svc.StopSkill(context.Background(), "cfg-1", "sk-1")
 
 	require.ErrorContains(t, err, "not installing")
 }
@@ -53,7 +53,7 @@ func TestStopSkillRejectsAReadySkill(t *testing.T) {
 func TestStopSkillRejectsAnUnknownSkill(t *testing.T) {
 	fx := newInstallFixture(t)
 
-	_, err := fx.svc.StopSkill(context.Background(), 7, "cfg-1", "nope")
+	_, err := fx.svc.StopSkill(context.Background(), "cfg-1", "nope")
 
 	require.ErrorContains(t, err, "not found")
 }
@@ -63,7 +63,7 @@ func TestStopSkillCancelsALiveInstall(t *testing.T) {
 	started := make(chan struct{})
 	released := make(chan struct{})
 	go func() {
-		_ = fx.svc.withSkillRunLock(context.Background(), 7, "cfg-1", "sk-1",
+		_ = fx.svc.withSkillRunLock(context.Background(), "cfg-1", "sk-1",
 			func(ctx context.Context) error {
 				close(started)
 				<-ctx.Done()
@@ -77,7 +77,7 @@ func TestStopSkillCancelsALiveInstall(t *testing.T) {
 		t.Fatal("live install never entered the lock")
 	}
 
-	got, err := fx.svc.StopSkill(context.Background(), 7, "cfg-1", "sk-1")
+	got, err := fx.svc.StopSkill(context.Background(), "cfg-1", "sk-1")
 
 	require.NoError(t, err)
 	require.Equal(t, types.SkillStatusFailed, got.Status)
@@ -93,10 +93,10 @@ func TestStopSkillLeavesARemovingSkillAlone(t *testing.T) {
 	fx := newInstallFixture(t)
 	fx.seedInstalledSkill("sk-1", "snap-old", 3)
 
-	_, err := fx.svc.StopSkill(context.Background(), 7, "cfg-1", "sk-1")
+	_, err := fx.svc.StopSkill(context.Background(), "cfg-1", "sk-1")
 
 	require.ErrorContains(t, err, "not installing")
-	skill, getErr := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	skill, getErr := fx.skillRepo.GetSkill(context.Background(), "cfg-1", "sk-1")
 	require.NoError(t, getErr)
 	require.Equal(t, types.SkillStatusRemoving, skill.Status,
 		"stop is install-only; a removal in flight must keep running")

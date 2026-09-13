@@ -13,6 +13,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/common/redislock"
+	appconfig "github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -57,23 +58,22 @@ const (
 
 // TenantSkillService owns the skill image lifecycle for sandbox configs.
 type TenantSkillService struct {
-	skills        repository.TenantSkillRepository
-	configs       repository.TenantSandboxConfigRepository
-	resolver      interfaces.StorageBackendResolver
-	sandboxes     sandbox.TenantSandboxResolver
-	sandboxPolicy WorkspaceSandboxPolicy
-	agents        interfaces.AgentService
-	// installerAgents reads the stored installer record. It is a separate
-	// dependency from agents because GetAgentByID lives on the custom agent
-	// service, not on interfaces.AgentService.
-	installerAgents installerAgentSource
-	sessions        interfaces.SessionService
-	models          interfaces.ModelService
-	redis           *redis.Client
+	skills         repository.TenantSkillRepository
+	configs        repository.TenantSandboxConfigRepository
+	archives       interfaces.PlatformSkillArchiveStore
+	sandboxes      sandbox.TenantSandboxResolver
+	executions     sandbox.PlatformSkillExecutionFactory
+	sandboxPolicy  WorkspaceSandboxPolicy
+	sessions       interfaces.SessionRepository
+	pinner         *SessionSandboxPinner
+	platformAgents *PlatformAgentService
+	models         interfaces.ModelService
+	redis          *redis.Client
+	appConfig      *appconfig.Config
 
-	// streams and messages are the two halves of an install transcript: the
-	// replayable event log the console tails, and the durable rows it falls
-	// back to once the log's TTL has passed.
+	// streams is the live half of an install transcript. Platform installs keep
+	// their durable message projection on the skill row; real tenant session
+	// preparation keeps ordinary message rows.
 	streams  interfaces.StreamManager
 	messages interfaces.MessageRepository
 
@@ -82,6 +82,10 @@ type TenantSkillService struct {
 	// sourceHTTP pulls remote skill archives. Nil means the package SSRF-safe
 	// default; tests inject httptest clients.
 	sourceHTTP *http.Client
+
+	// newSnapshotClient is injectable so lifecycle tests can supply provider
+	// inventory without dialing a real control plane.
+	newSnapshotClient func(*sandbox.Config) (sandbox.RemoteSandboxClient, error)
 
 	// cleanupTimeout bounds one piece of compensating work. Injectable so a
 	// test can let an install outlast it, which every real install does.
@@ -121,31 +125,36 @@ type TenantSkillService struct {
 func NewTenantSkillService(
 	skillsRepo repository.TenantSkillRepository,
 	configsRepo repository.TenantSandboxConfigRepository,
-	resolver interfaces.StorageBackendResolver,
+	archives interfaces.PlatformSkillArchiveStore,
 	sandboxes sandbox.TenantSandboxResolver,
+	executions sandbox.PlatformSkillExecutionFactory,
 	sandboxPolicy WorkspaceSandboxPolicy,
-	agents interfaces.AgentService,
-	customAgents interfaces.CustomAgentService,
-	sessions interfaces.SessionService,
+	sessions interfaces.SessionRepository,
+	pinner *SessionSandboxPinner,
+	platformAgents *PlatformAgentService,
 	models interfaces.ModelService,
 	redisClient *redis.Client,
 	streams interfaces.StreamManager,
 	messages interfaces.MessageRepository,
+	appConfig *appconfig.Config,
 ) *TenantSkillService {
 	return &TenantSkillService{
 		skills:            skillsRepo,
 		configs:           configsRepo,
-		resolver:          resolver,
+		archives:          archives,
 		sandboxes:         sandboxes,
+		executions:        executions,
 		sandboxPolicy:     sandboxPolicy,
-		agents:            agents,
-		installerAgents:   customAgents,
 		sessions:          sessions,
+		pinner:            pinner,
+		platformAgents:    platformAgents,
 		models:            models,
 		redis:             redisClient,
 		streams:           streams,
 		messages:          messages,
+		appConfig:         appConfig,
 		now:               time.Now,
+		newSnapshotClient: sandbox.NewRemoteClientForCheck,
 		cleanupTimeout:    installCleanupTimeout,
 		snapshotRetention: skillSnapshotRetention,
 		installHeartbeat:  skillInstallHeartbeatInterval,
@@ -165,13 +174,13 @@ func NewTenantSkillService(
 // installs would each snapshot a base that lacks the other's work, and whoever
 // wrote the pointer last would silently discard the other install.
 //
-// With Redis this is a 30s renewable lease, so every replica of the same
-// workspace contends on one key. Without Redis it is a process-local mutex
+// With Redis this is a 30s renewable lease, so every replica operating on the
+// same platform config contends on one key. Without Redis it is a process-local mutex
 // and two replicas can write the pointer independently.
 func (s *TenantSkillService) withConfigLock(
-	ctx context.Context, tenantID uint64, configID string, fn func(context.Context) error,
+	ctx context.Context, configID string, fn func(context.Context) error,
 ) error {
-	key := skillImageLockKey(tenantID, configID)
+	key := skillImageLockKey(configID)
 	if s.redis == nil {
 		release, err := s.localLocks.lock(ctx, key)
 		if err != nil {
@@ -185,8 +194,8 @@ func (s *TenantSkillService) withConfigLock(
 	)
 }
 
-func skillImageLockKey(tenantID uint64, configID string) string {
-	return fmt.Sprintf("weknora-skill-image-lock:%d:%s", tenantID, configID)
+func skillImageLockKey(configID string) string {
+	return fmt.Sprintf("weknora-skill-image-lock:%s", configID)
 }
 
 // clock is this service's time source. Tests inject one; a service built

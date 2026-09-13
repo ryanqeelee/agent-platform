@@ -5,7 +5,7 @@ import test from 'node:test'
 const source = readFileSync(new URL('./AgentEditorModal.vue', import.meta.url), 'utf8')
 
 test('editing an agent closes the editor after a successful save', () => {
-  assert.match(source, /await updateAgent\(formData\.value\.id, formData\.value\);/)
+  assert.match(source, /await updateAgent\(formData\.value\.id, payload\);/)
   assert.match(
     source,
     /MessagePlugin\.success\(t\('agent\.messages\.updated'\)\);\s*emit\('success'\);\s*handleClose\(\);/
@@ -131,6 +131,7 @@ test('platform saves remove tenant bindings while tenant tools remain editable',
   assert.match(source, /v-model="formData\.config\.allowed_tools"/)
   assert.match(source, /delete config\.selected_skills;/)
   assert.match(source, /delete config\.sandbox_config_id;/)
+  assert.match(source, /delete payload\.config\.image_storage_provider;/)
   assert.match(source, /config\.skills_selection_mode === 'selected'[\s\S]*?config\.skills_selection_mode = 'none'/)
-  assert.match(source, /else \{\s*await updateAgent\(formData\.value\.id, formData\.value\);\s*\}/)
+  assert.match(source, /else \{\s*await updateAgent\(formData\.value\.id, payload\);\s*\}/)
 })

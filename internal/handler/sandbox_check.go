@@ -94,8 +94,7 @@ func (r *SandboxCheckResponse) skip(name, reason string) {
 // @Param        body  body  SandboxCheckRequest  true  "沙箱配置"
 // @Success      200   {object}  SandboxCheckResponse
 // @Security     Bearer
-// @Param        tenant_id  path  int  true  "Enterprise ID"
-// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/check [post]
+// @Router       /system/admin/sandbox-configs/check [post]
 func (h *SystemHandler) CheckSandboxConfig(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
 
@@ -104,12 +103,6 @@ func (h *SystemHandler) CheckSandboxConfig(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 1, "msg": "请求体格式错误"})
 		return
 	}
-	tenant, _ := types.TenantInfoFromContext(c.Request.Context())
-	if tenant == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 1, "msg": "空间为空"})
-		return
-	}
-
 	var stored *types.TenantSandboxConfig
 	incoming := req.Config
 	if req.ConfigID != "" {
@@ -117,7 +110,7 @@ func (h *SystemHandler) CheckSandboxConfig(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"code": 1, "msg": "沙箱配置服务不可用"})
 			return
 		}
-		entity, err := h.sandboxConfigSvc.Get(ctx, tenant.ID, req.ConfigID)
+		entity, err := h.sandboxConfigSvc.Get(ctx, req.ConfigID)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"code": 1, "msg": err.Error()})
 			return

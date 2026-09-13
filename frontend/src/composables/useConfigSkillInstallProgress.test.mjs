@@ -14,6 +14,8 @@ const source = readFileSync(new URL('./useConfigSkillInstallProgress.ts', import
 test('catalog install progress follows the same SSE as the sandbox panel', () => {
   assert.match(source, /fetchEventSource/)
   assert.match(source, /configSkillInstallEventsUrl/)
+  assert.match(source, /configSkillInstallEventsUrl\(configId, skillId\)/)
+  assert.doesNotMatch(source, /tenantId/)
   assert.match(source, /openWhenHidden: true/)
   assert.match(source, /if \(!configId \|\| !skillId \|\| abortByKey\.has\(key\)\) return/)
   assert.doesNotMatch(

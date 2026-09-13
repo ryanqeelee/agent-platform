@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -35,11 +37,15 @@ type installTranscript struct {
 	bus      *event.EventBus
 	streams  interfaces.StreamManager
 	messages interfaces.MessageRepository
+	skills   repository.TenantSkillRepository
+	configID string
+	runID    string
 
 	sessionID          string
 	assistantMessageID string
 
 	mu      sync.Mutex
+	prompt  *types.Message
 	message *types.Message
 	answers []*installAnswerSegment
 	starts  map[string]time.Time
@@ -82,57 +88,60 @@ func newInstallTranscript(
 	ctx context.Context,
 	bus *event.EventBus,
 	streams interfaces.StreamManager,
-	messages interfaces.MessageRepository,
-	sessionID, assistantMessageID string,
+	skills repository.TenantSkillRepository,
+	configID, skillID, runID string,
 	onActivity func(steps int, lastCmd string),
 ) *installTranscript {
 	return &installTranscript{
-		ctx:                ctx,
-		bus:                bus,
-		streams:            streams,
-		messages:           messages,
-		sessionID:          sessionID,
-		assistantMessageID: assistantMessageID,
-		starts:             map[string]time.Time{},
-		onActivity:         onActivity,
+		ctx: ctx, bus: bus, streams: streams, skills: skills,
+		configID: configID, runID: runID,
+		sessionID: runID, assistantMessageID: skillID,
+		starts: map[string]time.Time{}, onActivity: onActivity,
 	}
 }
 
-// Create writes the two rows the conversation needs before the engine starts.
-//
-// The assistant row cannot wait until the run ends: /sessions/continue-stream
-// validates the message before it opens the stream, so a console that attaches
-// while the install is running would be refused.
+func newSessionInstallTranscript(
+	ctx context.Context,
+	bus *event.EventBus,
+	streams interfaces.StreamManager,
+	messages interfaces.MessageRepository,
+	sessionID, assistantMessageID string,
+) *installTranscript {
+	return &installTranscript{
+		ctx: ctx, bus: bus, streams: streams, messages: messages,
+		sessionID: sessionID, assistantMessageID: assistantMessageID,
+		starts: map[string]time.Time{},
+	}
+}
+
+// Create persists the opening prompt and assistant message projection before
+// the installer starts. Platform installs write the projection to the current
+// skill row; real tenant session preparation writes ordinary message rows.
 func (tr *installTranscript) Create(ctx context.Context, prompt string) error {
-	if tr == nil || tr.messages == nil {
+	if tr == nil {
 		return nil
 	}
 	now := time.Now()
-	if _, err := tr.messages.CreateMessage(ctx, &types.Message{
-		ID:          uuid.NewString(),
-		SessionID:   tr.sessionID,
-		Role:        "user",
-		Content:     prompt,
-		IsCompleted: true,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}); err != nil {
-		return fmt.Errorf("create installer prompt message: %w", err)
+	promptMessage := &types.Message{
+		ID: uuid.NewString(), SessionID: tr.sessionID, Role: "user",
+		Content: prompt, IsCompleted: true, CreatedAt: now, UpdatedAt: now,
 	}
 	assistant := &types.Message{
-		ID:        tr.assistantMessageID,
-		SessionID: tr.sessionID,
-		Role:      "assistant",
-		CreatedAt: now.Add(time.Millisecond),
-		UpdatedAt: now.Add(time.Millisecond),
+		ID: tr.assistantMessageID, SessionID: tr.sessionID, Role: "assistant",
+		CreatedAt: now.Add(time.Millisecond), UpdatedAt: now.Add(time.Millisecond),
 	}
-	if _, err := tr.messages.CreateMessage(ctx, assistant); err != nil {
-		return fmt.Errorf("create installer answer message: %w", err)
+	if tr.messages != nil {
+		if _, err := tr.messages.CreateMessage(ctx, promptMessage); err != nil {
+			return fmt.Errorf("create installer prompt message: %w", err)
+		}
+		if _, err := tr.messages.CreateMessage(ctx, assistant); err != nil {
+			return fmt.Errorf("create installer answer message: %w", err)
+		}
 	}
 	tr.mu.Lock()
+	tr.prompt = promptMessage
 	tr.message = assistant
 	tr.mu.Unlock()
-
 	// The prompt goes into the event log too, ahead of everything the agent
 	// does, so one replay of the log is the whole conversation. Without it a
 	// console following a running install would show the agent's side of a
@@ -145,6 +154,9 @@ func (tr *installTranscript) Create(ctx context.Context, prompt string) error {
 		Timestamp: now,
 		Data:      map[string]interface{}{},
 	})
+	if tr.skills != nil {
+		return tr.persistProjection(ctx)
+	}
 	return nil
 }
 
@@ -211,7 +223,9 @@ func (tr *installTranscript) Finish(ctx context.Context, runErr error) {
 			"total_duration_ms": duration,
 		},
 	})
-	tr.save(ctx)
+	if err := tr.save(ctx); err != nil {
+		logger.Warnf(ctx, "[skill] persist install transcript %s failed: %v", tr.runID, err)
+	}
 }
 
 // RecordPrompt logs a follow-up instruction the installer was given mid-run.
@@ -465,33 +479,29 @@ func (tr *installTranscript) composeAnswerLocked() string {
 }
 
 func (tr *installTranscript) append(evt interfaces.StreamEvent) {
-	if tr.streams == nil {
-		return
-	}
-	if err := tr.streams.AppendEvent(tr.ctx, tr.sessionID, tr.assistantMessageID, evt); err != nil {
-		logger.Warnf(tr.ctx, "[skill] append %s to install transcript %s failed: %v",
-			evt.Type, tr.sessionID, err)
+	if tr.streams != nil {
+		if err := tr.streams.AppendEvent(tr.ctx, tr.sessionID, tr.assistantMessageID, evt); err != nil {
+			logger.Warnf(tr.ctx, "[skill] append %s to install transcript %s failed: %v",
+				evt.Type, tr.sessionID, err)
+		}
 	}
 }
 
-// ensureMessageLocked returns the assistant row being accumulated, creating the
-// in-memory shell if Create never ran (a transcript whose seeding failed still
-// records what it can). Callers must hold tr.mu.
+// ensureMessageLocked returns the assistant projection being accumulated.
+// Callers must hold tr.mu.
 func (tr *installTranscript) ensureMessageLocked() *types.Message {
 	if tr.message == nil {
 		tr.message = &types.Message{
-			ID:        tr.assistantMessageID,
-			SessionID: tr.sessionID,
-			Role:      "assistant",
-			CreatedAt: time.Now(),
+			ID: tr.assistantMessageID, SessionID: tr.sessionID,
+			Role: "assistant", CreatedAt: time.Now(),
 		}
 	}
 	return tr.message
 }
 
-func (tr *installTranscript) save(ctx context.Context) {
-	if tr.messages == nil {
-		return
+func (tr *installTranscript) save(ctx context.Context) error {
+	if tr == nil {
+		return nil
 	}
 	tr.mu.Lock()
 	msg := tr.ensureMessageLocked()
@@ -499,10 +509,30 @@ func (tr *installTranscript) save(ctx context.Context) {
 	msg.IsCompleted = true
 	msg.UpdatedAt = time.Now()
 	tr.mu.Unlock()
-
-	if err := tr.messages.UpdateMessage(ctx, msg); err != nil {
-		logger.Warnf(ctx, "[skill] persist install transcript %s failed: %v", tr.sessionID, err)
+	if tr.messages != nil {
+		return tr.messages.UpdateMessage(ctx, msg)
 	}
+	return tr.persistProjection(ctx)
+}
+
+func (tr *installTranscript) persistProjection(ctx context.Context) error {
+	if tr == nil || tr.skills == nil {
+		return nil
+	}
+	tr.mu.Lock()
+	prompt, msg := tr.prompt, tr.message
+	tr.mu.Unlock()
+	if prompt == nil || msg == nil {
+		return nil
+	}
+	encoded, err := json.Marshal([]*types.Message{prompt, msg})
+	if err != nil {
+		return err
+	}
+	_, err = tr.skills.UpdateInstallTranscript(
+		ctx, tr.configID, tr.assistantMessageID, tr.runID, types.JSON(encoded),
+	)
+	return err
 }
 
 // progressLogMaxRunes caps the one-line command summary the progress card

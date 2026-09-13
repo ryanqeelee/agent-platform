@@ -1,6 +1,6 @@
 import { get, post, put, del } from '@/utils/request'
-import { platformTenantPath } from './platform-tenant-path'
-const basePath = (tenantId?: number) => tenantId === undefined ? '/api/v1/storage-backends' : platformTenantPath(tenantId, 'storage-backends')
+const basePath = '/api/v1/system/admin/storage-backends'
+const capabilityPath = '/api/v1/storage-backends'
 
 export interface StorageBackendConfig {
   mode?: string
@@ -20,13 +20,11 @@ export interface StorageBackendConfig {
 
 export interface StorageBackend {
   id: string
-  tenant_id?: number
   name: string
   provider: string
   config: StorageBackendConfig
-  source: 'user' | 'env'
+  source: 'user'
   status: 'active' | 'disabled'
-  legacy_alias?: boolean
   created_at?: string
   updated_at?: string
 }
@@ -37,11 +35,25 @@ export interface StorageBackendListResponse {
   default_storage_backend_id?: string | null
 }
 
-export const listStorageBackends = (tenantId?: number): Promise<StorageBackendListResponse> => get(basePath(tenantId))
-export const listStorageBackendTypes = (tenantId?: number): Promise<{ success: boolean; data: string[] }> => get(`${basePath(tenantId)}/types`)
-export const createStorageBackend = (data: Partial<StorageBackend>, tenantId?: number) => post(basePath(tenantId), data)
-export const updateStorageBackend = (id: string, data: Partial<StorageBackend>, tenantId?: number) => put(`${basePath(tenantId)}/${id}`, data)
-export const deleteStorageBackend = (id: string, tenantId?: number) => del(`${basePath(tenantId)}/${id}`)
-export const setDefaultStorageBackend = (id: string, tenantId?: number) => put(`${basePath(tenantId)}/${id}/default`, {})
-export const testStorageBackend = (data: Partial<StorageBackend>, tenantId?: number) => post(`${basePath(tenantId)}/test`, data)
-export const testStorageBackendByID = (id: string, tenantId?: number) => post(`${basePath(tenantId)}/${id}/test`, {})
+export interface StorageBackendCapability {
+  id: string
+  name: string
+  provider: string
+  status: 'active'
+}
+
+export interface StorageBackendCapabilitiesResponse {
+  success: boolean
+  data: StorageBackendCapability[]
+  default_storage_backend_id?: string | null
+}
+
+export const listStorageBackends = (): Promise<StorageBackendListResponse> => get(basePath)
+export const listStorageBackendCapabilities = (): Promise<StorageBackendCapabilitiesResponse> => get(capabilityPath)
+export const listStorageBackendTypes = (): Promise<{ success: boolean; data: string[] }> => get(`${basePath}/types`)
+export const createStorageBackend = (data: Partial<StorageBackend>) => post(basePath, data)
+export const updateStorageBackend = (id: string, data: Partial<StorageBackend>) => put(`${basePath}/${id}`, data)
+export const deleteStorageBackend = (id: string) => del(`${basePath}/${id}`)
+export const setDefaultStorageBackend = (id: string) => put(`${basePath}/${id}/default`, {})
+export const testStorageBackend = (data: Partial<StorageBackend>) => post(`${basePath}/test`, data)
+export const testStorageBackendByID = (id: string) => post(`${basePath}/${id}/test`, {})

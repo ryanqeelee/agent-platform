@@ -349,8 +349,7 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	// Bind the concrete storage instance. Provider remains a compatibility
 	// projection for older clients and historical rows.
 	if strings.TrimSpace(req.StorageBackendID) != "" {
-		tenant, _ := types.TenantInfoFromContext(ctx)
-		backend, resolveErr := h.storageResolver.ResolveBackend(ctx, tenant, req.StorageBackendID, "")
+		backend, resolveErr := h.storageResolver.ResolveBackend(ctx, req.StorageBackendID)
 		if resolveErr != nil || backend == nil {
 			c.Error(errors.NewBadRequestError("Storage backend is unavailable"))
 			return

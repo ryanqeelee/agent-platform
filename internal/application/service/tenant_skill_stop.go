@@ -19,21 +19,21 @@ type skillRunCancel struct {
 	cancel context.CancelFunc
 }
 
-func skillRunKey(tenantID uint64, configID, skillID string) string {
-	return fmt.Sprintf("%d:%s:%s", tenantID, configID, skillID)
+func skillRunKey(configID, skillID string) string {
+	return fmt.Sprintf("%s:%s", configID, skillID)
 }
 
 // bindSkillRun ties ctx to StopSkill for this skill. The returned unbind must
 // run when the goroutine exits, including after StopSkill has already cancelled.
 func (s *TenantSkillService) bindSkillRun(
-	ctx context.Context, tenantID uint64, configID, skillID string,
+	ctx context.Context, configID, skillID string,
 ) (context.Context, func()) {
 	if s == nil {
 		return ctx, func() {}
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	handle := &skillRunCancel{cancel: cancel}
-	key := skillRunKey(tenantID, configID, skillID)
+	key := skillRunKey(configID, skillID)
 	s.runCancelMu.Lock()
 	if s.runCancels == nil {
 		s.runCancels = map[string]*skillRunCancel{}
@@ -53,9 +53,7 @@ func (s *TenantSkillService) bindSkillRun(
 	}
 }
 
-func (s *TenantSkillService) lookupSkillRun(
-	tenantID uint64, configID, skillID string,
-) *skillRunCancel {
+func (s *TenantSkillService) lookupSkillRun(configID, skillID string) *skillRunCancel {
 	if s == nil {
 		return nil
 	}
@@ -64,11 +62,11 @@ func (s *TenantSkillService) lookupSkillRun(
 	if s.runCancels == nil {
 		return nil
 	}
-	return s.runCancels[skillRunKey(tenantID, configID, skillID)]
+	return s.runCancels[skillRunKey(configID, skillID)]
 }
 
-func (s *TenantSkillService) cancelSkillRun(tenantID uint64, configID, skillID string) {
-	handle := s.lookupSkillRun(tenantID, configID, skillID)
+func (s *TenantSkillService) cancelSkillRun(configID, skillID string) {
+	handle := s.lookupSkillRun(configID, skillID)
 	if handle != nil && handle.cancel != nil {
 		handle.cancel()
 	}
@@ -78,34 +76,34 @@ func (s *TenantSkillService) cancelSkillRun(tenantID uint64, configID, skillID s
 // this skill. A nil handle means the caller never bound one (direct runInstall
 // in tests) and is treated as still bound so those paths keep failing the row.
 func (s *TenantSkillService) skillRunStillBound(
-	tenantID uint64, configID, skillID string, handle *skillRunCancel,
+	configID, skillID string, handle *skillRunCancel,
 ) bool {
 	if handle == nil {
 		return true
 	}
-	return s.lookupSkillRun(tenantID, configID, skillID) == handle
+	return s.lookupSkillRun(configID, skillID) == handle
 }
 
 // withSkillRunLock is withConfigLock plus a StopSkill-cancellable context.
 func (s *TenantSkillService) withSkillRunLock(
-	ctx context.Context, tenantID uint64, configID, skillID string,
+	ctx context.Context, configID, skillID string,
 	fn func(context.Context) error,
 ) error {
-	runCtx, unbind := s.bindSkillRun(ctx, tenantID, configID, skillID)
+	runCtx, unbind := s.bindSkillRun(ctx, configID, skillID)
 	defer unbind()
-	return s.withConfigLock(runCtx, tenantID, configID, fn)
+	return s.withConfigLock(runCtx, configID, fn)
 }
 
 // StopSkill aborts an in-flight install so the operator can retry or uninstall.
 // After a process restart there is no goroutine to cancel; the row is still
 // rewritten, which is what unblocks the UI. Removal is left alone.
 func (s *TenantSkillService) StopSkill(
-	ctx context.Context, tenantID uint64, configID, skillID string,
+	ctx context.Context, configID, skillID string,
 ) (*types.TenantSkillEntity, error) {
 	if s == nil || s.skills == nil {
 		return nil, errors.New("skill service is not configured")
 	}
-	skill, err := s.skills.GetSkill(ctx, tenantID, configID, skillID)
+	skill, err := s.skills.GetSkill(ctx, configID, skillID)
 	if err != nil {
 		return nil, err
 	}
@@ -120,10 +118,10 @@ func (s *TenantSkillService) StopSkill(
 		return nil, apperrors.NewBadRequestError("skill is not installing")
 	}
 
-	s.cancelSkillRun(tenantID, configID, skillID)
-	s.failSkill(ctx, tenantID, configID, skillID, nil, errSkillInstallStopped)
+	s.cancelSkillRun(configID, skillID)
+	s.failSkill(ctx, configID, skillID, skill.InstallRunID, nil, errSkillInstallStopped)
 
-	updated, err := s.skills.GetSkill(ctx, tenantID, configID, skillID)
+	updated, err := s.skills.GetSkill(ctx, configID, skillID)
 	if err != nil {
 		return nil, err
 	}

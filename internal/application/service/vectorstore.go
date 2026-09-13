@@ -4,7 +4,6 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/errors"
@@ -19,40 +18,33 @@ import (
 // vectorStoreService implements interfaces.VectorStoreService
 type vectorStoreService struct {
 	repo          interfaces.VectorStoreRepository
-	kbRepo        interfaces.KnowledgeBaseRepository // counts bound KBs for the delete guard
-	storeRegistry interfaces.StoreRegistry           // for dynamic registry updates on CRUD
-	factory       interfaces.EngineFactory           // creates engine services from VectorStore config
-	db            *gorm.DB                           // shared handle for cross-table transactions (delete guard)
-	envStores     []types.VectorStore                // env stores derived once at construction for ResolveStoreView fast path
+	storeRegistry interfaces.StoreRegistry // for dynamic registry updates on CRUD
+	factory       interfaces.EngineFactory // creates engine services from VectorStore config
+	db            *gorm.DB                 // shared handle for cross-table transactions (delete guard)
 }
 
 // NewVectorStoreService creates a new vector store service.
 //
-// kbRepo and db are required by the delete guard, which counts bound KBs
-// inside a transaction. storeRegistry and factory are optional in tests
+// db is required by the delete guard, which counts bound KBs inside a
+// transaction. storeRegistry and factory are optional in tests
 // (passing nil disables dynamic registration / unregistration).
 func NewVectorStoreService(
 	repo interfaces.VectorStoreRepository,
-	kbRepo interfaces.KnowledgeBaseRepository,
 	storeRegistry interfaces.StoreRegistry,
 	factory interfaces.EngineFactory,
 	db *gorm.DB,
 ) interfaces.VectorStoreService {
 	return &vectorStoreService{
 		repo:          repo,
-		kbRepo:        kbRepo,
 		storeRegistry: storeRegistry,
 		factory:       factory,
 		db:            db,
-		// Cache the env-store derivation once at construction so per-request
-		// resolution does not re-read os environment variables every call.
-		envStores: types.BuildEnvVectorStores(os.Getenv("RETRIEVE_DRIVER"), os.Getenv),
 	}
 }
 
 // CreateStore validates and creates a new vector store.
 func (s *vectorStoreService) CreateStore(ctx context.Context, store *types.VectorStore) error {
-	// 1. Basic validation (name, engine_type, tenant_id)
+	// 1. Basic validation (name, engine_type)
 	if err := store.Validate(); err != nil {
 		return err
 	}
@@ -82,32 +74,8 @@ func (s *vectorStoreService) CreateStore(ctx context.Context, store *types.Vecto
 		}
 	}
 
-	// 3. Duplicate check — DB stores
-	endpoint := store.ConnectionConfig.GetEndpoint()
-	indexName := store.IndexConfig.GetIndexNameOrDefault(store.EngineType)
-
-	exists, err := s.repo.ExistsByEndpointAndIndex(ctx, store.TenantID, store.EngineType, endpoint, indexName)
-	if err != nil {
-		return errors.NewInternalServerError("failed to check for duplicates")
-	}
-	if exists {
-		return errors.NewConflictError("a vector store with the same endpoint and index already exists")
-	}
-
-	// 4. Duplicate check — env stores. We re-derive on each create because
-	// CreateStore is a low-frequency admin action; consistency with the
-	// startup-cached envStores is enforced by RETRIEVE_DRIVER being read
-	// only at process start.
-	for _, envStore := range s.envStores {
-		if envStore.EngineType == store.EngineType &&
-			envStore.ConnectionConfig.GetEndpoint() == endpoint &&
-			envStore.IndexConfig.GetIndexNameOrDefault(store.EngineType) == indexName {
-			return errors.NewConflictError(
-				"a vector store with the same endpoint and index is already configured via environment variables")
-		}
-	}
-
-	// 5. Auto-detect server version via connection test.
+	// 3. Auto-detect server version via connection test. Connections are not
+	// deduplicated: separately managed rows may intentionally share a target.
 	// This is required for engines where the version determines the SDK (e.g., ES v7 vs v8).
 	// Without it, the wrong SDK may be used causing protocol errors (406, etc.).
 	version, err := s.TestConnection(ctx, store.EngineType, store.ConnectionConfig)
@@ -120,8 +88,8 @@ func (s *vectorStoreService) CreateStore(ctx context.Context, store *types.Vecto
 	}
 
 	// 6. Persist
-	logger.Infof(ctx, "Creating vector store: tenant=%d, name=%s, engine=%s",
-		store.TenantID, secutils.SanitizeForLog(store.Name), store.EngineType)
+	logger.Infof(ctx, "Creating vector store: name=%s, engine=%s",
+		secutils.SanitizeForLog(store.Name), store.EngineType)
 	if err := s.repo.Create(ctx, store); err != nil {
 		return err
 	}
@@ -137,47 +105,33 @@ func (s *vectorStoreService) CreateStore(ctx context.Context, store *types.Vecto
 // NOTE: If connection_config or index_config become mutable in the future,
 // registry re-registration must be added here (unregister old + register new).
 func (s *vectorStoreService) UpdateStore(ctx context.Context, store *types.VectorStore) error {
-	if store.TenantID == 0 {
-		return errors.NewValidationError("tenant_id is required")
-	}
 	if store.Name == "" {
 		return errors.NewValidationError("name is required")
 	}
 
-	logger.Infof(ctx, "Updating vector store: tenant=%d, id=%s", store.TenantID, store.ID)
+	logger.Infof(ctx, "Updating vector store: id=%s", store.ID)
 	return s.repo.Update(ctx, store)
 }
 
-// DeleteStore deletes a vector store by tenant + id, after verifying that no
-// knowledge base is currently bound to it.
+// DeleteStore deletes a global vector store after verifying that no knowledge
+// base is currently bound to it.
 //
 // Guard rules:
 //
-//  1. Run inside a transaction so that the binding count and the store
-//     delete are atomic with respect to other writers holding the store
-//     row lock. Default isolation is Read Committed; this is a write-lock
-//     relationship, not a "shared snapshot" relationship.
+//  1. Run the current binding count and delete in one transaction.
 //  2. PostgreSQL: take a row-level X-lock on the vector_stores row via
-//     SELECT … FOR UPDATE so concurrent KB-create requests reading the
-//     same store row block until our transaction completes. SQLite
-//     serializes writes via WAL + max-open-conns=1, so the lock hint is
-//     skipped and we rely on the transaction boundary alone.
-//  3. Count knowledge_bases rows via the shared CountByVectorStoreID
-//     repository method (tx-aware), which leverages the composite index
-//     (tenant_id, vector_store_id). GORM auto-applies the soft-delete
-//     scope — no explicit deleted_at predicate is needed.
+//     SELECT … FOR UPDATE so default changes and deletion serialize on the
+//     same row. SQLite serializes writes via the configured single database
+//     connection.
+//  3. Count knowledge_bases rows across all tenants. GORM applies the
+//     soft-delete scope, so deleted KBs do not block retirement.
 //  4. After commit, unregister from the in-memory registry. Wrapped in
 //     defer/recover so a panic in UnregisterByStoreID surfaces as a
 //     structured warning instead of silently leaking the stale engine.
 //
-// Race window remaining:
-//
-//	A narrow window exists between CreateKnowledgeBase's binding check and
-//	the INSERT — a KB can be created against a store that is simultaneously
-//	being deleted. The retrieve-engine factory then rejects searches with
-//	the ErrVectorStoreForbidden / NotFound sentinel; the KB response view
-//	surfaces the condition through vector_store_status="unavailable" so the
-//	UI can guide recovery (admin tool / rebind / KB recreation).
+// Knowledge-base creation currently validates its binding before its insert,
+// outside this transaction. The row lock therefore coordinates default/delete
+// operations but does not by itself close a concurrent KB-create race.
 //
 // Multi-replica registry staleness:
 //
@@ -185,13 +139,16 @@ func (s *vectorStoreService) UpdateStore(ctx context.Context, store *types.Vecto
 //	UnregisterByStoreID on this replica, sibling replicas continue serving
 //	the engine from their own caches until process restart. This method
 //	does not broadcast invalidation across the cluster.
-func (s *vectorStoreService) DeleteStore(ctx context.Context, tenantID uint64, id string) error {
+func (s *vectorStoreService) DeleteStore(ctx context.Context, id string) error {
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockVectorDefaultChange(tx); err != nil {
+			return err
+		}
 		// tx inherits ctx from WithContext above; no need to re-attach.
 
 		// 1. Lock the store row (PG row-level X-lock; skipped on SQLite).
 		var store types.VectorStore
-		q := tx.Where("id = ? AND tenant_id = ?", id, tenantID)
+		q := tx.Where("id = ?", id)
 		if s.isPostgres(tx) {
 			q = q.Clauses(clause.Locking{Strength: "UPDATE"})
 		}
@@ -201,10 +158,14 @@ func (s *vectorStoreService) DeleteStore(ctx context.Context, tenantID uint64, i
 			}
 			return err
 		}
+		if store.IsDefault {
+			return errors.NewBadRequestError("default vector store cannot be deleted")
+		}
 
 		// 2. Binding count under the same write-lock boundary.
-		count, err := s.kbRepo.CountByVectorStoreID(ctx, tx, tenantID, id)
-		if err != nil {
+		var count int64
+		if err := tx.WithContext(ctx).Model(&types.KnowledgeBase{}).
+			Where("vector_store_id = ?", id).Count(&count).Error; err != nil {
 			return err
 		}
 		if count > 0 {
@@ -224,9 +185,40 @@ func (s *vectorStoreService) DeleteStore(ctx context.Context, tenantID uint64, i
 	// 4. Unregister from registry — wrapped to convert panics into ops
 	//    warnings rather than silent stale-engine leaks.
 	s.unregisterSafely(ctx, id)
-	logger.Infof(ctx, "Deleted vector store: tenant=%d, id=%s", tenantID,
-		secutils.SanitizeForLog(id))
+	logger.Infof(ctx, "Deleted vector store: id=%s", secutils.SanitizeForLog(id))
 	return nil
+}
+
+func (s *vectorStoreService) SetDefaultStore(ctx context.Context, id string) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockVectorDefaultChange(tx); err != nil {
+			return err
+		}
+		var store types.VectorStore
+		q := tx.Where("id = ?", id)
+		if s.isPostgres(tx) {
+			q = q.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := q.First(&store).Error; err != nil {
+			if stderrors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.NewNotFoundError("vector store not found")
+			}
+			return err
+		}
+		if err := tx.Model(&types.VectorStore{}).Where("is_default = ? AND id <> ?", true, id).Update("is_default", false).Error; err != nil {
+			return err
+		}
+		return tx.Model(&types.VectorStore{}).Where("id = ?", id).Update("is_default", true).Error
+	})
+}
+
+const vectorDefaultAdvisoryLockKey int64 = 0x564543544f52
+
+func lockVectorDefaultChange(tx *gorm.DB) error {
+	if tx.Dialector.Name() != "postgres" {
+		return nil
+	}
+	return tx.Exec("SELECT pg_advisory_xact_lock(?)", vectorDefaultAdvisoryLockKey).Error
 }
 
 // unregisterSafely calls the registry's idempotent unregister with panic
@@ -262,76 +254,48 @@ func (s *vectorStoreService) SaveDetectedVersion(ctx context.Context, store *typ
 	return s.repo.UpdateConnectionConfig(ctx, &updated)
 }
 
-// ResolveStoreView returns the API-safe display projection of a single
-// store ID for embedding in another resource's response (typically a KB).
-//
-// Resolution order:
-//
-//  1. storeID == "" → DefaultStoreDisplay (env fallback semantics).
-//  2. DB store row matching (id, tenantID) → user-source display.
-//  3. Cached env store with matching ID → env-source display.
-//  4. Otherwise → UnavailableStoreDisplay with a structured warn log.
-//
-// Errors from the underlying repository are returned to the caller so
-// transient infrastructure failures can be classified, but the returned
-// StoreDisplay is still UnavailableStoreDisplay so a handler that ignores
-// the error degrades gracefully rather than panicking on a zero value.
-// EnvDefaultStoreView is the env-fallback display, enriched with the
-// active env store's engine type when one is configured. Exposed
-// separately from ResolveStoreView so list paths can fill the
-// env-bound entries without invoking the single-KB resolver.
-func (s *vectorStoreService) EnvDefaultStoreView(_ context.Context) types.StoreDisplay {
-	return s.defaultStoreDisplay()
+// DefaultStoreView returns a credential-free projection of the configured
+// global default. Missing defaults remain visibly unavailable.
+func (s *vectorStoreService) DefaultStoreView(ctx context.Context) types.StoreDisplay {
+	store, err := s.repo.GetDefault(ctx)
+	if err != nil || store == nil {
+		return types.UnavailableStoreDisplay()
+	}
+	return vectorStoreDisplay(store)
 }
 
 func (s *vectorStoreService) ResolveStoreView(
-	ctx context.Context, tenantID uint64, storeID string,
+	ctx context.Context, storeID string,
 ) (types.StoreDisplay, error) {
 	if storeID == "" {
-		return s.defaultStoreDisplay(), nil
+		return s.DefaultStoreView(ctx), nil
 	}
-	store, err := s.repo.GetByID(ctx, tenantID, storeID)
+	store, err := s.repo.GetByID(ctx, storeID)
 	if err != nil {
 		return types.UnavailableStoreDisplay(), err
 	}
 	if store != nil {
-		return types.StoreDisplay{
-			Name:       store.Name,
-			Source:     types.StoreSourceUser,
-			EngineType: string(store.EngineType),
-			Status:     "available",
-		}, nil
-	}
-	for _, env := range s.envStores {
-		if env.ID == storeID {
-			return types.StoreDisplay{
-				Name:       env.Name,
-				Source:     types.StoreSourceEnv,
-				EngineType: string(env.EngineType),
-				Status:     "available",
-			}, nil
-		}
+		return vectorStoreDisplay(store), nil
 	}
 	logger.WarnWithFields(ctx, logger.Fields{
-		"tenant_id": tenantID,
-		"store_id":  secutils.SanitizeForLog(storeID),
-	}, "[vectorstore.resolve] bound store missing from DB and env set")
+		"store_id": secutils.SanitizeForLog(storeID),
+	}, "[vectorstore.resolve] bound store missing from platform configuration")
 	return types.UnavailableStoreDisplay(), nil
 }
 
-// BatchResolveStoreView resolves multiple store IDs in a single DB read
-// plus the cached env-store match. Returned map keys are the storeIDs
+// BatchResolveStoreView resolves multiple store IDs in a single DB read.
+// Returned map keys are the storeIDs
 // originally requested; missing IDs map to UnavailableStoreDisplay.
 //
 // Intended for list endpoints that need store metadata for many KBs at
 // once without incurring N+1 ResolveStoreView calls.
 //
-// Implementation note: the tenant-store count is bounded by operator
-// config (typically tens), so iterating the tenant's full store list
+// Implementation note: the platform connection count is bounded by operator
+// config (typically tens), so iterating the full store list
 // once is cheaper than a SELECT … WHERE id IN (…) round-trip and avoids
 // adding a batch-by-ids repository method that has no other caller.
 func (s *vectorStoreService) BatchResolveStoreView(
-	ctx context.Context, tenantID uint64, storeIDs []string,
+	ctx context.Context, storeIDs []string,
 ) (map[string]types.StoreDisplay, error) {
 	out := make(map[string]types.StoreDisplay, len(storeIDs))
 	if len(storeIDs) == 0 {
@@ -349,31 +313,13 @@ func (s *vectorStoreService) BatchResolveStoreView(
 	}
 
 	if hasNonEmpty {
-		dbStores, err := s.repo.List(ctx, tenantID)
+		dbStores, err := s.repo.List(ctx)
 		if err != nil {
 			return nil, err
 		}
 		for _, st := range dbStores {
 			if requested[st.ID] {
-				out[st.ID] = types.StoreDisplay{
-					Name:       st.Name,
-					Source:     types.StoreSourceUser,
-					EngineType: string(st.EngineType),
-					Status:     "available",
-				}
-			}
-		}
-		for _, env := range s.envStores {
-			if _, ok := out[env.ID]; ok {
-				continue
-			}
-			if requested[env.ID] {
-				out[env.ID] = types.StoreDisplay{
-					Name:       env.Name,
-					Source:     types.StoreSourceEnv,
-					EngineType: string(env.EngineType),
-					Status:     "available",
-				}
+				out[st.ID] = vectorStoreDisplay(st)
 			}
 		}
 	}
@@ -382,7 +328,7 @@ func (s *vectorStoreService) BatchResolveStoreView(
 	// sentinel so callers can rely on a key for every requested ID.
 	for _, id := range storeIDs {
 		if id == "" {
-			out[id] = s.defaultStoreDisplay()
+			out[id] = s.DefaultStoreView(ctx)
 			continue
 		}
 		if _, ok := out[id]; !ok {
@@ -392,17 +338,8 @@ func (s *vectorStoreService) BatchResolveStoreView(
 	return out, nil
 }
 
-// defaultStoreDisplay returns the env-fallback display, enriched with the
-// active env store's engine type when one is configured. Callers receive a
-// fully populated StoreDisplay so UIs can render the same badge shape for
-// env-bound and user-bound KBs (e.g. "postgres" vs "qdrant") without
-// branching on Source.
-func (s *vectorStoreService) defaultStoreDisplay() types.StoreDisplay {
-	d := types.DefaultStoreDisplay()
-	if len(s.envStores) > 0 {
-		d.EngineType = string(s.envStores[0].EngineType)
-	}
-	return d
+func vectorStoreDisplay(store *types.VectorStore) types.StoreDisplay {
+	return types.StoreDisplay{Name: store.Name, Source: types.StoreSourceUser, EngineType: string(store.EngineType), Status: "available"}
 }
 
 // registerInRegistry creates an engine service and registers it in the registry.
@@ -435,8 +372,8 @@ func validateConnectionConfig(engineType types.RetrieverEngineType, config types
 			return errors.NewValidationError("addr is required for elasticsearch")
 		}
 	case types.PostgresRetrieverEngineType:
-		if !config.UseDefaultConnection && config.Addr == "" {
-			return errors.NewValidationError("addr or use_default_connection is required for postgres")
+		if !config.UseDefaultConnection {
+			return errors.NewValidationError("postgres requires use_default_connection=true")
 		}
 	case types.QdrantRetrieverEngineType:
 		if config.Host == "" {
@@ -472,7 +409,9 @@ func validateConnectionConfig(engineType types.RetrieverEngineType, config types
 			return errors.NewValidationError("addr is required for opensearch")
 		}
 	case types.SQLiteRetrieverEngineType:
-		// No connection config needed for SQLite
+		if !config.UseDefaultConnection {
+			return errors.NewValidationError("sqlite requires use_default_connection=true")
+		}
 	}
 	return nil
 }
@@ -526,8 +465,8 @@ func validateConnectionAddrSSRF(engineType types.RetrieverEngineType, config typ
 			return err
 		}
 		return check(config.GrpcAddress)
-	case types.SQLiteRetrieverEngineType:
-		// File-based engine; no remote address to validate.
+	case types.PostgresRetrieverEngineType, types.SQLiteRetrieverEngineType:
+		// These explicit rows reuse the already configured application DB.
 		return nil
 	default:
 		// Fail closed. Engines without a DB-store address mapping (postgres,
@@ -545,8 +484,8 @@ func validateConnectionAddrSSRF(engineType types.RetrieverEngineType, config typ
 // delegating to TestConnection. Handlers MUST use this for raw user input
 // (e.g. POST /vector-stores/test).
 //
-// TestConnection itself stays validation-free for trusted callers (env stores
-// and stored configs already validated at create time, which legitimately use
+// TestConnection itself stays validation-free for trusted stored configs
+// already validated at create time, which may legitimately use
 // internal hosts such as localhost). Do NOT consolidate the two methods.
 func (s *vectorStoreService) TestRawConnection(
 	ctx context.Context,

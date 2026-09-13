@@ -16,7 +16,7 @@ func TestReapStuckRunsFailsAbandonedInstalls(t *testing.T) {
 	fx := newReaperFixture(t)
 	staleSince := fx.now.Add(-skillInstallStuckTTL - time.Minute)
 	fx.skills.put(&types.TenantSkillEntity{
-		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
+		ID: "sk-1", SandboxConfigID: "cfg-1",
 		Name: "pdf", Status: types.SkillStatusInstalling, InstallingSince: &staleSince,
 	})
 	// The live image is another skill's generation: this install died before
@@ -39,7 +39,7 @@ func TestReapStuckRunsRestoresAbandonedRemovals(t *testing.T) {
 	fx := newReaperFixture(t)
 	staleSince := fx.now.Add(-skillInstallStuckTTL - time.Minute)
 	fx.skills.put(&types.TenantSkillEntity{
-		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
+		ID: "sk-1", SandboxConfigID: "cfg-1",
 		Name: "pdf", Status: types.SkillStatusRemoving,
 		InstalledSnapshotID: "snap-live", InstallingSince: &staleSince,
 	})
@@ -64,7 +64,7 @@ func TestReapStuckRunsRestoresRemovalOfSkillInheritedByALaterSnapshot(t *testing
 	fx := newReaperFixture(t)
 	staleSince := fx.now.Add(-skillInstallStuckTTL - time.Minute)
 	fx.skills.put(&types.TenantSkillEntity{
-		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
+		ID: "sk-1", SandboxConfigID: "cfg-1",
 		Name: "pdf", Status: types.SkillStatusRemoving,
 		InstalledSnapshotID: "snap-1", BundleRef: "bundle-1",
 		InstallingSince: &staleSince,
@@ -89,7 +89,7 @@ func TestReapStuckRunsDeletesAbandonedRemovalAfterPointerMoved(t *testing.T) {
 	fx := newReaperFixture(t)
 	staleSince := fx.now.Add(-skillInstallStuckTTL - time.Minute)
 	fx.skills.put(&types.TenantSkillEntity{
-		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
+		ID: "sk-1", SandboxConfigID: "cfg-1",
 		Name: "pdf", Status: types.SkillStatusRemoving,
 		InstalledSnapshotID: "snap-old", BundleRef: "bundle-1",
 		InstallingSince: &staleSince,
@@ -112,7 +112,7 @@ func TestReapStuckRunsDeletesAbandonedRemovalThatNeverReachedAnImage(t *testing.
 	fx := newReaperFixture(t)
 	staleSince := fx.now.Add(-skillInstallStuckTTL - time.Minute)
 	fx.skills.put(&types.TenantSkillEntity{
-		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
+		ID: "sk-1", SandboxConfigID: "cfg-1",
 		Name: "pdf", Status: types.SkillStatusRemoving, InstallingSince: &staleSince,
 	})
 	fx.installed("sk-2", "snap-other", "")
@@ -131,7 +131,7 @@ func TestReapStuckRunsLeavesRemovalAloneWhenTheChainCannotBeFollowed(t *testing.
 	fx := newReaperFixture(t)
 	staleSince := fx.now.Add(-skillInstallStuckTTL - time.Minute)
 	fx.skills.put(&types.TenantSkillEntity{
-		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
+		ID: "sk-1", SandboxConfigID: "cfg-1",
 		Name: "pdf", Status: types.SkillStatusRemoving,
 		InstalledSnapshotID: "snap-1", BundleRef: "bundle-1",
 		InstallingSince: &staleSince,
@@ -153,7 +153,7 @@ func TestReapStuckRunsIgnoresFreshRuns(t *testing.T) {
 	fx := newReaperFixture(t)
 	freshSince := fx.now.Add(-time.Minute)
 	fx.skills.put(&types.TenantSkillEntity{
-		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
+		ID: "sk-1", SandboxConfigID: "cfg-1",
 		Name: "pdf", Status: types.SkillStatusInstalling, InstallingSince: &freshSince,
 	})
 
@@ -169,7 +169,7 @@ func TestReapStuckRunsHealsInstallingRowWhoseSnapshotIsStillLive(t *testing.T) {
 	fx := newReaperFixture(t)
 	staleSince := fx.now.Add(-skillInstallStuckTTL - time.Minute)
 	fx.skills.put(&types.TenantSkillEntity{
-		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
+		ID: "sk-1", SandboxConfigID: "cfg-1",
 		Name: "pdf", Status: types.SkillStatusInstalling,
 		InstalledSnapshotID: "snap-live", InstallingSince: &staleSince,
 	})
@@ -195,7 +195,7 @@ func TestReapStuckRunsHealsInstallThatDiedAfterThePointerSwitched(t *testing.T) 
 	fx := newReaperFixture(t)
 	staleSince := fx.now.Add(-skillInstallStuckTTL - time.Minute)
 	fx.skills.put(&types.TenantSkillEntity{
-		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-1",
+		ID: "sk-1", SandboxConfigID: "cfg-1",
 		Name: "pdf", Status: types.SkillStatusInstalling, InstallingSince: &staleSince,
 	})
 	fx.installed("sk-2", "snap-old", "")
@@ -217,7 +217,7 @@ func TestReapStuckRunsHealsInstallThatDiedAfterThePointerSwitched(t *testing.T) 
 func TestReconcileSnapshotsWarnsExtrasWithoutDeleting(t *testing.T) {
 	fx := newReaperFixture(t)
 	require.NoError(t, fx.skills.CreateSnapshotRow(context.Background(), &types.TenantSkillSnapshotEntity{
-		ID: "row-1", TenantID: 7, SandboxConfigID: "cfg-1",
+		ID: "row-1", SandboxConfigID: "cfg-1",
 		SnapshotID: "snap-ledger", State: types.SkillSnapshotStateActive,
 	}))
 	fx.provider.listed = []sandbox.RemoteSnapshotRef{
@@ -225,7 +225,7 @@ func TestReconcileSnapshotsWarnsExtrasWithoutDeleting(t *testing.T) {
 		{ID: "snap-orphan"},
 	}
 
-	n, err := fx.svc.ReconcileSnapshots(context.Background(), 7, "cfg-1")
+	n, err := fx.svc.ReconcileSnapshots(context.Background(), "cfg-1")
 
 	require.NoError(t, err)
 	require.Equal(t, 1, n, "the provider snapshot missing from the ledger is the extra")
@@ -254,7 +254,7 @@ func TestPruneSupersededSnapshotsDeletesOldLedgerSnapshots(t *testing.T) {
 	require.Equal(t, 1, n)
 	require.Equal(t, []string{"snap-old"}, fx.provider.deleted,
 		"only a superseded snapshot older than retention is a billed leftover")
-	rows, err := fx.skills.ListSnapshotsByConfig(context.Background(), 7, "cfg-1")
+	rows, err := fx.skills.ListSnapshotsByConfig(context.Background(), "cfg-1")
 	require.NoError(t, err)
 	states := map[string]string{}
 	for _, row := range rows {
@@ -272,7 +272,7 @@ func TestPruneSupersededSnapshotsNeverDeletesTheLiveImage(t *testing.T) {
 	old := fx.now.Add(-2 * time.Hour)
 	fx.live("snap-live")
 	fx.skills.snapshots = append(fx.skills.snapshots, &types.TenantSkillSnapshotEntity{
-		ID: "row-wrong", TenantID: 7, SandboxConfigID: "cfg-1", SkillID: "sk-1",
+		ID: "row-wrong", SandboxConfigID: "cfg-1", SkillID: "sk-1",
 		SnapshotID: "snap-live", Trigger: types.SkillSnapshotTriggerInstall,
 		State: types.SkillSnapshotStateSuperseded, SupersededAt: &old,
 	})
@@ -309,7 +309,7 @@ func TestPruneSupersededSnapshotsDeletesStaleActiveLeftovers(t *testing.T) {
 	fx.live("snap-live")
 	fx.installed("sk-2", "snap-live", "snap-old")
 	fx.skills.snapshots = append(fx.skills.snapshots, &types.TenantSkillSnapshotEntity{
-		ID: "row-snap-old", TenantID: 7, SandboxConfigID: "cfg-1", SkillID: "sk-1",
+		ID: "row-snap-old", SandboxConfigID: "cfg-1", SkillID: "sk-1",
 		SnapshotID: "snap-old", Trigger: types.SkillSnapshotTriggerInstall,
 		State: types.SkillSnapshotStateActive, CreatedAt: old, UpdatedAt: old,
 	})
@@ -320,7 +320,7 @@ func TestPruneSupersededSnapshotsDeletesStaleActiveLeftovers(t *testing.T) {
 	require.Equal(t, 1, n)
 	require.Equal(t, []string{"snap-old"}, fx.provider.deleted,
 		"a pointer switch that never marked the previous row superseded still leaves a billed snapshot")
-	rows, err := fx.skills.ListSnapshotsByConfig(context.Background(), 7, "cfg-1")
+	rows, err := fx.skills.ListSnapshotsByConfig(context.Background(), "cfg-1")
 	require.NoError(t, err)
 	states := map[string]string{}
 	for _, row := range rows {
@@ -348,7 +348,7 @@ func TestPruneSupersededSnapshotsSkipsAConfigBuiltByAnotherAccount(t *testing.T)
 	require.Zero(t, n)
 	require.Empty(t, fx.provider.deleted,
 		"snapshots of an account we can no longer address must not be recorded as deleted")
-	rows, err := fx.skills.ListSnapshotsByConfig(context.Background(), 7, "cfg-1")
+	rows, err := fx.skills.ListSnapshotsByConfig(context.Background(), "cfg-1")
 	require.NoError(t, err)
 	require.Equal(t, types.SkillSnapshotStateSuperseded, rows[0].State)
 }
@@ -384,7 +384,7 @@ func TestPruneSupersededSnapshotsLeavesTheRowWhenDeleteFails(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, n)
 	require.Empty(t, fx.provider.deleted)
-	rows, err := fx.skills.ListSnapshotsByConfig(context.Background(), 7, "cfg-1")
+	rows, err := fx.skills.ListSnapshotsByConfig(context.Background(), "cfg-1")
 	require.NoError(t, err)
 	require.Equal(t, types.SkillSnapshotStateSuperseded, rows[0].State,
 		"a failed provider delete must not be recorded as deleted")
@@ -406,7 +406,7 @@ func TestPruneSupersededSnapshotsRetriesWhenSnapshotStillInUse(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, n)
 	require.Empty(t, fx.provider.deleted)
-	rows, err := fx.skills.ListSnapshotsByConfig(context.Background(), 7, "cfg-1")
+	rows, err := fx.skills.ListSnapshotsByConfig(context.Background(), "cfg-1")
 	require.NoError(t, err)
 	require.Equal(t, types.SkillSnapshotStateSuperseded, rows[0].State,
 		"an in-use template must stay on the ledger so the next sweep can retry")
@@ -426,7 +426,7 @@ func TestPruneSupersededSnapshotsTreatsMissingProviderSnapshotAsDeleted(t *testi
 
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
-	rows, err := fx.skills.ListSnapshotsByConfig(context.Background(), 7, "cfg-1")
+	rows, err := fx.skills.ListSnapshotsByConfig(context.Background(), "cfg-1")
 	require.NoError(t, err)
 	require.Equal(t, types.SkillSnapshotStateDeleted, rows[0].State,
 		"a snapshot the provider already dropped is gone; the ledger must catch up")
@@ -514,7 +514,7 @@ func TestPruneLeavesABuildWhoseInstallIsStillBeating(t *testing.T) {
 	fx := newReaperFixture(t)
 	alive := fx.now.Add(-time.Minute)
 	fx.skills.put(&types.TenantSkillEntity{
-		ID: "sk-2", TenantID: 7, SandboxConfigID: "cfg-1",
+		ID: "sk-2", SandboxConfigID: "cfg-1",
 		Name: "pdf", Status: types.SkillStatusInstalling, InstallingSince: &alive,
 	})
 	fx.building("sk-2", "weknora-sk-cfg1-g2", fx.now.Add(-skillInstallStuckTTL-time.Minute))
@@ -538,7 +538,7 @@ func TestPruneLeavesAbandonedBuildWhileAnotherSkillIsInstalling(t *testing.T) {
 	fx.building("sk-2", "weknora-sk-t7-cfg1-g2-aaaaaaaa", fx.now.Add(-skillInstallStuckTTL-time.Minute))
 	alive := fx.now.Add(-time.Minute)
 	fx.skills.put(&types.TenantSkillEntity{
-		ID: "sk-3", TenantID: 7, SandboxConfigID: "cfg-1",
+		ID: "sk-3", SandboxConfigID: "cfg-1",
 		Name: "xlsx", Status: types.SkillStatusInstalling, InstallingSince: &alive,
 	})
 	fx.provider.listed = []sandbox.RemoteSnapshotRef{
@@ -599,42 +599,39 @@ func TestConfiguredSandboxTTLCoversTheDockerIdleWindow(t *testing.T) {
 }
 
 func TestSnapshotBelongsToOtherConfig(t *testing.T) {
-	prefix := skillSnapshotNamePrefix(7, "cfg-1")
+	prefix := skillSnapshotNamePrefix("cfg-1")
 	dockerOurs := sandbox.RemoteSnapshotRef{
-		ID: "weknora-skill/weknora-sk-t7-cfg1-g1", Names: []string{"weknora-skill/weknora-sk-t7-cfg1-g1"},
+		ID: "weknora-skill/weknora-sk-cfg1-g1", Names: []string{"weknora-skill/weknora-sk-cfg1-g1"},
 	}
 	dockerTheirs := sandbox.RemoteSnapshotRef{
-		ID: "weknora-skill/weknora-sk-t7-cfg2-g1", Names: []string{"weknora-skill/weknora-sk-t7-cfg2-g1"},
+		ID: "weknora-skill/weknora-sk-cfg2-g1", Names: []string{"weknora-skill/weknora-sk-cfg2-g1"},
 	}
-	cubeOurs := sandbox.RemoteSnapshotRef{ID: "snap-ours", Names: []string{"weknora-sk-t7-cfg1-g1"}}
-	cubeTheirs := sandbox.RemoteSnapshotRef{ID: "snap-theirs", Names: []string{"weknora-sk-t8-cfg1-g1"}}
-	e2bTheirs := sandbox.RemoteSnapshotRef{ID: "tpl-other", Names: []string{"weknora-sk-t7-aaaa-g3"}}
-	legacy := sandbox.RemoteSnapshotRef{ID: "snap-legacy", Names: []string{"weknora-sk-cfg1-g2"}}
+	cubeOurs := sandbox.RemoteSnapshotRef{ID: "snap-ours", Names: []string{"weknora-sk-cfg1-g1"}}
+	cubeTheirs := sandbox.RemoteSnapshotRef{ID: "snap-theirs", Names: []string{"weknora-sk-cfg2-g1"}}
+	e2bTheirs := sandbox.RemoteSnapshotRef{ID: "tpl-other", Names: []string{"weknora-sk-aaaa-g3"}}
 	unnamed := sandbox.RemoteSnapshotRef{ID: "snap-plain"}
 
 	require.False(t, snapshotBelongsToOtherConfig(dockerOurs, prefix))
 	require.True(t, snapshotBelongsToOtherConfig(dockerTheirs, prefix))
 	require.False(t, snapshotBelongsToOtherConfig(cubeOurs, prefix))
 	require.True(t, snapshotBelongsToOtherConfig(cubeTheirs, prefix),
-		"a Cube snapshot named for another tenant must not be this config's extra")
+		"a Cube snapshot named for another config must not be this config's extra")
 	require.True(t, snapshotBelongsToOtherConfig(e2bTheirs, prefix))
-	require.False(t, snapshotBelongsToOtherConfig(legacy, prefix),
-		"legacy names without a tenant prefix must still be matchable")
 	require.False(t, snapshotBelongsToOtherConfig(unnamed, prefix),
 		"a listing that does not echo our name is not classified as another config")
 
 	kept := snapshotsNotFromOtherConfig([]sandbox.RemoteSnapshotRef{
-		dockerOurs, dockerTheirs, cubeOurs, cubeTheirs, legacy, unnamed,
+		dockerOurs, dockerTheirs, cubeOurs, cubeTheirs, unnamed,
 	}, prefix)
 	ids := make([]string, 0, len(kept))
 	for _, snap := range kept {
 		ids = append(ids, snap.ID)
 	}
-	require.Equal(t, []string{"weknora-skill/weknora-sk-t7-cfg1-g1", "snap-ours", "snap-legacy", "snap-plain"}, ids)
+	require.Equal(t, []string{"weknora-skill/weknora-sk-cfg1-g1", "snap-ours", "snap-plain"}, ids)
 }
 
 func TestTenantSkillServiceStartIsIdempotent(t *testing.T) {
-	svc := NewTenantSkillService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	svc := NewTenantSkillService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	require.NoError(t, svc.Start(context.Background()))
 	require.NoError(t, svc.Start(context.Background()),
@@ -659,16 +656,17 @@ type reaperFixture struct {
 func newReaperFixture(t *testing.T) *reaperFixture {
 	t.Helper()
 	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
-	fingerprint := sandbox.SkillImageFingerprint("e2b", "key-1", "https://e2b.example")
+	fingerprint := sandbox.SkillImageFingerprint("e2b", "key-1", "http://127.0.0.1")
 	skills := &reaperSkillStore{rows: map[string]*types.TenantSkillEntity{}}
 	configs := &reaperConfigStore{
 		entity: &types.TenantSandboxConfigEntity{
-			ID: "cfg-1", TenantID: 7,
+			ID:          "cfg-1",
 			SandboxType: string(sandbox.SandboxTypeE2B),
 			Config: &types.TenantSandboxConfig{
-				SandboxType: string(sandbox.SandboxTypeE2B),
+				SandboxType:           string(sandbox.SandboxTypeE2B),
+				AllowPrivateEndpoints: true,
 				E2B: &types.E2BSandboxConfig{
-					APIURL: "https://e2b.example", APIKey: "key-1", TemplateID: "base-template",
+					APIURL: "http://127.0.0.1", APIKey: "key-1", TemplateID: "base-template",
 				},
 				SkillImage: &types.SkillImageConfig{
 					SnapshotID: "snap-other", OwnerFingerprint: fingerprint,
@@ -680,8 +678,12 @@ func newReaperFixture(t *testing.T) *reaperFixture {
 	resolver := &reaperSandboxResolver{provider: provider}
 	svc := NewTenantSkillService(
 		skills, configs, nil, resolver,
-		nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
 	)
+	svc.newSnapshotClient = func(*sandbox.Config) (sandbox.RemoteSandboxClient, error) {
+		resolver.resolves++
+		return &reaperSnapshotClient{reaperSnapshotProvider: provider}, nil
+	}
 	svc.now = func() time.Time { return now }
 	return &reaperFixture{
 		svc: svc, skills: skills, configs: configs, provider: provider,
@@ -701,7 +703,7 @@ func (f *reaperFixture) removed(skillID, snapshotID, parentSnapshotID string) {
 
 func (f *reaperFixture) snapshotRow(skillID, snapshotID, parentSnapshotID, trigger string) {
 	f.skills.snapshots = append(f.skills.snapshots, &types.TenantSkillSnapshotEntity{
-		ID: "row-" + snapshotID, TenantID: 7, SandboxConfigID: "cfg-1", SkillID: skillID,
+		ID: "row-" + snapshotID, SandboxConfigID: "cfg-1", SkillID: skillID,
 		SnapshotID: snapshotID, ParentSnapshotID: parentSnapshotID,
 		Trigger: trigger, State: types.SkillSnapshotStateActive,
 	})
@@ -709,7 +711,7 @@ func (f *reaperFixture) snapshotRow(skillID, snapshotID, parentSnapshotID, trigg
 
 func (f *reaperFixture) superseded(skillID, snapshotID, parentSnapshotID string, at time.Time) {
 	f.skills.snapshots = append(f.skills.snapshots, &types.TenantSkillSnapshotEntity{
-		ID: "row-" + snapshotID, TenantID: 7, SandboxConfigID: "cfg-1", SkillID: skillID,
+		ID: "row-" + snapshotID, SandboxConfigID: "cfg-1", SkillID: skillID,
 		SnapshotID: snapshotID, ParentSnapshotID: parentSnapshotID,
 		Trigger: types.SkillSnapshotTriggerInstall, State: types.SkillSnapshotStateSuperseded,
 		SupersededAt: &at,
@@ -720,7 +722,7 @@ func (f *reaperFixture) superseded(skillID, snapshotID, parentSnapshotID string,
 // and the ledger learning the snapshot's ID: named, but with no provider ID.
 func (f *reaperFixture) building(skillID, plannedName string, createdAt time.Time) {
 	f.skills.snapshots = append(f.skills.snapshots, &types.TenantSkillSnapshotEntity{
-		ID: "row-" + plannedName, TenantID: 7, SandboxConfigID: "cfg-1", SkillID: skillID,
+		ID: "row-" + plannedName, SandboxConfigID: "cfg-1", SkillID: skillID,
 		PlannedName: plannedName, Generation: 2,
 		Trigger:   types.SkillSnapshotTriggerInstall,
 		State:     types.SkillSnapshotStateBuilding,
@@ -730,7 +732,7 @@ func (f *reaperFixture) building(skillID, plannedName string, createdAt time.Tim
 
 func (f *reaperFixture) snapshotState(t *testing.T, rowID string) string {
 	t.Helper()
-	rows, err := f.skills.ListSnapshotsByConfig(context.Background(), 7, "cfg-1")
+	rows, err := f.skills.ListSnapshotsByConfig(context.Background(), "cfg-1")
 	require.NoError(t, err)
 	for _, row := range rows {
 		if row.ID == rowID {
@@ -792,10 +794,10 @@ func (r *reaperSkillStore) ListStaleInstalling(
 }
 
 func (r *reaperSkillStore) GetSkill(
-	_ context.Context, tenantID uint64, configID, skillID string,
+	_ context.Context, configID, skillID string,
 ) (*types.TenantSkillEntity, error) {
 	e := r.rows[skillID]
-	if e == nil || e.TenantID != tenantID || e.SandboxConfigID != configID {
+	if e == nil || e.SandboxConfigID != configID {
 		return nil, nil
 	}
 	cp := *e
@@ -813,8 +815,26 @@ func (r *reaperSkillStore) UpdateSkill(_ context.Context, e *types.TenantSkillEn
 	return nil
 }
 
+func (r *reaperSkillStore) BeginSkillRun(
+	context.Context, string, string, string, string, time.Time,
+) error {
+	panic("BeginSkillRun is outside the reaper surface")
+}
+
+func (r *reaperSkillStore) UpdateSkillForRun(
+	context.Context, *types.TenantSkillEntity, string,
+) (bool, error) {
+	panic("UpdateSkillForRun is outside the reaper surface")
+}
+
+func (r *reaperSkillStore) UpdateInstallTranscript(
+	context.Context, string, string, string, types.JSON,
+) (bool, error) {
+	panic("UpdateInstallTranscript is outside the reaper surface")
+}
+
 func (r *reaperSkillStore) UpdateSkillEnvs(
-	_ context.Context, _ uint64, _, skillID string, envs types.SkillEnvVars,
+	_ context.Context, _, skillID string, envs types.SkillEnvVars,
 ) error {
 	if stored := r.rows[skillID]; stored != nil {
 		stored.Envs = envs
@@ -822,8 +842,14 @@ func (r *reaperSkillStore) UpdateSkillEnvs(
 	return nil
 }
 
+func (r *reaperSkillStore) UpdateSkillEnvsForRun(
+	context.Context, string, string, string, types.SkillEnvVars,
+) (bool, error) {
+	panic("UpdateSkillEnvsForRun is outside the reaper surface")
+}
+
 func (r *reaperSkillStore) UpdateSkillAdminState(
-	_ context.Context, _ uint64, _, skillID string, enabled bool, envs types.SkillEnvVars,
+	_ context.Context, _, skillID string, enabled bool, envs types.SkillEnvVars,
 ) error {
 	if stored := r.rows[skillID]; stored != nil {
 		stored.Enabled = enabled
@@ -833,11 +859,11 @@ func (r *reaperSkillStore) UpdateSkillAdminState(
 }
 
 func (r *reaperSkillStore) ListSnapshotsByConfig(
-	_ context.Context, tenantID uint64, configID string,
+	_ context.Context, configID string,
 ) ([]*types.TenantSkillSnapshotEntity, error) {
 	var out []*types.TenantSkillSnapshotEntity
 	for _, e := range r.snapshots {
-		if e.TenantID == tenantID && e.SandboxConfigID == configID {
+		if e.SandboxConfigID == configID {
 			cp := *e
 			out = append(out, &cp)
 		}
@@ -849,16 +875,16 @@ func (r *reaperSkillStore) CreateSkill(context.Context, *types.TenantSkillEntity
 	panic("CreateSkill is outside the reaper surface")
 }
 
-func (r *reaperSkillStore) GetSkillByName(context.Context, uint64, string, string) (*types.TenantSkillEntity, error) {
+func (r *reaperSkillStore) GetSkillByName(context.Context, string, string) (*types.TenantSkillEntity, error) {
 	panic("GetSkillByName is outside the reaper surface")
 }
 
 func (r *reaperSkillStore) ListSkillsByConfig(
-	_ context.Context, tenantID uint64, configID string,
+	_ context.Context, configID string,
 ) ([]*types.TenantSkillEntity, error) {
 	var out []*types.TenantSkillEntity
 	for _, e := range r.rows {
-		if e != nil && e.TenantID == tenantID && e.SandboxConfigID == configID {
+		if e != nil && e.SandboxConfigID == configID {
 			cp := *e
 			out = append(out, &cp)
 		}
@@ -866,13 +892,19 @@ func (r *reaperSkillStore) ListSkillsByConfig(
 	return out, nil
 }
 
-func (r *reaperSkillStore) DeleteSkill(_ context.Context, tenantID uint64, configID, skillID string) error {
+func (r *reaperSkillStore) DeleteSkill(_ context.Context, configID, skillID string) error {
 	e := r.rows[skillID]
-	if e == nil || e.TenantID != tenantID || e.SandboxConfigID != configID {
+	if e == nil || e.SandboxConfigID != configID {
 		return nil
 	}
 	delete(r.rows, skillID)
 	return nil
+}
+
+func (r *reaperSkillStore) DeleteSkillForRun(
+	context.Context, string, string, string,
+) (bool, error) {
+	panic("DeleteSkillForRun is outside the reaper surface")
 }
 
 func (r *reaperSkillStore) CreateSnapshotRow(_ context.Context, e *types.TenantSkillSnapshotEntity) error {
@@ -882,10 +914,10 @@ func (r *reaperSkillStore) CreateSnapshotRow(_ context.Context, e *types.TenantS
 }
 
 func (r *reaperSkillStore) MarkSnapshotState(
-	_ context.Context, tenantID uint64, id, state, snapshotID string,
+	_ context.Context, id, state, snapshotID string,
 ) error {
 	for _, e := range r.snapshots {
-		if e == nil || e.ID != id || e.TenantID != tenantID {
+		if e == nil || e.ID != id {
 			continue
 		}
 		e.State = state
@@ -901,24 +933,25 @@ func (r *reaperSkillStore) MarkSnapshotState(
 	return nil
 }
 
-func (r *reaperSkillStore) DeleteSnapshotRowsByConfig(context.Context, uint64, string) error {
+func (r *reaperSkillStore) DeleteSnapshotRowsByConfig(context.Context, string) error {
 	panic("DeleteSnapshotRowsByConfig is outside the reaper surface")
 }
 
-// ListSkillsByTenant and ListCatalogsByTenant are on the surface because
+// ListSkills and ListCatalogs are on the surface because
 // dropping an abandoned removal is what makes an archive the row owned outright
 // unreachable, and reclaiming it means asking whether anything else names it.
-func (r *reaperSkillStore) ListSkillsByTenant(
-	_ context.Context, tenantID uint64,
-) ([]*types.TenantSkillEntity, error) {
+func (r *reaperSkillStore) ListSkills(_ context.Context) ([]*types.TenantSkillEntity, error) {
 	var out []*types.TenantSkillEntity
 	for _, e := range r.rows {
-		if e != nil && e.TenantID == tenantID {
+		if e != nil {
 			cp := *e
 			out = append(out, &cp)
 		}
 	}
 	return out, nil
+}
+func (r *reaperSkillStore) CountUserEnvVarsByConfig(context.Context, string) (int64, error) {
+	return 0, nil
 }
 func (r *reaperSkillStore) ListUserEnvVars(
 	context.Context, uint64, types.Principal, string, string,
@@ -945,18 +978,16 @@ func (r *reaperSkillStore) DeleteUserEnvVarsByConfig(context.Context, uint64, st
 func (r *reaperSkillStore) CreateCatalog(context.Context, *types.TenantSkillCatalogEntity) error {
 	panic("CreateCatalog is outside the reaper surface")
 }
-func (r *reaperSkillStore) GetCatalog(context.Context, uint64, string) (*types.TenantSkillCatalogEntity, error) {
+func (r *reaperSkillStore) GetCatalog(context.Context, string) (*types.TenantSkillCatalogEntity, error) {
 	panic("GetCatalog is outside the reaper surface")
 }
-func (r *reaperSkillStore) GetCatalogByName(context.Context, uint64, string) (*types.TenantSkillCatalogEntity, error) {
+func (r *reaperSkillStore) GetCatalogByName(context.Context, string) (*types.TenantSkillCatalogEntity, error) {
 	panic("GetCatalogByName is outside the reaper surface")
 }
-func (r *reaperSkillStore) ListCatalogsByTenant(
-	_ context.Context, tenantID uint64,
-) ([]*types.TenantSkillCatalogEntity, error) {
+func (r *reaperSkillStore) ListCatalogs(_ context.Context) ([]*types.TenantSkillCatalogEntity, error) {
 	var out []*types.TenantSkillCatalogEntity
 	for _, e := range r.catalogs {
-		if e != nil && e.TenantID == tenantID {
+		if e != nil {
 			cp := *e
 			out = append(out, &cp)
 		}
@@ -966,10 +997,10 @@ func (r *reaperSkillStore) ListCatalogsByTenant(
 func (r *reaperSkillStore) UpdateCatalog(context.Context, *types.TenantSkillCatalogEntity) error {
 	panic("UpdateCatalog is outside the reaper surface")
 }
-func (r *reaperSkillStore) DeleteCatalog(context.Context, uint64, string) error {
+func (r *reaperSkillStore) DeleteCatalog(context.Context, string) error {
 	panic("DeleteCatalog is outside the reaper surface")
 }
-func (r *reaperSkillStore) ListSkillsByCatalog(context.Context, uint64, string) ([]*types.TenantSkillEntity, error) {
+func (r *reaperSkillStore) ListSkillsByCatalog(context.Context, string) ([]*types.TenantSkillEntity, error) {
 	panic("ListSkillsByCatalog is outside the reaper surface")
 }
 
@@ -978,9 +1009,9 @@ type reaperConfigStore struct {
 }
 
 func (r *reaperConfigStore) GetByID(
-	_ context.Context, tenantID uint64, id string,
+	_ context.Context, id string,
 ) (*types.TenantSandboxConfigEntity, error) {
-	if r.entity == nil || r.entity.TenantID != tenantID || r.entity.ID != id {
+	if r.entity == nil || r.entity.ID != id {
 		return nil, nil
 	}
 	cp := *r.entity
@@ -995,27 +1026,35 @@ func (r *reaperConfigStore) ListAll(_ context.Context) ([]*types.TenantSandboxCo
 	return []*types.TenantSandboxConfigEntity{&cp}, nil
 }
 
-func (r *reaperConfigStore) Create(context.Context, *types.TenantSandboxConfigEntity) error {
-	panic("Create is outside the reaper surface")
+func (r *reaperConfigStore) GetDefault(context.Context) (*types.TenantSandboxConfigEntity, error) {
+	if r.entity == nil || !r.entity.IsDefault {
+		return nil, nil
+	}
+	cp := *r.entity
+	return &cp, nil
 }
 
-func (r *reaperConfigStore) ListByTenant(context.Context, uint64) ([]*types.TenantSandboxConfigEntity, error) {
-	panic("ListByTenant is outside the reaper surface")
+func (r *reaperConfigStore) SetDefault(context.Context, string) error {
+	panic("SetDefault is outside the reaper surface")
+}
+
+func (r *reaperConfigStore) Create(context.Context, *types.TenantSandboxConfigEntity) error {
+	panic("Create is outside the reaper surface")
 }
 
 func (r *reaperConfigStore) Update(context.Context, *types.TenantSandboxConfigEntity) error {
 	panic("Update is outside the reaper surface")
 }
 
-func (r *reaperConfigStore) SoftDelete(context.Context, uint64, string) error {
+func (r *reaperConfigStore) SoftDelete(context.Context, string) error {
 	panic("SoftDelete is outside the reaper surface")
 }
 
-func (r *reaperConfigStore) SetCordon(context.Context, uint64, string, time.Time) error {
+func (r *reaperConfigStore) SetCordon(context.Context, string, time.Time) error {
 	panic("SetCordon is outside the reaper surface")
 }
 
-func (r *reaperConfigStore) ClearCordon(context.Context, uint64, string) error {
+func (r *reaperConfigStore) ClearCordon(context.Context, string) error {
 	panic("ClearCordon is outside the reaper surface")
 }
 
@@ -1038,6 +1077,15 @@ type reaperSnapshotProvider struct {
 	listCalls []string
 	deleted   []string
 	deleteErr error
+}
+
+type reaperSnapshotClient struct {
+	sandbox.RemoteSandboxClient
+	*reaperSnapshotProvider
+}
+
+func (*reaperSnapshotClient) Capabilities() sandbox.RemoteSandboxCapabilities {
+	return sandbox.RemoteSandboxCapabilities{SupportsSnapshots: true}
 }
 
 func (p *reaperSnapshotProvider) ListSnapshots(

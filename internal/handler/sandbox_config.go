@@ -16,15 +16,19 @@ import (
 )
 
 type sandboxConfigService interface {
-	Create(context.Context, uint64, service.CreateSandboxConfigInput) (*types.TenantSandboxConfigEntity, error)
-	List(context.Context, uint64) ([]*types.TenantSandboxConfigEntity, error)
-	Get(context.Context, uint64, string) (*types.TenantSandboxConfigEntity, error)
-	Update(context.Context, uint64, string, service.UpdateSandboxConfigInput) (*types.TenantSandboxConfigEntity, error)
-	Delete(context.Context, uint64, string, bool) error
-	Inventory(context.Context, uint64, string) (service.SandboxInventory, error)
+	Create(context.Context, service.CreateSandboxConfigInput) (*types.TenantSandboxConfigEntity, error)
+	List(context.Context) ([]*types.TenantSandboxConfigEntity, error)
+	Get(context.Context, string) (*types.TenantSandboxConfigEntity, error)
+	SetDefault(context.Context, string) error
+	Update(context.Context, string, service.UpdateSandboxConfigInput) (*types.TenantSandboxConfigEntity, error)
+	Delete(context.Context, string, bool) error
+	Inventory(context.Context, string) (service.SandboxInventory, error)
+	QueryTemplates(context.Context, service.SandboxTemplateQueryInput) (*service.SandboxTemplateCatalog, error)
+}
+
+type sandboxPermissionService interface {
 	WorkspaceScriptsDisabled(context.Context, uint64) (bool, error)
 	SetWorkspaceScriptsDisabled(context.Context, uint64, bool) error
-	QueryTemplates(context.Context, uint64, service.SandboxTemplateQueryInput) (*service.SandboxTemplateCatalog, error)
 }
 
 type sandboxTemplateQueryRequest struct {
@@ -34,17 +38,23 @@ type sandboxTemplateQueryRequest struct {
 	ReplaceStandard bool                       `json:"replace_standard"`
 }
 
-// QueryTemplates returns the templates visible through an unsaved workspace
-// connection. ensure_standard starts a build only when the cluster has no
-// usable WeKnora template; replace_standard rebuilds that template so a
-// new spec (DNS, image) can take effect. replace_standard requires config_id.
+// QueryTemplates godoc
+// @Summary      Query sandbox templates
+// @Description  Query a platform sandbox backend and optionally create or replace its standard template.
+// @Tags         SandboxConfig
+// @Accept       json
+// @Produce      json
+// @Param        request  body      sandboxTemplateQueryRequest  true  "Template query"
+// @Success      200      {object}  map[string]interface{}
+// @Security     Bearer
+// @Router       /system/admin/sandbox-configs/templates/query [post]
 func (h *SandboxConfigHandler) QueryTemplates(c *gin.Context) {
 	var req sandboxTemplateQueryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperrors.NewBadRequestError(err.Error()))
 		return
 	}
-	result, err := h.service.QueryTemplates(c.Request.Context(), sandboxConfigTenantID(c),
+	result, err := h.service.QueryTemplates(c.Request.Context(),
 		service.SandboxTemplateQueryInput{
 			Config:          req.Config,
 			ConfigID:        req.ConfigID,
@@ -62,13 +72,15 @@ func (h *SandboxConfigHandler) QueryTemplates(c *gin.Context) {
 }
 
 type SandboxConfigHandler struct {
-	service sandboxConfigService
+	service     sandboxConfigService
+	permissions sandboxPermissionService
 }
 
 func NewSandboxConfigHandler(
 	service *service.TenantSandboxConfigService,
+	permissions *service.TenantSandboxPermissionService,
 ) *SandboxConfigHandler {
-	return &SandboxConfigHandler{service: service}
+	return &SandboxConfigHandler{service: service, permissions: permissions}
 }
 
 type sandboxConfigRequest struct {
@@ -84,6 +96,7 @@ type sandboxConfigResponse struct {
 	Name        string                     `json:"name"`
 	Description string                     `json:"description,omitempty"`
 	SandboxType string                     `json:"sandbox_type"`
+	IsDefault   bool                       `json:"is_default"`
 	Config      *types.TenantSandboxConfig `json:"config"`
 	CreatedAt   time.Time                  `json:"created_at"`
 	UpdatedAt   time.Time                  `json:"updated_at"`
@@ -102,6 +115,7 @@ func toSandboxConfigResponse(e *types.TenantSandboxConfigEntity) sandboxConfigRe
 		Name:        e.Name,
 		Description: e.Description,
 		SandboxType: e.SandboxType,
+		IsDefault:   e.IsDefault,
 		Config:      types.SandboxConfigForResponse(e.Config, true),
 		CreatedAt:   e.CreatedAt,
 		UpdatedAt:   e.UpdatedAt,
@@ -211,23 +225,16 @@ func respondSandboxConfigServiceError(c *gin.Context, err error) {
 
 // List godoc
 // @Summary      List sandbox configs
-// @Description  List workspace sandbox backend configs with credentials masked.
+// @Description  List platform sandbox backend configs with credentials masked.
 // @Tags         SandboxConfig
 // @Produce      json
 // @Success      200  {object}  map[string]interface{}   "Sandbox configs and defaults"
 // @Failure      401  {object}  map[string]interface{}   "Unauthorized"
 // @Security     Bearer
-// @Param        tenant_id  path  int  true  "Enterprise ID"
-// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs [get]
+// @Router       /system/admin/sandbox-configs [get]
 func (h *SandboxConfigHandler) List(c *gin.Context) {
 	ctx := c.Request.Context()
-	tenantID := sandboxConfigTenantID(c)
-	configs, err := h.service.List(ctx, tenantID)
-	if err != nil {
-		c.Error(err)
-		return
-	}
-	disabled, err := h.service.WorkspaceScriptsDisabled(ctx, tenantID)
+	configs, err := h.service.List(ctx)
 	if err != nil {
 		c.Error(err)
 		return
@@ -237,14 +244,27 @@ func (h *SandboxConfigHandler) List(c *gin.Context) {
 		data = append(data, toSandboxConfigResponse(cfg))
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"success":                    true,
-		"data":                       data,
-		"workspace_scripts_disabled": disabled,
+		"success": true,
+		"data":    data,
 	})
 }
 
 type workspacePolicyRequest struct {
 	ScriptsDisabled bool `json:"scripts_disabled"`
+}
+
+func (h *SandboxConfigHandler) GetWorkspacePolicy(c *gin.Context) {
+	if h.permissions == nil {
+		c.Error(stderrors.New("sandbox permission service is unavailable"))
+		return
+	}
+	disabled, err := h.permissions.WorkspaceScriptsDisabled(
+		c.Request.Context(), sandboxConfigTenantID(c))
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "scripts_disabled": disabled})
 }
 
 // SetWorkspacePolicy toggles script execution for the whole workspace.
@@ -255,7 +275,11 @@ func (h *SandboxConfigHandler) SetWorkspacePolicy(c *gin.Context) {
 		return
 	}
 	tenantID := sandboxConfigTenantID(c)
-	if err := h.service.SetWorkspaceScriptsDisabled(c.Request.Context(), tenantID, req.ScriptsDisabled); err != nil {
+	if h.permissions == nil {
+		c.Error(stderrors.New("sandbox permission service is unavailable"))
+		return
+	}
+	if err := h.permissions.SetWorkspaceScriptsDisabled(c.Request.Context(), tenantID, req.ScriptsDisabled); err != nil {
 		c.Error(err)
 		return
 	}
@@ -264,7 +288,7 @@ func (h *SandboxConfigHandler) SetWorkspacePolicy(c *gin.Context) {
 
 // Create godoc
 // @Summary      Create sandbox config
-// @Description  Create a named workspace sandbox backend config. Credentials are masked in the response.
+// @Description  Create a named platform sandbox backend config. Credentials are masked in the response.
 // @Tags         SandboxConfig
 // @Accept       json
 // @Produce      json
@@ -273,15 +297,14 @@ func (h *SandboxConfigHandler) SetWorkspacePolicy(c *gin.Context) {
 // @Failure      400      {object}  apperrors.AppError      "Invalid request or validation failure"
 // @Failure      401      {object}  map[string]interface{}  "Unauthorized"
 // @Security     Bearer
-// @Param        tenant_id  path  int  true  "Enterprise ID"
-// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs [post]
+// @Router       /system/admin/sandbox-configs [post]
 func (h *SandboxConfigHandler) Create(c *gin.Context) {
 	var req sandboxConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperrors.NewBadRequestError(err.Error()))
 		return
 	}
-	created, err := h.service.Create(c.Request.Context(), sandboxConfigTenantID(c),
+	created, err := h.service.Create(c.Request.Context(),
 		service.CreateSandboxConfigInput{
 			Name:        req.Name,
 			Description: req.Description,
@@ -296,7 +319,7 @@ func (h *SandboxConfigHandler) Create(c *gin.Context) {
 
 // Get godoc
 // @Summary      Get sandbox config
-// @Description  Retrieve a workspace sandbox backend config with credentials masked.
+// @Description  Retrieve a platform sandbox backend config with credentials masked.
 // @Tags         SandboxConfig
 // @Produce      json
 // @Param        id   path      string  true  "Sandbox config ID"
@@ -304,10 +327,9 @@ func (h *SandboxConfigHandler) Create(c *gin.Context) {
 // @Failure      401  {object}  map[string]interface{}   "Unauthorized"
 // @Failure      404  {object}  apperrors.AppError       "Sandbox config not found"
 // @Security     Bearer
-// @Param        tenant_id  path  int  true  "Enterprise ID"
-// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id} [get]
+// @Router       /system/admin/sandbox-configs/{id} [get]
 func (h *SandboxConfigHandler) Get(c *gin.Context) {
-	cfg, err := h.service.Get(c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"))
+	cfg, err := h.service.Get(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		c.Error(err)
 		return
@@ -334,15 +356,14 @@ func (h *SandboxConfigHandler) Get(c *gin.Context) {
 // @Failure      409      {object}  map[string]interface{}  "Live sandboxes or unverifiable inventory"
 // @Failure      423      {object}  map[string]interface{}  "Sandbox config is being modified by another request"
 // @Security     Bearer
-// @Param        tenant_id  path  int  true  "Enterprise ID"
-// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id} [put]
+// @Router       /system/admin/sandbox-configs/{id} [put]
 func (h *SandboxConfigHandler) Update(c *gin.Context) {
 	var req sandboxConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperrors.NewBadRequestError(err.Error()))
 		return
 	}
-	updated, err := h.service.Update(c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"),
+	updated, err := h.service.Update(c.Request.Context(), c.Param("id"),
 		service.UpdateSandboxConfigInput{
 			Name:        req.Name,
 			Description: req.Description,
@@ -373,11 +394,10 @@ func (h *SandboxConfigHandler) Update(c *gin.Context) {
 // @Failure      401    {object}  map[string]interface{}  "Unauthorized"
 // @Failure      409    {object}  map[string]interface{}  "Live sandboxes or unverifiable inventory"
 // @Security     Bearer
-// @Param        tenant_id  path  int  true  "Enterprise ID"
-// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id} [delete]
+// @Router       /system/admin/sandbox-configs/{id} [delete]
 func (h *SandboxConfigHandler) Delete(c *gin.Context) {
 	force := c.Query("force") == "true"
-	if err := h.service.Delete(c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"), force); err != nil {
+	if err := h.service.Delete(c.Request.Context(), c.Param("id"), force); err != nil {
 		if respondSandboxConfigRefusal(c, err) {
 			return
 		}
@@ -396,13 +416,39 @@ func (h *SandboxConfigHandler) Delete(c *gin.Context) {
 // @Success      200  {object}  map[string]interface{}  "Sandbox inventory"
 // @Failure      401  {object}  map[string]interface{}  "Unauthorized"
 // @Security     Bearer
-// @Param        tenant_id  path  int  true  "Enterprise ID"
-// @Router       /system/admin/tenants/{tenant_id}/sandbox-configs/{id}/sandboxes [get]
+// @Router       /system/admin/sandbox-configs/{id}/sandboxes [get]
 func (h *SandboxConfigHandler) Inventory(c *gin.Context) {
-	inv, err := h.service.Inventory(c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"))
+	inv, err := h.service.Inventory(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		c.Error(err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": inv})
+}
+
+type sandboxDefaultRequest struct {
+	ConfigID string `json:"config_id" binding:"required"`
+}
+
+// SetDefault godoc
+// @Summary      Set the default sandbox config
+// @Description  Select the platform sandbox config used by newly created sessions. Existing session pins are unchanged.
+// @Tags         SandboxConfig
+// @Accept       json
+// @Produce      json
+// @Param        request  body      sandboxDefaultRequest  true  "Default sandbox config"
+// @Success      200      {object}  map[string]interface{}
+// @Security     Bearer
+// @Router       /system/admin/sandbox-configs/default [put]
+func (h *SandboxConfigHandler) SetDefault(c *gin.Context) {
+	var req sandboxDefaultRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewBadRequestError(err.Error()))
+		return
+	}
+	if err := h.service.SetDefault(c.Request.Context(), req.ConfigID); err != nil {
+		c.Error(err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
 }

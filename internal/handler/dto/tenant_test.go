@@ -72,12 +72,5 @@ func sampleSecretTenant() *types.Tenant {
 				AppSecret: "wk-app-secret-def",
 			},
 		},
-		StorageEngineConfig: &types.StorageEngineConfig{
-			DefaultProvider: "minio",
-			MinIO: &types.MinIOEngineConfig{
-				AccessKeyID:     "minio-access-id",
-				SecretAccessKey: "minio-secret-789",
-			},
-		},
 	}
 }

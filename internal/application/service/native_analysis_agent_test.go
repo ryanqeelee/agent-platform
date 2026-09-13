@@ -13,20 +13,19 @@ func TestNativeAnalysisAgentUsesExistingTenantSandboxWithoutEmployeeScenario(t *
 		"builtin-data-analysis-base": {ID: "builtin-data-analysis-base", IsBuiltin: true, Config: types.CustomAgentConfig{SystemPrompt: "base", AllowedTools: []string{"data_schema", "data_analysis"}}},
 	})
 	t.Cleanup(restore)
-	own := &types.TenantSandboxConfigEntity{ID: "ours", TenantID: 7, Name: "employee-assistant"}
 	for _, id := range []string{"builtin-operating-analyst", "builtin-data-analysis-base"} {
 		for _, tc := range []struct {
-			name   string
-			rows   []*types.TenantSandboxConfigEntity
-			reject bool
+			name       string
+			defaultID  string
+			defaultErr error
+			reject     bool
 		}{
-			{"own", []*types.TenantSandboxConfigEntity{own}, false},
-			{"missing", nil, false},
-			{"duplicate", []*types.TenantSandboxConfigEntity{own, own}, true},
-			{"foreign", []*types.TenantSandboxConfigEntity{{ID: "foreign", TenantID: 8, Name: "employee-assistant"}}, true},
+			{name: "configured", defaultID: "ours"},
+			{name: "missing"},
+			{name: "failure", defaultErr: context.Canceled, reject: true},
 		} {
 			t.Run(id+tc.name, func(t *testing.T) {
-				svc := &customAgentService{repo: &platformAgentRepoStub{rows: map[uint64]map[string]*types.CustomAgent{}}, scenarioCapabilities: assistantScenarioResolverStub{settings: assistantScenarioSettings(false, false, true)}, sandboxConfigs: &employeeSandboxRepoStub{rows: tc.rows}}
+				svc := &customAgentService{repo: &platformAgentRepoStub{rows: map[uint64]map[string]*types.CustomAgent{}}, scenarioCapabilities: assistantScenarioResolverStub{settings: assistantScenarioSettings(false, false, true)}, sandboxDefault: &employeeSandboxDefaultStub{id: tc.defaultID, err: tc.defaultErr}}
 				ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
 				agent, err := svc.GetAgentByID(ctx, id)
 				if tc.reject {
@@ -34,7 +33,7 @@ func TestNativeAnalysisAgentUsesExistingTenantSandboxWithoutEmployeeScenario(t *
 					return
 				}
 				require.NoError(t, err)
-				if tc.name == "missing" {
+				if tc.defaultID == "" {
 					require.Empty(t, agent.Config.SandboxConfigID)
 					require.Equal(t, "none", agent.Config.SkillsSelectionMode)
 				} else {
@@ -53,7 +52,7 @@ func TestNativeOperatingToolsSwitchDoesNotOwnGovernedSQL(t *testing.T) {
 	t.Cleanup(restore)
 	for _, enabled := range []bool{false, true} {
 		resolver := assistantScenarioResolverStub{settings: assistantScenarioSettings(false, false, enabled)}
-		svc := &customAgentService{repo: &platformAgentRepoStub{rows: map[uint64]map[string]*types.CustomAgent{}}, scenarioCapabilities: resolver, sandboxConfigs: &employeeSandboxRepoStub{rows: []*types.TenantSandboxConfigEntity{{ID: "ours", TenantID: 7, Name: "employee-assistant"}}}}
+		svc := &customAgentService{repo: &platformAgentRepoStub{rows: map[uint64]map[string]*types.CustomAgent{}}, scenarioCapabilities: resolver, sandboxDefault: &employeeSandboxDefaultStub{id: "ours"}}
 		agent, err := svc.nativeAnalysisAgent(context.Background(), types.BuiltinOperatingAnalystID, 7)
 		require.NoError(t, err)
 		require.Equal(t, enabled, agent.Config.SandboxConfigID != "")

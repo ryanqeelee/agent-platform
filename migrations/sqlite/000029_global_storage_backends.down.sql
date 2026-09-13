@@ -1,0 +1,2 @@
+-- Irreversible: tenant ownership cannot be reconstructed without an
+-- operator-supplied mapping. Intentionally no automated rollback.

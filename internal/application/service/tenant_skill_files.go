@@ -6,14 +6,12 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"io"
 	"path"
 	"strings"
 	"sync"
 	"unicode/utf8"
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
-	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // skillFileTextLimit is how much of a text file the admin browser is given.
@@ -60,9 +58,9 @@ type SkillFileContent struct {
 // come from the uploaded bundle rather than the live image: browsing must
 // work while the skill is still installing, and without booting a sandbox.
 func (s *TenantSkillService) ListSkillFiles(
-	ctx context.Context, tenantID uint64, configID, skillID string,
+	ctx context.Context, configID, skillID string,
 ) ([]SkillFileEntry, error) {
-	archive, err := s.skillBundleArchive(ctx, tenantID, configID, skillID)
+	archive, err := s.skillBundleArchive(ctx, configID, skillID)
 	if err != nil {
 		return nil, err
 	}
@@ -73,13 +71,13 @@ func (s *TenantSkillService) ListSkillFiles(
 // either inlined as base64 (images small enough to preview) or reported
 // without a body so the UI can say they cannot be opened.
 func (s *TenantSkillService) ReadSkillFile(
-	ctx context.Context, tenantID uint64, configID, skillID, relativePath string,
+	ctx context.Context, configID, skillID, relativePath string,
 ) (*SkillFileContent, error) {
 	clean, err := safeSkillFilePath(relativePath)
 	if err != nil {
 		return nil, apperrors.NewBadRequestError(err.Error())
 	}
-	archive, err := s.skillBundleArchive(ctx, tenantID, configID, skillID)
+	archive, err := s.skillBundleArchive(ctx, configID, skillID)
 	if err != nil {
 		return nil, err
 	}
@@ -94,132 +92,51 @@ func (s *TenantSkillService) ReadSkillFile(
 }
 
 func (s *TenantSkillService) skillBundleArchive(
-	ctx context.Context, tenantID uint64, configID, skillID string,
+	ctx context.Context, configID, skillID string,
 ) ([]byte, error) {
-	skill, err := s.skills.GetSkill(ctx, tenantID, configID, skillID)
+	skill, err := s.skills.GetSkill(ctx, configID, skillID)
 	if err != nil {
 		return nil, err
 	}
 	if skill == nil {
 		return nil, apperrors.NewNotFoundError("skill not found")
 	}
-	// An object named by the row itself is the archive this sandbox was built
-	// from, so it answers first and needs no digest check.
-	if archive, ok := s.trySkillBundle(ctx, tenantID, skill); ok {
-		return archive, nil
-	}
-	// Otherwise the definition holds the zip. It answers for this install only
-	// while the digests agree: registering the skill again replaces the catalog
-	// object in place, while every sandbox keeps running the image built from
-	// the archive its row names. Serving the newer bytes would show the admin
-	// (and read_skill) a tree that image does not have.
-	if archive, err := s.sameDigestCatalogArchive(ctx, tenantID, skill); err == nil && len(archive) > 0 {
-		return archive, nil
-	}
-	if strings.TrimSpace(skill.BundleSHA256) == "" {
-		// A row that recorded no digest predates the catalog and has nothing to
-		// check against, so the definition's copy is the only answer available.
-		if archive, err := s.anyCatalogArchiveFor(ctx, tenantID, skill); err == nil && len(archive) > 0 {
-			return archive, nil
-		}
-	}
-	return nil, apperrors.NewNotFoundError("skill files are not available")
-}
-
-// anyCatalogArchiveFor resolves the definition an install belongs to without
-// checking what it holds. It exists for rows written before the catalog, which
-// carry neither a bundle reference nor a digest.
-func (s *TenantSkillService) anyCatalogArchiveFor(
-	ctx context.Context, tenantID uint64, skill *types.TenantSkillEntity,
-) ([]byte, error) {
-	if cid := strings.TrimSpace(skill.CatalogID); cid != "" {
-		if archive, err := s.loadCatalogArchive(ctx, tenantID, cid); err == nil && len(archive) > 0 {
-			return archive, nil
-		}
-	}
-	return s.loadCatalogArchive(ctx, tenantID, skill.ID)
-}
-
-func (s *TenantSkillService) sameDigestCatalogArchive(
-	ctx context.Context, tenantID uint64, skill *types.TenantSkillEntity,
-) ([]byte, error) {
-	if skill == nil || strings.TrimSpace(skill.BundleSHA256) == "" {
+	if strings.TrimSpace(skill.CatalogID) == "" || strings.TrimSpace(skill.BundleSHA256) == "" {
 		return nil, apperrors.NewNotFoundError("skill files are not available")
 	}
-	cid := strings.TrimSpace(skill.CatalogID)
-	if cid == "" {
-		cid = skill.ID
-	}
-	archive, err := s.loadCatalogArchive(ctx, tenantID, cid)
+	catalog, err := s.resolveCatalog(ctx, skill.CatalogID)
 	if err != nil {
 		return nil, err
 	}
-	if !archiveMatchesSHA(archive, skill.BundleSHA256) {
+	key := strings.TrimSpace(skill.BundleSHA256)
+	if strings.TrimSpace(catalog.BundleSHA256) != key {
 		return nil, apperrors.NewNotFoundError("skill files are not available")
 	}
-	return archive, nil
-}
-
-func (s *TenantSkillService) trySkillBundle(
-	ctx context.Context, tenantID uint64, skill *types.TenantSkillEntity,
-) ([]byte, bool) {
-	if skill == nil || strings.TrimSpace(skill.BundleRef) == "" {
-		return nil, false
-	}
-	key := skillBundleCacheKey(tenantID, skill)
 	if cached := s.cachedSkillBundle(key); cached != nil {
-		return cached, true
+		return cached, nil
 	}
 	v, err, _ := s.bundleLoad.Do(key, func() (interface{}, error) {
 		if cached := s.cachedSkillBundle(key); cached != nil {
 			return cached, nil
 		}
-		archive, err := s.downloadSkillBundle(ctx, tenantID, skill)
+		archive, err := s.catalogBundleArchive(ctx, catalog)
 		if err != nil {
 			return nil, err
+		}
+		if !archiveMatchesSHA(archive, key) {
+			return nil, apperrors.NewNotFoundError("skill files are not available")
 		}
 		s.storeSkillBundle(key, archive)
 		return archive, nil
 	})
 	if err != nil {
-		return nil, false
-	}
-	archive, ok := v.([]byte)
-	if !ok || len(archive) == 0 {
-		return nil, false
-	}
-	return archive, true
-}
-
-func (s *TenantSkillService) downloadSkillBundle(
-	ctx context.Context, tenantID uint64, skill *types.TenantSkillEntity,
-) ([]byte, error) {
-	ref := strings.TrimSpace(skill.BundleRef)
-	fs, err := s.fileServiceForTenant(ctx, tenantID)
-	if err != nil {
 		return nil, err
 	}
-	reader, err := fs.GetFile(ctx, ref)
-	if err != nil {
-		return nil, fmt.Errorf("download bundle of skill %s: %w", skill.Name, err)
+	loaded, ok := v.([]byte)
+	if !ok || len(loaded) == 0 {
+		return nil, apperrors.NewNotFoundError("skill files are not available")
 	}
-	defer func() { _ = reader.Close() }()
-	archive, err := io.ReadAll(io.LimitReader(reader, maxSkillBundleTotalBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("read bundle of skill %s: %w", skill.Name, err)
-	}
-	if len(archive) > maxSkillBundleTotalBytes {
-		return nil, fmt.Errorf("skill bundle %s is larger than the upload limit", ref)
-	}
-	return archive, nil
-}
-
-func skillBundleCacheKey(tenantID uint64, skill *types.TenantSkillEntity) string {
-	id := strings.TrimSpace(skill.BundleSHA256)
-	if id == "" {
-		id = strings.TrimSpace(skill.BundleRef)
-	}
-	return fmt.Sprintf("%d:%s", tenantID, id)
+	return loaded, nil
 }
 
 func (s *TenantSkillService) cachedSkillBundle(key string) []byte {

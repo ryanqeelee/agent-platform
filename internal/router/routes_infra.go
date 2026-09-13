@@ -42,7 +42,7 @@ func registerSandboxConfigHandlers(
 ) {
 	{
 		configs.GET("", h.List)
-		configs.PUT("/workspace-policy", h.SetWorkspacePolicy)
+		configs.PUT("/default", h.SetDefault)
 		configs.POST("/templates/query", h.QueryTemplates)
 		configs.POST("", h.Create)
 		configs.GET("/:id", h.Get)
@@ -65,6 +65,41 @@ func registerSandboxConfigHandlers(
 		configs.GET("/:id/skills/:skillId/transcript", skills.InstallTranscript)
 		configs.GET("/:id/skills/:skillId/transcript/history", skills.InstallTranscriptHistory)
 	}
+}
+
+// RegisterSystemAdminSandboxSkillRoutes exposes platform-owned sandbox
+// connections and skills without fabricating an enterprise scope. No API-key
+// policy is registered, so API keys remain denied by default.
+func RegisterSystemAdminSandboxSkillRoutes(
+	r *gin.RouterGroup,
+	sandboxConfigs *handler.SandboxConfigHandler,
+	sandboxSkills *handler.SandboxSkillHandler,
+	skills *handler.SkillHandler,
+	system *handler.SystemHandler,
+	g *rbacGuards,
+) {
+	admin := r.Group("/system/admin", g.SystemAdmin())
+	configs := admin.Group("/sandbox-configs")
+	registerSandboxConfigHandlers(configs, sandboxConfigs, sandboxSkills)
+	configs.POST("/check", system.CheckSandboxConfig)
+
+	catalog := admin.Group("/skills")
+	catalog.GET("", skills.ListCatalog)
+	catalog.POST("", skills.RegisterCatalog)
+	catalog.POST("/:id/install", skills.InstallCatalog)
+	catalog.DELETE("/:id", skills.DeleteCatalog)
+	catalog.GET("/:id/files", skills.ListCatalogFiles)
+	catalog.GET("/:id/files/content", skills.GetCatalogFile)
+}
+
+// RegisterSandboxPermissionRoutes keeps the enterprise-owned script kill
+// switch in the business plane. No API-key policy is declared.
+func RegisterSandboxPermissionRoutes(
+	r *gin.RouterGroup, h *handler.SandboxConfigHandler, g *rbacGuards,
+) {
+	policy := r.Group("/sandbox-policy", g.Admin())
+	policy.GET("", h.GetWorkspacePolicy)
+	policy.PUT("", h.SetWorkspacePolicy)
 }
 
 // RegisterEvaluationRoutes registers evaluation endpoints. Running an
@@ -229,12 +264,12 @@ func RegisterWebSearchProviderRoutes(
 
 // RegisterVectorStoreRoutes registers CRUD routes for vector store configurations.
 //
-// Vector stores are tenant-level infrastructure; reads are Viewer+, all
-// writes (and connection tests, which probe external systems with stored
-// credentials) are Admin+.
+// Full vector-store configuration is platform-global and SystemAdmin-only.
+// Tenant users receive a separate credential-free capability projection.
 func RegisterVectorStoreRoutes(r *gin.RouterGroup, h *handler.VectorStoreHandler, g *rbacGuards) {
+	r.GET("/vector-stores", g.Viewer(), h.ListCapabilities)
 	stores := g.apiKeyGroup(
-		r.Group("/vector-stores", g.SystemAdmin()),
+		r.Group("/system/admin/vector-stores", g.SystemAdmin()),
 		apiKeyPlatform(types.APIKeyCapabilityManageVectorStores),
 	)
 	{
@@ -246,13 +281,15 @@ func RegisterVectorStoreRoutes(r *gin.RouterGroup, h *handler.VectorStoreHandler
 		stores.PUT("/:id", h.UpdateStore)
 		stores.DELETE("/:id", h.DeleteStore)
 		stores.POST("/:id/test", h.TestStoreByID)
+		stores.PUT("/:id/default", h.SetDefaultStore)
 	}
 }
 
 // RegisterStorageBackendRoutes manages concrete object/file storage instances.
 func RegisterStorageBackendRoutes(r *gin.RouterGroup, h *handler.StorageBackendHandler, g *rbacGuards) {
+	r.GET("/storage-backends", g.Viewer(), h.ListCapabilities)
 	backends := g.apiKeyGroup(
-		r.Group("/storage-backends", g.SystemAdmin()),
+		r.Group("/system/admin/storage-backends", g.SystemAdmin()),
 		apiKeyPlatform(types.APIKeyCapabilityManageStorageBackends),
 	)
 	{

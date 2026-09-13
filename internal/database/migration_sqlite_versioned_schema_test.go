@@ -28,23 +28,30 @@ var versionedSQLiteTables = []string{
 	"operating_brief_snapshots",
 	"operating_brief_scope_refs",
 	"platform_parser_config",
+	"platform_sandbox_configs",
+	"platform_skill_catalog",
+	"platform_skills",
+	"platform_skill_snapshots",
+	"tenant_user_env_vars",
 }
 
 // versionedSQLiteColumns maps each existing table to the columns that the
 // versioned migrations add and the SQLite baseline was missing.
 var versionedSQLiteColumns = map[string][]string{
-	"tenants":            {"api_principal_config", "memory_generation", "seats_total", "governed_enterprise_id", "analysis_enabled", "ringxun_activation_idempotency_key_sha256", "ringxun_activation_plan_version_id", "ringxun_activation_completed_at", "ringxun_activation_last_error_code"},
-	"users":              {"is_system_admin"},                // 000053
-	"knowledges":         {"pending_subtasks_count"},         // 000056
-	"messages":           {"attachments", "usage"},           // 000034, 000085
-	"tenant_invitations": {"token", "accepted_count"},        // 000054
-	"embed_channels":     {"allow_memory"},                   // 000060
-	"mcp_oauth_tokens":   {"principal_type", "principal_id"}, // 000064
-	"memory_subjects":    {"generation", "revision"},         // 000101
-	"memory_items":       {"scope"},                          // 000101
+	"tenants":                  {"api_principal_config", "memory_generation", "seats_total", "governed_enterprise_id", "analysis_enabled", "ringxun_activation_idempotency_key_sha256", "ringxun_activation_plan_version_id", "ringxun_activation_completed_at", "ringxun_activation_last_error_code"},
+	"users":                    {"is_system_admin"},                // 000053
+	"knowledges":               {"pending_subtasks_count"},         // 000056
+	"messages":                 {"attachments", "usage"},           // 000034, 000085
+	"tenant_invitations":       {"token", "accepted_count"},        // 000054
+	"embed_channels":           {"allow_memory"},                   // 000060
+	"mcp_oauth_tokens":         {"principal_type", "principal_id"}, // 000064
+	"memory_subjects":          {"generation", "revision"},         // 000101
+	"memory_items":             {"scope"},                          // 000101
+	"platform_sandbox_configs": {"is_default"},
+	"platform_skills":          {"install_run_id", "install_transcript"},
 }
 
-const expectedSQLiteMigrationVersion = 32
+const expectedSQLiteMigrationVersion = 34
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
@@ -79,6 +86,11 @@ func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 		"SQLite migrations must drop legacy knowledges.tag_id after multi-tag migration")
 	require.False(t, sqliteColumnExists(t, db, "tenants", "parser_engine_config"),
 		"SQLite migrations must move parser configuration out of tenants")
+	require.False(t, sqliteTableExists(t, db, "tenant_sandbox_configs"))
+	require.False(t, sqliteTableExists(t, db, "tenant_skill_catalog"))
+	require.False(t, sqliteTableExists(t, db, "tenant_skills"))
+	require.False(t, sqliteTableExists(t, db, "tenant_skill_snapshots"))
+	require.False(t, sqliteTableExists(t, db, "platform_skill_runs"))
 }
 
 func TestSQLiteMigrationsUpgradeV4PreservesData(t *testing.T) {
@@ -141,6 +153,76 @@ func TestSQLiteMigrationsUpgradeV4PreservesData(t *testing.T) {
 	).Scan(&relationCount))
 	require.Equal(t, 1, relationCount)
 	require.False(t, sqliteColumnExists(t, db, "knowledges", "tag_id"))
+	require.False(t, sqliteTableExists(t, db, "tenant_sandbox_configs"))
+	require.False(t, sqliteTableExists(t, db, "platform_skill_runs"))
+}
+
+func TestSQLitePlatformSandboxMigrationPreservesIDsPinsAndDuplicateNames(t *testing.T) {
+	repoRoot := sqliteRepoRoot(t)
+	legacyRoot := copySQLiteMigrationsThrough(t, repoRoot, 27)
+	chdirAndRestore(t, legacyRoot)
+
+	dbPath := filepath.Join(t.TempDir(), "platform-sandbox.db")
+	require.NoError(t, RunMigrationsWithOptions("sqlite3://unused", MigrationOptions{SQLiteDBPath: dbPath}))
+	db := openSQLiteDB(t, dbPath)
+	_, err := db.Exec(`
+		INSERT INTO tenants(id, name, business) VALUES
+			(1, 'Tenant A', 'migration-test'),
+			(2, 'Tenant B', 'migration-test');
+		INSERT INTO tenant_sandbox_configs(
+			id, tenant_id, name, sandbox_type, config
+		) VALUES
+			('config-a', 1, 'shared-name', 'e2b', '{}'),
+			('config-b', 2, 'shared-name', 'e2b', '{}'),
+			('policy-a', 1, '__workspace_scripts_policy__', 'e2b', '{}');
+		INSERT INTO sessions(id, tenant_id, sandbox_config_id) VALUES
+			('session-a', 1, 'config-a'),
+			('session-b', 2, 'config-b');
+	`)
+	require.NoError(t, err)
+
+	chdirAndRestore(t, repoRoot)
+	require.NoError(t, RunMigrationsWithOptions("sqlite3://unused", MigrationOptions{SQLiteDBPath: dbPath}))
+
+	var configIDs []string
+	rows, err := db.Query("SELECT id FROM platform_sandbox_configs ORDER BY id")
+	require.NoError(t, err)
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id string
+		require.NoError(t, rows.Scan(&id))
+		configIDs = append(configIDs, id)
+	}
+	require.NoError(t, rows.Err())
+	require.Equal(t, []string{"config-a", "config-b"}, configIDs)
+	require.False(t, sqliteTableExists(t, db, "tenant_sandbox_configs"))
+	require.False(t, sqliteColumnExists(t, db, "platform_sandbox_configs", "tenant_id"))
+
+	var duplicateNames int
+	require.NoError(t, db.QueryRow(
+		"SELECT COUNT(*) FROM platform_sandbox_configs WHERE name = 'shared-name'",
+	).Scan(&duplicateNames))
+	require.Equal(t, 2, duplicateNames)
+
+	var tenantADisabled, tenantBDisabled bool
+	require.NoError(t, db.QueryRow(
+		"SELECT sandbox_scripts_disabled FROM tenants WHERE id = 1",
+	).Scan(&tenantADisabled))
+	require.NoError(t, db.QueryRow(
+		"SELECT sandbox_scripts_disabled FROM tenants WHERE id = 2",
+	).Scan(&tenantBDisabled))
+	require.True(t, tenantADisabled)
+	require.False(t, tenantBDisabled)
+
+	var sessionAConfig, sessionBConfig string
+	require.NoError(t, db.QueryRow(
+		"SELECT sandbox_config_id FROM sessions WHERE id = 'session-a'",
+	).Scan(&sessionAConfig))
+	require.NoError(t, db.QueryRow(
+		"SELECT sandbox_config_id FROM sessions WHERE id = 'session-b'",
+	).Scan(&sessionBConfig))
+	require.Equal(t, "config-a", sessionAConfig)
+	require.Equal(t, "config-b", sessionBConfig)
 }
 
 func TestSQLitePlatformIdentityMigrationNormalizesLegacyMixedIdentity(t *testing.T) {

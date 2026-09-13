@@ -29,6 +29,26 @@ type s3FileService struct {
 	pathPrefix string
 }
 
+func (s *s3FileService) putPlatformSkillArchive(ctx context.Context, key string, data []byte) (string, error) {
+	objectKey := strings.TrimSuffix(s.pathPrefix, "/") + "/" + key
+	if s.pathPrefix == "" {
+		objectKey = key
+	}
+	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(s.bucketName), Key: aws.String(objectKey), Body: bytes.NewReader(data), ContentLength: aws.Int64(int64(len(data))), ContentType: aws.String("application/octet-stream")})
+	if err != nil {
+		return "", fmt.Errorf("failed to upload platform skill archive to S3: %w", err)
+	}
+	return fmt.Sprintf("s3://%s/%s", s.bucketName, objectKey), nil
+}
+
+func (s *s3FileService) platformSkillArchiveKey(ref string) (string, error) {
+	key, err := s.parseS3FilePath(ref)
+	if err != nil {
+		return "", err
+	}
+	return platformSkillLogicalKey(key, s.pathPrefix)
+}
+
 // newS3Client creates a bare s3FileService with just the SDK client initialised.
 func newS3Client(endpoint, accessKey, secretKey, bucketName, region, pathPrefix string, forcePathStyle bool) (*s3FileService, error) {
 	if err := utils.ValidateURLForSSRF(endpoint); err != nil {

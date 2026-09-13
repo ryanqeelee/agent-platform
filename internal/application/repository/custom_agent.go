@@ -127,34 +127,22 @@ func (r *customAgentRepository) ListModelUsages(
 }
 
 // CountBySandboxConfigID counts agents pointing at a sandbox config.
-//
-// Used only to warn the admin which agents reference a config; never use it to
-// refuse operations. Agent references are permanent state, so blocking on them
-// would make credential rotation impossible.
 func (r *customAgentRepository) CountBySandboxConfigID(
-	ctx context.Context, tenantID uint64, configID string,
+	ctx context.Context, configID string,
 ) (int64, error) {
 	var count int64
-	query := r.db.WithContext(ctx).
-		Model(&types.CustomAgent{}).
-		Where("tenant_id = ?", tenantID)
+	query := r.db.WithContext(ctx).Model(&types.CustomAgent{})
 	query = scopeCustomAgentsBySandboxConfigID(query, configID)
 	err := query.Count(&count).Error
 	return count, err
 }
 
 // ListNamesBySandboxConfigID returns agent names pointing at a sandbox config.
-//
-// Used only to warn the admin which agents reference a config; never use it to
-// refuse operations. Agent references are permanent state, so blocking on them
-// would make credential rotation impossible.
 func (r *customAgentRepository) ListNamesBySandboxConfigID(
-	ctx context.Context, tenantID uint64, configID string,
+	ctx context.Context, configID string,
 ) ([]string, error) {
 	var names []string
-	query := r.db.WithContext(ctx).
-		Model(&types.CustomAgent{}).
-		Where("tenant_id = ?", tenantID)
+	query := r.db.WithContext(ctx).Model(&types.CustomAgent{})
 	query = scopeCustomAgentsBySandboxConfigID(query, configID)
 	err := query.Order("name ASC").Pluck("name", &names).Error
 	return names, err

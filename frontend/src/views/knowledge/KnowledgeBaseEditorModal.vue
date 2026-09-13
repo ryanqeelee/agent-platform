@@ -258,10 +258,8 @@
                 <div v-if="authStore.isSystemAdmin && !isFAQ && formData && currentSection === 'storage'" class="section">
                   <KBStorageSettings
                     :storage-backend-id="formData.storageBackendId"
-                    :storage-provider="formData.storageProvider"
                     :has-files="editorMode === 'edit' && hasFiles"
                     @update:storage-backend-id="handleStorageBackendUpdate"
-                    @update:storage-provider="handleStorageProviderUpdate"
                   />
                 </div>
 
@@ -559,9 +557,6 @@ const saving = ref(false)
 const loading = ref(false)
 const allModels = ref<any[]>([])
 const hasFiles = ref(false)
-const initialStorageProvider = ref<string>('')
-/** Tenant-wide default from Settings → Storage engine (used when creating a KB). */
-const tenantDefaultStorageProvider = ref('local')
 const initialIndexingStrategy = ref<any>(null)
 const dsCount = ref(0)
 const kbTenantId = ref<number>(0)
@@ -750,7 +745,6 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       tableMetadataInstructions: ''
     },
     storageBackendId: '' as string,
-    storageProvider: '' as string,
     multimodalConfig: {
       enabled: false,
       vllmModelId: '',
@@ -801,9 +795,8 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       wikiEnabled: false,
       graphEnabled: false,
     },
-    // Vector-store binding. Empty string means "use the env-configured
-    // store"; create mode defaults to that, edit mode loads the
-    // existing binding from the KB response below.
+    // Vector-store binding. Create mode receives the platform default ID;
+    // edit mode keeps the immutable binding from the KB response below.
     vectorStoreId: '' as string,
     vectorStoreInfo: {
       source: undefined as string | undefined,
@@ -894,7 +887,6 @@ const loadKBData = async (
 		tableMetadataInstructions: splitting.tableMetadataInstructions ?? kb.chunking_config?.table_metadata_instructions ?? ''
       },
       storageBackendId: (kb.storage_backend_id || '') as string,
-      storageProvider: (kb.storage_provider_config?.provider || kb.storage_config?.provider || 'local') as string,
       multimodalConfig: {
         enabled: !!kb.vlm_config?.enabled,
         vllmModelId: kb.vlm_config?.model_id || '',
@@ -962,7 +954,6 @@ const loadKBData = async (
         status: kb.vector_store_status,
       },
     }
-    initialStorageProvider.value = formData.value.storageProvider
     initialIndexingStrategy.value = { ...formData.value.indexingStrategy }
   } catch (error) {
     if (!isCurrentKBLoad(generation, kbId)) return
@@ -1090,48 +1081,15 @@ const handleAddWikiModel = () => {
   uiStore.openSettings('models', 'knowledgeqa')
 }
 
-const handleStorageProviderUpdate = (value: string) => {
-  if (formData.value) {
-    formData.value.storageProvider = editorMode.value === 'create'
-      ? editorResources.resolveUsableStorageProvider(value || tenantDefaultStorageProvider.value)
-      : (value || tenantDefaultStorageProvider.value || 'local')
-  }
-}
-
 const handleStorageBackendUpdate = (value: string) => {
   if (formData.value) {
     formData.value.storageBackendId = value
   }
 }
 
-async function loadTenantDefaultStorageProvider(force = false) {
-  try {
-    await editorResources.ensureStorageEngine(force)
-    tenantDefaultStorageProvider.value = editorResources.resolveUsableStorageProvider(
-      editorResources.storageConfig?.default_provider,
-    )
-  } catch {
-    tenantDefaultStorageProvider.value = editorResources.resolveUsableStorageProvider()
-  }
-}
-
-/** Resolved storage provider for create payload (never silently default to local before tenant config loads). */
-function resolvedStorageProvider(): string {
-  const explicit = formData.value?.storageProvider?.trim()
-  if (editorMode.value === 'create') {
-    return editorResources.resolveUsableStorageProvider(explicit || tenantDefaultStorageProvider.value)
-  }
-  if (explicit) return explicit
-  return tenantDefaultStorageProvider.value || 'local'
-}
-
 const handleVectorStoreIdUpdate = (id: string) => {
   if (formData.value) {
-    // Empty string here means "use system default" (env-store fallback).
-    // The create-payload assembly below converts this back to `omit` so
-    // the backend stores NULL — keeping the wire shape identical to
-    // pre-Phase-2 clients.
-    formData.value.vectorStoreId = id || ''
+    formData.value.vectorStoreId = id
   }
 }
 
@@ -1185,6 +1143,16 @@ const validateForm = (): boolean => {
       currentSection.value = 'multimodal'
       return false
     }
+    if (editorMode.value === 'create' && !formData.value.storageBackendId) {
+      MessagePlugin.warning(t('kbSettings.storage.defaultRequired'))
+      currentSection.value = 'storage'
+      return false
+    }
+    if (editorMode.value === 'create' && !formData.value.vectorStoreId) {
+      MessagePlugin.warning(t('kbSettings.vectorStore.defaultRequired'))
+      currentSection.value = 'vectorStore'
+      return false
+    }
   }
 
   if (formData.value.type === 'faq' && !formData.value.faqConfig?.indexMode) {
@@ -1230,9 +1198,7 @@ const buildSubmitData = () => {
   if (authStore.isSystemAdmin) {
     data.embedding_model_id = formData.value.modelConfig.embeddingModelId
     data.summary_model_id = formData.value.modelConfig.llmModelId
-    if (formData.value.vectorStoreId) {
-      data.vector_store_id = formData.value.vectorStoreId
-    }
+    data.vector_store_id = formData.value.vectorStoreId
     data.vlm_config = {
       enabled: formData.value.multimodalConfig.enabled,
       model_id: formData.value.multimodalConfig.enabled
@@ -1251,9 +1217,6 @@ const buildSubmitData = () => {
     if (formData.value.storageBackendId) {
       data.storage_backend_id = formData.value.storageBackendId
     }
-    const storageProvider = resolvedStorageProvider()
-    data.storage_provider_config = { provider: storageProvider }
-    data.storage_config = { provider: storageProvider }
   }
 
   // 添加知识图谱配置 — now synced via indexingStrategy.graphEnabled
@@ -1331,31 +1294,6 @@ const buildSubmitData = () => {
 // 提交表单
 const handleSubmit = async () => {
   if (!validateForm()) {
-    return
-  }
-
-  // 编辑模式下，若已有文件且存储引擎发生了变化，弹窗确认
-  if (
-    authStore.isSystemAdmin &&
-    editorMode.value === 'edit' &&
-    hasFiles.value &&
-    formData.value &&
-    initialStorageProvider.value &&
-    formData.value.storageProvider !== initialStorageProvider.value
-  ) {
-    const dialog = DialogPlugin.confirm({
-      header: t('common.confirm'),
-      body: t('knowledgeEditor.messages.storageChangeConfirm'),
-      confirmBtn: t('common.confirm'),
-      cancelBtn: t('common.cancel'),
-      onConfirm: () => {
-        dialog.destroy()
-        doSubmit()
-      },
-      onCancel: () => {
-        dialog.destroy()
-      },
-    })
     return
   }
 
@@ -1458,7 +1396,6 @@ const doSubmit = async () => {
           enabled: !!data.vlm_config?.enabled
         },
         storageBackendId: formData.value?.storageBackendId || '',
-        storageProvider: data.storage_provider_config?.provider || data.storage_config?.provider || '',
         nodeExtract: {
           enabled: data.extract_config?.enabled || false,
           text: data.extract_config?.text || '',
@@ -1544,8 +1481,6 @@ const resetState = () => {
   currentSection.value = 'basic'
   formData.value = null
   hasFiles.value = false
-  initialStorageProvider.value = ''
-  tenantDefaultStorageProvider.value = 'local'
   initialIndexingStrategy.value = null
   saving.value = false
   loading.value = false
@@ -1577,7 +1512,11 @@ watch(() => props.visible, async (newVal) => {
     }
     
     if (authStore.isSystemAdmin) {
-      await Promise.all([loadAllModels(), loadTenantDefaultStorageProvider()])
+      await Promise.all([
+        loadAllModels(),
+        editorResources.ensureStorageBackends(),
+        editorResources.ensureVectorStores(),
+      ])
     }
 
     if (generation !== kbEditorLoadGeneration || !props.visible) return
@@ -1586,10 +1525,11 @@ watch(() => props.visible, async (newVal) => {
     if (props.mode === 'edit' && targetKbId) {
       await loadKBData(targetKbId, generation)
     } else {
-      // 创建模式：初始化空表单，并预填空间默认存储引擎
+      // 创建模式：初始化空表单，并绑定平台明确配置的默认连接。
       formData.value = initFormData(props.initialType || 'document')
       if (authStore.isSystemAdmin) {
-        formData.value.storageProvider = tenantDefaultStorageProvider.value
+        formData.value.storageBackendId = editorResources.defaultStorageBackendID
+        formData.value.vectorStoreId = editorResources.defaultVectorStoreID
       }
       hasFiles.value = false
       if (authStore.isSystemAdmin) {
@@ -1607,12 +1547,21 @@ watch(() => props.visible, async (newVal) => {
   }
 })
 
-// 监听全局设置弹窗关闭后刷新模型列表
+// 监听全局设置弹窗关闭后刷新可配置资源
 watch(
   () => uiStore.showSettingsModal,
   async (visible, previous) => {
     if (authStore.isSystemAdmin && !visible && previous && props.visible) {
-      await loadAllModels(true)
+      await Promise.all([
+        loadAllModels(true),
+        editorResources.ensureStorageBackends(true),
+        editorResources.ensureVectorStores(true),
+      ])
+
+      if (editorMode.value === 'create' && formData.value) {
+        formData.value.storageBackendId ||= editorResources.defaultStorageBackendID
+        formData.value.vectorStoreId ||= editorResources.defaultVectorStoreID
+      }
     }
   }
 )

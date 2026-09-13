@@ -287,17 +287,19 @@ func NewRouter(params RouterParams) *gin.Engine {
 			params.TenantService,
 			params.TenantHandler,
 			params.MessageHandler,
+			params.TenantMemoryConfigHandler,
+			params.AICapabilityPlanHandler,
+			rbacGuards,
+		)
+		RegisterSystemAdminSandboxSkillRoutes(
+			v1,
 			params.SandboxConfigHandler,
 			params.SandboxSkillHandler,
 			params.SkillHandler,
-			params.CustomAgentHandler,
 			params.SystemHandler,
-			params.TenantMemoryConfigHandler,
-			params.AICapabilityPlanHandler,
-			params.VectorStoreHandler,
-			params.StorageBackendHandler,
 			rbacGuards,
 		)
+		RegisterSandboxPermissionRoutes(v1, params.SandboxConfigHandler, rbacGuards)
 		RegisterMyEnvVarRoutes(v1, params.MeEnvVarHandler)
 		RegisterEvaluationRoutes(v1, params.EvaluationHandler, rbacGuards)
 		RegisterInitializationRoutes(v1, params.InitializationHandler, rbacGuards)

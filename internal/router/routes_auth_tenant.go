@@ -262,8 +262,6 @@ func RegisterSystemRoutes(
 		systemGroup.GET("/admin/info", g.SystemAdmin(), handler.GetSystemInfo)
 		systemRoutes.GET("/info", g.Viewer(), handler.GetSystemInfo)
 		systemRoutes.GET("/parser-engines", g.Viewer(), handler.ListParserEngineCapabilities)
-		systemRoutes.GET("/storage-engine-status", g.SystemAdmin(), handler.GetStorageEngineStatus)
-		systemRoutes.POST("/storage-engine-check", g.SystemAdmin(), handler.CheckStorageEngine)
 	}
 }
 

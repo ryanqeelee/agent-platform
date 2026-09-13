@@ -117,6 +117,24 @@ func (r parentChildRetrieveRegistry) GetRetrieveEngineService(
 	return r.engine, nil
 }
 
+func (r parentChildRetrieveRegistry) GetOrLoadByStoreID(
+	context.Context, uint64, string,
+) (interfaces.RetrieveEngineService, error) {
+	return r.engine, nil
+}
+
+type parentChildStoreAvailability struct {
+	storeID string
+}
+
+func (a parentChildStoreAvailability) StoreUsable(_ context.Context, storeID string) (bool, error) {
+	return storeID == a.storeID, nil
+}
+
+func (a parentChildStoreAvailability) DefaultStoreID(context.Context) (string, error) {
+	return a.storeID, nil
+}
+
 type parentChildGraphRepo struct {
 	interfaces.RetrieveGraphRepository
 }
@@ -140,6 +158,7 @@ func (parentChildTaskEnqueuer) Enqueue(*asynq.Task, ...asynq.Option) (*asynq.Tas
 }
 
 func TestProcessChunksIndexesEveryTextChild(t *testing.T) {
+	vectorStoreID := "vector-store-1"
 	knowledge := &types.Knowledge{
 		ID:              "knowledge-1",
 		TenantID:        1,
@@ -163,6 +182,7 @@ func TestProcessChunksIndexesEveryTextChild(t *testing.T) {
 		chunkService:   chunkService,
 		modelService:   parentChildModelService{embedder: parentChildEmbedder{}},
 		retrieveEngine: parentChildRetrieveRegistry{engine: retrieveEngine},
+		ownership:      parentChildStoreAvailability{storeID: vectorStoreID},
 		graphEngine:    parentChildGraphRepo{},
 		tenantRepo:     parentChildTenantRepo{},
 		task:           parentChildTaskEnqueuer{},
@@ -172,6 +192,7 @@ func TestProcessChunksIndexesEveryTextChild(t *testing.T) {
 		TenantID:         1,
 		EmbeddingModelID: "embedding-1",
 		IndexingStrategy: types.IndexingStrategy{VectorEnabled: true},
+		VectorStoreID:    &vectorStoreID,
 	}
 	chunks := []types.ParsedChunk{
 		{Content: "linked child", Seq: 0, Start: 0, End: 12, ParentIndex: 0},

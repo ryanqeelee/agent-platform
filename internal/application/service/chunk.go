@@ -31,7 +31,7 @@ type chunkService struct {
 	kbRepository    interfaces.KnowledgeBaseRepository
 	modelService    interfaces.ModelService
 	retrieveEngine  interfaces.RetrieveEngineRegistry
-	ownership       retriever.TenantStoreOwnership
+	ownership       retriever.StoreConfigAvailability
 	task            interfaces.TaskEnqueuer
 	spanTracker     SpanTracker
 }
@@ -49,7 +49,7 @@ func NewChunkService(
 	kbRepository interfaces.KnowledgeBaseRepository,
 	modelService interfaces.ModelService,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
-	ownership retriever.TenantStoreOwnership,
+	ownership retriever.StoreConfigAvailability,
 	task interfaces.TaskEnqueuer,
 	spanTracker SpanTracker,
 ) interfaces.ChunkService {

@@ -80,7 +80,7 @@ type stubVectorStoreService struct {
 }
 
 func (s *stubVectorStoreService) BatchResolveStoreView(
-	_ context.Context, _ uint64, storeIDs []string,
+	_ context.Context, storeIDs []string,
 ) (map[string]types.StoreDisplay, error) {
 	s.batchCalls++
 	if s.batchErr != nil {
@@ -97,9 +97,9 @@ func (s *stubVectorStoreService) BatchResolveStoreView(
 	return out, nil
 }
 
-func (s *stubVectorStoreService) EnvDefaultStoreView(_ context.Context) types.StoreDisplay {
+func (s *stubVectorStoreService) DefaultStoreView(_ context.Context) types.StoreDisplay {
 	if s.envView.Source == "" {
-		return types.DefaultStoreDisplay()
+		return types.UnavailableStoreDisplay()
 	}
 	return s.envView
 }

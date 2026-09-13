@@ -13,9 +13,11 @@ const chatHistorySettings = readFileSync(new URL('../views/settings/ChatHistoryS
 const platformOperations = readFileSync(new URL('../views/operations/PlatformOperations.vue', import.meta.url), 'utf8')
 const nginx = readFileSync(new URL('../../nginx.conf', import.meta.url), 'utf8')
 
-test('platform sandbox and skill APIs require an explicit tenant path', () => {
-  assert.match(systemAPI, /\/api\/v1\/system\/admin\/tenants\/\$\{tenantId\}\/sandbox-configs/)
-  assert.match(skillAPI, /\/api\/v1\/system\/admin\/tenants\/\$\{tenantId\}\/skills/)
+test('platform sandbox and skill APIs are tenantless', () => {
+  assert.match(systemAPI, /\/api\/v1\/system\/admin\/sandbox-configs/)
+  assert.match(skillAPI, /\/api\/v1\/system\/admin\/skills/)
+  assert.doesNotMatch(systemAPI, /system\/admin\/tenants\/[^'`\n]*sandbox-configs/)
+  assert.doesNotMatch(skillAPI, /system\/admin\/tenants\/[^'`\n]*skills/)
   assert.doesNotMatch(systemAPI, /['`]\/api\/v1\/sandbox-configs/)
   assert.doesNotMatch(skillAPI, /['`]\/api\/v1\/skills/)
 })
@@ -69,6 +71,6 @@ test('message indexing uses the selected enterprise control-plane path', () => {
 })
 
 test('nginx grants the larger skill bundle limit only to the platform control plane', () => {
-  assert.ok(nginx.includes('location ~ ^/api/v1/system/admin/(?:skills/catalog|sandbox-configs/[^/]+/skills)/?$ {'))
-  assert.ok(!nginx.includes('location ~ ^/api/v1/(?:skills/catalog|sandbox-configs/[^/]+/skills)/?$ {'))
+  assert.ok(nginx.includes('location ~ ^/api/v1/system/admin/(?:skills|sandbox-configs/[^/]+/skills)/?$ {'))
+  assert.ok(!nginx.includes('location ~ ^/api/v1/(?:skills|sandbox-configs/[^/]+/skills)/?$ {'))
 })

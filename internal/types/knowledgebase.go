@@ -90,7 +90,8 @@ type KnowledgeBase struct {
 	VLMConfig VLMConfig `yaml:"vlm_config"              json:"vlm_config"              gorm:"type:json"`
 	// ASR config (Automatic Speech Recognition)
 	ASRConfig ASRConfig `yaml:"asr_config"              json:"asr_config"              gorm:"type:json"`
-	// Storage provider config (new): only stores provider selection; credentials from workspace StorageEngineConfig
+	// Storage provider config records the provider used by historical objects;
+	// credentials come from the bound platform storage backend.
 	StorageProviderConfig *StorageProviderConfig `yaml:"storage_provider_config" json:"storage_provider_config"  gorm:"column:storage_provider_config;type:jsonb"`
 	// StorageBackendID binds this KB to one concrete storage instance. The
 	// legacy provider field remains readable during migration only.
@@ -350,7 +351,7 @@ func normalizeParserFileType(fileType string) string {
 }
 
 // StorageProviderConfig stores the KB-level storage provider selection.
-// Credentials are managed at the tenant level (StorageEngineConfig).
+// Credentials are managed by the bound platform storage backend.
 type StorageProviderConfig struct {
 	Provider string `yaml:"provider" json:"provider"` // "local", "minio", "cos", "tos", "s3", "oss", "ks3", "obs"
 }

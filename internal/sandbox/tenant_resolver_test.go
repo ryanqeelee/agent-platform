@@ -15,7 +15,7 @@ type stubTenantConfigLoader struct {
 }
 
 func (s *stubTenantConfigLoader) Load(
-	context.Context, uint64, string,
+	context.Context, string,
 ) (ResolvedTenantSandboxConfig, error) {
 	s.hits++
 	return s.result, nil

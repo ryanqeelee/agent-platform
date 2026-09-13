@@ -2,6 +2,6 @@
 export function isSkillBundleUploadUrl(url: string | undefined): boolean {
   if (!url) return false
   const path = url.split('?')[0].replace(/\/+$/, '')
-  return /(?:^|\/)api\/v1\/system\/admin\/tenants\/\d+\/skills\/catalog$/.test(path)
-    || /(?:^|\/)api\/v1\/system\/admin\/tenants\/\d+\/sandbox-configs\/[^/]+\/skills$/.test(path)
+  return /(?:^|\/)api\/v1\/system\/admin\/skills$/.test(path)
+    || /(?:^|\/)api\/v1\/system\/admin\/sandbox-configs\/[^/]+\/skills$/.test(path)
 }

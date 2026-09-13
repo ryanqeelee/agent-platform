@@ -141,14 +141,7 @@ func createOpenSearchEngine(
 	if err != nil {
 		return nil, fmt.Errorf("create opensearch client: %w", err)
 	}
-	// Env stores share the cluster without a per-store index prefix; DB stores
-	// fold their (>=16-char) ID into the index name. NewRepository enforces the
-	// length rule, so map env-store IDs to "".
-	storeID := store.ID
-	if types.IsEnvStoreID(storeID) {
-		storeID = ""
-	}
-	repo, err := openSearchRepo.NewRepository(ctx, client, storeID, &store.IndexConfig,
+	repo, err := openSearchRepo.NewRepository(ctx, client, store.ID, &store.IndexConfig,
 		openSearchRepo.WithAuditSink(auditSink))
 	if err != nil {
 		return nil, fmt.Errorf("create opensearch repository: %w", err)

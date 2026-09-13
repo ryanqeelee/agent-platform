@@ -27,6 +27,26 @@ type tosFileService struct {
 	tempBucketName string
 }
 
+func (s *tosFileService) putPlatformSkillArchive(ctx context.Context, key string, data []byte) (string, error) {
+	objectKey := joinTOSObjectKey(s.pathPrefix, key)
+	_, err := s.client.PutObjectV2(ctx, &tos.PutObjectV2Input{PutObjectBasicInput: tos.PutObjectBasicInput{Bucket: s.bucketName, Key: objectKey, ContentType: "application/octet-stream"}, Content: bytes.NewReader(data)})
+	if err != nil {
+		return "", fmt.Errorf("failed to upload platform skill archive to TOS: %w", err)
+	}
+	return fmt.Sprintf("tos://%s/%s", s.bucketName, objectKey), nil
+}
+
+func (s *tosFileService) platformSkillArchiveKey(ref string) (string, error) {
+	bucket, key, err := parseTOSFilePath(ref)
+	if err != nil {
+		return "", err
+	}
+	if bucket != s.bucketName {
+		return "", fmt.Errorf("bucket mismatch in platform skill archive reference")
+	}
+	return platformSkillLogicalKey(key, s.pathPrefix)
+}
+
 const tosScheme = "tos://"
 
 // NewTosFileService creates a TOS file service.

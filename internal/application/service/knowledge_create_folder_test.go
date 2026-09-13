@@ -14,11 +14,12 @@ func createKnowledgeInFolder(t *testing.T, uploadName, customFileName string) *t
 	t.Helper()
 
 	repo := &createKnowledgeFileRepoStub{}
+	fileSvc := &createKnowledgeFileServiceStub{}
 	svc := &knowledgeService{
-		repo:      repo,
-		kbService: &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
-		fileSvc:   &createKnowledgeFileServiceStub{},
-		task:      &createKnowledgeTaskEnqueuerStub{},
+		repo:            repo,
+		kbService:       &createKnowledgeFileKBServiceStub{kb: newCreateKnowledgeBaseFixture()},
+		storageResolver: &createKnowledgeStorageResolver{fileSvc: fileSvc, provider: "local"},
+		task:            &createKnowledgeTaskEnqueuerStub{},
 	}
 
 	_, err := svc.CreateKnowledgeFromFile(

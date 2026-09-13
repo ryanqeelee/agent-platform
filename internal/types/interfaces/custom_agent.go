@@ -144,17 +144,12 @@ type CustomAgentRepository interface {
 	// callers that need the untruncated size should use CountByModelID.
 	ListModelUsages(ctx context.Context, tenantID uint64, modelID string) ([]types.ModelUsageResource, error)
 
-	// CountBySandboxConfigID counts agents pointing at a sandbox config.
-	//
-	// Used only to warn the admin which agents reference a config; never use it
-	// to refuse operations. Agent references are permanent state, so blocking on
-	// them would make credential rotation impossible.
-	CountBySandboxConfigID(ctx context.Context, tenantID uint64, configID string) (int64, error)
+	// CountBySandboxConfigID counts references across every tenant. Platform
+	// config deletion uses this as a hard safety guard.
+	CountBySandboxConfigID(ctx context.Context, configID string) (int64, error)
 
 	// ListNamesBySandboxConfigID returns agent names pointing at a sandbox config.
 	//
-	// Used only to warn the admin which agents reference a config; never use it
-	// to refuse operations. Agent references are permanent state, so blocking on
-	// them would make credential rotation impossible.
-	ListNamesBySandboxConfigID(ctx context.Context, tenantID uint64, configID string) ([]string, error)
+	// Results span every tenant; names are informational and need not be unique.
+	ListNamesBySandboxConfigID(ctx context.Context, configID string) ([]string, error)
 }

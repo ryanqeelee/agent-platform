@@ -87,7 +87,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/limiter"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/router"
-	"github.com/Tencent/WeKnora/internal/storageallowlist"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/stream"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -244,13 +244,16 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		repo repository.TenantSandboxConfigRepository,
 		agents interfaces.CustomAgentRepository,
 		skills repository.TenantSkillRepository,
-		files interfaces.StorageBackendResolver,
+		files interfaces.PlatformSkillArchiveStore,
+		pinner *service.SessionSandboxPinner,
 	) *service.TenantSandboxConfigService {
-		return service.NewTenantSandboxConfigService(repo, agents, buildGlobalSandboxConfig(), skills, files)
+		return service.NewTenantSandboxConfigService(repo, agents, buildGlobalSandboxConfig(), skills, files, pinner)
 	}))
-	must(container.Provide(func(s *service.TenantSandboxConfigService) service.WorkspaceSandboxPolicy {
+	must(container.Provide(service.NewTenantSandboxPermissionService))
+	must(container.Provide(func(s *service.TenantSandboxPermissionService) service.WorkspaceSandboxPolicy {
 		return s
 	}))
+	must(container.Provide(service.NewPlatformSandboxDefaultResolver))
 	must(container.Provide(service.NewWeKnoraCloudService))
 
 	// Extract services - register individual extracters with names
@@ -284,7 +287,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewResourceCatalog))
 	// TenantStoreOwnership adapter used by the retriever factory functions
 	// to verify that a resolved VectorStore belongs to the caller's tenant.
-	must(container.Provide(retriever.NewVectorStoreRepoOwnership))
+	must(container.Provide(retriever.NewVectorStoreConfigAvailability))
 	must(container.Provide(service.NewWebSearchService))
 	must(container.Provide(service.NewWebSearchProviderService))
 	must(container.Provide(NewEngineFactory))
@@ -298,9 +301,10 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		return sr, nil
 	}))
 	must(container.Provide(service.NewVectorStoreService))
-	must(container.Provide(service.NewStorageBackendServiceWithResources))
+	must(container.Provide(service.NewStorageBackendService))
 	must(container.Provide(func(s *service.StorageBackendService) interfaces.StorageBackendService { return s }))
 	must(container.Provide(func(s *service.StorageBackendService) interfaces.StorageBackendResolver { return s }))
+	must(container.Provide(service.NewPlatformSkillArchiveStore))
 
 	// Agent service layer (requires event bus, web search service)
 	// SessionService is passed as parameter to CreateAgentEngine method when creating AgentService
@@ -327,6 +331,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 
 	logger.Debugf(ctx, "[Container] Registering session service...")
 	must(container.Provide(service.NewSessionService))
+	must(container.Provide(sandbox.NewPlatformSkillExecutionFactory))
 	must(container.Provide(service.NewTenantSkillService))
 	// The member-facing half of env vars is its own service because its
 	// authority is different in kind: it derives the identity from the context
@@ -416,7 +421,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// *chatpipeline.EventManager, which only exists after the pipeline
 	// block above — starting the reaper any earlier panics.
 	must(container.Invoke(service.ConfigureSessionSkillPreparation))
-	must(container.Invoke(service.ConfigureEmployeeSandboxDefaults))
 	must(container.Invoke(startTenantSkillReaper))
 	logger.Debugf(ctx, "[Container] Tenant skill reaper registered")
 
@@ -466,7 +470,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewUserResourceFavoriteHandler))
 	must(container.Provide(service.NewSkillService))
 	must(container.Provide(func(s *service.TenantSkillService, agents interfaces.CustomAgentService) *handler.SkillHandler {
-		return handler.NewSkillHandler(s, s).WithEmployeeAgents(agents).WithEmployeeManagement(s)
+		return handler.NewSkillHandler(s, s).WithEmployeeAgents(agents)
 	}))
 	must(container.Provide(handler.NewOrganizationHandler))
 	must(container.Provide(handler.NewMemoryHandler))
@@ -550,7 +554,7 @@ func registerChatLocalImageResolver(
 		if provider == "" {
 			provider = "local"
 		}
-		fileSvc, _, err := storageResolver.ResolveFileService(ctx, tenant, backendID, provider, baseDir)
+		fileSvc, _, err := storageResolver.ResolveFileService(ctx, backendID, baseDir)
 		if err != nil {
 			return nil, false
 		}
@@ -793,11 +797,9 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 			)
 		}
 
-		// Post-migration: resolve __pending_env__ storage provider markers for historical KBs.
-		// The SQL migration marks KBs that have documents but no provider with "__pending_env__";
-		// we replace that with the actual STORAGE_TYPE from the environment.
-		resolveStorageProviderPending(db)
-		migrateLegacyStorageBackends(db)
+		// Repair counters and stale Lite-mode tasks after schema migration.
+		syncSequences(db)
+		resetPendingTasks(db)
 
 		// Post-migration: declarative built-in models from config/builtin_models.yaml (optional).
 		if err := types.LoadBuiltinModelsConfig(context.Background(), db, config.ConfigDir()); err != nil {
@@ -825,145 +827,6 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	sqlDB.SetConnMaxLifetime(time.Duration(10) * time.Minute)
 
 	return db, nil
-}
-
-// resolveStorageProviderPending replaces the "__pending_env__" sentinel in
-// knowledge_bases.storage_provider_config with the actual STORAGE_TYPE from the environment.
-// This runs once after SQL migrations to bind historical KBs to their real storage provider.
-func resolveStorageProviderPending(db *gorm.DB) {
-	storageType := strings.TrimSpace(os.Getenv("STORAGE_TYPE"))
-	if storageType == "" {
-		storageType = "local"
-	}
-	storageType = strings.ToLower(storageType)
-
-	result := db.Exec(
-		`UPDATE knowledge_bases SET storage_provider_config = ? WHERE storage_provider_config IS NOT NULL AND storage_provider_config->>'provider' = '__pending_env__'`,
-		fmt.Sprintf(`{"provider":"%s"}`, storageType),
-	)
-	if result.Error != nil {
-		logger.Warnf(context.Background(), "Failed to resolve __pending_env__ storage providers: %v", result.Error)
-	} else if result.RowsAffected > 0 {
-		logger.Infof(context.Background(), "Resolved %d knowledge bases with __pending_env__ storage provider → %s", result.RowsAffected, storageType)
-	}
-
-	// Sync PostgreSQL sequences with actual MAX values to prevent duplicate key
-	// errors. The old code assigned seq_id via SELECT MAX()+1 in application
-	// code, which could push values past the DB sequence counter.
-	syncSequences(db)
-
-	// Reset any pending tasks left over from previous aborted runs (Lite App mode)
-	resetPendingTasks(db)
-}
-
-// migrateLegacyStorageBackends backfills the storage_backends table from each
-// workspace's legacy StorageEngineConfig (or environment defaults) and binds
-// existing knowledge bases to the resulting backend.
-//
-// The table, columns and indexes are created by the SQL migrations
-// (migrations/versioned/000068 for Postgres, migrations/sqlite/000000_init for
-// SQLite); this step only handles data that cannot be expressed portably in
-// SQL: environment snapshots, JSON→config mapping, AES-encrypted credentials,
-// UUID generation and the per-startup refresh of env-backed aliases.
-// The migration is idempotent: one legacy_alias row per tenant/provider.
-func migrateLegacyStorageBackends(db *gorm.DB) {
-	var tenants []*types.Tenant
-	if err := db.Find(&tenants).Error; err != nil {
-		logger.Warnf(context.Background(), "Failed to load workspaces for storage backend migration: %v", err)
-		return
-	}
-	if len(tenants) == 0 {
-		return
-	}
-
-	// Load every alias in a single query. Probing each tenant/provider pair with
-	// First() makes GORM log "record not found" for every miss, which floods the
-	// startup log with workspaces × providers lines on fresh installs.
-	var aliases []*types.StorageBackend
-	if err := db.Where("legacy_alias = ?", true).Find(&aliases).Error; err != nil {
-		logger.Warnf(context.Background(), "Failed to load legacy storage aliases: %v", err)
-		return
-	}
-	existingAliases := make(map[uint64]map[string]*types.StorageBackend, len(aliases))
-	for _, alias := range aliases {
-		byProvider := existingAliases[alias.TenantID]
-		if byProvider == nil {
-			byProvider = make(map[string]*types.StorageBackend)
-			existingAliases[alias.TenantID] = byProvider
-		}
-		byProvider[alias.Provider] = alias
-	}
-
-	for _, tenant := range tenants {
-		legacy := tenant.StorageEngineConfig
-		defaultProvider := ""
-		if legacy != nil {
-			defaultProvider = strings.ToLower(strings.TrimSpace(legacy.DefaultProvider))
-		}
-		if defaultProvider == "" {
-			defaultProvider = strings.ToLower(strings.TrimSpace(os.Getenv("STORAGE_TYPE")))
-		}
-		if defaultProvider == "" {
-			defaultProvider = "local"
-		}
-
-		backendIDs := make(map[string]string)
-		for _, provider := range storageallowlist.Supported() {
-			if existing := existingAliases[tenant.ID][provider]; existing != nil {
-				// Environment-backed aliases are snapshots, not user-owned config.
-				// Refresh them at every startup so credential rotation does not
-				// leave the persisted resolver on stale values. If the workspace
-				// later gains an explicit legacy config, promote the alias to user
-				// source and stop automatic refreshes.
-				if existing.Source == types.StorageBackendSourceEnv {
-					desired := types.StorageBackendFromLegacy(tenant.ID, provider, legacy)
-					if desired == nil && provider == defaultProvider {
-						desired = types.StorageBackendFromEnvironment(tenant.ID)
-					}
-					if desired != nil && desired.Provider == provider {
-						_ = db.Model(&types.StorageBackend{}).Where("id = ?", existing.ID).Updates(map[string]interface{}{
-							"name": desired.Name, "config": desired.Config, "source": desired.Source, "status": desired.Status, "updated_at": time.Now(),
-						}).Error
-					}
-				}
-				backendIDs[provider] = existing.ID
-				continue
-			}
-			backend := types.StorageBackendFromLegacy(tenant.ID, provider, legacy)
-			if backend == nil && provider == defaultProvider {
-				backend = types.StorageBackendFromEnvironment(tenant.ID)
-			}
-			if backend == nil {
-				continue
-			}
-			if err := db.Create(backend).Error; err != nil {
-				logger.Warnf(context.Background(), "Failed to migrate %s storage for workspace %d: %v", provider, tenant.ID, err)
-				continue
-			}
-			backendIDs[provider] = backend.ID
-		}
-		if tenant.DefaultStorageBackendID == nil {
-			if id := backendIDs[defaultProvider]; id != "" {
-				if err := db.Model(&types.Tenant{}).Where("id = ?", tenant.ID).Update("default_storage_backend_id", id).Error; err != nil {
-					logger.Warnf(context.Background(), "Failed to set default storage backend for workspace %d: %v", tenant.ID, err)
-				}
-			}
-		}
-
-		var kbs []*types.KnowledgeBase
-		if err := db.Where("tenant_id = ? AND storage_backend_id IS NULL", tenant.ID).Find(&kbs).Error; err != nil {
-			continue
-		}
-		for _, kb := range kbs {
-			provider := kb.GetStorageProvider()
-			if provider == "" {
-				provider = defaultProvider
-			}
-			if id := backendIDs[provider]; id != "" {
-				_ = db.Model(&types.KnowledgeBase{}).Where("id = ? AND storage_backend_id IS NULL", kb.ID).Update("storage_backend_id", id).Error
-			}
-		}
-	}
 }
 
 // syncSequences ensures PostgreSQL sequences for auto-increment columns (seq_id)

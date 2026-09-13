@@ -82,7 +82,7 @@ func (e *skillVerificationError) Error() string {
 // skill offers ever loads, or a requirement pip would have skipped, is
 // returned as a note.
 func (s *TenantSkillService) verifySkill(
-	ctx context.Context, mgr sandbox.Manager, sessionID, skillDir string, bundle *SkillBundle,
+	ctx context.Context, mgr skillMaintenanceExecution, sessionID, skillDir string, bundle *SkillBundle,
 ) ([]string, error) {
 	if err := s.verifySkillTree(ctx, mgr, sessionID, skillDir, bundle); err != nil {
 		return nil, err
@@ -104,7 +104,7 @@ func (s *TenantSkillService) verifySkill(
 // going, so one round trip returns every finding instead of stopping at the
 // first — an install that fails anyway may as well fail completely.
 func (s *TenantSkillService) verifySkillTree(
-	ctx context.Context, mgr sandbox.Manager, sessionID, skillDir string, bundle *SkillBundle,
+	ctx context.Context, mgr skillMaintenanceExecution, sessionID, skillDir string, bundle *SkillBundle,
 ) error {
 	res, err := s.execInstall(ctx, mgr, sessionID,
 		skillTreeVerifyCommand(skillDir, sortedScriptPaths(bundle, allScriptExtensions...)))
@@ -163,7 +163,7 @@ func skillTreeVerifyCommand(skillDir string, scripts []string) string {
 // This is only the shape of the install. Whether the individual packages
 // landed is checked by the language passes below, which read the manifests.
 func (s *TenantSkillService) verifyDeclaredDependencies(
-	ctx context.Context, mgr sandbox.Manager, sessionID, skillDir string, bundle *SkillBundle,
+	ctx context.Context, mgr skillMaintenanceExecution, sessionID, skillDir string, bundle *SkillBundle,
 ) error {
 	if bundleHasPythonDeps(bundle) {
 		venvPython := path.Join(skillDir, ".venv", "bin", "python")
@@ -196,7 +196,7 @@ func (s *TenantSkillService) verifyDeclaredDependencies(
 // whose findings depend on what the image carries: a bundled tests/ directory
 // naming a package the venv does not have must not fail an install that works.
 func (s *TenantSkillService) verifyScriptsParse(
-	ctx context.Context, mgr sandbox.Manager, sessionID, skillDir string, bundle *SkillBundle,
+	ctx context.Context, mgr skillMaintenanceExecution, sessionID, skillDir string, bundle *SkillBundle,
 ) ([]string, error) {
 	var notes []string
 	if scripts := sortedScriptPaths(bundle, ".py"); len(scripts) > 0 {
@@ -231,7 +231,7 @@ func (s *TenantSkillService) verifyScriptsParse(
 // same working directory and environment a real skill call gets. Running it as
 // install-mode root would test permissions that never reach a session.
 func (s *TenantSkillService) execVerify(
-	ctx context.Context, mgr sandbox.Manager, sessionID, skillDir, label, command string,
+	ctx context.Context, mgr skillMaintenanceExecution, sessionID, skillDir, label, command string,
 ) ([]string, error) {
 	executor, err := installExecutor(mgr)
 	if err != nil {

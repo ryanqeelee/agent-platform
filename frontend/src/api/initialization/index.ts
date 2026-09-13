@@ -149,9 +149,8 @@ export interface KBModelConfigRequest {
     multimodal: {
         enabled: boolean
     }
-    /** 存储引擎选择："local" | "minio" | "cos" | "obs" 等，影响文档上传与文档内图片存储 */
+    /** 平台存储连接 ID。 */
     storageBackendId?: string
-    storageProvider?: string
     nodeExtract: {
         enabled: boolean
         text: string

@@ -1,4 +1,4 @@
-import { ref, type Ref } from 'vue'
+import { ref } from 'vue'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import {
   configSkillInstallEventsUrl,
@@ -23,7 +23,6 @@ export {
 
 export function useConfigSkillInstallProgress(options: {
   onDone?: (target: SkillInstallProgressTarget, event: ConfigSkillInstallEvent) => void
-  tenantId: Readonly<Ref<number | undefined>>
 }) {
   const progressByKey = ref<Record<string, ConfigSkillInstallEvent>>({})
   const abortByKey = new Map<string, AbortController>()
@@ -57,8 +56,6 @@ export function useConfigSkillInstallProgress(options: {
   function follow(configId: string, skillId: string) {
     const key = progressKey(configId, skillId)
     if (!configId || !skillId || abortByKey.has(key)) return
-    const tenantId = options.tenantId.value
-    if (!tenantId) return
     // abortByKey is the in-flight guard. A finished event for this key is
     // either status lag or a new run of the same skill id (retry); skipping
     // reconnect would leave the drawer showing the previous 100%.
@@ -67,7 +64,7 @@ export function useConfigSkillInstallProgress(options: {
     abortByKey.set(key, controller)
 
     const token = localStorage.getItem('weknora_token')
-    const url = `${getApiBaseUrl()}${configSkillInstallEventsUrl(tenantId, configId, skillId)}`
+    const url = `${getApiBaseUrl()}${configSkillInstallEventsUrl(configId, skillId)}`
 
     void fetchEventSource(url, {
       method: 'GET',

@@ -434,7 +434,7 @@ type DataTableSummaryService struct {
 	chunkService         interfaces.ChunkService
 	tenantService        interfaces.TenantService
 	retrieveEngine       interfaces.RetrieveEngineRegistry
-	ownership            retriever.TenantStoreOwnership
+	ownership            retriever.StoreConfigAvailability
 	sqlDB                *sql.DB
 	storageResolver      interfaces.StorageBackendResolver
 }
@@ -448,7 +448,7 @@ func NewDataTableSummaryService(
 	chunkService interfaces.ChunkService,
 	tenantService interfaces.TenantService,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
-	ownership retriever.TenantStoreOwnership,
+	ownership retriever.StoreConfigAvailability,
 	sqlDB *sql.DB,
 	storageResolver interfaces.StorageBackendResolver,
 ) interfaces.TaskHandler {
@@ -596,20 +596,14 @@ func (s *DataTableSummaryService) prepareResources(ctx context.Context, payload 
 	}, nil
 }
 
-// resolveFileServiceForKnowledge resolves a provider-specific file service for the current knowledge file.
-// It falls back to the global service when tenant storage config is unavailable.
+// resolveFileServiceForKnowledge keeps the existing table-summary flow while
+// resolving the global backend bound to the file or knowledge base.
 func (s *DataTableSummaryService) resolveFileServiceForKnowledge(ctx context.Context, resources *extractionResources) interfaces.FileService {
 	if resources == nil || resources.knowledge == nil {
 		return s.fileService
 	}
-	if resources.tenant == nil {
-		return s.fileService
-	}
 
 	provider := types.InferStorageFromFilePath(resources.knowledge.FilePath)
-	if provider == "" && resources.tenant.StorageEngineConfig != nil {
-		provider = strings.ToLower(strings.TrimSpace(resources.tenant.StorageEngineConfig.DefaultProvider))
-	}
 
 	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
 	backendID, _, _ := types.ParseStorageBackendPath(resources.knowledge.FilePath)
@@ -617,16 +611,13 @@ func (s *DataTableSummaryService) resolveFileServiceForKnowledge(ctx context.Con
 		backendID = strings.TrimSpace(*resources.knowledgeBase.StorageBackendID)
 	}
 
-	// New-model workspaces resolve via DefaultStorageBackendID even when no
-	// legacy StorageEngineConfig / provider is present, so gate on the resolver
-	// and a usable backendID/provider rather than requiring a non-empty provider.
-	if s.storageResolver == nil || (backendID == "" && provider == "") {
+	if s.storageResolver == nil {
 		return s.fileService
 	}
 
-	resolvedSvc, resolvedProvider, err := s.storageResolver.ResolveFileService(ctx, resources.tenant, backendID, provider, baseDir)
+	resolvedSvc, resolvedProvider, err := s.storageResolver.ResolveFileService(ctx, backendID, baseDir)
 	if err != nil {
-		logger.Warnf(ctx, "[TableSummary] Failed to resolve file service for provider=%s, fallback to default: %v", provider, err)
+		logger.Warnf(ctx, "[TableSummary] Failed to resolve file service for provider=%s: %v", provider, err)
 		return s.fileService
 	}
 	logger.Infof(ctx, "[TableSummary] Resolved file service for knowledge=%s provider=%s", resources.knowledge.ID, resolvedProvider)

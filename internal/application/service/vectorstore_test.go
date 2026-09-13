@@ -39,12 +39,10 @@ func newFakeESServer(t *testing.T) *httptest.Server {
 // ---------------------------------------------------------------------------
 
 type mockVectorStoreRepo struct {
-	stores              []*types.VectorStore
-	createErr           error
-	updateErr           error
-	deleteErr           error
-	existsByEndpointErr error
-	existsByEndpoint    bool
+	stores    []*types.VectorStore
+	createErr error
+	updateErr error
+	deleteErr error
 }
 
 func (m *mockVectorStoreRepo) Create(_ context.Context, store *types.VectorStore) error {
@@ -55,23 +53,26 @@ func (m *mockVectorStoreRepo) Create(_ context.Context, store *types.VectorStore
 	return nil
 }
 
-func (m *mockVectorStoreRepo) GetByID(_ context.Context, tenantID uint64, id string) (*types.VectorStore, error) {
+func (m *mockVectorStoreRepo) GetByID(_ context.Context, id string) (*types.VectorStore, error) {
 	for _, s := range m.stores {
-		if s.ID == id && s.TenantID == tenantID {
+		if s.ID == id {
 			return s, nil
 		}
 	}
 	return nil, nil
 }
 
-func (m *mockVectorStoreRepo) List(_ context.Context, tenantID uint64) ([]*types.VectorStore, error) {
-	var result []*types.VectorStore
-	for _, s := range m.stores {
-		if s.TenantID == tenantID {
-			result = append(result, s)
+func (m *mockVectorStoreRepo) GetDefault(_ context.Context) (*types.VectorStore, error) {
+	for _, store := range m.stores {
+		if store.IsDefault {
+			return store, nil
 		}
 	}
-	return result, nil
+	return nil, nil
+}
+
+func (m *mockVectorStoreRepo) List(_ context.Context) ([]*types.VectorStore, error) {
+	return m.stores, nil
 }
 
 func (m *mockVectorStoreRepo) Update(_ context.Context, store *types.VectorStore) error {
@@ -82,17 +83,8 @@ func (m *mockVectorStoreRepo) UpdateConnectionConfig(_ context.Context, _ *types
 	return m.updateErr
 }
 
-func (m *mockVectorStoreRepo) Delete(_ context.Context, _ uint64, _ string) error {
+func (m *mockVectorStoreRepo) Delete(_ context.Context, _ string) error {
 	return m.deleteErr
-}
-
-func (m *mockVectorStoreRepo) ExistsByEndpointAndIndex(
-	_ context.Context, _ uint64, _ types.RetrieverEngineType, _ string, _ string,
-) (bool, error) {
-	if m.existsByEndpointErr != nil {
-		return false, m.existsByEndpointErr
-	}
-	return m.existsByEndpoint, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -177,10 +169,9 @@ func (m *mockEngineService) BatchUpdateChunkTagID(_ context.Context, _ map[strin
 func TestCreateStore_Success(t *testing.T) {
 	es := newFakeESServer(t)
 	repo := &mockVectorStoreRepo{}
-	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
+	svc := NewVectorStoreService(repo, nil, nil, nil)
 
 	store := &types.VectorStore{
-		TenantID:   1,
 		Name:       "test-es",
 		EngineType: types.ElasticsearchRetrieverEngineType,
 		ConnectionConfig: types.ConnectionConfig{
@@ -195,7 +186,7 @@ func TestCreateStore_Success(t *testing.T) {
 
 func TestCreateStore_ValidationError(t *testing.T) {
 	repo := &mockVectorStoreRepo{}
-	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
+	svc := NewVectorStoreService(repo, nil, nil, nil)
 
 	tests := []struct {
 		name  string
@@ -203,15 +194,11 @@ func TestCreateStore_ValidationError(t *testing.T) {
 	}{
 		{
 			name:  "empty name",
-			store: &types.VectorStore{TenantID: 1, EngineType: types.PostgresRetrieverEngineType},
+			store: &types.VectorStore{EngineType: types.PostgresRetrieverEngineType},
 		},
 		{
 			name:  "invalid engine type",
-			store: &types.VectorStore{TenantID: 1, Name: "test", EngineType: "unknown"},
-		},
-		{
-			name:  "zero tenant ID",
-			store: &types.VectorStore{Name: "test", EngineType: types.PostgresRetrieverEngineType},
+			store: &types.VectorStore{Name: "test", EngineType: "unknown"},
 		},
 	}
 
@@ -227,7 +214,7 @@ func TestCreateStore_ValidationError(t *testing.T) {
 
 func TestCreateStore_ConnectionConfigValidation(t *testing.T) {
 	repo := &mockVectorStoreRepo{}
-	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
+	svc := NewVectorStoreService(repo, nil, nil, nil)
 
 	tests := []struct {
 		name      string
@@ -236,33 +223,23 @@ func TestCreateStore_ConnectionConfigValidation(t *testing.T) {
 	}{
 		{
 			name: "elasticsearch without addr",
-			store: &types.VectorStore{
-				TenantID: 1, Name: "test",
+			store: &types.VectorStore{Name: "test",
 				EngineType:       types.ElasticsearchRetrieverEngineType,
 				ConnectionConfig: types.ConnectionConfig{},
 			},
 			wantError: true,
 		},
 		{
-			// Postgres is no longer registerable as a DB-managed store (see
-			// validEngineTypes); the Validate() call inside CreateStore short-
-			// circuits before validateConnectionConfig ever runs. Either
-			// missing-config or full-config rejects with "unsupported engine
-			// type". The env-store path (RETRIEVE_DRIVER=postgres) reaches the
-			// engine registry through BuildEnvVectorStores and does not
-			// traverse this code path.
-			name: "postgres rejected as DB store (any config)",
-			store: &types.VectorStore{
-				TenantID: 1, Name: "test",
+			name: "postgres reuses application database",
+			store: &types.VectorStore{Name: "test",
 				EngineType:       types.PostgresRetrieverEngineType,
 				ConnectionConfig: types.ConnectionConfig{UseDefaultConnection: true},
 			},
-			wantError: true,
+			wantError: false,
 		},
 		{
 			name: "qdrant without host",
-			store: &types.VectorStore{
-				TenantID: 1, Name: "test",
+			store: &types.VectorStore{Name: "test",
 				EngineType:       types.QdrantRetrieverEngineType,
 				ConnectionConfig: types.ConnectionConfig{},
 			},
@@ -270,8 +247,7 @@ func TestCreateStore_ConnectionConfigValidation(t *testing.T) {
 		},
 		{
 			name: "milvus without addr",
-			store: &types.VectorStore{
-				TenantID: 1, Name: "test",
+			store: &types.VectorStore{Name: "test",
 				EngineType:       types.MilvusRetrieverEngineType,
 				ConnectionConfig: types.ConnectionConfig{},
 			},
@@ -279,19 +255,15 @@ func TestCreateStore_ConnectionConfigValidation(t *testing.T) {
 		},
 		{
 			name: "weaviate without host",
-			store: &types.VectorStore{
-				TenantID: 1, Name: "test",
+			store: &types.VectorStore{Name: "test",
 				EngineType:       types.WeaviateRetrieverEngineType,
 				ConnectionConfig: types.ConnectionConfig{},
 			},
 			wantError: true,
 		},
 		{
-			// SQLite, like Postgres, is no longer registerable as a DB store
-			// (see validEngineTypes). Reachable only as an env store.
-			name: "sqlite rejected as DB store",
-			store: &types.VectorStore{
-				TenantID: 1, Name: "test",
+			name: "sqlite requires application database reuse",
+			store: &types.VectorStore{Name: "test",
 				EngineType:       types.SQLiteRetrieverEngineType,
 				ConnectionConfig: types.ConnectionConfig{},
 			},
@@ -311,134 +283,21 @@ func TestCreateStore_ConnectionConfigValidation(t *testing.T) {
 	}
 }
 
-func TestCreateStore_DuplicateCheck_DBStore(t *testing.T) {
-	// "es" is an unresolvable host on a blocked port (9200); whitelist it so
-	// the test reaches the duplicate check (step 3) rather than failing the
-	// SSRF guard (step 2.1).
-	withSSRFWhitelist(t, "es")
-	repo := &mockVectorStoreRepo{existsByEndpoint: true}
-	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
-
-	store := &types.VectorStore{
-		TenantID:   1,
-		Name:       "dup-store",
-		EngineType: types.ElasticsearchRetrieverEngineType,
-		ConnectionConfig: types.ConnectionConfig{
-			Addr: "http://es:9200",
-		},
-	}
-
-	err := svc.CreateStore(context.Background(), store)
-	require.Error(t, err)
-
-	var appErr *errors.AppError
-	require.ErrorAs(t, err, &appErr)
-	assert.Equal(t, errors.ErrConflict, appErr.Code)
-}
-
-func TestCreateStore_DuplicateCheck_DBError(t *testing.T) {
-	// Whitelist "es" so the flow reaches the duplicate-check DB error (step 3)
-	// instead of stopping at the SSRF guard (step 2.1).
-	withSSRFWhitelist(t, "es")
-	repo := &mockVectorStoreRepo{
-		existsByEndpointErr: assert.AnError,
-	}
-	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
-
-	store := &types.VectorStore{
-		TenantID:   1,
-		Name:       "test",
-		EngineType: types.ElasticsearchRetrieverEngineType,
-		ConnectionConfig: types.ConnectionConfig{
-			Addr: "http://es:9200",
-		},
-	}
-
-	err := svc.CreateStore(context.Background(), store)
-	require.Error(t, err)
-}
-
-func TestCreateStore_DuplicateCheck_EnvStore(t *testing.T) {
-	// Whitelist "es" so the flow reaches the env-store duplicate check rather
-	// than failing the SSRF guard (step 2.1) on the unresolvable es:9200 host.
-	withSSRFWhitelist(t, "es")
-	// Set up env to simulate an existing elasticsearch env store
-	t.Setenv("RETRIEVE_DRIVER", "elasticsearch_v8")
-	t.Setenv("ELASTICSEARCH_ADDR", "http://es:9200")
-	t.Setenv("ELASTICSEARCH_USERNAME", "elastic")
-	t.Setenv("ELASTICSEARCH_PASSWORD", "secret")
-	t.Setenv("ELASTICSEARCH_INDEX", "xwrag_default")
-
-	repo := &mockVectorStoreRepo{existsByEndpoint: false} // no DB duplicate
-	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
-
-	store := &types.VectorStore{
-		TenantID:   1,
-		Name:       "dup-env-store",
-		EngineType: types.ElasticsearchRetrieverEngineType,
-		ConnectionConfig: types.ConnectionConfig{
-			Addr: "http://es:9200",
-		},
-		IndexConfig: types.IndexConfig{
-			IndexName: "xwrag_default",
-		},
-	}
-
-	err := svc.CreateStore(context.Background(), store)
-	require.Error(t, err)
-
-	var appErr *errors.AppError
-	require.ErrorAs(t, err, &appErr)
-	assert.Equal(t, errors.ErrConflict, appErr.Code)
-	assert.Contains(t, appErr.Error(), "environment variables")
-}
-
-func TestCreateStore_DuplicateCheck_EnvStore_DifferentIndex_Allowed(t *testing.T) {
-	// Same endpoint as env store but different index — should be allowed.
-	// Use an httptest server so CreateStore's connection probe sees a real
-	// (fake) ES root instead of dialing an unreachable host.
+func TestCreateStore_AllowsSameEndpointAndIndex(t *testing.T) {
 	es := newFakeESServer(t)
-	t.Setenv("RETRIEVE_DRIVER", "elasticsearch_v8")
-	t.Setenv("ELASTICSEARCH_ADDR", es.URL)
-	t.Setenv("ELASTICSEARCH_INDEX", "xwrag_default")
+	repo := &mockVectorStoreRepo{}
+	svc := NewVectorStoreService(repo, nil, nil, nil)
 
-	repo := &mockVectorStoreRepo{existsByEndpoint: false}
-	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
-
-	store := &types.VectorStore{
-		TenantID:   1,
-		Name:       "different-index",
-		EngineType: types.ElasticsearchRetrieverEngineType,
-		ConnectionConfig: types.ConnectionConfig{
-			Addr: es.URL,
-		},
-		IndexConfig: types.IndexConfig{
-			IndexName: "different_index",
-		},
+	for _, name := range []string{"first", "second"} {
+		store := &types.VectorStore{
+			Name:             name,
+			EngineType:       types.ElasticsearchRetrieverEngineType,
+			ConnectionConfig: types.ConnectionConfig{Addr: es.URL},
+			IndexConfig:      types.IndexConfig{IndexName: "shared_index"},
+		}
+		require.NoError(t, svc.CreateStore(context.Background(), store))
 	}
-
-	err := svc.CreateStore(context.Background(), store)
-	assert.NoError(t, err)
-}
-
-func TestCreateStore_DifferentEndpointSameIndex_Allowed(t *testing.T) {
-	// Historical note — this test used Postgres + UseDefaultConnection so the
-	// connectivity test step would short-circuit (testPostgresConnection
-	// returns nil on use_default_connection), letting the duplicate-check
-	// logic run against a pure in-memory mock. Once Postgres/SQLite were
-	// dropped from validEngineTypes (DB stores must be a network-reachable
-	// engine), no engine remaining in the allow list has an equivalent
-	// "no network needed" fast path: every other engine's connection probe
-	// dials a real endpoint, which a unit-test environment cannot
-	// reasonably provide without spinning up a real backend.
-	//
-	// The underlying invariant (same endpoint + different index name is
-	// allowed) is still indirectly exercised by the live ParadeDB/Qdrant
-	// flows in CI integration and by manual E2E tests. A proper unit-test
-	// substitute requires either an injectable TestConnection mock or a
-	// dedicated repository-only test that exercises ExistsByEndpointAndIndex
-	// without going through the service-level CreateStore pipeline.
-	t.Skip("requires mockable TestConnection or repository-only test; track separately")
+	assert.Len(t, repo.stores, 2)
 }
 
 // ---------------------------------------------------------------------------
@@ -450,10 +309,9 @@ func TestCreateStore_RegistersInRegistry(t *testing.T) {
 	repo := &mockVectorStoreRepo{}
 	registry := newMockStoreRegistry()
 	factory := mockEngineFactory(nil)
-	svc := NewVectorStoreService(repo, nil, registry, factory, nil)
+	svc := NewVectorStoreService(repo, registry, factory, nil)
 
 	store := &types.VectorStore{
-		TenantID:   1,
 		Name:       "test-es",
 		EngineType: types.ElasticsearchRetrieverEngineType,
 		ConnectionConfig: types.ConnectionConfig{
@@ -474,10 +332,9 @@ func TestCreateStore_RegistryFailureDoesNotRollBackDB(t *testing.T) {
 	repo := &mockVectorStoreRepo{}
 	registry := newMockStoreRegistry()
 	factory := mockEngineFactory(assert.AnError) // factory fails
-	svc := NewVectorStoreService(repo, nil, registry, factory, nil)
+	svc := NewVectorStoreService(repo, registry, factory, nil)
 
 	store := &types.VectorStore{
-		TenantID:   1,
 		Name:       "test-es",
 		EngineType: types.ElasticsearchRetrieverEngineType,
 		ConnectionConfig: types.ConnectionConfig{
@@ -498,10 +355,9 @@ func TestCreateStore_RegistryFailureDoesNotRollBackDB(t *testing.T) {
 func TestCreateStore_NilRegistryAndFactory(t *testing.T) {
 	es := newFakeESServer(t)
 	repo := &mockVectorStoreRepo{}
-	svc := NewVectorStoreService(repo, nil, nil, nil, nil) // no registry
+	svc := NewVectorStoreService(repo, nil, nil, nil) // no registry
 
 	store := &types.VectorStore{
-		TenantID:   1,
 		Name:       "test-es",
 		EngineType: types.ElasticsearchRetrieverEngineType,
 		ConnectionConfig: types.ConnectionConfig{
@@ -531,12 +387,11 @@ func TestCreateStore_NilRegistryAndFactory(t *testing.T) {
 
 func TestUpdateStore_Success(t *testing.T) {
 	repo := &mockVectorStoreRepo{}
-	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
+	svc := NewVectorStoreService(repo, nil, nil, nil)
 
 	store := &types.VectorStore{
-		ID:       "test-id",
-		TenantID: 1,
-		Name:     "updated-name",
+		ID:   "test-id",
+		Name: "updated-name",
 	}
 
 	err := svc.UpdateStore(context.Background(), store)
@@ -545,7 +400,7 @@ func TestUpdateStore_Success(t *testing.T) {
 
 func TestUpdateStore_ValidationError(t *testing.T) {
 	repo := &mockVectorStoreRepo{}
-	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
+	svc := NewVectorStoreService(repo, nil, nil, nil)
 
 	tests := []struct {
 		name  string
@@ -553,11 +408,7 @@ func TestUpdateStore_ValidationError(t *testing.T) {
 	}{
 		{
 			name:  "empty name",
-			store: &types.VectorStore{ID: "id", TenantID: 1, Name: ""},
-		},
-		{
-			name:  "zero tenant ID",
-			store: &types.VectorStore{ID: "id", TenantID: 0, Name: "test"},
+			store: &types.VectorStore{ID: "id", Name: ""},
 		},
 	}
 
@@ -584,11 +435,10 @@ func TestUpdateStore_ValidationError(t *testing.T) {
 
 func TestSaveDetectedVersion_Success(t *testing.T) {
 	repo := &mockVectorStoreRepo{}
-	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
+	svc := NewVectorStoreService(repo, nil, nil, nil)
 
 	store := &types.VectorStore{
 		ID:               "store-1",
-		TenantID:         1,
 		ConnectionConfig: types.ConnectionConfig{Addr: "http://es:9200"},
 	}
 
@@ -598,20 +448,19 @@ func TestSaveDetectedVersion_Success(t *testing.T) {
 
 func TestSaveDetectedVersion_RepoError(t *testing.T) {
 	repo := &mockVectorStoreRepo{updateErr: assert.AnError}
-	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
+	svc := NewVectorStoreService(repo, nil, nil, nil)
 
-	store := &types.VectorStore{ID: "store-1", TenantID: 1}
+	store := &types.VectorStore{ID: "store-1"}
 	err := svc.SaveDetectedVersion(context.Background(), store, "8.11.0")
 	assert.Error(t, err)
 }
 
 func TestSaveDetectedVersion_DoesNotMutateOriginal(t *testing.T) {
 	repo := &mockVectorStoreRepo{}
-	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
+	svc := NewVectorStoreService(repo, nil, nil, nil)
 
 	store := &types.VectorStore{
 		ID:               "store-1",
-		TenantID:         1,
 		ConnectionConfig: types.ConnectionConfig{Version: "old"},
 	}
 
@@ -628,7 +477,7 @@ func TestSaveDetectedVersion_DoesNotMutateOriginal(t *testing.T) {
 
 func TestTestConnection_UnsupportedEngineType(t *testing.T) {
 	repo := &mockVectorStoreRepo{}
-	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
+	svc := NewVectorStoreService(repo, nil, nil, nil)
 
 	_, err := svc.TestConnection(context.Background(), "unknown_engine", types.ConnectionConfig{})
 	require.Error(t, err)
@@ -640,7 +489,7 @@ func TestTestConnection_UnsupportedEngineType(t *testing.T) {
 
 func TestTestConnection_SQLiteAlwaysSucceeds(t *testing.T) {
 	repo := &mockVectorStoreRepo{}
-	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
+	svc := NewVectorStoreService(repo, nil, nil, nil)
 
 	version, err := svc.TestConnection(context.Background(), types.SQLiteRetrieverEngineType, types.ConnectionConfig{})
 	assert.NoError(t, err)
@@ -649,7 +498,7 @@ func TestTestConnection_SQLiteAlwaysSucceeds(t *testing.T) {
 
 func TestTestConnection_PostgresDefaultConnection(t *testing.T) {
 	repo := &mockVectorStoreRepo{}
-	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
+	svc := NewVectorStoreService(repo, nil, nil, nil)
 
 	version, err := svc.TestConnection(context.Background(), types.PostgresRetrieverEngineType,
 		types.ConnectionConfig{UseDefaultConnection: true})
@@ -660,7 +509,7 @@ func TestTestConnection_PostgresDefaultConnection(t *testing.T) {
 func TestTestConnection_DorisInvalidAddr(t *testing.T) {
 	// 给一个不可达的地址 + 5s timeout，期望返回 BadRequestError 而非 panic。
 	repo := &mockVectorStoreRepo{}
-	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
+	svc := NewVectorStoreService(repo, nil, nil, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
@@ -675,7 +524,7 @@ func TestTestConnection_DorisInvalidAddr(t *testing.T) {
 
 func TestTestConnection_DorisMissingAddr(t *testing.T) {
 	repo := &mockVectorStoreRepo{}
-	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
+	svc := NewVectorStoreService(repo, nil, nil, nil)
 
 	_, err := svc.TestConnection(context.Background(), types.DorisRetrieverEngineType,
 		types.ConnectionConfig{})
@@ -712,10 +561,10 @@ func TestValidateConnectionConfig(t *testing.T) {
 			wantError:  false,
 		},
 		{
-			name:       "postgres with addr",
+			name:       "postgres with external addr",
 			engineType: types.PostgresRetrieverEngineType,
 			config:     types.ConnectionConfig{Addr: "postgres://host:5432/db"},
-			wantError:  false,
+			wantError:  true,
 		},
 		{
 			name:       "postgres without addr or default",
@@ -760,10 +609,16 @@ func TestValidateConnectionConfig(t *testing.T) {
 			wantError:  true,
 		},
 		{
-			name:       "sqlite always valid",
+			name:       "sqlite with default connection",
+			engineType: types.SQLiteRetrieverEngineType,
+			config:     types.ConnectionConfig{UseDefaultConnection: true},
+			wantError:  false,
+		},
+		{
+			name:       "sqlite without default connection",
 			engineType: types.SQLiteRetrieverEngineType,
 			config:     types.ConnectionConfig{},
-			wantError:  false,
+			wantError:  true,
 		},
 		{
 			name:       "doris valid",
@@ -816,7 +671,7 @@ CREATE TABLE IF NOT EXISTS vector_stores (
     engine_type VARCHAR(50) NOT NULL,
     connection_config TEXT NOT NULL DEFAULT '{}',
     index_config TEXT NOT NULL DEFAULT '{}',
-    tenant_id INTEGER NOT NULL,
+	is_default INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     deleted_at DATETIME NULL
@@ -863,11 +718,9 @@ func newGuardTestService(t *testing.T) (*vectorStoreService, *gorm.DB, *mockStor
 	registry := newMockStoreRegistry()
 	svc := &vectorStoreService{
 		repo:          &realStoreRepo{db: db},
-		kbRepo:        &realKBRepo{db: db},
 		storeRegistry: registry,
 		factory:       nil,
 		db:            db,
-		envStores:     []types.VectorStore{},
 	}
 	return svc, db, registry
 }
@@ -880,9 +733,9 @@ type realStoreRepo struct{ db *gorm.DB }
 func (r *realStoreRepo) Create(ctx context.Context, s *types.VectorStore) error {
 	return r.db.WithContext(ctx).Create(s).Error
 }
-func (r *realStoreRepo) GetByID(ctx context.Context, tenantID uint64, id string) (*types.VectorStore, error) {
+func (r *realStoreRepo) GetByID(ctx context.Context, id string) (*types.VectorStore, error) {
 	var s types.VectorStore
-	err := r.db.WithContext(ctx).Where("id = ? AND tenant_id = ?", id, tenantID).First(&s).Error
+	err := r.db.WithContext(ctx).Where("id = ?", id).First(&s).Error
 	if err == gorm.ErrRecordNotFound {
 		return nil, nil
 	}
@@ -891,9 +744,17 @@ func (r *realStoreRepo) GetByID(ctx context.Context, tenantID uint64, id string)
 	}
 	return &s, nil
 }
-func (r *realStoreRepo) List(ctx context.Context, tenantID uint64) ([]*types.VectorStore, error) {
+func (r *realStoreRepo) GetDefault(ctx context.Context) (*types.VectorStore, error) {
+	var store types.VectorStore
+	err := r.db.WithContext(ctx).Where("is_default = ?", true).First(&store).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	return &store, err
+}
+func (r *realStoreRepo) List(ctx context.Context) ([]*types.VectorStore, error) {
 	var stores []*types.VectorStore
-	err := r.db.WithContext(ctx).Where("tenant_id = ?", tenantID).Find(&stores).Error
+	err := r.db.WithContext(ctx).Find(&stores).Error
 	return stores, err
 }
 func (r *realStoreRepo) Update(_ context.Context, _ *types.VectorStore) error {
@@ -902,75 +763,15 @@ func (r *realStoreRepo) Update(_ context.Context, _ *types.VectorStore) error {
 func (r *realStoreRepo) UpdateConnectionConfig(_ context.Context, _ *types.VectorStore) error {
 	return nil
 }
-func (r *realStoreRepo) Delete(ctx context.Context, tenantID uint64, id string) error {
-	return r.db.WithContext(ctx).Where("id = ? AND tenant_id = ?", id, tenantID).Delete(&types.VectorStore{}).Error
-}
-func (r *realStoreRepo) ExistsByEndpointAndIndex(_ context.Context, _ uint64, _ types.RetrieverEngineType, _ string, _ string) (bool, error) {
-	return false, nil
-}
-
-// realKBRepo is the minimal KnowledgeBaseRepository slice required by the
-// vector-store service (only CountByVectorStoreID is exercised here).
-type realKBRepo struct{ db *gorm.DB }
-
-func (r *realKBRepo) CountByVectorStoreID(ctx context.Context, db *gorm.DB, tenantID uint64, storeID string) (int64, error) {
-	if db == nil {
-		db = r.db
-	}
-	var count int64
-	err := db.WithContext(ctx).
-		Model(&types.KnowledgeBase{}).
-		Where("tenant_id = ? AND vector_store_id = ?", tenantID, storeID).
-		Count(&count).Error
-	return count, err
-}
-func (r *realKBRepo) CountByModelID(_ context.Context, _ uint64, _ string) (int64, error) {
-	return 0, nil
-}
-func (r *realKBRepo) ListModelUsages(_ context.Context, _ uint64, _ string) ([]types.ModelUsageResource, error) {
-	return []types.ModelUsageResource{}, nil
-}
-
-// The remaining methods are not called by the tested code paths; declare them
-// so realKBRepo satisfies interfaces.KnowledgeBaseRepository.
-func (r *realKBRepo) CreateKnowledgeBase(_ context.Context, kb *types.KnowledgeBase) error {
-	return r.db.Create(kb).Error
-}
-func (r *realKBRepo) GetKnowledgeBaseByID(_ context.Context, _ string) (*types.KnowledgeBase, error) {
-	return nil, nil
-}
-func (r *realKBRepo) GetKnowledgeBaseByIDAndTenant(_ context.Context, _ string, _ uint64) (*types.KnowledgeBase, error) {
-	return nil, nil
-}
-func (r *realKBRepo) GetKnowledgeBaseByIDs(_ context.Context, _ []string) ([]*types.KnowledgeBase, error) {
-	return nil, nil
-}
-func (r *realKBRepo) ListKnowledgeBases(_ context.Context) ([]*types.KnowledgeBase, error) {
-	return nil, nil
-}
-func (r *realKBRepo) ListKnowledgeBasesByTenantID(_ context.Context, _ uint64) ([]*types.KnowledgeBase, error) {
-	return nil, nil
-}
-func (r *realKBRepo) UpdateKnowledgeBase(_ context.Context, _ *types.KnowledgeBase) error {
-	return nil
-}
-func (r *realKBRepo) DeleteKnowledgeBase(_ context.Context, _ string) error {
-	return nil
-}
-func (r *realKBRepo) TogglePinKnowledgeBase(_ context.Context, _ string, _ uint64) (*types.KnowledgeBase, error) {
-	return nil, nil
-}
-func (r *realKBRepo) ListUserKBPinIDs(_ context.Context, _ uint64, _ string) (map[string]time.Time, error) {
-	return map[string]time.Time{}, nil
-}
-func (r *realKBRepo) SetUserKBPin(_ context.Context, _ uint64, _ string, _ string, _ bool) (*time.Time, error) {
-	return nil, nil
+func (r *realStoreRepo) Delete(ctx context.Context, id string) error {
+	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&types.VectorStore{}).Error
 }
 
 func insertGuardStore(t *testing.T, db *gorm.DB, id string, tenantID uint64) {
 	t.Helper()
+	_ = tenantID
 	require.NoError(t, db.Create(&types.VectorStore{
-		ID: id, Name: id, EngineType: types.QdrantRetrieverEngineType, TenantID: tenantID,
+		ID: id, Name: id, EngineType: types.QdrantRetrieverEngineType,
 	}).Error)
 }
 
@@ -1010,7 +811,7 @@ func TestDeleteStore_Guard_Success(t *testing.T) {
 	svc, db, registry := newGuardTestService(t)
 	insertGuardStore(t, db, "store-A", 1)
 
-	err := svc.DeleteStore(ctx, 1, "store-A")
+	err := svc.DeleteStore(ctx, "store-A")
 	require.NoError(t, err)
 
 	// store row soft-deleted, no longer visible to default GORM scope.
@@ -1029,7 +830,7 @@ func TestDeleteStore_Guard_RejectsBoundKB(t *testing.T) {
 	storeID := "store-A"
 	insertGuardKB(t, db, 1, &storeID)
 
-	err := svc.DeleteStore(ctx, 1, "store-A")
+	err := svc.DeleteStore(ctx, "store-A")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "still has 1 knowledge base")
 
@@ -1047,28 +848,28 @@ func TestDeleteStore_Guard_IgnoresSoftDeletedKB(t *testing.T) {
 	kbID := insertGuardKB(t, db, 1, &storeID)
 	require.NoError(t, db.Where("id = ?", kbID).Delete(&types.KnowledgeBase{}).Error)
 
-	err := svc.DeleteStore(ctx, 1, "store-A")
+	err := svc.DeleteStore(ctx, "store-A")
 	require.NoError(t, err)
 	require.Equal(t, []string{"store-A"}, registry.unregistered)
 }
 
-func TestDeleteStore_Guard_IgnoresOtherTenantKB(t *testing.T) {
+func TestDeleteStore_Guard_RejectsBoundKBAcrossTenants(t *testing.T) {
 	ctx := context.Background()
 	svc, db, registry := newGuardTestService(t)
 	insertGuardStore(t, db, "store-A", 1)
 	storeID := "store-A"
-	insertGuardKB(t, db, 2, &storeID) // cross-tenant binding (should not block)
+	insertGuardKB(t, db, 2, &storeID)
 
-	err := svc.DeleteStore(ctx, 1, "store-A")
-	require.NoError(t, err)
-	require.Equal(t, []string{"store-A"}, registry.unregistered)
+	err := svc.DeleteStore(ctx, "store-A")
+	require.ErrorContains(t, err, "still has 1 knowledge base")
+	require.Empty(t, registry.unregistered)
 }
 
 func TestDeleteStore_Guard_StoreNotFound(t *testing.T) {
 	ctx := context.Background()
 	svc, _, registry := newGuardTestService(t)
 
-	err := svc.DeleteStore(ctx, 1, "store-missing")
+	err := svc.DeleteStore(ctx, "store-missing")
 	require.Error(t, err)
 	appErr, ok := errors.IsAppError(err)
 	require.True(t, ok)
@@ -1090,7 +891,7 @@ func TestDeleteStore_Guard_RejectsCount3(t *testing.T) {
 		require.NoError(t, db.Create(kb).Error)
 	}
 
-	err := svc.DeleteStore(ctx, 1, "store-A")
+	err := svc.DeleteStore(ctx, "store-A")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "still has 3 knowledge base")
 }
@@ -1119,39 +920,31 @@ func TestResolveStoreView(t *testing.T) {
 	ctx := context.Background()
 	svc, db, _ := newGuardTestService(t)
 	insertGuardStore(t, db, "store-A", 1)
-	svc.envStores = []types.VectorStore{
-		{ID: "__env_es__", Name: "Env ES", EngineType: types.ElasticsearchRetrieverEngineType},
-	}
+	require.NoError(t, db.Model(&types.VectorStore{}).Where("id = ?", "store-A").Update("is_default", true).Error)
 
-	t.Run("empty store id returns DefaultStoreDisplay", func(t *testing.T) {
-		v, err := svc.ResolveStoreView(ctx, 1, "")
+	t.Run("empty store id returns global default", func(t *testing.T) {
+		v, err := svc.ResolveStoreView(ctx, "")
 		require.NoError(t, err)
-		assert.Equal(t, "System default", v.Name)
-		assert.Equal(t, types.StoreSourceEnv, v.Source)
+		assert.Equal(t, "store-A", v.Name)
+		assert.Equal(t, types.StoreSourceUser, v.Source)
 	})
 	t.Run("DB hit", func(t *testing.T) {
-		v, err := svc.ResolveStoreView(ctx, 1, "store-A")
+		v, err := svc.ResolveStoreView(ctx, "store-A")
 		require.NoError(t, err)
 		assert.Equal(t, "store-A", v.Name)
 		assert.Equal(t, types.StoreSourceUser, v.Source)
 		assert.Equal(t, string(types.QdrantRetrieverEngineType), v.EngineType)
 	})
-	t.Run("env hit", func(t *testing.T) {
-		v, err := svc.ResolveStoreView(ctx, 1, "__env_es__")
-		require.NoError(t, err)
-		assert.Equal(t, "Env ES", v.Name)
-		assert.Equal(t, types.StoreSourceEnv, v.Source)
-	})
 	t.Run("miss returns unavailable", func(t *testing.T) {
-		v, err := svc.ResolveStoreView(ctx, 1, "store-zzz")
+		v, err := svc.ResolveStoreView(ctx, "store-zzz")
 		require.NoError(t, err)
 		assert.Equal(t, types.StoreSourceUnavailable, v.Source)
 	})
-	t.Run("cross-tenant store is treated as unavailable", func(t *testing.T) {
-		insertGuardStore(t, db, "store-B", 2) // owned by tenant 2
-		v, err := svc.ResolveStoreView(ctx, 1, "store-B")
+	t.Run("global store is visible independent of tenant ownership", func(t *testing.T) {
+		insertGuardStore(t, db, "store-B", 2)
+		v, err := svc.ResolveStoreView(ctx, "store-B")
 		require.NoError(t, err)
-		assert.Equal(t, types.StoreSourceUnavailable, v.Source)
+		assert.Equal(t, types.StoreSourceUser, v.Source)
 	})
 }
 
@@ -1160,11 +953,9 @@ func TestBatchResolveStoreView(t *testing.T) {
 	svc, db, _ := newGuardTestService(t)
 	insertGuardStore(t, db, "store-A", 1)
 	insertGuardStore(t, db, "store-B", 1)
-	svc.envStores = []types.VectorStore{
-		{ID: "__env_qd__", Name: "Env QD", EngineType: types.QdrantRetrieverEngineType},
-	}
+	require.NoError(t, db.Model(&types.VectorStore{}).Where("id = ?", "store-A").Update("is_default", true).Error)
 
-	got, err := svc.BatchResolveStoreView(ctx, 1, []string{
+	got, err := svc.BatchResolveStoreView(ctx, []string{
 		"store-A", "store-zzz", "__env_qd__", "",
 	})
 	require.NoError(t, err)
@@ -1172,16 +963,15 @@ func TestBatchResolveStoreView(t *testing.T) {
 	assert.Equal(t, types.StoreSourceUser, got["store-A"].Source)
 	assert.Equal(t, "store-A", got["store-A"].Name)
 	assert.Equal(t, types.StoreSourceUnavailable, got["store-zzz"].Source)
-	assert.Equal(t, types.StoreSourceEnv, got["__env_qd__"].Source)
-	assert.Equal(t, "Env QD", got["__env_qd__"].Name)
-	assert.Equal(t, types.StoreSourceEnv, got[""].Source)
-	assert.Equal(t, "System default", got[""].Name)
+	assert.Equal(t, types.StoreSourceUnavailable, got["__env_qd__"].Source)
+	assert.Equal(t, types.StoreSourceUser, got[""].Source)
+	assert.Equal(t, "store-A", got[""].Name)
 }
 
 func TestBatchResolveStoreView_Empty(t *testing.T) {
 	ctx := context.Background()
 	svc, _, _ := newGuardTestService(t)
-	got, err := svc.BatchResolveStoreView(ctx, 1, nil)
+	got, err := svc.BatchResolveStoreView(ctx, nil)
 	require.NoError(t, err)
 	assert.Empty(t, got)
 }

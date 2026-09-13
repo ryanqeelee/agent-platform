@@ -24,6 +24,22 @@ type minioFileService struct {
 	bucketName string
 }
 
+func (s *minioFileService) putPlatformSkillArchive(ctx context.Context, key string, data []byte) (string, error) {
+	_, err := s.client.PutObject(ctx, s.bucketName, key, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{ContentType: "application/octet-stream"})
+	if err != nil {
+		return "", fmt.Errorf("failed to upload platform skill archive to MinIO: %w", err)
+	}
+	return fmt.Sprintf("minio://%s/%s", s.bucketName, key), nil
+}
+
+func (s *minioFileService) platformSkillArchiveKey(ref string) (string, error) {
+	key, err := s.parseMinioFilePath(ref)
+	if err != nil {
+		return "", err
+	}
+	return platformSkillLogicalKey(key, "")
+}
+
 // newMinioClient creates a bare minioFileService with just the SDK client initialised.
 // Shared by NewMinioFileService (which also ensures the bucket exists) and
 // CheckMinioConnectivity (read-only probe).

@@ -54,6 +54,40 @@ type createKnowledgeFileKBServiceStub struct {
 	kb *types.KnowledgeBase
 }
 
+const createKnowledgeStorageBackendID = "storage-backend-upload"
+
+func newCreateKnowledgeBaseFixture() *types.KnowledgeBase {
+	backendID := createKnowledgeStorageBackendID
+	return &types.KnowledgeBase{ID: "kb-1", StorageBackendID: &backendID}
+}
+
+type createKnowledgeStorageResolver struct {
+	fileSvc  interfaces.FileService
+	provider string
+}
+
+func (r *createKnowledgeStorageResolver) ResolveBackend(
+	_ context.Context,
+	backendID string,
+) (*types.StorageBackend, error) {
+	if backendID != createKnowledgeStorageBackendID {
+		return nil, errors.New("storage backend not found")
+	}
+	return &types.StorageBackend{ID: backendID, Provider: r.provider}, nil
+}
+
+func (r *createKnowledgeStorageResolver) ResolveFileService(
+	ctx context.Context,
+	backendID string,
+	_ string,
+) (interfaces.FileService, string, error) {
+	backend, err := r.ResolveBackend(ctx, backendID)
+	if err != nil {
+		return nil, "", err
+	}
+	return r.fileSvc, backend.Provider, nil
+}
+
 func (s *createKnowledgeFileKBServiceStub) GetKnowledgeBaseByID(
 	ctx context.Context,
 	id string,
@@ -133,9 +167,9 @@ func TestCreateKnowledgeFromFileDoesNotPersistWhenStorageSaveFails(t *testing.T)
 	repo := &createKnowledgeFileRepoStub{}
 	fileSvc := &createKnowledgeFileServiceStub{saveErr: errors.New("storage unavailable")}
 	svc := &knowledgeService{
-		repo:      repo,
-		kbService: &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
-		fileSvc:   fileSvc,
+		repo:            repo,
+		kbService:       &createKnowledgeFileKBServiceStub{kb: newCreateKnowledgeBaseFixture()},
+		storageResolver: &createKnowledgeStorageResolver{fileSvc: fileSvc, provider: "local"},
 	}
 
 	knowledge, err := svc.CreateKnowledgeFromFile(
@@ -163,10 +197,10 @@ func TestCreateKnowledgeFromFilePersistsStoredFilePathOnCreate(t *testing.T) {
 	fileSvc := &createKnowledgeFileServiceStub{}
 	task := &createKnowledgeTaskEnqueuerStub{}
 	svc := &knowledgeService{
-		repo:      repo,
-		kbService: &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
-		fileSvc:   fileSvc,
-		task:      task,
+		repo:            repo,
+		kbService:       &createKnowledgeFileKBServiceStub{kb: newCreateKnowledgeBaseFixture()},
+		storageResolver: &createKnowledgeStorageResolver{fileSvc: fileSvc, provider: "local"},
+		task:            task,
 	}
 
 	knowledge, err := svc.CreateKnowledgeFromFile(
@@ -192,32 +226,23 @@ func TestCreateKnowledgeFromFilePersistsStoredFilePathOnCreate(t *testing.T) {
 	require.Equal(t, 1, task.calls)
 }
 
-func TestCreateKnowledgeFromImageFallsBackWhenLegacyStorageConfigIsIncomplete(t *testing.T) {
+func TestCreateKnowledgeFromImageUsesExplicitPlatformStorageBackend(t *testing.T) {
 	t.Parallel()
 
 	repo := &createKnowledgeFileRepoStub{}
 	fileSvc := &createKnowledgeFileServiceStub{}
 	task := &createKnowledgeTaskEnqueuerStub{}
-	kb := &types.KnowledgeBase{
-		ID:        "kb-1",
-		VLMConfig: types.VLMConfig{Enabled: true, ModelID: "vlm-1"},
-	}
-	kb.SetStorageProvider("cos")
+	kb := newCreateKnowledgeBaseFixture()
+	kb.VLMConfig = types.VLMConfig{Enabled: true, ModelID: "vlm-1"}
 	svc := &knowledgeService{
-		repo:      repo,
-		kbService: &createKnowledgeFileKBServiceStub{kb: kb},
-		fileSvc:   fileSvc,
-		task:      task,
+		repo:            repo,
+		kbService:       &createKnowledgeFileKBServiceStub{kb: kb},
+		storageResolver: &createKnowledgeStorageResolver{fileSvc: fileSvc, provider: "cos"},
+		task:            task,
 	}
-	ctx := context.WithValue(newCreateKnowledgeFileContext(), types.TenantInfoContextKey, &types.Tenant{
-		StorageEngineConfig: &types.StorageEngineConfig{
-			DefaultProvider: "cos",
-			COS:             &types.COSEngineConfig{SecretID: "incomplete"},
-		},
-	})
 
 	knowledge, err := svc.CreateKnowledgeFromFile(
-		ctx,
+		newCreateKnowledgeFileContext(),
 		"kb-1",
 		newMultipartFileHeader(t, "image.png", "image bytes"),
 		nil,
@@ -241,9 +266,9 @@ func TestCreateKnowledgeFromFileDeletesStoredFileWhenCreateFails(t *testing.T) {
 	repo := &createKnowledgeFileRepoStub{createErr: errors.New("database unavailable")}
 	fileSvc := &createKnowledgeFileServiceStub{}
 	svc := &knowledgeService{
-		repo:      repo,
-		kbService: &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
-		fileSvc:   fileSvc,
+		repo:            repo,
+		kbService:       &createKnowledgeFileKBServiceStub{kb: newCreateKnowledgeBaseFixture()},
+		storageResolver: &createKnowledgeStorageResolver{fileSvc: fileSvc, provider: "local"},
 	}
 
 	knowledge, err := svc.CreateKnowledgeFromFile(
@@ -273,10 +298,10 @@ func TestCreateKnowledgeFromFile_PersistsProcessOverrides(t *testing.T) {
 	fileSvc := &createKnowledgeFileServiceStub{}
 	task := &createKnowledgeTaskEnqueuerStub{}
 	svc := &knowledgeService{
-		repo:      repo,
-		kbService: &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
-		fileSvc:   fileSvc,
-		task:      task,
+		repo:            repo,
+		kbService:       &createKnowledgeFileKBServiceStub{kb: newCreateKnowledgeBaseFixture()},
+		storageResolver: &createKnowledgeStorageResolver{fileSvc: fileSvc, provider: "local"},
+		task:            task,
 	}
 
 	chunkSize := 512

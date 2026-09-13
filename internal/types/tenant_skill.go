@@ -31,15 +31,8 @@ const (
 	SkillSnapshotTriggerRebuild = "rebuild"
 )
 
-// SkillMaintenanceSessionMarker tags the sessions that skill image operations
-// run in. Those sessions carry a real agent transcript that is deliberately
-// kept for troubleshooting, but they are infrastructure rather than
-// conversations, so the console must never list them. This mirrors how embed
-// sessions are classified (EmbedSessionMarkerPrefix): a description prefix,
-// so no schema change is needed.
-const SkillMaintenanceSessionMarker = "skill_maintenance:"
-
-// TenantSkillEntity is one skill installed onto one sandbox config.
+// TenantSkillEntity is one platform skill installed onto one platform sandbox
+// config. Tenant-specific values remain in TenantUserEnvVar.
 //
 // There is deliberately no entry_script / interpreter / smoke_command column:
 // a skill may ship several executables across languages, so none of those is a
@@ -48,9 +41,8 @@ const SkillMaintenanceSessionMarker = "skill_maintenance:"
 type TenantSkillEntity struct {
 	// ID is the row key. It is not the directory name inside the image.
 	ID              string `gorm:"type:varchar(36);primaryKey"`
-	TenantID        uint64
 	SandboxConfigID string `gorm:"type:varchar(36)"`
-	// CatalogID points at the tenant-level skill definition this install
+	// CatalogID points at the platform skill definition this install
 	// was created from. Empty on rows that predate the catalog migration
 	// and have not been backfilled yet.
 	CatalogID string `gorm:"type:varchar(36);index"`
@@ -78,15 +70,15 @@ type TenantSkillEntity struct {
 	// kept for audit and chain troubleshooting.
 	InstalledSnapshotID string `gorm:"type:varchar(255)"`
 
-	// InstallSessionID / InstallMessageID locate the installer agent's
-	// transcript for the most recent install of this skill. A re-install
-	// overwrites them: the previous run's conversation is superseded by the
-	// one that produced the image now in service.
-	InstallSessionID string `gorm:"type:varchar(36)"`
-	InstallMessageID string `gorm:"type:varchar(36)"`
+	// InstallRunID is the current install's correlation and stream token.
+	// Platform maintenance never creates a business session.
+	InstallRunID string `gorm:"type:varchar(36);not null;default:''"`
+	// InstallTranscript stores the latest install's durable prompt and
+	// assistant message projection. Live events remain in the stream store.
+	InstallTranscript JSON `gorm:"type:jsonb"`
 
 	// Envs is the installer agent's declaration of the environment variables
-	// this skill needs, each optionally carrying a workspace-wide admin value.
+	// this skill needs, each optionally carrying a platform-managed default.
 	Envs SkillEnvVars `json:"envs,omitempty" gorm:"type:jsonb"`
 
 	Status string `gorm:"type:varchar(32);not null"`
@@ -100,7 +92,7 @@ type TenantSkillEntity struct {
 }
 
 // TableName pins the table so GORM's pluralizer cannot drift.
-func (e *TenantSkillEntity) TableName() string { return "tenant_skills" }
+func (e *TenantSkillEntity) TableName() string { return "platform_skills" }
 
 // TenantSkillSnapshotEntity is the image-chain ledger. It exists because
 // snapshots are billable provider resources whose IDs we hand out: we must be
@@ -109,7 +101,6 @@ func (e *TenantSkillEntity) TableName() string { return "tenant_skills" }
 type TenantSkillSnapshotEntity struct {
 	// ID is the install ID; it also seeds the snapshot name.
 	ID              string `gorm:"type:varchar(36);primaryKey"`
-	TenantID        uint64 `gorm:"index"`
 	SandboxConfigID string `gorm:"type:varchar(36);index"`
 	SkillID         string `gorm:"type:varchar(36);index"`
 
@@ -135,14 +126,13 @@ type TenantSkillSnapshotEntity struct {
 }
 
 // TableName pins the table so GORM's pluralizer cannot drift.
-func (e *TenantSkillSnapshotEntity) TableName() string { return "tenant_skill_snapshots" }
+func (e *TenantSkillSnapshotEntity) TableName() string { return "platform_skill_snapshots" }
 
-// TenantSkillCatalogEntity is one workspace skill definition. It does not
+// TenantSkillCatalogEntity is one platform skill definition. It does not
 // belong to a sandbox: installations onto a config's image are TenantSkillEntity
 // rows that point back here.
 type TenantSkillCatalogEntity struct {
 	ID           string `gorm:"type:varchar(36);primaryKey"`
-	TenantID     uint64
 	Name         string `gorm:"type:varchar(255);not null"`
 	Version      string `gorm:"type:varchar(64)"`
 	Description  string `gorm:"type:text"`
@@ -157,4 +147,4 @@ type TenantSkillCatalogEntity struct {
 }
 
 // TableName pins the table so GORM's pluralizer cannot drift.
-func (e *TenantSkillCatalogEntity) TableName() string { return "tenant_skill_catalog" }
+func (e *TenantSkillCatalogEntity) TableName() string { return "platform_skill_catalog" }

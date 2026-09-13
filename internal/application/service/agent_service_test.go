@@ -282,7 +282,7 @@ func TestCreateAgentEngineOpensSandboxToolsOnlyForInstallMode(t *testing.T) {
 			SandboxConfigID: "cfg-remote",
 			SkillsEnabled:   true,
 			TenantSkills: []*types.TenantSkillEntity{{
-				ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-remote",
+				ID: "sk-1", SandboxConfigID: "cfg-remote",
 				Name: "pdf-tools", Description: "PDF helpers",
 				Status: types.SkillStatusReady, Enabled: true,
 			}},
@@ -415,7 +415,7 @@ func TestSkillsManagerOffersTheInjectedInstalledSkills(t *testing.T) {
 			SandboxConfigID: "cfg-remote",
 			SkillsEnabled:   true,
 			TenantSkills: []*types.TenantSkillEntity{{
-				ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-remote",
+				ID: "sk-1", SandboxConfigID: "cfg-remote",
 				Name: "pdf-tools", Description: "PDF helpers",
 				Status: types.SkillStatusReady, Enabled: true,
 			}},
@@ -440,7 +440,7 @@ func TestSkillsManagerOffersTheInjectedInstalledSkills(t *testing.T) {
 			SkillsEnabled:   true,
 			SkillDirs:       []string{dir},
 			TenantSkills: []*types.TenantSkillEntity{{
-				ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-remote",
+				ID: "sk-1", SandboxConfigID: "cfg-remote",
 				Name: "pdf-tools", Description: "PDF helpers",
 				Status: types.SkillStatusReady, Enabled: true,
 			}},
@@ -457,7 +457,7 @@ func TestSkillsManagerOffersTheInjectedInstalledSkills(t *testing.T) {
 			SkillsEnabled:   true,
 			SkillDirs:       []string{t.TempDir()},
 			TenantSkills: []*types.TenantSkillEntity{{
-				ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-remote",
+				ID: "sk-1", SandboxConfigID: "cfg-remote",
 				Name: "pdf-tools", Description: "PDF helpers",
 				Status: types.SkillStatusReady, Enabled: true,
 			}},

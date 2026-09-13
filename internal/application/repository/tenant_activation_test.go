@@ -140,9 +140,6 @@ func TestEnterpriseActivationChecksSeatBeforeInitialAdministratorBecomesActive(t
 	var provisioned types.Tenant
 	require.NoError(t, db.First(&provisioned, prepared.TenantID).Error)
 	require.Zero(t, provisioned.StorageQuota)
-	backendID := "backend-1"
-	require.NoError(t, db.Model(&types.Tenant{}).Where("id = ?", prepared.TenantID).
-		Update("default_storage_backend_id", backendID).Error)
 	createActivationUser(t, db, types.User{ID: "viewer-seat", TenantID: prepared.TenantID, IsActive: true})
 	require.NoError(t, db.Create(&types.TenantMember{
 		UserID: "viewer-seat", TenantID: prepared.TenantID, Role: types.TenantRoleViewer,
@@ -153,7 +150,7 @@ func TestEnterpriseActivationChecksSeatBeforeInitialAdministratorBecomesActive(t
 	require.ErrorIs(t, err, ErrSeatLimitExceeded)
 }
 
-func TestFailedActivationRejectsPlatformMemberRecoveryAndRemainsReplayable(t *testing.T) {
+func TestPreparedActivationRejectsPlatformMemberRecoveryThenActivatesIdempotently(t *testing.T) {
 	db := activationTestDB(t)
 	repo := NewTenantRepository(db)
 	createActivationUser(t, db, types.User{ID: "owner-recovery", IsActive: true})
@@ -166,9 +163,10 @@ func TestFailedActivationRejectsPlatformMemberRecoveryAndRemainsReplayable(t *te
 	prepared, err := repo.ApplyEnterpriseActivation(context.Background(), command)
 	require.NoError(t, err)
 
-	command.DesiredState = types.EnterpriseActivationStateActive
-	_, err = repo.ApplyEnterpriseActivation(context.Background(), command)
-	require.ErrorIs(t, err, ErrEnterpriseActivationStorageRequired)
+	var preparedMembership types.TenantMember
+	require.NoError(t, db.Where("user_id = ? AND tenant_id = ?", "owner-recovery", prepared.TenantID).
+		Take(&preparedMembership).Error)
+	require.Equal(t, types.TenantMemberStatusSuspended, preparedMembership.Status)
 
 	memberRepo := &tenantMemberRepository{db: db}
 	err = memberRepo.UpdateStatus(context.Background(), types.MemberActorAuthority{
@@ -176,17 +174,23 @@ func TestFailedActivationRejectsPlatformMemberRecoveryAndRemainsReplayable(t *te
 	}, "owner-recovery", prepared.TenantID, types.TenantMemberStatusActive)
 	require.ErrorIs(t, err, ErrEnterpriseNotActive)
 
-	backendID := "backend-recovery"
-	require.NoError(t, db.Model(&types.Tenant{}).Where("id = ?", prepared.TenantID).
-		Update("default_storage_backend_id", backendID).Error)
+	command.DesiredState = types.EnterpriseActivationStateActive
 	activated, err := repo.ApplyEnterpriseActivation(context.Background(), command)
 	require.NoError(t, err)
 	require.Equal(t, types.EnterpriseActivationStateActive, activated.State)
+	require.Equal(t, prepared.TenantID, activated.TenantID)
+	require.Equal(t, prepared.OwnerMembershipID, activated.OwnerMembershipID)
 
 	var ownerMembership types.TenantMember
 	require.NoError(t, db.Where("user_id = ? AND tenant_id = ?", "owner-recovery", prepared.TenantID).
 		Take(&ownerMembership).Error)
 	require.Equal(t, types.TenantMemberStatusActive, ownerMembership.Status)
+
+	replayed, err := repo.ApplyEnterpriseActivation(context.Background(), command)
+	require.NoError(t, err)
+	require.Equal(t, activated.TenantID, replayed.TenantID)
+	require.Equal(t, activated.OwnerMembershipID, replayed.OwnerMembershipID)
+	require.Equal(t, types.EnterpriseActivationStateActive, replayed.State)
 }
 
 func TestActiveActivationReplaySurvivesLegitimateInitialAdministratorChanges(t *testing.T) {
@@ -201,9 +205,6 @@ func TestActiveActivationReplaySurvivesLegitimateInitialAdministratorChanges(t *
 	command.SeatsTotal, command.StorageQuota = &seats, &quota
 	prepared, err := repo.ApplyEnterpriseActivation(context.Background(), command)
 	require.NoError(t, err)
-	backendID := "backend-completed-replay"
-	require.NoError(t, db.Model(&types.Tenant{}).Where("id = ?", prepared.TenantID).
-		Update("default_storage_backend_id", backendID).Error)
 	command.DesiredState = types.EnterpriseActivationStateActive
 	active, err := repo.ApplyEnterpriseActivation(context.Background(), command)
 	require.NoError(t, err)
@@ -416,8 +417,6 @@ func TestEnterpriseActivationStateTransitionsAreAtomicAndTerminal(t *testing.T) 
 	activeCommand := activationCommand("activation-active", "active-owner")
 	prepared, err := repo.ApplyEnterpriseActivation(context.Background(), activeCommand)
 	require.NoError(t, err)
-	require.NoError(t, db.Model(&types.Tenant{}).Where("id = ?", prepared.TenantID).
-		Update("default_storage_backend_id", "backend-1").Error)
 	activeCommand.DesiredState = types.EnterpriseActivationStateActive
 	active, err := repo.ApplyEnterpriseActivation(context.Background(), activeCommand)
 	require.NoError(t, err)

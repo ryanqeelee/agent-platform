@@ -68,7 +68,7 @@ func (s *PlatformAgentService) Get(ctx context.Context, id string) (*types.Custo
 }
 
 func (s *PlatformAgentService) get(ctx context.Context, id string) (*types.CustomAgent, error) {
-	if !types.IsPlatformManagedBuiltinAgentID(id) {
+	if !types.IsPlatformManageableBuiltinAgentID(id) {
 		return nil, ErrPlatformAgentNotFound
 	}
 	stored, err := s.agents.GetAgentByID(ctx, id, platformAgentTenantID)
@@ -100,7 +100,7 @@ func (s *PlatformAgentService) Update(
 		return nil, err
 	}
 	fallback := types.GetBuiltinAgentWithContext(ctx, id, platformAgentTenantID)
-	if !types.IsPlatformManagedBuiltinAgentID(id) || fallback == nil {
+	if !types.IsPlatformManageableBuiltinAgentID(id) || fallback == nil {
 		return nil, ErrPlatformAgentNotFound
 	}
 	if err := s.validateConfig(ctx, config); err != nil {

@@ -23,6 +23,28 @@ type localFileService struct {
 
 const localScheme = "local://"
 
+func (s *localFileService) putPlatformSkillArchive(_ context.Context, key string, data []byte) (string, error) {
+	candidate := filepath.Join(s.baseDir, filepath.FromSlash(key))
+	resolved, err := secutils.SafePathUnderBase(s.baseDir, candidate)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(resolved), 0o755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(resolved, data, 0o644); err != nil {
+		return "", err
+	}
+	return localScheme + filepath.ToSlash(key), nil
+}
+
+func (s *localFileService) platformSkillArchiveKey(ref string) (string, error) {
+	if !strings.HasPrefix(ref, localScheme) {
+		return "", fmt.Errorf("invalid local platform skill archive reference")
+	}
+	return platformSkillLogicalKey(strings.TrimPrefix(ref, localScheme), "")
+}
+
 // CheckConnectivity verifies the local storage directory exists and is accessible.
 func (s *localFileService) CheckConnectivity(ctx context.Context) error {
 	info, err := os.Stat(s.baseDir)
@@ -268,7 +290,7 @@ func (s *localFileService) GetFileURL(ctx context.Context, filePath string) (str
 		// Tenant ID is parsed from the storage path, which encodes the
 		// resource owner's tenant (not the caller's). The verifier on
 		// /api/v1/files/presigned uses this ID to look up the owning
-		// tenant's StorageEngineConfig — using the caller's tenant would
+		// selected backend config — using another backend would
 		// break cross-tenant shared resources (e.g. shared KB images).
 		tenantID := secutils.ParseTenantIDFromStoragePath(normalized)
 		presignedURL, err := secutils.SignFileURL(s.externalURL, normalized, tenantID, 0)

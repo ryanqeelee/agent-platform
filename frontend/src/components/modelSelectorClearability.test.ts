@@ -45,11 +45,29 @@ test('知识库仅在模型确实可选时允许恢复为空', () => {
 })
 
 test('必填模型继续保持不可清空', () => {
-  assertNotClearable(modelSelectorTag(agentEditor, 'formData.config.model_id'))
+  const chatModel = modelSelectorTag(agentEditor, 'formData.config.model_id')
+  assertNotClearable(chatModel)
+  assert.match(chatModel, /:allow-automatic-selection="isPlatformMode"/)
   assertNotClearable(modelSelectorTag(agentEditor, 'formData.config.vlm_model_id'))
   assertNotClearable(modelSelectorTag(kbModelConfig, 'config.llmModelId'))
   assertNotClearable(modelSelectorTag(kbEditor, 'formData.multimodalConfig.vllmModelId'))
   assertNotClearable(modelSelectorTag(kbEditor, 'formData.asrConfig.modelId'))
   assertNotClearable(modelSelectorTag(uploadConfirm, 'uiState.multimodalConfig.vllmModelId'))
   assertNotClearable(modelSelectorTag(uploadConfirm, 'uiState.asrConfig.modelId'))
+})
+
+test('平台智能体可选自动模型并将选择还原为空 ID', () => {
+  assert.match(selector, /AUTOMATIC_MODEL_VALUE = '__automatic_model__'/)
+  assert.match(selector, /allowAutomaticSelection && !props\.selectedModelId[\s\S]*return AUTOMATIC_MODEL_VALUE/)
+  assert.match(selector, /value === AUTOMATIC_MODEL_VALUE[\s\S]*emit\('update:selectedModelId', ''\)/)
+  assert.match(agentEditor, /authStore\.isSystemAdmin && !isPlatformMode\.value && !formData\.value\.config\.model_id/)
+  assert.match(agentEditor, /updatePlatformAgent\([\s\S]*config,/)
+  assert.doesNotMatch(agentEditor, /config\.model_id\s*=\s*selectInitialModelId/)
+})
+
+test('内置智能体显示固定模式语义而不渲染禁用的切换控件', () => {
+  assert.match(agentEditor, /<span v-if="isBuiltinAgent" class="fixed-mode-value">/)
+  assert.match(agentEditor, /<t-radio-group v-else v-model="agentMode"/)
+  assert.doesNotMatch(agentEditor, /<t-radio-group v-model="agentMode" :disabled="isBuiltinAgent"/)
+  assert.match(agentEditor, /BUILTIN_EMPLOYEE_ASSISTANT_ID[\s\S]*employeeBuiltinModeHint/)
 })

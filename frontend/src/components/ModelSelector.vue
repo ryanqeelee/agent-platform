@@ -1,7 +1,7 @@
 <template>
   <div class="model-selector">
     <t-select
-      :value="selectedModelId"
+      :value="selectorValue"
       @change="handleModelChange"
       :placeholder="placeholderText"
       :disabled="disabled"
@@ -21,6 +21,16 @@
           >{{ formatContextWindow(selectedModel.parameters?.context_window) }}</span>
         </span>
       </template>
+      <t-option
+        v-if="allowAutomaticSelection"
+        :value="AUTOMATIC_MODEL_VALUE"
+        :label="automaticSelectionLabel"
+      >
+        <div class="model-option model-option--automatic">
+          <t-icon name="swap" class="model-icon" />
+          <span class="model-name">{{ automaticSelectionLabel }}</span>
+        </div>
+      </t-option>
       <!-- 已有的模型选项 -->
       <t-option
         v-for="model in models"
@@ -79,6 +89,8 @@ interface Props {
   placeholder?: string
   status?: 'default' | 'success' | 'warning' | 'error'
   clearable?: boolean
+  allowAutomaticSelection?: boolean
+  automaticSelectionLabel?: string
   // 可选：外部传入的所有模型列表，如果提供则不调用API
   allModels?: ModelConfig[]
 }
@@ -88,6 +100,8 @@ const props = withDefaults(defineProps<Props>(), {
   placeholder: '',
   status: 'default',
   clearable: false,
+  allowAutomaticSelection: false,
+  automaticSelectionLabel: '',
 })
 
 const emit = defineEmits<{
@@ -99,6 +113,12 @@ const models = ref<ModelConfig[]>([])
 const loading = ref(false)
 const { t } = useI18n()
 const chatResources = useChatResourcesStore()
+const AUTOMATIC_MODEL_VALUE = '__automatic_model__'
+
+const selectorValue = computed(() => {
+  if (props.allowAutomaticSelection && !props.selectedModelId) return AUTOMATIC_MODEL_VALUE
+  return props.selectedModelId
+})
 
 const placeholderText = computed(() => {
   return props.placeholder || t('model.selectModelPlaceholder')
@@ -157,6 +177,10 @@ const handleModelChange = (value?: string) => {
   // 如果选择的是添加模型选项，触发添加事件而不更新选中值
   if (value === '__add_model__') {
     emit('add-model')
+    return
+  }
+  if (value === AUTOMATIC_MODEL_VALUE) {
+    emit('update:selectedModelId', '')
     return
   }
   emit('update:selectedModelId', value || '')

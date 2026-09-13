@@ -115,7 +115,14 @@
                           $t('agent.editor.normalDesc') }}</p>
                       </div>
                       <div class="setting-control">
-                        <t-radio-group v-model="agentMode" :disabled="isBuiltinAgent" data-guide="agent-create-mode">
+                        <span v-if="isBuiltinAgent" class="fixed-mode-value">
+                          {{ editorAgent?.id === BUILTIN_EMPLOYEE_ASSISTANT_ID
+                            ? $t('agent.editor.employeeBuiltinModeHint')
+                            : $t('agent.editor.builtinModeFixed', {
+                            mode: agentMode === 'smart-reasoning' ? $t('agent.type.agent') : $t('agent.type.normal')
+                          }) }}
+                        </span>
+                        <t-radio-group v-else v-model="agentMode" data-guide="agent-create-mode">
                           <t-radio-button value="quick-answer">
                             {{ $t('agent.type.normal') }}
                           </t-radio-button>
@@ -599,14 +606,21 @@
                       :class="{ 'setting-row--field-highlight': highlightedField === 'summary_model' }"
                     >
                       <div class="setting-info">
-                        <label>{{ $t('agent.editor.model') }} <span class="required">*</span></label>
-                        <p class="desc">{{ $t('agentEditor.desc.model') }}</p>
+                        <label>{{ $t('agent.editor.model') }} <span v-if="!isPlatformMode" class="required">*</span></label>
+                        <p class="desc">{{ isPlatformMode ? $t('agent.editor.platformModelDesc') : $t('agentEditor.desc.model') }}</p>
                       </div>
-                      <div class="setting-control">
+                      <div class="setting-control model-selection-control">
                         <ModelSelector model-type="KnowledgeQA" :selected-model-id="formData.config.model_id"
                           :all-models="allModels"
+                          :allow-automatic-selection="isPlatformMode"
+                          :automatic-selection-label="$t('agent.editor.automaticModel')"
                           @update:selected-model-id="(val: string) => formData.config.model_id = val"
                           @add-model="handleAddModel('llm')" :placeholder="$t('agent.editor.modelPlaceholder')" />
+                        <p v-if="isPlatformMode && !formData.config.model_id" :class="['model-selection-hint', { 'model-selection-hint--warning': !hasAvailablePlatformChatModel }]">
+                          {{ hasAvailablePlatformChatModel
+                            ? $t('agent.editor.automaticModelHint')
+                            : $t('agent.editor.automaticModelUnavailableHint') }}
+                        </p>
                       </div>
                     </div>
 
@@ -1663,6 +1677,7 @@ import {
   AGENT_EDITOR_FOCUS_SECTION_EVENT,
   markContextualGuideDone,
 } from '@/config/contextualGuides';
+import { BUILTIN_EMPLOYEE_ASSISTANT_ID } from '@/api/agent/constants';
 import { useI18n } from 'vue-i18n';
 import { selectInitialModelId } from '@/utils/modelDefaults';
 import { copyWithToast } from '@/utils/clipboard';
@@ -1875,6 +1890,9 @@ const saving = ref(false);
 const editorInitializing = ref(false);
 const dependencyLoadError = ref('');
 const allModels = ref<ModelConfig[]>([]);
+const hasAvailablePlatformChatModel = computed(() =>
+  !!selectInitialModelId(allModels.value, 'KnowledgeQA')
+);
 const kbOptions = ref<{ label: string; value: string; type?: 'document' | 'faq'; count?: number; shared?: boolean; orgName?: string; ragEnabled?: boolean; wikiEnabled?: boolean; capabilities?: KBCapabilities }[]>([]);
 
 // 智能体类型预设（仅 smart-reasoning 模式下展示）
@@ -2476,7 +2494,7 @@ const removeStarterSuggestion = (index: number) => {
 };
 
 const applyDefaultModelsIfEmpty = () => {
-  if (!authStore.isSystemAdmin || props.mode !== 'create' || !formData.value) return
+  if (!authStore.isSystemAdmin || isPlatformMode.value || props.mode !== 'create' || !formData.value) return
   const chatModelId = selectInitialModelId(allModels.value, 'KnowledgeQA')
   const rerankModelId = selectInitialModelId(allModels.value, 'Rerank')
   if (!formData.value.config.model_id && chatModelId) {
@@ -4402,7 +4420,7 @@ const handleSave = async () => {
     }
   }
 
-  if (authStore.isSystemAdmin && !formData.value.config.model_id) {
+  if (authStore.isSystemAdmin && !isPlatformMode.value && !formData.value.config.model_id) {
     MessagePlugin.error(t('agent.editor.modelRequired'));
     currentSection.value = 'model';
     return;
@@ -5012,6 +5030,29 @@ const handleSave = async () => {
 
   :deep(.t-input-number) {
     width: 120px;
+  }
+}
+
+.fixed-mode-value {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--td-text-color-primary);
+}
+
+.model-selection-control {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.model-selection-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--td-text-color-secondary);
+
+  &--warning {
+    color: var(--td-warning-color);
   }
 }
 

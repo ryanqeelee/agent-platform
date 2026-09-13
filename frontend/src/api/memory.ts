@@ -1,4 +1,5 @@
 import { get, put, post, del } from '@/utils/request'
+import { platformTenantPath } from './platform-tenant-path'
 
 // Kinds mirror internal/types/memory.go. profile and preference make up the
 // block injected on every turn; fact and task are pulled in only when the
@@ -278,10 +279,12 @@ export function deleteMemoryDocument(id: string) {
 // Workspace configuration, stored on the tenant like the other KV configs.
 // ---------------------------------------------------------------------------
 
-export function getTenantMemoryConfig() {
-  return get<{ success: boolean; data: MemoryConfig }>('/api/v1/tenants/kv/memory-config')
+export function getTenantMemoryConfig(platformTenantId?: number) {
+  const path = platformTenantId === undefined ? '/api/v1/tenants/kv/memory-config' : platformTenantPath(platformTenantId, 'memory-config')
+  return get<{ success: boolean; data: MemoryConfig }>(path)
 }
 
-export function updateTenantMemoryConfig(config: MemoryConfig) {
-  return put<{ success: boolean; data: MemoryConfig }>('/api/v1/tenants/kv/memory-config', config)
+export function updateTenantMemoryConfig(config: MemoryConfig, platformTenantId?: number) {
+  const path = platformTenantId === undefined ? '/api/v1/tenants/kv/memory-config' : platformTenantPath(platformTenantId, 'memory-config')
+  return put<{ success: boolean; data: MemoryConfig }>(path, config)
 }

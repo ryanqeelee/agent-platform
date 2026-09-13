@@ -215,9 +215,16 @@ export async function login(data: LoginRequest): Promise<LoginResponse> {
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || t('error.auth.loginFailed')
+      message: resolveLoginFailureMessage(error)
     }
   }
+}
+
+function resolveLoginFailureMessage(error: any): string {
+  if (error?.status === 503) {
+    return t('auth.loginErrorRetry')
+  }
+  return error?.message || t('error.auth.loginFailed')
 }
 
 /**

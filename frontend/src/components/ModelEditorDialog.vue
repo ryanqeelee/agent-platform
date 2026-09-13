@@ -51,7 +51,7 @@
       <!--
         Section 1 — 模型来源 + 模型名称（来源直接决定下方字段，所以放一节）
       -->
-      <section class="setting-drawer__section">
+      <section v-if="!isPlatformMode" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('model.editor.sectionSource') }}</h4>
 
         <div class="form-item">
@@ -96,10 +96,6 @@
             class="ollama-unavailable-tip">
             <t-icon name="error-circle-filled" class="tip-icon" />
             <span class="tip-text">{{ $t('model.editor.ollamaUnavailable') }}</span>
-            <t-button variant="text" size="small" @click="goToOllamaSettings" class="tip-link">
-              <template #icon><t-icon name="jump" /></template>
-              {{ $t('model.editor.goToOllamaSettings') }}
-            </t-button>
           </div>
         </div>
 
@@ -198,13 +194,6 @@
                 <template v-else>
                   {{ $t('settings.weknoraCloud.credentialUnconfigured') }}
                 </template>
-                <div style="margin-top: 8px;">
-                  <t-button variant="text" size="small" @click="goToWeKnoraCloudSettings"
-                    style="padding: 0; height: auto;">
-                    <template #icon><t-icon name="jump" /></template>
-                    {{ $t('settings.weknoraCloud.goToSettings') }}
-                  </t-button>
-                </div>
               </div>
             </div>
 
@@ -403,7 +392,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed, onUnmounted, nextTick } from 'vue'
+import { ref, watch, computed, onUnmounted, nextTick, inject } from 'vue'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { checkOllamaModels, checkRemoteModel, testEmbeddingModel, checkRerankModel, checkASRModel, listOllamaModels, downloadOllamaModel, getDownloadProgress, checkOllamaStatus, listModelProviders, type OllamaModelInfo, type ModelProviderOption } from '@/api/initialization'
 import {
@@ -413,7 +402,8 @@ import {
   type ModelCredentialField,
 } from '@/api/model'
 import { useI18n } from 'vue-i18n'
-import { useUIStore } from '@/stores/ui'
+import { useAuthStore } from '@/stores/auth'
+import { platformTenantControlIDKey } from '@/composables/platformTenantControl'
 import {
   defaultThinkingControl,
   resolveThinkingControl,
@@ -469,7 +459,8 @@ interface Props {
 }
 
 const { t, te } = useI18n()
-const uiStore = useUIStore()
+const authStore = useAuthStore()
+const platformTenantControlID = inject(platformTenantControlIDKey, null)
 
 const props = withDefaults(defineProps<Props>(), {
   visible: false,
@@ -484,6 +475,14 @@ const emit = defineEmits<{
 const draftModelType = ref<EditorModelType>(props.modelType)
 
 const isEdit = computed(() => !!props.modelData)
+
+// Global model administration is tenantless and accepts only platform-owned
+// remote credentials. Tenant-scoped callers keep the existing choices.
+const isPlatformMode = computed(() => (
+  authStore.isSystemAdmin
+  && platformTenantControlID !== null
+  && platformTenantControlID.value === undefined
+))
 
 const activeModelType = computed(() => (
   isEdit.value ? props.modelType : draftModelType.value
@@ -535,10 +534,11 @@ const fallbackProviderOptions = computed(() => [
       chat: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
       embedding: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
       rerank: 'https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank',
-      vllm: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+      vllm: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      asr: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
     },
     description: t('model.editor.providers.aliyun.description'),
-    modelTypes: ['chat', 'embedding', 'rerank', 'vllm']
+    modelTypes: ['chat', 'embedding', 'rerank', 'vllm', 'asr']
   },
   {
     value: 'zhipu',
@@ -664,21 +664,22 @@ const loadProviders = async () => {
 // API 返回的 defaultUrls/modelTypes 数据优先，但 label/description 使用 i18n
 const providerOptions = computed(() => {
   // API 数据可用时，用 API 的结构数据 + i18n 的显示文本
-  if (apiProviderOptions.value.length > 0) {
-    return apiProviderOptions.value.map(p => ({
-      ...p,
-      label: te(`model.editor.providers.${p.value}.label`)
-        ? t(`model.editor.providers.${p.value}.label`)
-        : p.label,
-      description: te(`model.editor.providers.${p.value}.description`)
-        ? t(`model.editor.providers.${p.value}.description`)
-        : p.description,
-    }))
-  }
-  // 回退到硬编码值，按 modelTypes 过滤
-  return fallbackProviderOptions.value.filter(p =>
-    p.modelTypes.includes(activeModelType.value)
-  )
+  const options = apiProviderOptions.value.length > 0
+    ? apiProviderOptions.value.map(p => ({
+        ...p,
+        label: te(`model.editor.providers.${p.value}.label`)
+          ? t(`model.editor.providers.${p.value}.label`)
+          : p.label,
+        description: te(`model.editor.providers.${p.value}.description`)
+          ? t(`model.editor.providers.${p.value}.description`)
+          : p.description,
+      }))
+    : fallbackProviderOptions.value.filter(p =>
+        p.modelTypes.includes(activeModelType.value)
+      )
+  return isPlatformMode.value
+    ? options.filter(p => p.value !== 'weknoracloud')
+    : options
 })
 
 const dialogVisible = computed({
@@ -873,14 +874,6 @@ const checkWkcCredentialStatus = async () => {
   }
 }
 
-const goToWeKnoraCloudSettings = async () => {
-  emit('update:visible', false)
-  if (uiStore.showSettingsModal) {
-    uiStore.closeSettings()
-    await nextTick()
-  }
-  uiStore.openSettings('weknoracloud')
-}
 
 const formData = ref<ModelFormData>({
   id: '',
@@ -996,24 +989,6 @@ const checkOllamaServiceStatus = async () => {
   }
 }
 
-// 打开Ollama设置窗口
-const goToOllamaSettings = async () => {
-  console.log('点击跳转到Ollama设置按钮')
-  // 关闭当前弹窗
-  emit('update:visible', false)
-
-  // 先关闭设置弹窗（如果已打开）
-  if (uiStore.showSettingsModal) {
-    uiStore.closeSettings()
-    // 等待 DOM 更新
-    await nextTick()
-  }
-
-  // 打开设置窗口并直接跳转到Ollama设置
-  console.log('调用uiStore.openSettings')
-  uiStore.openSettings('ollama')
-  console.log('uiStore.openSettings调用完成')
-}
 
 // 上一次打开时的 modelData id：用来判断切换模型/新增 vs. 同一次新增的连续打开
 const lastOpenedModelId = ref<string | null>(null)
@@ -1022,7 +997,7 @@ const selectModelType = async (type: EditorModelType) => {
   if (isEdit.value || draftModelType.value === type) return
   draftModelType.value = type
 
-  if (type === 'rerank') {
+  if (isPlatformMode.value || type === 'rerank') {
     formData.value.source = 'remote'
   }
   if (type !== 'embedding') {
@@ -1057,8 +1032,11 @@ const selectModelType = async (type: EditorModelType) => {
 // 监听 visible 变化，初始化表单
 watch(() => props.visible, (val) => {
   if (val) {
-    // 检查Ollama服务状态
-    checkOllamaServiceStatus()
+    if (isPlatformMode.value) {
+      formData.value.source = 'remote'
+    } else {
+      checkOllamaServiceStatus()
+    }
 
     // 从 API 加载 Model Provider 列表
     loadProviders()
@@ -1099,13 +1077,16 @@ watch(() => props.visible, (val) => {
 
       lastOpenedModelId.value = currentId
 
-      // ReRank 模型强制使用 remote 来源（Ollama 不支持 ReRank）
-      if (activeModelType.value === 'rerank') {
+      // 平台全局模型和 ReRank 模型只使用 remote 来源。
+      if (isPlatformMode.value || activeModelType.value === 'rerank') {
         formData.value.source = 'remote'
       }
 
       // 如果当前 provider 是 WeKnoraCloud，检查凭证状态
-      if (formData.value.provider === 'weknoracloud') {
+      if (isPlatformMode.value && formData.value.provider === 'weknoracloud') {
+        formData.value.provider = 'generic'
+        formData.value.baseUrl = ''
+      } else if (formData.value.provider === 'weknoracloud') {
         checkWkcCredentialStatus()
       }
 
@@ -1177,7 +1158,7 @@ const handleProviderChange = (value: string) => {
     remoteMessage.value = ''
   }
   // WeKnoraCloud: 检查凭证状态
-  if (value === 'weknoracloud') {
+  if (!isPlatformMode.value && value === 'weknoracloud') {
     checkWkcCredentialStatus()
   }
   if (hydratingForm.value) return
@@ -1460,19 +1441,20 @@ const checkRemoteAPI = async () => {
 
       case 'vllm':
         // VLLM 模型（多模态）
-        // VLLM 使用 checkRemoteModel 进行基础连接测试
+        // 通过 modelType 让后端发送真实图片多模态请求。
         result = await checkRemoteModel({
           modelName: formData.value.modelName,
           baseUrl: formData.value.baseUrl || '',
           apiKey: formData.value.apiKey || '',
           provider: formData.value.provider,
+          modelType: 'VLLM',
           ...idPayload,
           ...headerPayload,
         })
         break
 
       case 'asr':
-        // ASR 模型（语音识别）— 使用专用的 ASR 测试接口（/v1/audio/transcriptions）
+        // ASR 模型（语音识别）— 后端按 provider 选择对应的语音协议。
         result = await checkASRModel({
           modelName: formData.value.modelName,
           baseUrl: formData.value.baseUrl || '',
@@ -1673,6 +1655,10 @@ onUnmounted(() => {
 
 // 监听来源变化，清理所有状态
 watch(() => formData.value.source, () => {
+  if (isPlatformMode.value && formData.value.source !== 'remote') {
+    formData.value.source = 'remote'
+    return
+  }
   // 重置校验状态
   modelChecked.value = false
   modelAvailable.value = false

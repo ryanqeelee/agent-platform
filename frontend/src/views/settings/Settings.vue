@@ -15,8 +15,8 @@
             <div class="settings-sidebar">
               <div class="sidebar-header">
                 <h2 class="sidebar-title">{{ settingsTitle }}</h2>
-                <p v-if="settingsSurface === 'enterprise' || currentSection === 'memory-runtime'"
-                  class="settings-tenant">{{ authStore.currentTenantName }}</p>
+                <p v-if="settingsSurface === 'enterprise' || ['memory-runtime', 'chathistory', 'websearch', 'parser', 'mcp', 'vectorstore', 'storage', 'sandbox', 'skills'].includes(currentSection)"
+                  class="settings-tenant">{{ tenantSettingsName }}</p>
               </div>
               <div class="settings-nav">
                 <div v-for="group in navGroups" :key="group.key">
@@ -38,15 +38,7 @@
                         <line x1="2.94" y1="12.5" x2="15.06" y2="12.5" stroke="currentColor" stroke-width="1.2"
                           stroke-linecap="round" />
                       </svg>
-                      <!-- 平台云服务使用自定义图标 -->
-                      <svg v-else-if="item.key === 'weknoracloud'" width="17" height="17" viewBox="0 0 18 18"
-                        fill="none" xmlns="http://www.w3.org/2000/svg" class="nav-icon">
-                        <rect x="1.5" y="1.5" width="15" height="15" rx="3.5" stroke="currentColor" stroke-width="1.2"
-                          fill="none" />
-                        <path d="M4.5 5.5L6.5 12.5L9 7.5L11.5 12.5L13.5 5.5" stroke="currentColor" stroke-width="1.3"
-                          stroke-linecap="round" stroke-linejoin="round" fill="none" />
-                      </svg>
-                      <!-- 沙箱：隔离运行窗口，避免和 Ollama / 系统设置共用 server -->
+                      <!-- 沙箱：隔离运行窗口 -->
                       <svg v-else-if="item.key === 'sandbox'" width="17" height="17" viewBox="0 0 18 18" fill="none"
                         xmlns="http://www.w3.org/2000/svg" class="nav-icon">
                         <rect x="2.5" y="3" width="13" height="12" rx="2" stroke="currentColor" stroke-width="1.2"
@@ -100,35 +92,26 @@
                     <GeneralSettings />
                   </div>
 
-                  <!-- Ollama 设置 -->
-                  <div v-if="currentSection === 'ollama'" class="section">
-                    <OllamaSettings />
-                  </div>
-
-                  <!-- 平台云服务 -->
-                  <div v-if="currentSection === 'weknoracloud'" class="section">
-                    <WeKnoraCloudSettings />
-                  </div>
 
                   <!-- 模型配置 -->
-                  <div v-if="currentSection === 'agents'" class="section"><AgentList /></div>
+                  <div v-if="currentSection === 'agents'" class="section"><PlatformAgentList /></div>
                   <div v-if="currentSection === 'models'" class="section">
                     <ModelSettings />
                   </div>
 
                   <!-- 网络搜索配置 -->
                   <div v-if="currentSection === 'websearch'" class="section">
-                    <WebSearchSettings />
+                    <WebSearchSettings :key="props.tenantControlId" />
                   </div>
 
                   <!-- 消息管理 -->
                   <div v-if="currentSection === 'chathistory'" class="section">
-                    <ChatHistorySettings />
+                    <ChatHistorySettings :key="props.tenantControlId" />
                   </div>
 
                   <!-- 长期记忆（空间级开关） -->
                   <div v-if="currentSection === 'memory' || currentSection === 'memory-runtime'" class="section">
-                    <MemoryWorkspaceSettings :key="currentSection" :runtime="currentSection === 'memory-runtime'" />
+                    <MemoryWorkspaceSettings :key="`${currentSection}-${props.tenantControlId ?? 'self'}`" :runtime="currentSection === 'memory-runtime'" />
                   </div>
 
                   <!-- 我的记忆（个人记忆管理） -->
@@ -138,28 +121,28 @@
 
                   <!-- 向量数据库引擎 -->
                   <div v-if="currentSection === 'vectorstore'" class="section">
-                    <VectorStoreSettings />
+                    <VectorStoreSettings :key="props.tenantControlId" />
                   </div>
 
                   <!-- 解析引擎 -->
                   <div v-if="currentSection === 'parser'" class="section">
-                    <ParserEngineSettings />
+                    <ParserEngineSettings :key="props.tenantControlId" />
                   </div>
 
                   <!-- 存储引擎 -->
                   <div v-if="currentSection === 'storage'" class="section">
-                    <StorageEngineSettings />
+                    <StorageEngineSettings :key="props.tenantControlId" />
                   </div>
 
                   <!-- 沙箱 -->
                   <div v-if="currentSection === 'sandbox'" class="section">
-                    <SandboxSettings />
+                    <SandboxSettings :key="props.tenantControlId" />
                   </div>
 
                   <div v-if="currentSection === 'enterprise-skills'" class="section"><EnterpriseSkillSettings /></div>
                   <!-- 技能目录：登记后可装到多份沙箱，智能体只从当前沙箱的就绪集合选用 -->
                   <div v-if="currentSection === 'skills'" class="section">
-                    <SkillSettings :initial-sandbox-id="currentSubSection" />
+                    <SkillSettings :key="props.tenantControlId" :initial-sandbox-id="currentSubSection" />
                   </div>
 
                   <!-- 系统信息 -->
@@ -175,10 +158,6 @@
                   <!-- 系统管理员可见的任务队列运行状态 -->
                   <div v-if="currentSection === 'runtime-queues'" class="section">
                     <RuntimeQueues />
-                  </div>
-
-                  <div v-if="currentSection === 'platform-api-keys'" class="section">
-                    <PlatformAPIKeys />
                   </div>
 
                   <div v-if="currentSection === 'system-audit-log'" class="section">
@@ -212,7 +191,7 @@
 
                   <!-- MCP 服务 -->
                   <div v-if="currentSection === 'mcp'" class="section">
-                    <McpSettings />
+                    <McpSettings :key="props.tenantControlId" />
                   </div>
                 </template>
               </div>
@@ -225,7 +204,7 @@
 </template>
 
 <script setup lang="ts">
-import AgentList from '@/views/agent/AgentList.vue'
+import PlatformAgentList from '@/views/agent/PlatformAgentList.vue'
 import { ref, computed, watch, onMounted, onUnmounted, provide, toRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { LocationQueryRaw } from 'vue-router'
@@ -239,7 +218,6 @@ import TenantInfo from './TenantInfo.vue'
 import UserProfile from './UserProfile.vue'
 import GeneralSettings from './GeneralSettings.vue'
 import ModelSettings from './ModelSettings.vue'
-import OllamaSettings from './OllamaSettings.vue'
 import McpSettings from './McpSettings.vue'
 import WebSearchSettings from './WebSearchSettings.vue'
 import ChatHistorySettings from './ChatHistorySettings.vue'
@@ -251,12 +229,10 @@ import StorageEngineSettings from './StorageBackendSettings.vue'
 import SandboxSettings from './SandboxSettings.vue'
 import SkillSettings from './SkillSettings.vue'
 import EnterpriseSkillSettings from './EnterpriseSkillSettings.vue'
-import WeKnoraCloudSettings from './WeKnoraCloudSettings.vue'
 import TenantMembers from './TenantMembers.vue'
 import BusinessRoles from './BusinessRoles.vue'
 import SystemSettings from '@/views/system/SystemSettings.vue'
 import RuntimeQueues from '@/views/system/RuntimeQueues.vue'
-import PlatformAPIKeys from '@/views/system/PlatformAPIKeys.vue'
 import SystemAuditLog from '@/views/system/SystemAuditLog.vue'
 import IntegrationSettingsSection from '@/views/integrations/IntegrationSettingsSection.vue'
 import {
@@ -289,7 +265,7 @@ const authStore = useAuthStore()
 const deploymentCapabilities = useDeploymentCapabilitiesStore()
 const { t, locale } = useI18n()
 
-const props = defineProps<{ tenantControlId?: number }>()
+const props = defineProps<{ tenantControlId?: number; tenantControlName?: string }>()
 provide(platformTenantControlIDKey, toRef(props, 'tenantControlId'))
 
 const currentSection = ref<string>('general')
@@ -314,6 +290,7 @@ type NavGroup = {
 const SYSTEM_ADMIN_SECTIONS = SYSTEM_ADMIN_SETTINGS_SECTIONS
 
 const settingsSurface = computed(() => settingsSurfaceForSection(currentSection.value))
+const tenantSettingsName = computed(() => props.tenantControlName || authStore.currentTenantName)
 const settingsTitle = computed(() => {
   if (settingsSurface.value === 'enterprise') return getEnterpriseAdministrationCopy(locale.value).eyebrow
   if (settingsSurface.value === 'platform') return t('settings.navGroups.systemAdministration')
@@ -351,7 +328,7 @@ const canSeeSection = (key: string): boolean => {
     return authStore.hasRole(min)
   }
   if (SYSTEM_ADMIN_SECTIONS.has(key)) {
-    if ((key === 'sandbox' || key === 'skills') && !props.tenantControlId) return false
+    if (['sandbox', 'skills', 'chathistory', 'memory-runtime', 'websearch', 'parser', 'mcp', 'vectorstore', 'storage'].includes(key) && !props.tenantControlId) return false
     return authStore.isSystemAdmin
   }
   const min = SETTINGS_SECTION_MIN_ROLE[key]
@@ -374,8 +351,6 @@ const navItems = computed(() => {
   }))
   const all: NavItem[] = [
     { key: 'general', icon: 'setting', label: t('general.title') },
-    { key: 'ollama', icon: 'server', label: 'Ollama' },
-    { key: 'weknoracloud', icon: '', label: t('settings.platformCloudService') },
     { key: 'agents', icon: 'chat', label: t('menu.agents') },
     { key: 'models', icon: 'control-platform', label: t('settings.modelManagement') },
     { key: 'websearch', icon: 'search', label: t('settings.webSearchConfig') },
@@ -393,7 +368,6 @@ const navItems = computed(() => {
     { key: 'system', icon: 'info-circle', label: t('settings.versionInfo') },
     { key: 'system-global', icon: 'server', label: t('settings.system') },
     { key: 'runtime-queues', icon: 'queue', label: t('settings.taskQueue') },
-    { key: 'platform-api-keys', icon: 'secured', label: t('platformApiKeys.title') },
     { key: 'system-audit-log', icon: 'history', label: t('system.globalSettings.audit.tabLabel') },
     { key: 'userprofile', icon: 'user', label: t('userProfile.title') },
     { key: 'mymemory', icon: 'bookmark', label: t('memorySettings.title') },
@@ -432,7 +406,7 @@ const navGroups = computed<NavGroup[]>(() => {
     {
       key: 'models_runtime',
       label: t('settings.navGroups.modelsRuntime'),
-      items: pickItems(['agents', 'models', 'chathistory', 'memory-runtime', 'ollama', 'weknoracloud']),
+      items: pickItems(['agents', 'models', 'chathistory', 'memory-runtime']),
     },
     {
       key: 'integrations',
@@ -461,7 +435,7 @@ const navGroups = computed<NavGroup[]>(() => {
     {
       key: 'system_administration',
       label: t('settings.navGroups.systemAdministration'),
-      items: pickItems(['system-global', 'runtime-queues', 'platform-api-keys', 'system-audit-log']),
+      items: pickItems(['system-global', 'runtime-queues', 'system-audit-log']),
     },
     {
       key: 'platform',
@@ -520,12 +494,7 @@ const handleClose = () => {
   uiStore.closeSettings()
   // 如果当前路由是设置页，返回上一页
   if (route.path === '/platform/settings') {
-    const sec = route.query.section
-    if (sec === 'system-global' || sec === 'runtime-queues' || sec === 'platform-api-keys' || sec === 'system-audit-log') {
-      router.push('/platform/knowledge-bases')
-    } else {
-      router.back()
-    }
+    router.push('/platform/operations')
   }
 }
 

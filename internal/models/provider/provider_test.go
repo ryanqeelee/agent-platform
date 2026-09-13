@@ -144,6 +144,8 @@ func TestAliyunProviderValidation(t *testing.T) {
 		assert.Contains(t, info.ModelTypes, types.ModelTypeKnowledgeQA)
 		assert.Contains(t, info.ModelTypes, types.ModelTypeEmbedding)
 		assert.Contains(t, info.ModelTypes, types.ModelTypeRerank)
+		assert.Contains(t, info.ModelTypes, types.ModelTypeASR)
+		assert.Equal(t, AliyunChatBaseURL, info.GetDefaultURL(types.ModelTypeASR))
 	})
 }
 

@@ -75,6 +75,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { getPromptTemplates, type PromptTemplate, type PromptTemplatesConfig } from '@/api/system';
+import { getPlatformAgentPromptTemplates } from '@/api/agent';
 
 const { t } = useI18n();
 
@@ -88,6 +89,7 @@ const props = withDefaults(defineProps<{
   intentId?: string;
   /** 为 false 时只显示「恢复默认」，不显示「使用模板」 */
   showTemplatePicker?: boolean;
+  scope?: 'tenant' | 'platform';
 }>(), {
   showTemplatePicker: true,
 });
@@ -114,7 +116,9 @@ const loadTemplates = async () => {
   if (loading.value) return;
   loading.value = true;
   try {
-    const response = await getPromptTemplates();
+    const response = props.scope === 'platform'
+      ? await getPlatformAgentPromptTemplates()
+      : await getPromptTemplates();
     templatesConfig.value = response.data;
   } catch (error) {
     console.error('Failed to load prompt templates:', error);
@@ -185,7 +189,9 @@ const handleResetToDefault = async () => {
   if (!templatesConfig.value) {
     resettingDefault.value = true;
     try {
-      const response = await getPromptTemplates();
+      const response = props.scope === 'platform'
+        ? await getPlatformAgentPromptTemplates()
+        : await getPromptTemplates();
       templatesConfig.value = response.data;
     } catch (error) {
       console.error('Failed to load prompt templates:', error);

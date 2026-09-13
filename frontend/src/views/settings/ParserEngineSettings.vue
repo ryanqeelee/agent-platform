@@ -173,7 +173,7 @@
           只有有内容时才渲染，避免空 section 空底部分隔线。
         -->
         <section
-          v-if="currentEngine.Name === 'builtin' || currentEngine.Name === 'weknoracloud'"
+          v-if="currentEngine.Name === 'builtin'"
           class="setting-drawer__section"
         >
           <h4 class="setting-drawer__section-title">{{ $t('settings.parser.statusSection', '状态信息') }}</h4>
@@ -202,27 +202,6 @@
             统一用 inline alert：图标 + 一行文案 + 行尾跳转 link，体量
             匹配"一条信息"该有的样子。
           -->
-          <template v-if="currentEngine.Name === 'weknoracloud'">
-            <div v-if="wkcState === 'configured'" class="inline-alert inline-alert--ok">
-              <t-icon name="check-circle-filled" class="inline-alert__icon" />
-              <span>{{ $t('settings.weknoraCloud.credentialConfigured') }}</span>
-            </div>
-            <div v-else-if="wkcState === 'loading'" class="inline-alert">
-              <t-icon name="loading" class="inline-alert__icon spinning" />
-              <span>{{ $t('settings.weknoraCloud.checkingStatus') }}</span>
-            </div>
-            <div v-else class="inline-alert inline-alert--warn">
-              <t-icon name="error-circle-filled" class="inline-alert__icon" />
-              <span class="inline-alert__text">
-                <span v-if="wkcState === 'expired'">{{ $t('settings.weknoraCloud.credentialExpired') }}</span>
-                <span v-else>{{ $t('settings.weknoraCloud.unconfigured') }}</span>
-              </span>
-              <a class="inline-alert__action" @click="goToWkcSettings">
-                {{ $t('settings.weknoraCloud.goToSettings') }}
-                <t-icon name="chevron-right" />
-              </a>
-            </div>
-          </template>
         </section>
 
         <!-- Section 3 — mineru 自建配置 -->
@@ -382,9 +361,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
 import { MessagePlugin } from 'tdesign-vue-next'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
@@ -397,11 +375,11 @@ import {
   type ParserEngineInfo,
   type ParserEngineConfig,
 } from '@/api/system'
-import { getWeKnoraCloudStatus } from '@/api/model'
+import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 
 const { t } = useI18n()
-const uiStore = useUIStore()
 const authStore = useAuthStore()
+const platformTenantID = usePlatformTenantControlID()
 
 const CONFIGURABLE_ENGINES = new Set(['mineru', 'mineru_cloud', 'paddleocr_vl', 'paddleocr_vl_cloud'])
 
@@ -490,7 +468,7 @@ const ENGINE_ORDER: Record<string, number> = {
 }
 
 const sortedEngines = computed(() => {
-  return [...engines.value].sort((a, b) => {
+  return engines.value.filter(engine => engine.Name !== 'weknoracloud').sort((a, b) => {
     const oa = ENGINE_ORDER[a.Name] ?? 100
     const ob = ENGINE_ORDER[b.Name] ?? 100
     if (oa !== ob) return oa - ob
@@ -553,7 +531,7 @@ async function loadEngines() {
 
 async function loadConfig() {
   try {
-    const res = await getParserEngineConfig()
+    const res = await getParserEngineConfig(platformTenantID.value)
     const data = res?.data
     config.value = {
       docreader_addr: data?.docreader_addr ?? DEFAULT_PARSER_CONFIG.docreader_addr ?? '',
@@ -580,15 +558,15 @@ async function loadConfig() {
       paddleocr_vl_cloud_use_seal_recognition: data?.paddleocr_vl_cloud_use_seal_recognition ?? DEFAULT_PARSER_CONFIG.paddleocr_vl_cloud_use_seal_recognition ?? true,
       paddleocr_vl_cloud_use_chart_recognition: data?.paddleocr_vl_cloud_use_chart_recognition ?? DEFAULT_PARSER_CONFIG.paddleocr_vl_cloud_use_chart_recognition ?? false,
     }
-  } catch {
-    config.value = { ...DEFAULT_PARSER_CONFIG }
+  } catch (e: any) {
+    error.value = e?.message || t('settings.parser.loadFailed')
   }
 }
 
 async function loadAll() {
   loading.value = true
   error.value = ''
-  await Promise.all([loadEngines(), loadConfig(), checkWkcStatus()])
+  await Promise.all([loadEngines(), loadConfig()])
   loading.value = false
 }
 
@@ -675,10 +653,11 @@ async function onCheck() {
 }
 
 async function onSave() {
+  if (error.value) return
   saving.value = true
   saveMessage.value = ''
   try {
-    await updateParserEngineConfig(buildConfigPayload())
+    await updateParserEngineConfig(buildConfigPayload(), platformTenantID.value)
     saveSuccess.value = true
     saveMessage.value = t('settings.parser.saveSuccess')
     drawerVisible.value = false
@@ -689,33 +668,6 @@ async function onSave() {
   } finally {
     saving.value = false
   }
-}
-
-// ---- WeKnoraCloud 凭证状态 ----
-const wkcState = ref<'loading' | 'unconfigured' | 'configured' | 'expired'>('loading')
-
-async function checkWkcStatus() {
-  wkcState.value = 'loading'
-  try {
-    const status = await getWeKnoraCloudStatus()
-    if (status.needs_reinit) {
-      wkcState.value = 'expired'
-    } else if (status.has_models) {
-      wkcState.value = 'configured'
-    } else {
-      wkcState.value = 'unconfigured'
-    }
-  } catch {
-    wkcState.value = 'unconfigured'
-  }
-}
-
-async function goToWkcSettings() {
-  if (uiStore.showSettingsModal) {
-    uiStore.closeSettings()
-    await nextTick()
-  }
-  uiStore.openSettings('weknoracloud')
 }
 
 onMounted(loadAll)

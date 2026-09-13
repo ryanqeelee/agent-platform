@@ -1,4 +1,6 @@
 import { get, post, put, del } from '@/utils/request'
+import { platformTenantPath } from './platform-tenant-path'
+const basePath = (tenantId?: number) => tenantId === undefined ? '/api/v1/mcp-services' : platformTenantPath(tenantId, 'mcp-services')
 
 export interface MCPService {
   id: string
@@ -82,37 +84,36 @@ export interface MCPTestResult {
 }
 
 // List all MCP services
-export async function listMCPServices(): Promise<MCPService[]> {
-  const response: any = await get('/api/v1/mcp-services')
+export async function listMCPServices(tenantId?: number): Promise<MCPService[]> {
+  const response: any = await get(basePath(tenantId))
   return response.data || []
 }
 
 // Get a single MCP service by ID
-export async function getMCPService(id: string): Promise<MCPService> {
-  const response: any = await get(`/api/v1/mcp-services/${id}`)
+export async function getMCPService(id: string, tenantId?: number): Promise<MCPService> {
+  const response: any = await get(`${basePath(tenantId)}/${id}`)
   return response.data
 }
 
 // Create a new MCP service
-export async function createMCPService(data: Partial<MCPService>): Promise<MCPService> {
-  const response: any = await post('/api/v1/mcp-services', data)
+export async function createMCPService(data: Partial<MCPService>, tenantId?: number): Promise<MCPService> {
+  const response: any = await post(basePath(tenantId), data)
   return response.data
 }
 
 // Update an existing MCP service
-export async function updateMCPService(id: string, data: Partial<MCPService>): Promise<MCPService> {
-  const response: any = await put(`/api/v1/mcp-services/${id}`, data)
+export async function updateMCPService(id: string, data: Partial<MCPService>, tenantId?: number): Promise<MCPService> {
+  const response: any = await put(`${basePath(tenantId)}/${id}`, data)
   return response.data
 }
 
 // Delete an MCP service
-export async function deleteMCPService(id: string): Promise<void> {
-  await del(`/api/v1/mcp-services/${id}`)
+export async function deleteMCPService(id: string, tenantId?: number): Promise<void> { await del(`${basePath(tenantId)}/${id}`)
 }
 
 // Test MCP service connection
-export async function testMCPService(id: string): Promise<MCPTestResult> {
-  const response: any = await post(`/api/v1/mcp-services/${id}/test`, {})
+export async function testMCPService(id: string, tenantId?: number): Promise<MCPTestResult> {
+  const response: any = await post(`${basePath(tenantId)}/${id}/test`, {})
   // 后端返回格式: { success: true, data: MCPTestResult }
   // response interceptor 已经返回了 data，所以 response 就是 { success: true, data: {...} }
   if (response && response.data) {
@@ -123,25 +124,22 @@ export async function testMCPService(id: string): Promise<MCPTestResult> {
 }
 
 // Get tools from an MCP service
-export async function getMCPServiceTools(id: string): Promise<MCPTool[]> {
-  const response: any = await get(`/api/v1/mcp-services/${id}/tools`)
+export async function getMCPServiceTools(id: string, tenantId?: number): Promise<MCPTool[]> { const response: any = await get(`${basePath(tenantId)}/${id}/tools`)
   return response.data || []
 }
 
 // Get resources from an MCP service
-export async function getMCPServiceResources(id: string): Promise<MCPResource[]> {
-  const response: any = await get(`/api/v1/mcp-services/${id}/resources`)
+export async function getMCPServiceResources(id: string, tenantId?: number): Promise<MCPResource[]> { const response: any = await get(`${basePath(tenantId)}/${id}/resources`)
   return response.data || []
 }
 
 /** Persisted per-tool human-approval flags (issue #1173) */
-export async function getMCPToolApprovals(serviceId: string): Promise<MCPToolApprovalRow[]> {
-  const response: any = await get(`/api/v1/mcp-services/${serviceId}/tool-approvals`)
+export async function getMCPToolApprovals(serviceId: string, tenantId?: number): Promise<MCPToolApprovalRow[]> { const response: any = await get(`${basePath(tenantId)}/${serviceId}/tool-approvals`)
   return response.data || []
 }
 
-export async function setMCPToolApproval(serviceId: string, toolName: string, requireApproval: boolean): Promise<void> {
-  await put(`/api/v1/mcp-services/${serviceId}/tool-approvals/${encodeURIComponent(toolName)}`, {
+export async function setMCPToolApproval(serviceId: string, toolName: string, requireApproval: boolean, tenantId?: number): Promise<void> {
+  await put(`${basePath(tenantId)}/${serviceId}/tool-approvals/${encodeURIComponent(toolName)}`, {
     require_approval: requireApproval
   })
 }
@@ -168,17 +166,17 @@ export interface McpCredentialsResponse {
 
 export async function putMCPCredentials(
   serviceId: string,
-  body: Partial<Record<McpCredentialField, string>>
+  body: Partial<Record<McpCredentialField, string>>, tenantId?: number
 ): Promise<McpCredentialsResponse> {
-  const response: any = await put(`/api/v1/mcp-services/${serviceId}/credentials`, body)
+  const response: any = await put(`${basePath(tenantId)}/${serviceId}/credentials`, body)
   return (response.data ?? response) as McpCredentialsResponse
 }
 
 export async function deleteMCPCredentialField(
   serviceId: string,
-  field: McpCredentialField
+  field: McpCredentialField, tenantId?: number
 ): Promise<void> {
-  await del(`/api/v1/mcp-services/${serviceId}/credentials/${field}`)
+  await del(`${basePath(tenantId)}/${serviceId}/credentials/${field}`)
 }
 
 // ----------------------------------------------------------------------------

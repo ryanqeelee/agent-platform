@@ -9,8 +9,8 @@ import (
 // Native analysis has independent platform-owned prompts and tools. It shares
 // the existing tenant sandbox configuration, with existing sandbox/Skills/network capability switches.
 func (s *customAgentService) nativeAnalysisAgent(ctx context.Context, id string, tenantID uint64) (*types.CustomAgent, error) {
-	agent := types.GetBuiltinAgentWithContext(ctx, id, tenantID)
-	if agent == nil {
+	agent, err := s.platformBuiltinAgent(ctx, id, tenantID)
+	if err != nil {
 		return nil, fmt.Errorf("native analysis definition is missing")
 	}
 	if s.scenarioCapabilities == nil {
@@ -21,7 +21,8 @@ func (s *customAgentService) nativeAnalysisAgent(ctx context.Context, id string,
 		return nil, ErrAssistantScenarioCapabilityUnavailable
 	}
 	agent.Config.SandboxConfigID = ""
-	if settings.Capabilities.Tools && s.sandboxConfigs != nil {
+	platformSkillsMode := agent.Config.SkillsSelectionMode
+	if platformSkillsMode != "none" && settings.Capabilities.Tools && s.sandboxConfigs != nil {
 		if s.provisionEmployeeSandbox != nil {
 			if err := s.provisionEmployeeSandbox(ctx, tenantID); err != nil {
 				return nil, err
@@ -45,7 +46,7 @@ func (s *customAgentService) nativeAnalysisAgent(ctx context.Context, id string,
 		agent.Config.SkillsSelectionMode = "none"
 		agent.Config.SelectedSkills = nil
 	}
-	agent.Config.WebSearchEnabled = settings.Capabilities.ExternalSearch
+	agent.Config.WebSearchEnabled = agent.Config.WebSearchEnabled && settings.Capabilities.ExternalSearch
 	ready := false
 	agent.WebSearchReady = &ready
 	if agent.Config.WebSearchEnabled && s.webSearchProviders != nil {

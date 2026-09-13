@@ -1,4 +1,5 @@
 import { get, put } from '@/utils/request'
+import { platformTenantPath } from './platform-tenant-path'
 
 // RetrievalConfig represents the global retrieval/search configuration for a tenant.
 // Shared by knowledge search and message search.
@@ -28,8 +29,9 @@ export interface PlatformRetrievalProcessingSettings {
   }
 }
 
-export async function getPlatformRetrievalProcessingSettings(): Promise<PlatformRetrievalProcessingSettings> {
-  const response: any = await get('/api/v1/platform/retrieval-processing-settings')
+export async function getPlatformRetrievalProcessingSettings(platformTenantId?: number): Promise<PlatformRetrievalProcessingSettings> {
+  const path = platformTenantId === undefined ? '/api/v1/platform/retrieval-processing-settings' : platformTenantPath(platformTenantId, 'retrieval-processing-settings')
+  const response: any = await get(path)
   if (!response?.success || !response.data) throw new Error('platform retrieval context unavailable')
   return response.data as PlatformRetrievalProcessingSettings
 }

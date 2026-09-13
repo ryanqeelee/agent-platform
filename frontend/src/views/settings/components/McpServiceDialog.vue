@@ -212,7 +212,7 @@
         </div>
 
         <!-- OAuth 2.0：零配置（自动发现 + 动态客户端注册），按用户授权 -->
-        <template v-if="isOAuth">
+        <template v-if="isOAuth && !props.platformMode">
           <div class="form-item">
             <label class="form-label">{{ t('mcpServiceDialog.oauthScopes', 'Scopes（可选，空格分隔）') }}</label>
             <t-input v-model="oauthScopesText" :placeholder="t('mcpServiceDialog.optional')" />
@@ -359,7 +359,7 @@
             <template #icon><t-icon name="close" /></template>
           </t-button>
         </div>
-        <McpTestResultBody :result="testResult" :service-id="props.service?.id" />
+        <McpTestResultBody :result="testResult" :service-id="props.service?.id" :tenant-id="platformTenantID" />
       </section>
     </t-form>
   </SettingDrawer>
@@ -387,6 +387,7 @@ import {
   type MCPOAuthTokenState,
 } from '@/api/mcp-service'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 import McpTestResultBody from './McpTestResultBody.vue'
 import CredentialResource, {
   type CredentialFieldDef,
@@ -397,6 +398,7 @@ interface Props {
   visible: boolean
   service: MCPService | null
   mode: 'add' | 'edit'
+  platformMode?: boolean
 }
 
 interface Emits {
@@ -408,6 +410,7 @@ interface Emits {
 }
 
 const props = defineProps<Props>()
+const platformTenantID = usePlatformTenantControlID()
 const emit = defineEmits<Emits>()
 
 const formRef = ref<FormInstanceFunctions>()
@@ -617,7 +620,7 @@ const oauthChecking = ref(false)
 const oauthAuthorizing = ref(false)
 
 async function refreshOAuthStatus() {
-  if (props.mode !== 'edit' || !props.service?.id || !isOAuth.value) return
+  if (props.platformMode || props.mode !== 'edit' || !props.service?.id || !isOAuth.value) return
   oauthChecking.value = true
   try {
     const status = await getMCPOAuthAuthorizationStatus(props.service.id)
@@ -690,11 +693,11 @@ async function handleAuthorize() {
     const hasId = !!props.service?.id
     const data = buildPayload(!hasId)
     if (hasId) {
-      await updateMCPService(props.service!.id, data)
+      await updateMCPService(props.service!.id, data, platformTenantID.value)
       serviceId = props.service!.id
       emit('created', { ...(props.service as MCPService), ...data } as MCPService)
     } else {
-      const created = await createMCPService(data)
+      const created = await createMCPService(data, platformTenantID.value)
       serviceId = created.id
       emit('created', created)
     }
@@ -750,11 +753,11 @@ const credentialApi = computed<CredentialResourceApi<McpCredentialField>>(() => 
   const id = props.service?.id ?? ''
   return {
     save: async (patch) => {
-      const meta = await putMCPCredentials(id, patch)
+      const meta = await putMCPCredentials(id, patch, platformTenantID.value)
       return meta.fields
     },
     remove: async (field) => {
-      await deleteMCPCredentialField(id, field)
+      await deleteMCPCredentialField(id, field, platformTenantID.value)
     },
   }
 })
@@ -829,7 +832,7 @@ async function handleTestConnection() {
     closeBtn: false,
   })
   try {
-    const result = await testMCPService(props.service.id)
+    const result = await testMCPService(props.service.id, platformTenantID.value)
     MessagePlugin.closeAll()
     const safe: MCPTestResult = result ?? {
       success: false,
@@ -1032,7 +1035,7 @@ const handleSubmit = async () => {
   try {
     const data = buildPayload(props.mode === 'add')
     if (props.mode === 'add') {
-      const created = await createMCPService(data)
+      const created = await createMCPService(data, platformTenantID.value)
       MessagePlugin.success(t('mcpServiceDialog.toasts.created'))
       // Keep the drawer open and hand back the new service so the parent can
       // flip it into edit mode in place — OAuth authorization and "test
@@ -1040,7 +1043,7 @@ const handleSubmit = async () => {
       // the user do them immediately instead of save → reopen.
       emit('created', created)
     } else {
-      await updateMCPService(props.service!.id, data)
+      await updateMCPService(props.service!.id, data, platformTenantID.value)
       MessagePlugin.success(t('mcpServiceDialog.toasts.updated'))
       emit('success')
     }

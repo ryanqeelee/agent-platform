@@ -27,6 +27,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
+	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -1655,7 +1656,7 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 
 // ModelTestRequest 统一的"测试连接"请求体。
 //
-// 四种模型（chat/embedding/rerank/asr）的测试接口共享同一份结构，以便：
+// 模型测试接口共享同一份结构，以便：
 //   - 前端只需维护一份表单 → 后端映射。
 //   - 后端可以直接把请求转成 *types.Model，再调用各包的 ConfigFromModel，
 //     与生产路径（service.modelService.GetXxxModel）走完全相同的装配流程，
@@ -1664,6 +1665,7 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 // 所有 provider/model 通用字段都在这里集中声明；若未来新增字段（比如现在的
 // custom_headers），只需改一处，生产路径和测试路径会同时生效。
 type ModelTestRequest struct {
+	ModelType                 string            `json:"modelType,omitempty"`
 	Source                    string            `json:"source"` // 为空时按需默认为 "remote"
 	ModelName                 string            `json:"modelName" binding:"required"`
 	BaseURL                   string            `json:"baseUrl"`
@@ -1676,6 +1678,10 @@ type ModelTestRequest struct {
 	ExtraConfig               map[string]string `json:"extraConfig,omitempty"`
 	// AppSecret 用于 LKEAP / Volcengine Rerank 等需要第二段密钥的场景（对应模型 Parameters.AppSecret）。
 	AppSecret string `json:"appSecret,omitempty"`
+	// appID is copied only from an authorized stored model. It is deliberately
+	// not part of the request contract: WeKnoraCloud's tenant fallback remains
+	// the public setup path for unsaved credentials.
+	appID string
 	// ModelID, when set, instructs the handler to substitute any missing
 	// secrets (APIKey, AppSecret via ExtraConfig) from the stored model
 	// record before assembling the test client. This lets the "Test
@@ -1698,7 +1704,8 @@ func (h *InitializationHandler) fillSecretsFromStoredModel(ctx context.Context, 
 	if req == nil || req.ModelID == "" {
 		return
 	}
-	if req.APIKey != "" && req.AppSecret != "" {
+	if req.APIKey != "" && req.AppSecret != "" &&
+		provider.ProviderName(req.Provider) != provider.ProviderWeKnoraCloud {
 		return
 	}
 	stored, err := h.modelService.GetModelByID(ctx, req.ModelID)
@@ -1712,6 +1719,9 @@ func (h *InitializationHandler) fillSecretsFromStoredModel(ctx context.Context, 
 	}
 	if req.AppSecret == "" {
 		req.AppSecret = stored.Parameters.AppSecret
+	}
+	if req.appID == "" {
+		req.appID = stored.Parameters.AppID
 	}
 }
 
@@ -1751,6 +1761,7 @@ func (h *InitializationHandler) buildTestModel(
 			BaseURL:       req.BaseURL,
 			APIKey:        req.APIKey,
 			AppSecret:     req.AppSecret,
+			AppID:         req.appID,
 			Provider:      req.Provider,
 			InterfaceType: req.InterfaceType,
 			ExtraConfig:   req.ExtraConfig,
@@ -1764,20 +1775,37 @@ func (h *InitializationHandler) buildTestModel(
 	}
 }
 
-// resolveTenantWeKnoraCloudCreds 从当前空间上下文里取出 WeKnoraCloud 凭证，
-// 供测试连接端点补齐 appID/appSecret。与 service.resolveWeKnoraCloudCredentials
-// 对应，但因为 handler 还没有被注入 tenantService（历史原因），暂时从
-// TenantInfoFromContext 读取，等效果相同。
-func (h *InitializationHandler) resolveTenantWeKnoraCloudCreds(ctx context.Context) (string, string, bool) {
+// resolveTestModelCredentials returns credentials owned by the model under test.
+// Only WeKnoraCloud may fill missing application credentials from the current
+// tenant; generic providers must never inherit enterprise-space credentials.
+func (h *InitializationHandler) resolveTestModelCredentials(
+	ctx context.Context, model *types.Model,
+) (appID, appSecret string) {
+	if model == nil {
+		return "", ""
+	}
+	appID = model.Parameters.AppID
+	appSecret = decryptModelAppSecret(model.Parameters.AppSecret)
+	if provider.ProviderName(model.Parameters.Provider) != provider.ProviderWeKnoraCloud ||
+		(appID != "" && appSecret != "") {
+		return
+	}
+
 	tenantInfo, ok := types.TenantInfoFromContext(ctx)
-	if !ok {
-		return "", "", false
+	if !ok || tenantInfo == nil {
+		return
 	}
 	creds := tenantInfo.Credentials.GetWeKnoraCloud()
 	if creds == nil {
-		return "", "", true
+		return
 	}
-	return creds.AppID, creds.AppSecret, true
+	if appID == "" {
+		appID = creds.AppID
+	}
+	if appSecret == "" {
+		appSecret = creds.AppSecret
+	}
+	return
 }
 
 // CheckRemoteModel godoc
@@ -1816,15 +1844,19 @@ func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(utils.FormatSSRFError("Base URL", req.BaseURL, err)))
 		return
 	}
-	appID, appSecret, ok := h.resolveTenantWeKnoraCloudCreds(ctx)
-	if !ok {
-		logger.Error(ctx, "Tenant info not found")
-		c.Error(errors.NewBadRequestError("空间信息未找到"))
-		return
+	modelType := types.ModelTypeKnowledgeQA
+	if strings.EqualFold(req.ModelType, string(types.ModelTypeVLLM)) {
+		modelType = types.ModelTypeVLLM
 	}
-
-	model := h.buildTestModel(&req, types.ModelTypeKnowledgeQA, types.ModelSourceRemote)
-	available, message := h.checkChatModelConnection(ctx, model, appID, appSecret)
+	model := h.buildTestModel(&req, modelType, types.ModelSourceRemote)
+	appID, appSecret := h.resolveTestModelCredentials(ctx, model)
+	var available bool
+	var message string
+	if modelType == types.ModelTypeVLLM {
+		available, message = h.checkVLMModelConnection(ctx, model, appID, appSecret)
+	} else {
+		available, message = h.checkChatModelConnection(ctx, model, appID, appSecret)
+	}
 
 	logger.Infof(ctx, "Remote model check completed, available: %v, message: %s", available, message)
 
@@ -1890,14 +1922,8 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 		}
 	}
 
-	appID, appSecret, ok := h.resolveTenantWeKnoraCloudCreds(ctx)
-	if !ok {
-		logger.Error(ctx, "Tenant info not found")
-		c.Error(errors.NewBadRequestError("空间信息未找到"))
-		return
-	}
-
 	model := h.buildTestModel(&req, types.ModelTypeEmbedding, types.ModelSourceRemote)
+	appID, appSecret := h.resolveTestModelCredentials(ctx, model)
 	emb, err := embedding.NewEmbedder(embedding.ConfigFromModel(model, appID, appSecret), h.pooler, h.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"model": utils.SanitizeForLog(req.ModelName)})
@@ -1985,6 +2011,34 @@ func (h *InitializationHandler) checkChatModelConnection(
 	return true, "连接正常，模型可用"
 }
 
+var modelTestPNG = []byte{
+	0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+	0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x40,
+	0x08, 0x02, 0x00, 0x00, 0x00, 0x25, 0x0b, 0xe6, 0x89, 0x00, 0x00, 0x00,
+	0x4b, 0x49, 0x44, 0x41, 0x54, 0x78, 0xda, 0xed, 0xcf, 0x31, 0x0d, 0x00,
+	0x00, 0x0c, 0x03, 0xa0, 0xfa, 0x37, 0xdd, 0x4a, 0xd8, 0xbd, 0x04, 0x1c,
+	0x90, 0x3e, 0x17, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+	0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+	0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+	0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+	0x01, 0x81, 0xcb, 0x00, 0xca, 0x53, 0xd2, 0xc2, 0x1c, 0x35, 0xb7, 0x04,
+	0x00, 0x00, 0x00, 0x00,
+	0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+}
+
+func (h *InitializationHandler) checkVLMModelConnection(
+	ctx context.Context, model *types.Model, appID, appSecret string,
+) (bool, string) {
+	instance, err := vlm.NewVLM(vlm.ConfigFromModel(model, appID, appSecret), h.ollamaService)
+	if err != nil {
+		return false, fmt.Sprintf("创建VLM实例失败: %v", err)
+	}
+	if _, err := instance.Predict(ctx, [][]byte{modelTestPNG}, "Briefly describe this image."); err != nil {
+		return false, fmt.Sprintf("图像理解测试失败: %v", err)
+	}
+	return true, "连接正常，图像理解功能可用"
+}
+
 // checkRerankModelConnection 使用 rerank 模块做一次最小化调用来测试连通性与鉴权。
 // 与生产路径共用 ConfigFromModel，所有字段（CustomHeaders 等）都透传。
 func (h *InitializationHandler) checkRerankModelConnection(
@@ -2042,14 +2096,8 @@ func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 		return
 	}
 
-	appID, appSecret, ok := h.resolveTenantWeKnoraCloudCreds(ctx)
-	if !ok {
-		logger.Error(ctx, "Tenant info not found")
-		c.Error(errors.NewBadRequestError("空间信息未找到"))
-		return
-	}
-
 	model := h.buildTestModel(&req, types.ModelTypeRerank, types.ModelSourceRemote)
+	appID, appSecret := h.resolveTestModelCredentials(ctx, model)
 	if providerName := provider.ProviderName(model.Parameters.Provider); providerName == provider.ProviderLKEAP || providerName == provider.ProviderVolcengine {
 		appID = ""
 		appSecret = decryptModelAppSecret(model.Parameters.AppSecret)
@@ -2069,7 +2117,7 @@ func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 
 // CheckASRModel godoc
 // @Summary      检查ASR模型
-// @Description  检查ASR（语音识别）模型连接是否正常，通过发送一段静默音频测试 /v1/audio/transcriptions 端点
+// @Description  检查ASR（语音识别）模型连接是否正常，通过发送一段静默音频测试对应厂商协议
 // @Tags         初始化
 // @Accept       json
 // @Produce      json
@@ -2104,8 +2152,8 @@ func (h *InitializationHandler) CheckASRModel(c *gin.Context) {
 		return
 	}
 
-	// 用统一构造器生成测试用 *types.Model（ASR 不涉及 WeKnoraCloud 凭证），
-	// 发送一段极短的静默 WAV 音频验证 /v1/audio/transcriptions 端点可达。
+	// 用统一构造器生成测试用 *types.Model，发送一段极短的静默 WAV 音频
+	// 验证 provider 选择的实际 ASR 协议。
 	model := h.buildTestModel(&req, types.ModelTypeASR, types.ModelSourceRemote)
 	asrInstance, err := asr.NewASR(asr.ConfigFromModel(model))
 	if err != nil {
@@ -2130,26 +2178,8 @@ func (h *InitializationHandler) CheckASRModel(c *gin.Context) {
 
 	if err != nil {
 		errMsg := err.Error()
-		// Always include the raw upstream error after the hint — see
-		// classifyConnectionError comment for rationale.
-		switch {
-		case strings.Contains(errMsg, "401") || strings.Contains(errMsg, "Unauthorized") || strings.Contains(errMsg, "authentication"):
-			available = false
-			message = fmt.Sprintf("认证失败，请检查API Key：%s", errMsg)
-		case strings.Contains(errMsg, "404") || strings.Contains(errMsg, "Not Found"):
-			available = false
-			message = fmt.Sprintf("API端点不存在，请检查Base URL：%s", errMsg)
-		case strings.Contains(errMsg, "connection refused") || strings.Contains(errMsg, "no such host") || strings.Contains(errMsg, "dial tcp"):
-			available = false
-			message = fmt.Sprintf("无法连接到服务器，请检查Base URL：%s", errMsg)
-		case strings.Contains(errMsg, "model") && strings.Contains(errMsg, "not found"):
-			available = false
-			message = fmt.Sprintf("模型不存在，请检查模型名称：%s", errMsg)
-		default:
-			logger.Infof(ctx, "ASR check got non-fatal error (endpoint reachable): %v", err)
-			available = true
-			message = fmt.Sprintf("ASR端点可达（非致命错误: %s）", errMsg)
-		}
+		available = false
+		message = fmt.Sprintf("%s：%s", classifyConnectionError(strings.ToLower(errMsg)), errMsg)
 	} else if text != "" {
 		message = fmt.Sprintf("ASR连接成功，转写结果: %s", text)
 	}

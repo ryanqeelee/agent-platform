@@ -6,6 +6,9 @@
         {{ $t('mcpSettings.description') }}
       </p>
     </div>
+    <t-alert v-if="loadError" theme="error" :message="loadError">
+      <template #operation><t-button size="small" @click="loadServices">{{ t('common.retry') }}</t-button></template>
+    </t-alert>
 
     <div v-if="loading" class="loading-container">
       <t-loading :text="$t('common.loading')" />
@@ -17,7 +20,7 @@
         <p>{{ $t('mcpSettings.manageAndTest') }}</p>
       </div>
 
-      <div v-if="services.length === 0 && !authStore.hasRole('admin')" class="empty-state">
+      <div v-if="services.length === 0 && !canManage" class="empty-state">
         <t-empty :description="$t('mcpSettings.empty')" />
       </div>
 
@@ -93,7 +96,7 @@
           </div>
         </div>
         <button
-          v-if="authStore.hasRole('admin')"
+          v-if="canManage"
           type="button"
           class="service-card service-card--add"
           @click="handleAdd"
@@ -111,6 +114,7 @@
       v-model:visible="dialogVisible"
       :service="currentService"
       :mode="dialogMode"
+      platform-mode
       @success="handleDialogSuccess"
       @created="handleDialogCreated"
     />
@@ -131,13 +135,17 @@ import {
 import McpServiceDialog from './components/McpServiceDialog.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useAuthStore } from '@/stores/auth'
+import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
+const platformTenantID = usePlatformTenantControlID()
+const canManage = authStore.isSystemAdmin || authStore.hasRole('admin')
 const confirmDelete = useConfirmDelete()
 
 const services = ref<MCPService[]>([])
 const loading = ref(false)
+const loadError = ref('')
 const dialogVisible = ref(false)
 const dialogMode = ref<'add' | 'edit'>('add')
 const currentService = ref<MCPService | null>(null)
@@ -145,9 +153,11 @@ const currentService = ref<MCPService | null>(null)
 // Load MCP services
 const loadServices = async () => {
   loading.value = true
+  loadError.value = ''
   try {
-    services.value = await listMCPServices()
+    services.value = await listMCPServices(platformTenantID.value)
   } catch (error) {
+    loadError.value = (error as any)?.message || t('common.loadFailed')
     MessagePlugin.error(t('mcpSettings.toasts.loadFailed'))
     console.error('Failed to load MCP services:', error)
   } finally {
@@ -162,7 +172,7 @@ const handleAdd = () => {
   dialogVisible.value = true
 }
 
-const isServiceCardClickable = () => authStore.hasRole('admin')
+const isServiceCardClickable = () => canManage
 
 const onServiceCardClick = (event: Event, service: MCPService) => {
   if (!isServiceCardClickable()) return
@@ -207,7 +217,7 @@ const handleToggleEnabled = async (service: MCPService) => {
 
   const originalState = service.enabled
   try {
-    await updateMCPService(service.id, { enabled: service.enabled })
+    await updateMCPService(service.id, { enabled: service.enabled }, platformTenantID.value)
     MessagePlugin.success(service.enabled ? t('mcpSettings.toasts.enabled') : t('mcpSettings.toasts.disabled'))
   } catch (error) {
     service.enabled = originalState
@@ -224,7 +234,7 @@ const handleDelete = (service: MCPService) => {
     body: t('mcpSettings.deleteConfirmBody', { name: service.name || t('mcpSettings.unnamed') }),
     onConfirm: async () => {
       try {
-        await deleteMCPService(service.id)
+        await deleteMCPService(service.id, platformTenantID.value)
         MessagePlugin.success(t('mcpSettings.toasts.deleted'))
         loadServices()
       } catch (error) {
@@ -240,7 +250,7 @@ const handleDelete = (service: MCPService) => {
 // 测试连接已挪到编辑抽屉的 footer，不再放在外层菜单里 — 单一入口减少
 // 用户疑惑（"为什么有两个测试入口，结果一样吗？"）。
 const getServiceOptions = (service: MCPService) => {
-  if (!authStore.hasRole('admin')) {
+  if (!canManage) {
     return []
   }
   return [
@@ -256,7 +266,7 @@ const getServiceOptions = (service: MCPService) => {
 // Builtin: 仅编辑（同样 Admin+ only）。内置服务测试也通过抽屉的 footer 触发，
 // 不再在外层菜单露出"测试连接"项。
 const getBuiltinServiceOptions = () => {
-  if (!authStore.hasRole('admin')) {
+  if (!canManage) {
     return []
   }
   return [

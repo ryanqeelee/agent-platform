@@ -1,4 +1,6 @@
 import { get, post, put, del } from '@/utils/request'
+import { platformTenantPath } from './platform-tenant-path'
+const basePath = (tenantId?: number) => tenantId === undefined ? '/api/v1/storage-backends' : platformTenantPath(tenantId, 'storage-backends')
 
 export interface StorageBackendConfig {
   mode?: string
@@ -35,11 +37,11 @@ export interface StorageBackendListResponse {
   default_storage_backend_id?: string | null
 }
 
-export const listStorageBackends = (): Promise<StorageBackendListResponse> => get('/api/v1/storage-backends')
-export const listStorageBackendTypes = (): Promise<{ success: boolean; data: string[] }> => get('/api/v1/storage-backends/types')
-export const createStorageBackend = (data: Partial<StorageBackend>) => post('/api/v1/storage-backends', data)
-export const updateStorageBackend = (id: string, data: Partial<StorageBackend>) => put(`/api/v1/storage-backends/${id}`, data)
-export const deleteStorageBackend = (id: string) => del(`/api/v1/storage-backends/${id}`)
-export const setDefaultStorageBackend = (id: string) => put(`/api/v1/storage-backends/${id}/default`, {})
-export const testStorageBackend = (data: Partial<StorageBackend>) => post('/api/v1/storage-backends/test', data)
-export const testStorageBackendByID = (id: string) => post(`/api/v1/storage-backends/${id}/test`, {})
+export const listStorageBackends = (tenantId?: number): Promise<StorageBackendListResponse> => get(basePath(tenantId))
+export const listStorageBackendTypes = (tenantId?: number): Promise<{ success: boolean; data: string[] }> => get(`${basePath(tenantId)}/types`)
+export const createStorageBackend = (data: Partial<StorageBackend>, tenantId?: number) => post(basePath(tenantId), data)
+export const updateStorageBackend = (id: string, data: Partial<StorageBackend>, tenantId?: number) => put(`${basePath(tenantId)}/${id}`, data)
+export const deleteStorageBackend = (id: string, tenantId?: number) => del(`${basePath(tenantId)}/${id}`)
+export const setDefaultStorageBackend = (id: string, tenantId?: number) => put(`${basePath(tenantId)}/${id}/default`, {})
+export const testStorageBackend = (data: Partial<StorageBackend>, tenantId?: number) => post(`${basePath(tenantId)}/test`, data)
+export const testStorageBackendByID = (id: string, tenantId?: number) => post(`${basePath(tenantId)}/${id}/test`, {})

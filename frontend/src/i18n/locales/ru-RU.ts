@@ -4612,7 +4612,7 @@ export default {
     firstTime: 'Впервые в Huanshu?',
     registerSuccess: 'Регистрация завершена. Войдите в систему',
     registerFailed: 'Ошибка регистрации',
-    subtitle: 'Используйте корпоративную учетную запись, чтобы войти в пространство интеллектуальных агентов вашей организации.',
+    subtitle: 'Войдите с платформенной или корпоративной учетной записью в соответствующую панель управления и рабочее пространство.',
     registerSubtitle: 'Создайте аккаунт и начните работу с Huanshu',
     emailPlaceholder: 'Введите адрес электронной почты',
     passwordPlaceholder: 'Введите пароль',
@@ -5790,6 +5790,8 @@ export default {
     contextCompactedDegraded: 'Сводка недоступна, сохранена исходная запись',
     title: 'Agents',
     subtitle: 'Платформа управляет инструкциями, поиском и инструментами. Сотрудники используют единого помощника; его базовая конфигурация обновляется с выпусками платформы.',
+    platformSubtitle: 'Управляйте общей конфигурацией агентов для всех предприятий. Исходные встроенные агенты сохранены для сравнения и регрессионных проверок.',
+    platformBuiltin: 'Встроенный агент платформы',
     createAgent: 'Create Agent',
     builtin: 'Built-in',
     disabled: 'Disabled',
@@ -5820,6 +5822,10 @@ export default {
       capabilityUnconfigured: 'Not set'
     },
     editor: {
+      platformSkills: 'Встроенные навыки',
+      platformSkillsDesc: 'Выберите, может ли агент платформы использовать все встроенные навыки. Навыки конкретного предприятия настраиваются в самом предприятии.',
+      platformSkillsNone: 'Не использовать',
+      platformSkillsAll: 'Все встроенные навыки',
       createTitle: 'Create Agent',
       editTitle: 'Edit Agent',
       buttons: {

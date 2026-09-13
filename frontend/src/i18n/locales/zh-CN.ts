@@ -4614,7 +4614,7 @@ export default {
     firstTime: '首次使用环枢？',
     registerSuccess: '注册成功，请登录',
     registerFailed: '注册失败',
-    subtitle: '使用统一企业账号，进入所属企业的智能体工作空间。',
+    subtitle: '使用平台或企业账号登录，进入对应的管理与工作空间。',
     registerSubtitle: '创建账户并开始使用环枢',
     emailPlaceholder: '输入邮箱地址',
     passwordPlaceholder: '输入密码',
@@ -5792,6 +5792,8 @@ export default {
     contextCompactedDegraded: '摘要不可用，已保留原始记录',
     title: '智能体',
     subtitle: '由平台维护提示词、检索和工具配置。员工统一使用员工助理；内置员工助理的默认配置随平台版本发布。',
+    platformSubtitle: '为所有企业维护共享的智能体配置；保留原始内置智能体，便于对照和回归。',
+    platformBuiltin: '平台内置',
     createAgent: '创建智能体',
     builtin: '内置',
     disabled: '已停用',
@@ -5822,6 +5824,10 @@ export default {
       capabilityUnconfigured: '未配置'
     },
     editor: {
+      platformSkills: '内置技能',
+      platformSkillsDesc: '选择该平台智能体是否可使用全部内置技能。企业专属技能绑定仍由各企业配置。',
+      platformSkillsNone: '不使用',
+      platformSkillsAll: '全部内置技能',
       createTitle: '创建智能体',
       editTitle: '编辑智能体',
       buttons: {

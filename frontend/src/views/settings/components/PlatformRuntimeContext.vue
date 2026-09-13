@@ -30,11 +30,13 @@ import {
   getPlatformModelRuntimeSettings,
 } from '@/api/model'
 import { getPlatformRetrievalProcessingSettings } from '@/api/retrieval'
+import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 
 const props = withDefaults(defineProps<{ context?: 'request' | 'retrieval' }>(), {
   context: 'request',
 })
 const available = ref(false)
+const tenantId = usePlatformTenantControlID()
 const scopeKind = ref<'platform_shared' | 'enterprise_assigned'>('platform_shared')
 const planVersion = ref('')
 const capabilityItems = ref<Array<{ labelKey: string; value: string }>>([])
@@ -48,7 +50,7 @@ const unavailableKey = computed(() => props.context === 'retrieval'
 onMounted(async () => {
   try {
     if (props.context === 'retrieval') {
-      const settings = await getPlatformRetrievalProcessingSettings()
+      const settings = await getPlatformRetrievalProcessingSettings(tenantId.value)
       scopeKind.value = settings.scope.kind
       planVersion.value = settings.active_plan.version_id
       capabilityItems.value = [

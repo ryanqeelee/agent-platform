@@ -21,21 +21,48 @@ type employeeProviderStub struct {
 
 type employeeModelsStub struct{ interfaces.ModelService }
 
+func (employeeModelsStub) GetModelByID(_ context.Context, id string) (*types.Model, error) {
+	if id == "employee-model" {
+		return &types.Model{ID: id, Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusActive}, nil
+	}
+	return nil, nil
+}
+
 func (employeeModelsStub) ListModels(context.Context) ([]*types.Model, error) {
 	return []*types.Model{
 		{ID: "larger-alternative", Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusActive},
 		{ID: "platform-flash", Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusActive, IsDefault: true},
 	}, nil
 }
-func TestEmployeeAssistantUsesPlatformDefaultAcrossTopics(t *testing.T) {
+func TestEmployeeAssistantUsesConfiguredModelAndFallsBackWhenUnavailable(t *testing.T) {
 	svc := &sessionService{modelService: employeeModelsStub{}}
-	for _, targets := range [][]string{nil, {"different-kb"}} {
-		id, err := svc.resolveChatModelID(context.Background(), &types.QARequest{
-			CustomAgent:    &types.CustomAgent{ID: types.BuiltinEmployeeAssistantID, Config: types.CustomAgentConfig{ModelID: "stale-model"}},
-			SummaryModelID: "client-override", Session: &types.Session{},
-		}, targets, nil, nil)
-		require.NoError(t, err)
-		require.Equal(t, "platform-flash", id)
+	for _, tc := range []struct {
+		name       string
+		configured string
+		want       string
+	}{
+		{name: "configured binding", configured: "employee-model", want: "employee-model"},
+		{name: "unavailable binding", configured: "missing-model", want: "platform-flash"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, mode := range []string{types.AgentModeQuickAnswer, types.AgentModeSmartReasoning} {
+				t.Run(mode, func(t *testing.T) {
+					id, err := svc.resolveChatModelID(context.Background(), &types.QARequest{
+						CustomAgent: &types.CustomAgent{
+							ID: types.BuiltinEmployeeAssistantID,
+							Config: types.CustomAgentConfig{
+								AgentMode: mode,
+								ModelID:   tc.configured,
+							},
+						},
+						SummaryModelID: "client-override",
+						Session:        &types.Session{},
+					}, nil, nil, nil)
+					require.NoError(t, err)
+					require.Equal(t, tc.want, id)
+				})
+			}
+		})
 	}
 }
 func (s *employeeProviderStub) GetDefault(_ context.Context, tenant uint64) (*types.WebSearchProviderEntity, error) {
@@ -47,7 +74,7 @@ func TestEmployeeAssistantReadinessAndCanonicalConfig(t *testing.T) {
 	restore := types.OverrideBuiltinAgentEntriesForTest(map[string]*types.BuiltinAgentEntry{
 		types.BuiltinEmployeeAssistantID: {ID: types.BuiltinEmployeeAssistantID, IsBuiltin: true,
 			Config: types.CustomAgentConfig{AgentMode: types.AgentModeSmartReasoning, ImageUploadEnabled: true,
-				AllowedTools: []string{tools.ToolKnowledgeSearch, tools.ToolWikiSearch, tools.ToolDataAnalysis}}},
+				AllowedTools: []string{tools.ToolKnowledgeSearch, tools.ToolWikiSearch, tools.ToolDataAnalysis}, WebSearchEnabled: true}},
 	})
 	t.Cleanup(restore)
 	for _, tc := range []struct {
@@ -66,7 +93,7 @@ func TestEmployeeAssistantReadinessAndCanonicalConfig(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			provider := &employeeProviderStub{provider: tc.provider, err: tc.err}
-			svc := &customAgentService{scenarioCapabilities: assistantScenarioResolverStub{settings: assistantScenarioSettings(tc.enabled, false, false)}, webSearchProviders: provider}
+			svc := &customAgentService{repo: &platformAgentRepoStub{rows: map[uint64]map[string]*types.CustomAgent{}}, scenarioCapabilities: assistantScenarioResolverStub{settings: assistantScenarioSettings(tc.enabled, false, false)}, webSearchProviders: provider}
 			ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
 			agent, err := svc.GetAgentByID(ctx, types.BuiltinEmployeeAssistantID)
 			if tc.err != nil {
@@ -143,7 +170,7 @@ func TestEmployeeAssistantSandboxSelection(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &employeeSandboxRepoStub{rows: tc.rows, err: tc.repoErr}
-			svc := &customAgentService{scenarioCapabilities: assistantScenarioResolverStub{settings: assistantScenarioSettings(false, false, tc.enabled)}, sandboxConfigs: repo}
+			svc := &customAgentService{repo: &platformAgentRepoStub{rows: map[uint64]map[string]*types.CustomAgent{}}, scenarioCapabilities: assistantScenarioResolverStub{settings: assistantScenarioSettings(false, false, tc.enabled)}, sandboxConfigs: repo}
 			agent, err := svc.employeeAssistant(context.Background(), 7)
 			if tc.wantErr {
 				require.Error(t, err)

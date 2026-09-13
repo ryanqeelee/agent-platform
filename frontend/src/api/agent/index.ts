@@ -1,4 +1,5 @@
 import { get, post, put, del } from "../../utils/request";
+import type { PromptTemplatesConfig } from '../system';
 
 export { BUILTIN_EMPLOYEE_ASSISTANT_ID, BUILTIN_OPERATING_ANALYST_ID } from './constants';
 
@@ -236,6 +237,20 @@ export function updateAgent(id: string, data: UpdateAgentRequest) {
   return put<{ data: CustomAgent }>(`/api/v1/agents/${id}`, data);
 }
 
+// Platform-owned agent definitions. These routes are deliberately separate
+// from tenant agents: callers must not manufacture a tenant context for them.
+export function listPlatformAgents() {
+  return get<{ data: CustomAgent[] }>('/api/v1/system/admin/agents');
+}
+
+export function getPlatformAgentById(id: string) {
+  return get<{ data: CustomAgent }>(`/api/v1/system/admin/agents/${id}`);
+}
+
+export function updatePlatformAgent(id: string, data: UpdateAgentRequest) {
+  return put<{ data: CustomAgent }>(`/api/v1/system/admin/agents/${id}`, data);
+}
+
 // 删除智能体
 export function deleteAgent(id: string) {
   return del<{ success: boolean }>(`/api/v1/agents/${id}`);
@@ -272,6 +287,14 @@ export interface PlaceholdersResponse {
 // 获取占位符定义
 export function getPlaceholders() {
   return get<{ data: PlaceholdersResponse }>('/api/v1/agents/placeholders');
+}
+
+export function getPlatformAgentPlaceholders() {
+  return get<{ data: PlaceholdersResponse }>('/api/v1/system/admin/agents/placeholders');
+}
+
+export function getPlatformAgentPromptTemplates() {
+  return get<{ data: PromptTemplatesConfig }>('/api/v1/system/admin/agents/prompt-templates');
 }
 
 // ===== 智能体类型预设 =====
@@ -320,6 +343,10 @@ export interface AgentTypePreset {
 // 拉取类型预设列表（编辑器用）
 export function getAgentTypePresets() {
   return get<{ data: AgentTypePreset[] }>('/api/v1/agents/type-presets');
+}
+
+export function getPlatformAgentTypePresets() {
+  return get<{ data: AgentTypePreset[] }>('/api/v1/system/admin/agents/type-presets');
 }
 
 // ===== IM渠道 =====

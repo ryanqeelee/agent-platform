@@ -4,6 +4,9 @@
       <h2>{{ runtime ? t('settings.memoryRuntime') : t('memoryWorkspaceSettings.title') }}</h2>
       <p class="section-description">{{ t('memoryWorkspaceSettings.description') }}</p>
     </div>
+    <t-alert v-if="loadError" theme="error" :message="loadError">
+      <template #operation><t-button size="small" @click="loadConfig">{{ t('common.retry') }}</t-button></template>
+    </t-alert>
 
     <!-- The switch defaults to off because memory retains what users say
          across sessions. That makes the feature easy to miss, so the intro
@@ -23,7 +26,7 @@
           <p class="desc">{{ t('memoryWorkspaceSettings.enableDescription') }}</p>
         </div>
         <div class="setting-control">
-          <t-switch v-model="config.enabled" :disabled="!canEdit" @change="debouncedSave" />
+          <t-switch v-model="config.enabled" :disabled="!canEdit || !loaded" @change="debouncedSave" />
         </div>
       </div>
 
@@ -40,7 +43,7 @@
           </p>
         </div>
         <div class="setting-control">
-          <t-radio-group v-model="config.write_mode" :disabled="!canEdit" @change="debouncedSave">
+          <t-radio-group v-model="config.write_mode" :disabled="!canEdit || !loaded" @change="debouncedSave">
             <t-radio-button value="explicit_only">
               {{ t('memoryWorkspaceSettings.writeModeExplicit') }}
             </t-radio-button>
@@ -60,7 +63,7 @@
           <ModelSelector
             model-type="KnowledgeQA"
             :selected-model-id="config.extract_model_id"
-            :disabled="!canEdit"
+            :disabled="!canEdit || !loaded"
             @update:selected-model-id="handleModelChange"
             @add-model="handleAddModel('chat')"
           />
@@ -79,7 +82,7 @@
             :max="3600"
             :step="15"
             suffix="s"
-            :disabled="!canEdit"
+            :disabled="!canEdit || !loaded"
             @change="debouncedSave"
           />
         </div>
@@ -97,7 +100,7 @@
             :max="86400"
             :step="60"
             suffix="s"
-            :disabled="!canEdit"
+            :disabled="!canEdit || !loaded"
             @change="debouncedSave"
           />
         </div>
@@ -109,7 +112,7 @@
           <p class="desc">{{ t('memoryWorkspaceSettings.vectorRecallDescription') }}</p>
         </div>
         <div class="setting-control">
-          <t-switch v-model="config.vector_recall" :disabled="!canEdit" @change="debouncedSave" />
+          <t-switch v-model="config.vector_recall" :disabled="!canEdit || !loaded" @change="debouncedSave" />
         </div>
       </div>
 
@@ -122,7 +125,7 @@
           <ModelSelector
             model-type="Embedding"
             :selected-model-id="config.embedding_model_id"
-            :disabled="!canEdit"
+            :disabled="!canEdit || !loaded"
             :clearable="true"
             @update:selected-model-id="handleEmbeddingModelChange"
             @add-model="handleAddModel('embedding')"
@@ -138,7 +141,7 @@
         <div class="setting-control">
           <t-switch
             v-model="config.retrieval_conditioning"
-            :disabled="!canEdit"
+            :disabled="!canEdit || !loaded"
             @change="debouncedSave"
           />
         </div>
@@ -155,7 +158,7 @@
             :min="1"
             :max="20"
             :step="1"
-            :disabled="!canEdit"
+            :disabled="!canEdit || !loaded"
             @change="debouncedSave"
           />
         </div>
@@ -171,7 +174,7 @@
             v-model="config.extract_instructions"
             :autosize="{ minRows: 3, maxRows: 8 }"
             :maxlength="1000"
-            :disabled="!canEdit"
+            :disabled="!canEdit || !loaded"
             :placeholder="t('memoryWorkspaceSettings.instructionsPlaceholder')"
             @blur="debouncedSave"
           />
@@ -189,7 +192,7 @@
             :min="10"
             :max="2000"
             :step="10"
-            :disabled="!canEdit"
+            :disabled="!canEdit || !loaded"
             @change="debouncedSave"
           />
         </div>
@@ -199,18 +202,20 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import ModelSelector from '@/components/ModelSelector.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useUIStore } from '@/stores/ui'
 import { getTenantMemoryConfig, updateTenantMemoryConfig, type MemoryConfig } from '@/api/memory'
+import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 
 const { runtime = false } = defineProps<{ runtime?: boolean }>()
 const { t } = useI18n()
 const authStore = useAuthStore()
 const uiStore = useUIStore()
+const platformTenantID = usePlatformTenantControlID()
 
 const config = reactive<MemoryConfig>({
   enabled: false,
@@ -226,12 +231,17 @@ const config = reactive<MemoryConfig>({
   vector_recall: true,
 })
 const isInitializing = ref(true)
+const loaded = ref(false)
+const loadError = ref('')
 
-const canEdit = computed(() => authStore.hasRole('admin'))
+const canEdit = computed(() => runtime ? authStore.isSystemAdmin : authStore.hasRole('admin'))
 
 const loadConfig = async () => {
+  isInitializing.value = true
+  loaded.value = false
+  loadError.value = ''
   try {
-    const response = await getTenantMemoryConfig()
+    const response = await getTenantMemoryConfig(runtime ? platformTenantID.value : undefined)
     if (response.data) {
       config.enabled = response.data.enabled ?? false
       config.write_mode = response.data.write_mode === 'auto' ? 'auto' : 'explicit_only'
@@ -244,9 +254,11 @@ const loadConfig = async () => {
       config.retrieval_conditioning = response.data.retrieval_conditioning !== false
       config.embedding_model_id = response.data.embedding_model_id || ''
       config.vector_recall = response.data.vector_recall !== false
+      loaded.value = true
     }
   } catch (error: any) {
     console.error('Failed to load memory config:', error)
+    loadError.value = error?.message || t('common.loadFailed')
   } finally {
     // Give the switches a tick to settle so binding the loaded values does not
     // immediately fire a save.
@@ -257,8 +269,10 @@ const loadConfig = async () => {
 }
 
 const saveConfig = async () => {
+  if (!loaded.value) return
+  const targetTenantId = runtime ? platformTenantID.value : undefined
   try {
-    await updateTenantMemoryConfig({ ...config })
+    await updateTenantMemoryConfig({ ...config }, targetTenantId)
     MessagePlugin.success(t('memoryWorkspaceSettings.toasts.saveSuccess'))
   } catch (error: any) {
     MessagePlugin.error(
@@ -269,7 +283,7 @@ const saveConfig = async () => {
 
 let saveTimer: number | null = null
 const debouncedSave = () => {
-  if (isInitializing.value || !canEdit.value) return
+  if (isInitializing.value || !canEdit.value || !loaded.value) return
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = window.setTimeout(() => {
     saveConfig().catch(() => {})
@@ -294,6 +308,7 @@ const handleAddModel = (subSection: 'chat' | 'embedding') => {
 }
 
 onMounted(loadConfig)
+onUnmounted(() => { if (saveTimer) clearTimeout(saveTimer) })
 </script>
 
 <style lang="less" scoped>

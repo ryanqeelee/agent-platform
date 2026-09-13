@@ -26,7 +26,7 @@ func TestNativeAnalysisAgentUsesExistingTenantSandboxWithoutEmployeeScenario(t *
 			{"foreign", []*types.TenantSandboxConfigEntity{{ID: "foreign", TenantID: 8, Name: "employee-assistant"}}, true},
 		} {
 			t.Run(id+tc.name, func(t *testing.T) {
-				svc := &customAgentService{scenarioCapabilities: assistantScenarioResolverStub{settings: assistantScenarioSettings(false, false, true)}, sandboxConfigs: &employeeSandboxRepoStub{rows: tc.rows}}
+				svc := &customAgentService{repo: &platformAgentRepoStub{rows: map[uint64]map[string]*types.CustomAgent{}}, scenarioCapabilities: assistantScenarioResolverStub{settings: assistantScenarioSettings(false, false, true)}, sandboxConfigs: &employeeSandboxRepoStub{rows: tc.rows}}
 				ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
 				agent, err := svc.GetAgentByID(ctx, id)
 				if tc.reject {
@@ -53,7 +53,7 @@ func TestNativeOperatingToolsSwitchDoesNotOwnGovernedSQL(t *testing.T) {
 	t.Cleanup(restore)
 	for _, enabled := range []bool{false, true} {
 		resolver := assistantScenarioResolverStub{settings: assistantScenarioSettings(false, false, enabled)}
-		svc := &customAgentService{scenarioCapabilities: resolver, sandboxConfigs: &employeeSandboxRepoStub{rows: []*types.TenantSandboxConfigEntity{{ID: "ours", TenantID: 7, Name: "employee-assistant"}}}}
+		svc := &customAgentService{repo: &platformAgentRepoStub{rows: map[uint64]map[string]*types.CustomAgent{}}, scenarioCapabilities: resolver, sandboxConfigs: &employeeSandboxRepoStub{rows: []*types.TenantSandboxConfigEntity{{ID: "ours", TenantID: 7, Name: "employee-assistant"}}}}
 		agent, err := svc.nativeAnalysisAgent(context.Background(), types.BuiltinOperatingAnalystID, 7)
 		require.NoError(t, err)
 		require.Equal(t, enabled, agent.Config.SandboxConfigID != "")

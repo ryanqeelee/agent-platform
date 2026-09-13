@@ -3,6 +3,7 @@ package asr
 import (
 	"context"
 
+	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -36,6 +37,7 @@ type Config struct {
 	APIKey    string
 	ModelID   string
 	Language  string // optional: specify language for transcription
+	Provider  string
 	// CustomHeaders 允许在调用远程 API 时附加自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
 	CustomHeaders map[string]string
 }
@@ -47,19 +49,32 @@ func ConfigFromModel(m *types.Model) *Config {
 	if m == nil {
 		return nil
 	}
+	language := ""
+	if m.Parameters.ExtraConfig != nil {
+		language = m.Parameters.ExtraConfig["language"]
+	}
 	return &Config{
 		ModelID:       m.ID,
 		APIKey:        m.Parameters.APIKey,
 		BaseURL:       m.Parameters.BaseURL,
 		ModelName:     m.Name,
 		Source:        m.Source,
+		Provider:      m.Parameters.Provider,
+		Language:      language,
 		CustomHeaders: m.Parameters.CustomHeaders,
 	}
 }
 
 // NewASR creates an ASR instance based on the provided configuration.
-// All ASR vendors use the OpenAI-compatible /v1/audio/transcriptions API.
 func NewASR(config *Config) (ASR, error) {
-	a, err := NewOpenAIASR(config)
+	var (
+		a   ASR
+		err error
+	)
+	if provider.ProviderName(config.Provider) == provider.ProviderAliyun {
+		a, err = NewAliyunASR(config)
+	} else {
+		a, err = NewOpenAIASR(config)
+	}
 	return wrapASRLangfuse(a, err)
 }

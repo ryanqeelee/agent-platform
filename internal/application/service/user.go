@@ -241,11 +241,14 @@ func (s *userService) Login(ctx context.Context, req *types.LoginRequest) (*type
 	// Get user by email
 	user, err := s.userRepo.GetUserByEmail(ctx, req.Email)
 	if err != nil {
+		if errors.Is(err, apprepo.ErrUserNotFound) {
+			return &types.LoginResponse{
+				Success: false,
+				Message: "Invalid email or password",
+			}, nil
+		}
 		logger.Errorf(ctx, "Failed to get user by email: %v", err)
-		return &types.LoginResponse{
-			Success: false,
-			Message: "Invalid email or password",
-		}, nil
+		return nil, fmt.Errorf("get user by email: %w", err)
 	}
 	if user == nil {
 		logger.Warn(ctx, "User not found for email")

@@ -4,6 +4,9 @@
       <h2>{{ t('webSearchSettings.title') }}</h2>
       <p class="section-description">{{ t('webSearchSettings.description') }}</p>
     </div>
+    <t-alert v-if="loadError" theme="error" :message="loadError">
+      <template #operation><t-button size="small" @click="loadAll">{{ t('common.retry') }}</t-button></template>
+    </t-alert>
 
     <h3 class="list-section-title">{{ t('webSearchSettings.providersTitle') }}</h3>
 
@@ -334,9 +337,11 @@ import CredentialResource, {
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useAuthStore } from '@/stores/auth'
 import { providerLogo } from './providerLogos'
+import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
+const platformTenantID = usePlatformTenantControlID()
 const confirmDelete = useConfirmDelete()
 
 // ===== State =====
@@ -346,6 +351,7 @@ const showAddProviderDialog = ref(false)
 const editingProvider = ref<WebSearchProviderEntity | null>(null)
 const testing = ref(false)
 const saving = ref(false)
+const loadError = ref('')
 const formRef = ref<any>()
 
 // Tri-state hint icon next to the test button: null=neutral, true=just
@@ -407,11 +413,11 @@ const credentialApi = computed<CredentialResourceApi<WebSearchCredentialField>>(
   const id = editingProvider.value?.id ?? ''
   return {
     save: async (patch) => {
-      const meta = await putWebSearchProviderCredentials(id, patch)
+      const meta = await putWebSearchProviderCredentials(id, patch, platformTenantID.value)
       return meta.fields
     },
     remove: async (field) => {
-      await deleteWebSearchProviderCredentialField(id, field)
+      await deleteWebSearchProviderCredentialField(id, field, platformTenantID.value)
     },
   }
 })
@@ -510,19 +516,21 @@ const onProviderTypeChange = () => {
 
 const loadProviderEntities = async () => {
   try {
-    const response = await listWebSearchProviders()
+    const response = await listWebSearchProviders(platformTenantID.value)
     if (response.data && Array.isArray(response.data)) {
       providerEntities.value = response.data
     }
   } catch (error) {
+    loadError.value = (error as any)?.message || t('common.loadFailed')
     console.error('Failed to load provider entities:', error)
   }
 }
 
 const loadProviderTypes = async () => {
   try {
-    providerTypes.value = await listWebSearchProviderTypes()
+    providerTypes.value = await listWebSearchProviderTypes(platformTenantID.value)
   } catch (error) {
+    loadError.value = (error as any)?.message || t('common.loadFailed')
     console.error('Failed to load provider types:', error)
   }
 }
@@ -604,10 +612,10 @@ const saveProvider = async () => {
     }
 
     if (editingProvider.value) {
-      await updateWebSearchProvider(editingProvider.value.id!, data)
+      await updateWebSearchProvider(editingProvider.value.id!, data, platformTenantID.value)
       MessagePlugin.success(t('webSearchSettings.toasts.providerUpdated'))
     } else {
-      await createWebSearchProvider(data)
+      await createWebSearchProvider(data, platformTenantID.value)
       MessagePlugin.success(t('webSearchSettings.toasts.providerCreated'))
     }
     showAddProviderDialog.value = false
@@ -624,7 +632,7 @@ const deleteProvider = (entity: WebSearchProviderEntity) => {
     body: t('webSearchSettings.deleteConfirm'),
     onConfirm: async () => {
       try {
-        await deleteWebSearchProviderAPI(entity.id!)
+        await deleteWebSearchProviderAPI(entity.id!, platformTenantID.value)
         MessagePlugin.success(t('webSearchSettings.toasts.providerDeleted'))
         await loadProviderEntities()
       } catch (error: any) {
@@ -644,7 +652,7 @@ const testConnection = async () => {
 
     let ok = false
     if (editingProvider.value && !data.parameters.api_key) {
-      const res = await testWebSearchProvider(editingProvider.value.id!)
+      const res = await testWebSearchProvider(editingProvider.value.id!, undefined, platformTenantID.value)
       ok = !!res.success
       if (res.success) {
         MessagePlugin.success(t('webSearchSettings.toasts.testSuccess'))
@@ -652,7 +660,7 @@ const testConnection = async () => {
         MessagePlugin.error(res.error || t('webSearchSettings.toasts.testFailed'))
       }
     } else {
-      const res = await testWebSearchProvider(undefined, data)
+      const res = await testWebSearchProvider(undefined, data, platformTenantID.value)
       ok = !!res.success
       if (res.success) {
         MessagePlugin.success(t('webSearchSettings.toasts.testSuccess'))
@@ -669,7 +677,7 @@ const testConnection = async () => {
   }
 }
 
-const isProviderCardClickable = () => authStore.hasRole('admin')
+const isProviderCardClickable = () => authStore.isSystemAdmin || authStore.hasRole('admin')
 
 const onProviderCardClick = (event: Event, entity: WebSearchProviderEntity) => {
   if (!isProviderCardClickable()) return
@@ -689,7 +697,7 @@ const getProviderOptions = (_entity: WebSearchProviderEntity) => {
   // Hide the action menu entirely for non-Admins so they don't trip 403s.
   // 测试连接已挪到编辑抽屉的 footer，不再放在外层菜单里 — 单一入口减少
   // 用户疑惑（"为什么有两个测试入口，结果一样吗？"）。
-  if (!authStore.hasRole('admin')) {
+  if (!authStore.isSystemAdmin && !authStore.hasRole('admin')) {
     return []
   }
   return [
@@ -710,9 +718,11 @@ const handleMenuAction = (data: { value: string }, entity: WebSearchProviderEnti
 }
 
 // ===== Init =====
-onMounted(async () => {
+const loadAll = async () => {
+  loadError.value = ''
   await Promise.all([loadProviderTypes(), loadProviderEntities()])
-})
+}
+onMounted(loadAll)
 </script>
 
 <style lang="less" scoped>

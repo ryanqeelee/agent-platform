@@ -847,6 +847,8 @@ export default {
     contextCompactedDegraded: 'Summary unavailable, raw transcript kept',
     title: 'Agents',
     subtitle: 'Platform-managed prompts, retrieval and tools. Employees use one assistant; its built-in defaults are maintained with platform releases.',
+    platformSubtitle: 'Maintain shared agent configuration for every enterprise. Original built-in agents remain available for comparison and regression checks.',
+    platformBuiltin: 'Platform built-in',
     createAgent: 'Create Agent',
     builtin: 'Built-in',
     disabled: 'Disabled',
@@ -940,6 +942,10 @@ export default {
       enabled: 'Agent enabled'
     },
     editor: {
+      platformSkills: 'Built-in skills',
+      platformSkillsDesc: 'Choose whether this platform agent can use all built-in skills. Tenant-specific skill bindings are configured by each enterprise.',
+      platformSkillsNone: 'None',
+      platformSkillsAll: 'All built-in skills',
       createTitle: 'Create Agent',
       editTitle: 'Edit Agent',
       buttons: {
@@ -2223,7 +2229,7 @@ export default {
     firstTime: 'New to Huanshu?',
     registerSuccess: 'Registration successful. Please sign in',
     registerFailed: 'Registration failed',
-    subtitle: 'Use your enterprise account to enter your organization’s agent workspace.',
+    subtitle: 'Sign in with a platform or enterprise account to enter the appropriate management and workspace.',
     registerSubtitle: 'Create your account and start using Huanshu',
     emailPlaceholder: 'Enter email address',
     passwordPlaceholder: 'Enter password',

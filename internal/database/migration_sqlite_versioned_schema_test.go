@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -28,10 +29,13 @@ var versionedSQLiteTables = []string{
 	"operating_brief_snapshots",
 	"operating_brief_scope_refs",
 	"platform_parser_config",
+	"platform_memory_runtime_config",
 	"platform_sandbox_configs",
 	"platform_skill_catalog",
 	"platform_skills",
 	"platform_skill_snapshots",
+	"platform_chat_history_config",
+	"tenant_chat_history_indexes",
 	"tenant_user_env_vars",
 }
 
@@ -51,7 +55,7 @@ var versionedSQLiteColumns = map[string][]string{
 	"platform_skills":          {"install_run_id", "install_transcript"},
 }
 
-const expectedSQLiteMigrationVersion = 34
+const expectedSQLiteMigrationVersion = 36
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
@@ -86,6 +90,8 @@ func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 		"SQLite migrations must drop legacy knowledges.tag_id after multi-tag migration")
 	require.False(t, sqliteColumnExists(t, db, "tenants", "parser_engine_config"),
 		"SQLite migrations must move parser configuration out of tenants")
+	require.False(t, sqliteColumnExists(t, db, "tenants", "chat_history_config"),
+		"SQLite migrations must move chat-history configuration out of tenants")
 	require.False(t, sqliteTableExists(t, db, "tenant_sandbox_configs"))
 	require.False(t, sqliteTableExists(t, db, "tenant_skill_catalog"))
 	require.False(t, sqliteTableExists(t, db, "tenant_skills"))
@@ -155,6 +161,125 @@ func TestSQLiteMigrationsUpgradeV4PreservesData(t *testing.T) {
 	require.False(t, sqliteColumnExists(t, db, "knowledges", "tag_id"))
 	require.False(t, sqliteTableExists(t, db, "tenant_sandbox_configs"))
 	require.False(t, sqliteTableExists(t, db, "platform_skill_runs"))
+}
+
+func TestSQLitePlatformChatHistoryMigrationRejectsUnsafeLegacyState(t *testing.T) {
+	repoRoot := sqliteRepoRoot(t)
+	for _, test := range []struct {
+		name   string
+		legacy string
+	}{
+		{name: "bound knowledge base", legacy: `{"enabled":true,"embedding_model_id":"embed","knowledge_base_id":"legacy-kb"}`},
+		{name: "malformed config", legacy: `{not-json`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			legacyRoot := copySQLiteMigrationsThrough(t, repoRoot, 34)
+			chdirAndRestore(t, legacyRoot)
+			dbPath := filepath.Join(t.TempDir(), "unsafe-chat-history.db")
+			require.NoError(t, RunMigrationsWithOptions("sqlite3://unused", MigrationOptions{SQLiteDBPath: dbPath}))
+			db := openSQLiteDB(t, dbPath)
+			_, err := db.Exec(
+				"INSERT INTO tenants (id, name, business, chat_history_config) VALUES (?, ?, ?, ?)",
+				10001, "legacy", "migration-test", test.legacy,
+			)
+			require.NoError(t, err)
+
+			chdirAndRestore(t, repoRoot)
+			require.Error(t, RunMigrationsWithOptions("sqlite3://unused", MigrationOptions{SQLiteDBPath: dbPath}))
+			require.True(t, sqliteColumnExists(t, db, "tenants", "chat_history_config"))
+			require.False(t, sqliteTableExists(t, db, "platform_chat_history_config"))
+			require.False(t, sqliteTableExists(t, db, "tenant_chat_history_indexes"))
+		})
+	}
+}
+
+func TestSQLiteMemoryRuntimeMigrationPreservesTenantAndMemoryData(t *testing.T) {
+	repoRoot := sqliteRepoRoot(t)
+	legacyRoot := copySQLiteMigrationsThrough(t, repoRoot, 34)
+	chdirAndRestore(t, legacyRoot)
+	dbPath := filepath.Join(t.TempDir(), "memory-runtime.db")
+	require.NoError(t, RunMigrationsWithOptions("sqlite3://unused", MigrationOptions{SQLiteDBPath: dbPath}))
+	db := openSQLiteDB(t, dbPath)
+
+	legacyConfig := `{"enabled":true,"write_mode":"auto","extract_model_id":"","max_items":200,"extract_delay_seconds":90,"extract_min_interval_seconds":300,"extract_instructions":"","interest_threshold":3,"embedding_model_id":"","vector_recall":true,"retrieval_conditioning":null}`
+	_, err := db.Exec(`
+		INSERT INTO tenants(id, name, business, memory_config, memory_generation)
+		VALUES (501, 'memory tenant', 'migration-test', ?, 7);
+        INSERT INTO tenants(id, name, business) VALUES (502, 'unset tenant', 'migration-test');
+        INSERT INTO tenants(id, name, business, memory_config) VALUES (503, 'disabled tenant', 'migration-test', '{"enabled":false,"write_mode":"explicit_only"}');
+		INSERT INTO users(id, username, email, password_hash, tenant_id)
+		VALUES ('memory-user', 'memory-user', 'memory@example.invalid', 'unused', 501);
+		INSERT INTO knowledge_bases(id, name, tenant_id, embedding_model_id, summary_model_id)
+		VALUES ('memory-kb', 'memory kb', 501, '', '');
+		INSERT INTO memory_subjects(id, tenant_id, subject_id)
+		VALUES ('memory-subject', 501, 'web_user:memory-user');
+		INSERT INTO memory_items(id, tenant_id, subject_id, kind, content)
+		VALUES ('memory-item', 501, 'web_user:memory-user', 'fact', 'preserved');
+	`, legacyConfig)
+	require.NoError(t, err)
+
+	chdirAndRestore(t, repoRoot)
+	require.NoError(t, RunMigrationsWithOptions("sqlite3://unused", MigrationOptions{SQLiteDBPath: dbPath}))
+	version, dirty := sqliteMigrationState(t, db)
+	require.Equal(t, expectedSQLiteMigrationVersion, version)
+	require.False(t, dirty)
+
+	var enabled bool
+	var writeMode string
+	var tenantGeneration int64
+	var tenantConfigKeys, runtimeConfigKeys int
+	require.NoError(t, db.QueryRow(`SELECT json_extract(memory_config, '$.enabled'),
+		json_extract(memory_config, '$.write_mode'), memory_generation
+		FROM tenants WHERE id = 501`).Scan(&enabled, &writeMode, &tenantGeneration))
+	require.True(t, enabled)
+	require.Equal(t, "auto", writeMode)
+	require.Equal(t, int64(7), tenantGeneration)
+	// Decode the stored JSON through the application scanner: json_extract
+	// alone accepts SQLite numeric booleans and misses an unreadable DTO.
+	var consent types.TenantMemoryConfig
+	require.NoError(t, db.QueryRow("SELECT memory_config FROM tenants WHERE id = 501").Scan(&consent))
+	require.True(t, consent.Enabled)
+	require.Equal(t, "auto", consent.WriteMode)
+	for _, id := range []int{502, 503} {
+		var disabled types.TenantMemoryConfig
+		require.NoError(t, db.QueryRow("SELECT memory_config FROM tenants WHERE id = ?", id).Scan(&disabled))
+		require.False(t, disabled.Enabled)
+	}
+
+	require.NoError(t, db.QueryRow(
+		"SELECT COUNT(*) FROM json_each((SELECT memory_config FROM tenants WHERE id = 501))",
+	).Scan(&tenantConfigKeys))
+	require.Equal(t, 2, tenantConfigKeys)
+	require.NoError(t, db.QueryRow(
+		"SELECT COUNT(*) FROM json_each((SELECT runtime FROM platform_memory_runtime_config WHERE id = 1))",
+	).Scan(&runtimeConfigKeys))
+	require.Equal(t, 9, runtimeConfigKeys)
+
+	for table, id := range map[string]string{
+		"users": "memory-user", "knowledge_bases": "memory-kb",
+		"memory_subjects": "memory-subject", "memory_items": "memory-item",
+	} {
+		var count int
+		require.NoError(t, db.QueryRow("SELECT COUNT(*) FROM "+table+" WHERE id = ?", id).Scan(&count))
+		require.Equalf(t, 1, count, "%s row was not preserved", table)
+	}
+}
+
+func TestSQLiteMemoryRuntimeMigrationRejectsNonDefaultTenantRuntime(t *testing.T) {
+	repoRoot := sqliteRepoRoot(t)
+	legacyRoot := copySQLiteMigrationsThrough(t, repoRoot, 34)
+	chdirAndRestore(t, legacyRoot)
+	dbPath := filepath.Join(t.TempDir(), "memory-runtime-reject.db")
+	require.NoError(t, RunMigrationsWithOptions("sqlite3://unused", MigrationOptions{SQLiteDBPath: dbPath}))
+	db := openSQLiteDB(t, dbPath)
+	_, err := db.Exec(`INSERT INTO tenants(id, name, business, memory_config)
+		VALUES (502, 'custom memory tenant', 'migration-test', '{"enabled":true,"max_items":201}')`)
+	require.NoError(t, err)
+
+	chdirAndRestore(t, repoRoot)
+	err = RunMigrationsWithOptions("sqlite3://unused", MigrationOptions{SQLiteDBPath: dbPath})
+	require.Error(t, err)
+	require.False(t, sqliteTableExists(t, db, "platform_memory_runtime_config"))
 }
 
 func TestSQLitePlatformSandboxMigrationPreservesIDsPinsAndDuplicateNames(t *testing.T) {

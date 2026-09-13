@@ -240,7 +240,9 @@ curl --location 'http://localhost:8080/api/v1/messages/search' \
 
 ## GET `/messages/chat-history-stats` - 获取聊天历史知识库统计
 
-获取当前空间的聊天历史知识库索引统计信息。
+获取当前企业私有聊天历史索引的统计信息。是否为新消息建立索引及使用的 Embedding 模型由
+SystemAdmin 统一配置；企业成员不能覆盖平台策略。已有索引、关键词/向量/混合搜索合同和用户会话
+访问范围保持企业及用户隔离。
 
 **请求**:
 

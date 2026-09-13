@@ -335,9 +335,189 @@ type MemoryItem struct {
 
 func (MemoryItem) TableName() string { return "memory_items" }
 
-// MemoryConfig is the workspace-level memory switch, stored as JSONB on
-// tenants. It is deliberately small: everything a workspace admin can decide
-// fits in four fields.
+// TenantMemoryConfig is the enterprise-owned consent stored on tenants.
+// Runtime tuning and model selection are deployment-wide platform authority.
+type TenantMemoryConfig struct {
+	// Enabled defaults to false. Memory retains user statements across
+	// sessions, so a workspace admin has to turn it on deliberately.
+	Enabled bool `json:"enabled"`
+	// WriteMode is MemoryWriteExplicitOnly or MemoryWriteAuto.
+	WriteMode string `json:"write_mode"`
+}
+
+func (c TenantMemoryConfig) Value() (driver.Value, error) { return json.Marshal(c) }
+
+func (c *TenantMemoryConfig) Scan(value interface{}) error {
+	if value == nil {
+		return nil
+	}
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		return fmt.Errorf("scan TenantMemoryConfig: unsupported value type %T", value)
+	}
+	if len(b) == 0 {
+		return nil
+	}
+	return json.Unmarshal(b, c)
+}
+
+func (c *TenantMemoryConfig) Normalize() {
+	if c == nil {
+		return
+	}
+	if c.WriteMode != MemoryWriteAuto {
+		c.WriteMode = MemoryWriteExplicitOnly
+	}
+}
+
+// MemoryRuntimeConfig is the deployment-wide runtime policy. Its persisted
+// JSON shape is intentionally disjoint from TenantMemoryConfig.
+type MemoryRuntimeConfig struct {
+	ExtractModelID            string `json:"extract_model_id"`
+	MaxItems                  int    `json:"max_items"`
+	ExtractDelaySeconds       int    `json:"extract_delay_seconds"`
+	ExtractMinIntervalSeconds int    `json:"extract_min_interval_seconds"`
+	ExtractInstructions       string `json:"extract_instructions"`
+	InterestThreshold         int    `json:"interest_threshold"`
+	EmbeddingModelID          string `json:"embedding_model_id"`
+	VectorRecall              *bool  `json:"vector_recall"`
+	RetrievalConditioning     *bool  `json:"retrieval_conditioning"`
+}
+
+func (c MemoryRuntimeConfig) Value() (driver.Value, error) { return json.Marshal(c) }
+
+func (c *MemoryRuntimeConfig) Scan(value interface{}) error {
+	if value == nil {
+		return nil
+	}
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		return fmt.Errorf("scan MemoryRuntimeConfig: unsupported value type %T", value)
+	}
+	if len(b) == 0 {
+		return nil
+	}
+	return json.Unmarshal(b, c)
+}
+
+func (c *MemoryRuntimeConfig) Normalize() {
+	if c == nil {
+		return
+	}
+	c.ExtractModelID = strings.TrimSpace(c.ExtractModelID)
+	c.EmbeddingModelID = strings.TrimSpace(c.EmbeddingModelID)
+	if c.MaxItems <= 0 {
+		c.MaxItems = DefaultMemoryMaxItems
+	}
+	if c.MaxItems > 2000 {
+		c.MaxItems = 2000
+	}
+	c.ExtractDelaySeconds = clampSeconds(
+		c.ExtractDelaySeconds, DefaultMemoryExtractDelaySeconds,
+		MinMemoryExtractDelaySeconds, MaxMemoryExtractDelaySeconds,
+	)
+	c.ExtractMinIntervalSeconds = clampSeconds(
+		c.ExtractMinIntervalSeconds, DefaultMemoryExtractMinIntervalSeconds,
+		0, MaxMemoryExtractMinIntervalSeconds,
+	)
+	if c.InterestThreshold <= 0 {
+		c.InterestThreshold = DefaultMemoryInterestThreshold
+	}
+	if c.InterestThreshold > MaxMemoryInterestThreshold {
+		c.InterestThreshold = MaxMemoryInterestThreshold
+	}
+	c.ExtractInstructions = strings.TrimSpace(c.ExtractInstructions)
+	if runes := []rune(c.ExtractInstructions); len(runes) > MaxMemoryExtractInstructionsRunes {
+		c.ExtractInstructions = strings.TrimSpace(string(runes[:MaxMemoryExtractInstructionsRunes]))
+	}
+	// Nil and true both mean enabled. Persist one canonical representation so
+	// a semantically identical PUT does not advance the policy generation.
+	if c.VectorRecall != nil && *c.VectorRecall {
+		c.VectorRecall = nil
+	}
+	if c.RetrievalConditioning != nil && *c.RetrievalConditioning {
+		c.RetrievalConditioning = nil
+	}
+}
+
+func DefaultMemoryRuntimeConfig() *MemoryRuntimeConfig {
+	cfg := &MemoryRuntimeConfig{}
+	cfg.Normalize()
+	return cfg
+}
+
+// ComposeMemoryConfig builds the effective runtime view consumed by memory.
+func ComposeMemoryConfig(runtime *MemoryRuntimeConfig, consent *TenantMemoryConfig) *MemoryConfig {
+	if runtime == nil {
+		runtime = DefaultMemoryRuntimeConfig()
+	} else {
+		copy := *runtime
+		runtime = &copy
+		runtime.Normalize()
+	}
+	if consent == nil {
+		consent = &TenantMemoryConfig{}
+	} else {
+		copy := *consent
+		consent = &copy
+		consent.Normalize()
+	}
+	return &MemoryConfig{
+		Enabled: consent.Enabled, WriteMode: consent.WriteMode,
+		ExtractModelID: runtime.ExtractModelID, MaxItems: runtime.MaxItems,
+		ExtractDelaySeconds:       runtime.ExtractDelaySeconds,
+		ExtractMinIntervalSeconds: runtime.ExtractMinIntervalSeconds,
+		ExtractInstructions:       runtime.ExtractInstructions,
+		InterestThreshold:         runtime.InterestThreshold,
+		EmbeddingModelID:          runtime.EmbeddingModelID,
+		VectorRecall:              runtime.VectorRecall,
+		RetrievalConditioning:     runtime.RetrievalConditioning,
+	}
+}
+
+// MemoryRuntimeConfigFromEffective is used by tests and internal adapters that
+// already hold a composed config. Persistence code never reads runtime fields
+// from tenant JSON.
+func MemoryRuntimeConfigFromEffective(cfg *MemoryConfig) *MemoryRuntimeConfig {
+	if cfg == nil {
+		return DefaultMemoryRuntimeConfig()
+	}
+	runtime := &MemoryRuntimeConfig{
+		ExtractModelID: cfg.ExtractModelID, MaxItems: cfg.MaxItems,
+		ExtractDelaySeconds:       cfg.ExtractDelaySeconds,
+		ExtractMinIntervalSeconds: cfg.ExtractMinIntervalSeconds,
+		ExtractInstructions:       cfg.ExtractInstructions,
+		InterestThreshold:         cfg.InterestThreshold,
+		EmbeddingModelID:          cfg.EmbeddingModelID,
+		VectorRecall:              cfg.VectorRecall,
+		RetrievalConditioning:     cfg.RetrievalConditioning,
+	}
+	runtime.Normalize()
+	return runtime
+}
+
+func TenantMemoryConfigFromEffective(cfg *MemoryConfig) *TenantMemoryConfig {
+	consent := &TenantMemoryConfig{}
+	if cfg != nil {
+		consent.Enabled = cfg.Enabled
+		consent.WriteMode = cfg.WriteMode
+	}
+	consent.Normalize()
+	return consent
+}
+
+// MemoryConfig is the effective runtime view composed from platform runtime
+// policy and enterprise consent. It is not persisted as one authority row.
 type MemoryConfig struct {
 	// Enabled defaults to false. Memory retains user statements across
 	// sessions, so a workspace admin has to turn it on deliberately.

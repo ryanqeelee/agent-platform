@@ -12019,6 +12019,120 @@
                 }
             }
         },
+        "/system/admin/chat-history-config": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "获取部署级消息索引开关和 Embedding 模型；配置不隶属任何企业",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "系统管理"
+                ],
+                "summary": "获取平台消息索引配置",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "保存部署级消息索引开关和 Embedding 模型；启用时模型必填",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "系统管理"
+                ],
+                "summary": "更新平台消息索引配置",
+                "parameters": [
+                    {
+                        "description": "消息索引配置",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.PlatformChatHistoryConfig"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/system/admin/chat-history-stats": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "汇总各企业私有消息索引知识库及已索引消息数量",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "系统管理"
+                ],
+                "summary": "获取平台消息索引统计",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/system/admin/list": {
             "get": {
                 "description": "Retrieve a paginated list of users with system administrator\nprivileges (SystemAdmin only). Supports `offset` (default 0)\nand `limit` (default 50, max 200) query parameters. Walks the\npartial-friendly idx_users_is_system_admin index.",
@@ -12590,6 +12704,68 @@
                         "description": "服务器错误",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/system/admin/memory-runtime-config": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Admin"
+                ],
+                "summary": "获取平台记忆运行配置",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Admin"
+                ],
+                "summary": "更新平台记忆运行配置",
+                "parameters": [
+                    {
+                        "description": "记忆运行配置",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MemoryRuntimeConfig"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -16074,7 +16250,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "获取空间级别的KV配置（支持prompt-templates、chat-history-config、retrieval-config）",
+                "description": "获取空间级别的KV配置（支持prompt-templates、retrieval-config）",
                 "consumes": [
                     "application/json"
                 ],
@@ -16119,7 +16295,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "更新空间级别的KV配置（支持chat-history-config、retrieval-config）",
+                "description": "更新空间级别的KV配置（支持retrieval-config）",
                 "consumes": [
                     "application/json"
                 ],
@@ -17944,23 +18120,6 @@
                 "skip_if_tagged": {
                     "description": "SkipIfTagged leaves documents that already carry tags untouched, so a\ndeliberate manual classification is not diluted by model guesses. It is\na pointer because the default is true: rows written before this field\nexisted decode to nil and must not silently flip to \"always append\".",
                     "type": "boolean"
-                }
-            }
-        },
-        "github_com_Tencent_WeKnora_internal_types.ChatHistoryConfig": {
-            "type": "object",
-            "properties": {
-                "embedding_model_id": {
-                    "description": "EmbeddingModelID is the ID of the embedding model used for vectorizing chat messages.\nOnce messages have been indexed, the model cannot be changed (requires re-indexing).",
-                    "type": "string"
-                },
-                "enabled": {
-                    "description": "Enabled controls whether chat history indexing is active",
-                    "type": "boolean"
-                },
-                "knowledge_base_id": {
-                    "description": "KnowledgeBaseID is the auto-managed hidden knowledge base for chat history.\nThis is set internally when the feature is first enabled; users should not set this directly.",
-                    "type": "string"
                 }
             }
         },
@@ -19970,52 +20129,35 @@
                 }
             }
         },
-        "github_com_Tencent_WeKnora_internal_types.MemoryConfig": {
+        "github_com_Tencent_WeKnora_internal_types.MemoryRuntimeConfig": {
             "type": "object",
             "properties": {
                 "embedding_model_id": {
-                    "description": "EmbeddingModelID is the single model used to score memory against a\nquestion. It is pinned per workspace: knowledge bases each have their\nown embedding model, and grabbing whichever one happens to be listed\nfirst would mix incomparable vector spaces. Blank means semantic recall\nis off and matching stays lexical.",
                     "type": "string"
                 },
-                "enabled": {
-                    "description": "Enabled defaults to false. Memory retains user statements across\nsessions, so a workspace admin has to turn it on deliberately.",
-                    "type": "boolean"
-                },
                 "extract_delay_seconds": {
-                    "description": "ExtractDelaySeconds is how long a finished turn waits before\ndistillation runs. Waiting lets one model call cover the several\nmessages a user usually sends in a row. 0 means the default.",
                     "type": "integer"
                 },
                 "extract_instructions": {
-                    "description": "ExtractInstructions are workspace-specific rules appended to the\ndistillation prompt, for policies the product cannot guess (\"never record\ncustomer names\", \"always note the environment a question is about\").",
                     "type": "string"
                 },
                 "extract_min_interval_seconds": {
-                    "description": "ExtractMinIntervalSeconds is the floor between two distillation runs for\nthe same person, and exists purely to bound cost. It never drops a turn:\na turn arriving inside the interval is queued and picked up by the next\nrun. 0 means the default.",
                     "type": "integer"
                 },
                 "extract_model_id": {
-                    "description": "ExtractModelID is the model used by the background extraction task.\nEmpty means \"use the model the conversation itself used\", which is what\nthe settings UI promises, so the extraction task must never fail merely\nbecause this is blank.",
                     "type": "string"
                 },
                 "interest_threshold": {
-                    "description": "InterestThreshold is how many separate conversations must touch a topic\nbefore it becomes a stored interest. 0 means the default. Setting it to 1\nrecords every topic on first sight, which is usually too noisy.",
                     "type": "integer"
                 },
                 "max_items": {
-                    "description": "MaxItems caps active items per subject. 0 means DefaultMemoryMaxItems.",
                     "type": "integer"
                 },
                 "retrieval_conditioning": {
-                    "description": "RetrievalConditioning lets memory shape retrieval — query rewriting and\nper-document ranking — rather than only being appended to the answer\nprompt. This is where memory earns its keep in a knowledge-base product.",
                     "type": "boolean"
                 },
                 "vector_recall": {
-                    "description": "VectorRecall adds semantic similarity to memory recall. Nil means on\nwhen an embedding model is reachable.\n\nLexical matching alone cannot find a memory the user has re-worded, which\nis most of them: \"回答直接给结论\" and \"别铺垫那么多\" share no tokens. The\ncost is one embedding call per turn, bounded and degraded to lexical on\nfailure, so the feature never becomes a reason a chat is slow.",
                     "type": "boolean"
-                },
-                "write_mode": {
-                    "description": "WriteMode is MemoryWriteExplicitOnly or MemoryWriteAuto.",
-                    "type": "string"
                 }
             }
         },
@@ -20722,6 +20864,17 @@
                 },
                 "xlsx_first_row_as_header": {
                     "description": "XLSXFirstRowAsHeader restores row-1 column context for flat XLSX tables.\nnil preserves the parser default; an explicit false disables the mode.",
+                    "type": "boolean"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.PlatformChatHistoryConfig": {
+            "type": "object",
+            "properties": {
+                "embedding_model_id": {
+                    "type": "string"
+                },
+                "enabled": {
                     "type": "boolean"
                 }
             }
@@ -21874,14 +22027,6 @@
                     "description": "Business",
                     "type": "string"
                 },
-                "chat_history_config": {
-                    "description": "Chat history config: knowledge base configuration for indexing and searching chat messages via vector search",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ChatHistoryConfig"
-                        }
-                    ]
-                },
                 "context_config": {
                     "description": "Global Context configuration for this workspace (default for all sessions)",
                     "allOf": [
@@ -21919,10 +22064,10 @@
                     "type": "integer"
                 },
                 "memory_config": {
-                    "description": "Memory config: workspace switch for cross-session long-term memory",
+                    "description": "Memory config: enterprise consent for cross-session long-term memory.",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MemoryConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.TenantMemoryConfig"
                         }
                     ]
                 },
@@ -21972,6 +22117,19 @@
                 },
                 "updated_at": {
                     "description": "Last updated time",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.TenantMemoryConfig": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "description": "Enabled defaults to false. Memory retains user statements across\nsessions, so a workspace admin has to turn it on deliberately.",
+                    "type": "boolean"
+                },
+                "write_mode": {
+                    "description": "WriteMode is MemoryWriteExplicitOnly or MemoryWriteAuto.",
                     "type": "string"
                 }
             }

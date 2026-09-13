@@ -37,7 +37,7 @@
           <ModelSelector
             model-type="Embedding"
             :selected-model-id="localEmbeddingModelId"
-            :disabled="!loaded || modelLocked"
+            :disabled="!loaded || modelSelectionLocked"
             @update:selected-model-id="handleModelChange"
           />
         </div>
@@ -47,7 +47,7 @@
     <!-- 统计信息 -->
     <div class="stats-section">
       <h3 class="stats-title">{{ t('chatHistorySettings.statsTitle') }}</h3>
-      <div v-if="stats && stats.enabled && stats.knowledge_base_id" class="stats-grid">
+      <div v-if="stats && stats.tenant_knowledge_base_count > 0" class="stats-grid">
         <div class="stat-card">
           <div class="stat-value">{{ stats.indexed_message_count }}</div>
           <div class="stat-label">{{ t('chatHistorySettings.statsIndexedMessages') }}</div>
@@ -62,39 +62,40 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import ModelSelector from '@/components/ModelSelector.vue'
-import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 import {
-  getTenantChatHistoryConfig,
-  updateTenantChatHistoryConfig,
-  getChatHistoryKBStats,
+  getPlatformChatHistoryConfig,
+  updatePlatformChatHistoryConfig,
+  getPlatformChatHistoryStats,
   type ChatHistoryConfig,
-  type ChatHistoryKBStats,
+  type PlatformChatHistoryStats,
 } from '@/api/chat-history'
 
 const { t } = useI18n()
-const platformTenantID = usePlatformTenantControlID()
 
 // Local state
 const localEnabled = ref(false)
 const localEmbeddingModelId = ref('')
 const isInitializing = ref(true)
 const initialConfig = ref<ChatHistoryConfig | null>(null)
-const stats = ref<ChatHistoryKBStats | null>(null)
+const stats = ref<PlatformChatHistoryStats | null>(null)
 
-// Whether the embedding model is locked (has indexed messages — cannot change)
+// Any tenant KB may already have an asynchronous index task in flight.
 const modelLocked = ref(true)
+const modelSelectionLocked = computed(
+  () => modelLocked.value && !!initialConfig.value?.embedding_model_id,
+)
 const loaded = ref(false)
 const loadError = ref('')
 
-// Load tenant config
+// Load the deployment-wide platform policy.
 const loadConfig = async () => {
   loaded.value = false
   try {
-    const response = await getTenantChatHistoryConfig(platformTenantID.value)
+    const response = await getPlatformChatHistoryConfig()
     if (response.data) {
       const config = response.data
       isInitializing.value = true
@@ -122,11 +123,11 @@ const loadConfig = async () => {
 const loadStats = async () => {
   modelLocked.value = true
   try {
-    const response = await getChatHistoryKBStats(platformTenantID.value)
+    const response = await getPlatformChatHistoryStats()
     if (response.data) {
       stats.value = response.data
-      // Lock model if there are indexed messages
-      modelLocked.value = response.data.has_indexed_messages === true
+      // A tenant binding may already have an asynchronous index write in flight.
+      modelLocked.value = response.data.tenant_knowledge_base_count > 0
     } else throw new Error(t('common.loadFailed'))
   } catch (error: any) {
     console.error('Failed to load chat history stats:', error)
@@ -147,17 +148,14 @@ const hasConfigChanged = (): boolean => {
 // Save config
 const saveConfig = async () => {
   if (!loaded.value || !hasConfigChanged()) return
-  const targetTenantID = platformTenantID.value
-
   try {
     const config: ChatHistoryConfig = {
       enabled: localEnabled.value,
       embedding_model_id: localEmbeddingModelId.value,
     }
 
-    const response = await updateTenantChatHistoryConfig(config, targetTenantID)
+    const response = await updatePlatformChatHistoryConfig(config)
 
-    // Update initial config from response (includes auto-managed knowledge_base_id)
     if (response.data) {
       initialConfig.value = {
         enabled: response.data.enabled || false,

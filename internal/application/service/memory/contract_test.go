@@ -335,7 +335,7 @@ func TestManagementCanForgetWhileMemoryDisabled(t *testing.T) {
 				if disabled == "personal" {
 					require.NoError(t, svc.SetEnabled(ctx, false))
 				} else {
-					cfg := *tenants.configs[1]
+					cfg := *tenants.currentConfig(1)
 					cfg.Enabled = false
 					tenants.set(1, &cfg)
 				}

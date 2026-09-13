@@ -37,7 +37,7 @@ func (s *tenantMemoryConfigService) Get(ctx context.Context) (*interfaces.Tenant
 }
 
 func (s *tenantMemoryConfigService) Update(
-	ctx context.Context, cfg *types.MemoryConfig,
+	ctx context.Context, cfg *types.TenantMemoryConfig,
 ) (*interfaces.TenantMemoryConfigState, error) {
 	tenantID, err := tenantMemoryConfigScope(ctx)
 	if err != nil {

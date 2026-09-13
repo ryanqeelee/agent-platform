@@ -23,6 +23,10 @@ func (r *memoryRepository) WithAuthority(
 	}
 	var result *types.PersonalMemoryReceipt
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		runtime, err := loadPlatformMemoryRuntimeConfig(ctx, tx, "SHARE")
+		if err != nil {
+			return err
+		}
 		var tenant types.Tenant
 		if err := tx.Select("id", "memory_config", "memory_generation").
 			Where("id = ?", scope.TenantID).
@@ -54,9 +58,13 @@ func (r *memoryRepository) WithAuthority(
 			}
 		}
 
-		cfg := normalizedMemoryConfig(tenant.MemoryConfig)
+		cfg := types.ComposeMemoryConfig(runtime.Runtime, tenant.MemoryConfig)
+		workspaceGeneration, err := effectiveMemoryGeneration(runtime.Generation, tenant.MemoryGeneration)
+		if err != nil {
+			return err
+		}
 		state := interfaces.MemoryAuthorityState{
-			Config: cfg, WorkspaceGeneration: tenant.MemoryGeneration,
+			Config: cfg, WorkspaceGeneration: workspaceGeneration,
 			SubjectGeneration: subject.Generation, Revision: subject.Revision,
 			UserEnabled: subject.Enabled,
 		}
@@ -123,7 +131,7 @@ func (r *memoryRepository) WithAuthority(
 			ID: uuid.NewString(), TenantID: scope.TenantID, SubjectID: scope.SubjectID,
 			OperationID: request.OperationID, CommandHash: request.CommandHash,
 			Status: status, ReasonCode: reasonPtr, Revision: subject.Revision,
-			WorkspaceGeneration: tenant.MemoryGeneration, SubjectGeneration: subject.Generation,
+			WorkspaceGeneration: workspaceGeneration, SubjectGeneration: subject.Generation,
 			ItemIDs: types.MemoryStringList(mutation.ItemIDs), CommittedAt: committedAt,
 		}
 		if request.OperationID != "" {
@@ -162,6 +170,10 @@ func (r *memoryRepository) AcceptExpression(
 	}
 	var receipt *types.PersonalMemoryExpressionReceipt
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		runtime, err := loadPlatformMemoryRuntimeConfig(ctx, tx, "SHARE")
+		if err != nil {
+			return err
+		}
 		var tenant types.Tenant
 		if err := tx.Select("id", "memory_config", "memory_generation").Where("id = ?", scope.TenantID).
 			Clauses(clause.Locking{Strength: "SHARE"}).First(&tenant).Error; err != nil {
@@ -177,7 +189,7 @@ func (r *memoryRepository) AcceptExpression(
 			return err
 		}
 		var existing types.MemoryExpression
-		err := tx.Where("tenant_id = ? AND subject_id = ? AND expression_id = ?",
+		err = tx.Where("tenant_id = ? AND subject_id = ? AND expression_id = ?",
 			scope.TenantID, scope.SubjectID, expression.ExpressionID).First(&existing).Error
 		if err == nil {
 			if existing.ExpressionHash != expression.ExpressionHash {
@@ -193,11 +205,15 @@ func (r *memoryRepository) AcceptExpression(
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
-		cfg := normalizedMemoryConfig(tenant.MemoryConfig)
+		cfg := types.ComposeMemoryConfig(runtime.Runtime, tenant.MemoryConfig)
+		workspaceGeneration, err := effectiveMemoryGeneration(runtime.Generation, tenant.MemoryGeneration)
+		if err != nil {
+			return err
+		}
 		reason := ""
 		if !cfg.AutoExtractEnabled() || !subject.Enabled {
 			reason = types.MemoryReasonPolicyDisabled
-		} else if expression.WorkspaceGeneration != tenant.MemoryGeneration ||
+		} else if expression.WorkspaceGeneration != workspaceGeneration ||
 			expression.SubjectGeneration != subject.Generation {
 			reason = types.MemoryReasonPolicyStale
 		}

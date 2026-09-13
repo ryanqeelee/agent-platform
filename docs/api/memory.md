@@ -6,6 +6,8 @@
 
 工作空间管理员先在设置里打开空间级开关，用户还可以再关掉自己的记忆。推断出的条目会停在 `pending`，确认后才进入提示词。
 
+企业管理员通过 `GET/PUT /tenants/kv/memory-config` 管理本企业同意项，请求体仅包含 `enabled` 与 `write_mode`；未知的运行参数会被拒绝。平台 SystemAdmin 通过 tenantless 的 `GET/PUT /system/admin/memory-runtime-config` 维护所有企业共享的运行参数。运行参数为 `extract_model_id`、`max_items`、`extract_delay_seconds`、`extract_min_interval_seconds`、`extract_instructions`、`interest_threshold`、`embedding_model_id`、`vector_recall` 与 `retrieval_conditioning`，不包含企业开关。
+
 | 方法 | 路径 | 描述 |
 | ---- | ---- | ---- |
 | GET | `/memory/settings` | 获取合并后的记忆开关（空间级 + 个人级）与条数 |
@@ -24,6 +26,8 @@
 | DELETE | `/memory/documents/{id}` | 停止用某份文档做个性化检索 |
 | GET | `/memory/export` | 以 JSON 导出全部记忆 |
 | POST | `/memory/consolidate` | 立刻整理（合并近义条目、归档到期事项） |
+| GET/PUT | `/tenants/kv/memory-config` | 获取或更新当前企业的长期记忆同意项（Admin 写） |
+| GET/PUT | `/system/admin/memory-runtime-config` | 获取或更新平台共享运行配置（SystemAdmin） |
 
 ## GET `/memory/settings`
 

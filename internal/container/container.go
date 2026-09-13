@@ -167,6 +167,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewAuthTokenRepository))
 	must(container.Provide(repository.NewSystemSettingRepository))
 	must(container.Provide(repository.NewPlatformParserConfigRepository))
+	must(container.Provide(repository.NewPlatformChatHistoryRepository))
+	must(container.Provide(repository.NewPlatformMemoryRuntimeConfigRepository))
 	must(container.Provide(repository.NewCapabilityPlanRepository))
 	must(container.Provide(neo4jRepo.NewNeo4jRepository))
 	must(container.Provide(repository.NewMCPServiceRepository))
@@ -231,6 +233,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewUserService))
 	must(container.Provide(service.NewSystemSettingService))
 	must(container.Provide(service.NewPlatformParserConfigService))
+	must(container.Provide(service.NewPlatformChatHistoryService))
+	must(container.Provide(service.NewPlatformMemoryRuntimeConfigService))
 	must(container.Provide(service.NewCapabilityPlanService))
 	must(container.Provide(func(s *service.CapabilityPlanService) interfaces.AICapabilityPlanResolver { return s }))
 	must(container.Provide(func(s *service.CapabilityPlanService) interfaces.KnowledgeProcessingPlanResolver { return s }))
@@ -441,6 +445,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewTagHandler))
 	must(container.Provide(session.NewHandler))
 	must(container.Provide(handler.NewMessageHandler))
+	must(container.Provide(handler.NewPlatformChatHistoryHandler))
 	must(container.Provide(handler.NewMessageSuggestionHandler))
 	must(container.Provide(handler.NewModelHandler))
 	must(container.Provide(handler.NewSandboxConfigHandler))
@@ -475,6 +480,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewOrganizationHandler))
 	must(container.Provide(handler.NewMemoryHandler))
 	must(container.Provide(handler.NewTenantMemoryConfigHandler))
+	must(container.Provide(handler.NewPlatformMemoryRuntimeConfigHandler))
 	must(container.Provide(handler.NewOperatingBriefHandler))
 
 	// Data source handler

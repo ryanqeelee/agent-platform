@@ -147,12 +147,10 @@ type Tenant struct {
 	ContextConfig *ContextConfig `yaml:"context_config"      json:"context_config"      gorm:"type:jsonb"`
 	// Credentials config: third-party provider credentials (e.g. WeKnoraCloud AppID/AppSecret)
 	Credentials *CredentialsConfig `yaml:"credentials" json:"credentials" gorm:"type:jsonb"`
-	// Chat history config: knowledge base configuration for indexing and searching chat messages via vector search
-	ChatHistoryConfig *ChatHistoryConfig `yaml:"chat_history_config" json:"chat_history_config" gorm:"type:jsonb"`
 	// Retrieval config: global search/retrieval parameters shared by knowledge search and message search
 	RetrievalConfig *RetrievalConfig `yaml:"retrieval_config" json:"retrieval_config" gorm:"type:jsonb"`
-	// Memory config: workspace switch for cross-session long-term memory
-	MemoryConfig *MemoryConfig `yaml:"memory_config" json:"memory_config" gorm:"type:jsonb"`
+	// Memory config: enterprise consent for cross-session long-term memory.
+	MemoryConfig *TenantMemoryConfig `yaml:"memory_config" json:"memory_config" gorm:"type:jsonb"`
 	// MemoryGeneration invalidates every outstanding memory write whenever the
 	// workspace memory policy actually changes.
 	MemoryGeneration int64 `yaml:"memory_generation" json:"memory_generation" gorm:"not null;default:0"`

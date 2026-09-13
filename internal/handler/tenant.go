@@ -1281,7 +1281,7 @@ func (h *TenantHandler) SearchTenants(c *gin.Context) {
 
 // GetTenantKV godoc
 // @Summary      获取空间KV配置
-// @Description  获取空间级别的KV配置（支持prompt-templates、chat-history-config、retrieval-config）
+// @Description  获取空间级别的KV配置（支持prompt-templates、retrieval-config）
 // @Tags         空间管理
 // @Accept       json
 // @Produce      json
@@ -1296,7 +1296,7 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 	key := secutils.SanitizeForLog(c.Param("key"))
 
 	switch key {
-	case "chat-history-config", "retrieval-config":
+	case "retrieval-config":
 		if !types.IsSystemAdminFromContext(ctx) {
 			c.Error(errors.NewForbiddenError("platform configuration requires system administrator access"))
 			return
@@ -1306,10 +1306,6 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 	switch key {
 	case "prompt-templates":
 		h.GetPromptTemplates(c)
-		return
-		return
-	case "chat-history-config":
-		h.GetTenantChatHistoryConfig(c)
 		return
 	case "retrieval-config":
 		h.GetTenantRetrievalConfig(c)
@@ -1323,7 +1319,7 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 
 // UpdateTenantKV godoc
 // @Summary      更新空间KV配置
-// @Description  更新空间级别的KV配置（支持chat-history-config、retrieval-config）
+// @Description  更新空间级别的KV配置（支持retrieval-config）
 // @Tags         空间管理
 // @Accept       json
 // @Produce      json
@@ -1339,7 +1335,7 @@ func (h *TenantHandler) UpdateTenantKV(c *gin.Context) {
 	key := secutils.SanitizeForLog(c.Param("key"))
 
 	switch key {
-	case "chat-history-config", "retrieval-config":
+	case "retrieval-config":
 		if !types.IsSystemAdminFromContext(ctx) {
 			c.Error(errors.NewForbiddenError("platform configuration requires system administrator access"))
 			return
@@ -1347,9 +1343,6 @@ func (h *TenantHandler) UpdateTenantKV(c *gin.Context) {
 	}
 
 	switch key {
-	case "chat-history-config":
-		h.updateTenantChatHistoryConfigInternal(c)
-		return
 	case "retrieval-config":
 		h.updateTenantRetrievalConfigInternal(c)
 		return
@@ -1397,103 +1390,6 @@ func (h *TenantHandler) GetPromptTemplates(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    localized,
-	})
-}
-
-// GetTenantChatHistoryConfig returns the tenant's chat history KB configuration.
-func (h *TenantHandler) GetTenantChatHistoryConfig(c *gin.Context) {
-	ctx := c.Request.Context()
-	tenant, _ := types.TenantInfoFromContext(ctx)
-	if tenant == nil {
-		logger.Error(ctx, "Workspace is empty")
-		c.Error(errors.NewBadRequestError("Workspace is empty"))
-		return
-	}
-	data := tenant.ChatHistoryConfig
-	if data == nil {
-		data = &types.ChatHistoryConfig{}
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    data,
-	})
-}
-
-// updateTenantChatHistoryConfigInternal updates the tenant's chat history KB configuration.
-// When enabled with an embedding model and no KB exists yet, it auto-creates a hidden KB.
-func (h *TenantHandler) updateTenantChatHistoryConfigInternal(c *gin.Context) {
-	ctx := c.Request.Context()
-
-	// The frontend sends: enabled, embedding_model_id
-	// knowledge_base_id is managed internally.
-	var req types.ChatHistoryConfig
-	if err := c.ShouldBindJSON(&req); err != nil {
-		logger.Error(ctx, "Failed to parse request parameters", err)
-		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
-		return
-	}
-
-	tenant, _ := types.TenantInfoFromContext(ctx)
-	if tenant == nil {
-		logger.Error(ctx, "Workspace is empty")
-		c.Error(errors.NewBadRequestError("Workspace is empty"))
-		return
-	}
-
-	existing := tenant.ChatHistoryConfig
-
-	// Build the new config, preserving the internally-managed knowledge_base_id
-	cfg := &types.ChatHistoryConfig{
-		Enabled:          req.Enabled,
-		EmbeddingModelID: req.EmbeddingModelID,
-		KnowledgeBaseID:  "", // will be set below
-	}
-
-	// Carry over existing KB ID if the embedding model hasn't changed
-	if existing != nil && existing.KnowledgeBaseID != "" {
-		if existing.EmbeddingModelID == req.EmbeddingModelID {
-			cfg.KnowledgeBaseID = existing.KnowledgeBaseID
-		} else {
-			// Embedding model changed — the old KB is incompatible.
-			// We'll create a new one below. The old KB remains but is orphaned (can be cleaned up later).
-			logger.Infof(ctx, "Embedding model changed from %s to %s, will create new chat history KB", existing.EmbeddingModelID, req.EmbeddingModelID)
-		}
-	}
-
-	// Auto-create hidden KB if enabled + model set + no KB yet
-	if cfg.Enabled && cfg.EmbeddingModelID != "" && cfg.KnowledgeBaseID == "" {
-		kb := &types.KnowledgeBase{
-			Name:             "__chat_history__",
-			Type:             types.KnowledgeBaseTypeDocument,
-			IsTemporary:      true,
-			Description:      "Auto-managed knowledge base for chat history message indexing",
-			EmbeddingModelID: cfg.EmbeddingModelID,
-		}
-		createdKB, err := h.kbService.CreateKnowledgeBase(ctx, kb)
-		if err != nil {
-			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to create chat history knowledge base").WithDetails(err.Error()))
-			return
-		}
-		cfg.KnowledgeBaseID = createdKB.ID
-		logger.Infof(ctx, "Auto-created chat history KB: id=%s, embedding_model=%s", createdKB.ID, cfg.EmbeddingModelID)
-	}
-
-	tenant.ChatHistoryConfig = cfg
-	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
-	if err != nil {
-		if appErr, ok := errors.IsAppError(err); ok {
-			c.Error(appErr)
-		} else {
-			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to update chat history config").WithDetails(err.Error()))
-		}
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    updatedTenant.ChatHistoryConfig,
-		"message": "Chat history configuration updated successfully",
 	})
 }
 

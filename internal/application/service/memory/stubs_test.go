@@ -22,29 +22,64 @@ import (
 // actually calls; anything else panics loudly rather than silently returning
 // a zero value.
 type stubTenantRepo struct {
-	interfaces.TenantRepository
+	mu                 sync.RWMutex
+	consents           map[uint64]*types.TenantMemoryConfig
+	runtime            *types.MemoryRuntimeConfig
+	platformGeneration int64
+	tenantGenerations  map[uint64]int64
+	db                 *gorm.DB
+}
 
-	mu      sync.RWMutex
-	configs map[uint64]*types.MemoryConfig
-	db      *gorm.DB
+func (s *stubTenantRepo) currentConfig(tenantID uint64) *types.MemoryConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return types.ComposeMemoryConfig(s.runtime, s.consents[tenantID])
 }
 
 func (s *stubTenantRepo) set(tenantID uint64, cfg *types.MemoryConfig) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.configs[tenantID] = cfg
+	s.runtime = types.MemoryRuntimeConfigFromEffective(cfg)
+	s.consents[tenantID] = types.TenantMemoryConfigFromEffective(cfg)
 	if s.db != nil {
+		_ = s.db.Model(&types.PlatformMemoryRuntimeConfig{}).
+			Where("id = ?", types.PlatformMemoryRuntimeConfigSingletonID).
+			Update("runtime", s.runtime).Error
 		_ = s.db.Exec(
 			`INSERT INTO tenants(id, memory_config, memory_generation) VALUES (?, ?, 0)
-			 ON CONFLICT(id) DO UPDATE SET memory_config=excluded.memory_config`, tenantID, cfg,
+			 ON CONFLICT(id) DO UPDATE SET memory_config=excluded.memory_config`, tenantID, s.consents[tenantID],
 		).Error
 	}
 }
 
-func (s *stubTenantRepo) GetTenantByID(_ context.Context, id uint64) (*types.Tenant, error) {
+func (s *stubTenantRepo) Get(_ context.Context, id uint64) (*interfaces.TenantMemoryConfigState, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return &types.Tenant{ID: id, MemoryConfig: s.configs[id]}, nil
+	consent := s.consents[id]
+	return &interfaces.TenantMemoryConfigState{
+		Config: types.ComposeMemoryConfig(s.runtime, consent), Consent: consent,
+		Generation:         s.platformGeneration + s.tenantGenerations[id],
+		PlatformGeneration: s.platformGeneration, TenantGeneration: s.tenantGenerations[id],
+	}, nil
+}
+
+func (s *stubTenantRepo) Update(
+	_ context.Context, id uint64, consent *types.TenantMemoryConfig,
+) (*interfaces.TenantMemoryConfigState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	next := *consent
+	next.Normalize()
+	previous := s.consents[id]
+	if previous == nil || previous.Enabled != next.Enabled || previous.WriteMode != next.WriteMode {
+		s.tenantGenerations[id]++
+	}
+	s.consents[id] = &next
+	return &interfaces.TenantMemoryConfigState{
+		Config: types.ComposeMemoryConfig(s.runtime, &next), Consent: &next,
+		Generation:         s.platformGeneration + s.tenantGenerations[id],
+		PlatformGeneration: s.platformGeneration, TenantGeneration: s.tenantGenerations[id],
+	}, nil
 }
 
 // stubMessageRepo serves per-session transcripts. It implements the same

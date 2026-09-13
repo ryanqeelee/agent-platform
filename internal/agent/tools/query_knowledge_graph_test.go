@@ -20,6 +20,9 @@ type stubKnowledgeBaseService struct {
 func (s *stubKnowledgeBaseService) CreateKnowledgeBase(context.Context, *types.KnowledgeBase) (*types.KnowledgeBase, error) {
 	return nil, nil
 }
+func (s *stubKnowledgeBaseService) EnsureChatHistoryKnowledgeBase(context.Context, string) (*types.KnowledgeBase, error) {
+	return nil, nil
+}
 
 func (s *stubKnowledgeBaseService) GetKnowledgeBaseByID(context.Context, string) (*types.KnowledgeBase, error) {
 	return s.kb, nil

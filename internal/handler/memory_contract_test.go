@@ -43,3 +43,23 @@ func TestMemoryCommandDecoderKeepsIntegerFieldsStrict(t *testing.T) {
 		decodeStrictMemoryJSON(strictMemoryContext(t, missing), &types.PersonalMemoryCommand{}),
 	)
 }
+
+func TestMemoryConfigDecodersKeepPlatformRuntimeAndTenantConsentDisjoint(t *testing.T) {
+	require.NoError(t, decodeStrictMemoryJSON(
+		strictMemoryContext(t, `{"enabled":true,"write_mode":"auto"}`),
+		&types.TenantMemoryConfig{},
+	))
+	require.ErrorContains(t, decodeStrictMemoryJSON(
+		strictMemoryContext(t, `{"enabled":true,"write_mode":"auto","max_items":100}`),
+		&types.TenantMemoryConfig{},
+	), "unknown field")
+
+	validRuntime := `{"extract_model_id":"","max_items":200,"extract_delay_seconds":90,"extract_min_interval_seconds":300,"extract_instructions":"","interest_threshold":3,"embedding_model_id":"","vector_recall":null,"retrieval_conditioning":null}`
+	require.NoError(t, decodeStrictMemoryJSON(
+		strictMemoryContext(t, validRuntime), &types.MemoryRuntimeConfig{},
+	))
+	require.ErrorContains(t, decodeStrictMemoryJSON(
+		strictMemoryContext(t, strings.TrimSuffix(validRuntime, "}")+`,"enabled":true}`),
+		&types.MemoryRuntimeConfig{},
+	), "unknown field")
+}

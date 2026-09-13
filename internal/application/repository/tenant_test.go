@@ -16,7 +16,11 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&types.Tenant{}, &types.TenantMember{}))
+	require.NoError(t, db.AutoMigrate(&types.Tenant{}, &types.TenantMember{}, &types.PlatformMemoryRuntimeConfig{}))
+	require.NoError(t, db.Create(&types.PlatformMemoryRuntimeConfig{
+		ID: types.PlatformMemoryRuntimeConfigSingletonID, Runtime: types.DefaultMemoryRuntimeConfig(),
+		Generation: 0, UpdatedBy: "test",
+	}).Error)
 	return db
 }
 

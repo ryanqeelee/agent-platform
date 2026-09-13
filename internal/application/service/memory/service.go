@@ -45,7 +45,7 @@ const rejectedMessageWindow = time.Hour
 // Service implements interfaces.MemoryService.
 type Service struct {
 	repo         interfaces.MemoryRepository
-	tenantRepo   interfaces.TenantRepository
+	configRepo   interfaces.TenantMemoryConfigRepository
 	messageRepo  interfaces.MessageRepository
 	modelService interfaces.ModelService
 	enqueuer     interfaces.TaskEnqueuer
@@ -58,7 +58,7 @@ type Service struct {
 // NewMemoryService builds the long-term memory service.
 func NewMemoryService(
 	repo interfaces.MemoryRepository,
-	tenantRepo interfaces.TenantRepository,
+	configRepo interfaces.TenantMemoryConfigRepository,
 	messageRepo interfaces.MessageRepository,
 	modelService interfaces.ModelService,
 	enqueuer interfaces.TaskEnqueuer,
@@ -66,7 +66,7 @@ func NewMemoryService(
 ) interfaces.MemoryService {
 	return &Service{
 		repo:         repo,
-		tenantRepo:   tenantRepo,
+		configRepo:   configRepo,
 		messageRepo:  messageRepo,
 		modelService: modelService,
 		enqueuer:     enqueuer,
@@ -74,14 +74,14 @@ func NewMemoryService(
 	}
 }
 
-// workspaceConfig loads the workspace memory switch. A missing tenant or an
-// unset column yields a zero-value config, which is disabled.
+// workspaceConfig loads the effective platform-runtime plus enterprise-consent
+// policy through the dedicated atomic reader.
 func (s *Service) workspaceConfig(ctx context.Context, tenantID uint64) *types.MemoryConfig {
-	tenant, err := s.tenantRepo.GetTenantByID(ctx, tenantID)
-	if err != nil || tenant == nil || tenant.MemoryConfig == nil {
+	state, err := s.configRepo.Get(ctx, tenantID)
+	if err != nil || state == nil || state.Config == nil {
 		return &types.MemoryConfig{}
 	}
-	cfg := *tenant.MemoryConfig
+	cfg := *state.Config
 	cfg.Normalize()
 	return &cfg
 }
@@ -1055,16 +1055,16 @@ func (s *Service) GetSettings(ctx context.Context) (*types.MemorySettings, error
 	if err != nil {
 		return nil, err
 	}
-	tenant, tenantErr := s.tenantRepo.GetTenantByID(ctx, scope.TenantID)
-	if tenantErr != nil {
-		return nil, tenantErr
+	state, configErr := s.configRepo.Get(ctx, scope.TenantID)
+	if configErr != nil {
+		return nil, configErr
 	}
 	cfg := &types.MemoryConfig{}
 	var workspaceGeneration int64
-	if tenant != nil {
-		workspaceGeneration = tenant.MemoryGeneration
-		if tenant.MemoryConfig != nil {
-			cfg = tenant.MemoryConfig
+	if state != nil {
+		workspaceGeneration = state.Generation
+		if state.Config != nil {
+			cfg = state.Config
 		}
 	}
 	cfg.Normalize()

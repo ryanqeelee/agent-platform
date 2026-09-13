@@ -11,8 +11,8 @@ test('platform operations opens the existing model settings overlay', () => {
   assert.match(source, /@click="uiStore\.openSettings\('models'\)"[^>]*>模型配置<\/t-button>/)
   assert.match(source, /@click="uiStore\.openSettings\('sandbox'\)"[^>]*>沙箱配置<\/t-button>/)
   assert.match(source, /@click="uiStore\.openSettings\('skills'\)"[^>]*>技能管理<\/t-button>/)
-  assert.match(source, /选择企业后可管理该企业的消息索引和记忆运行配置/)
-  assert.match(source, /<Settings :tenant-control-id="selected\?\.id" :tenant-control-name="selected\?\.name" \/>/)
+  assert.doesNotMatch(source, /选择企业后|openTenantSettings/)
+  assert.match(source, /<Settings \/>/)
 })
 
 test('model settings protects YAML lifecycle while allowing manual global cleanup', () => {

@@ -10,11 +10,10 @@
         <t-button variant="outline" @click="uiStore.openSettings('models')">模型配置</t-button>
         <t-button variant="outline" @click="uiStore.openSettings('sandbox')">沙箱配置</t-button>
         <t-button variant="outline" @click="uiStore.openSettings('skills')">技能管理</t-button>
-        <t-button variant="outline" :disabled="!selected" @click="openTenantSettings('chathistory')">消息索引</t-button>
-        <t-button variant="outline" :disabled="!selected" @click="openTenantSettings('memory-runtime')">记忆运行配置</t-button>
+        <t-button variant="outline" @click="uiStore.openSettings('chathistory')">消息索引</t-button>
+        <t-button variant="outline" @click="uiStore.openSettings('memory-runtime')">记忆运行配置</t-button>
         <t-button theme="primary" @click="openCreationWizard">创建企业</t-button>
         <t-button variant="outline" @click="handleLogout">{{ $t('auth.logout') }}</t-button>
-        <small v-if="!selected" class="tenant-settings-hint">选择企业后可管理该企业的消息索引和记忆运行配置</small>
       </div>
     </header>
 
@@ -260,7 +259,7 @@
       <t-input v-model="newPassword" type="password" placeholder="输入新密码" />
     </t-dialog>
 
-    <Settings :tenant-control-id="selected?.id" :tenant-control-name="selected?.name" />
+    <Settings />
   </main>
 </template>
 
@@ -351,10 +350,6 @@ function showError(error: any) { errorMessage.value = error?.message || '操作�
 async function handleLogout() {
   authStore.logout()
   await router.replace('/login')
-}
-function openTenantSettings(section: 'chathistory' | 'memory-runtime') {
-  if (!selected.value) return
-  uiStore.openSettings(section)
 }
 function formatStorage(bytes: number) { return `${bytesToGiB(bytes).toFixed(2)} GiB` }
 function formatTimestamp(value: string | null) { return value ? new Date(value).toLocaleString() : '暂无' }
@@ -832,7 +827,6 @@ onMounted(async () => {
 .page-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-bottom: 24px; }
 .page-header h1 { margin: 4px 0 8px; font-size: 32px; }.page-header p { margin: 0; color: var(--td-text-color-secondary); }.eyebrow { color: var(--td-brand-color) !important; font-weight: 700; }
 .page-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.tenant-settings-hint { flex-basis: 100%; color: var(--td-text-color-placeholder); text-align: right; }
 .workspace { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 18px; margin-top: 18px; }.detail-column { display: grid; gap: 18px; }.detail-empty { padding-top: 100px; }
 .enterprise-row { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 13px; border: 0; border-radius: 8px; background: transparent; text-align: left; color: inherit; cursor: pointer; }.enterprise-row:hover, .enterprise-row.active { background: var(--td-bg-color-container-hover); }.enterprise-row span:first-child, td:first-child { display: grid; gap: 4px; }.enterprise-row small, td small, .hint { color: var(--td-text-color-secondary); }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }.table-scroll { overflow-x: auto; }table { width: 100%; border-collapse: collapse; }th, td { padding: 12px; border-bottom: 1px solid var(--td-component-stroke); text-align: left; }.actions { display: flex; flex-wrap: wrap; gap: 8px; }.secret { margin: 16px 0; padding: 14px; border-radius: 8px; background: var(--td-bg-color-secondarycontainer); white-space: pre-wrap; overflow-wrap: anywhere; }

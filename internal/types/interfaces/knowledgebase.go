@@ -24,6 +24,9 @@ type KnowledgeBaseService interface {
 	//   - Created knowledge base object (including automatically generated ID)
 	//   - Possible errors such as insufficient permissions, duplicate names, etc.
 	CreateKnowledgeBase(ctx context.Context, kb *types.KnowledgeBase) (*types.KnowledgeBase, error)
+	// EnsureChatHistoryKnowledgeBase lazily creates the caller tenant's private
+	// internal message-index KB under the selected platform embedding model.
+	EnsureChatHistoryKnowledgeBase(ctx context.Context, expectedModelID string) (*types.KnowledgeBase, error)
 
 	// GetKnowledgeBaseByID retrieves knowledge base information by ID
 	// Parameters:

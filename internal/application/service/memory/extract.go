@@ -81,14 +81,14 @@ func (s *Service) ScheduleExtraction(ctx context.Context, sessionID, messageID, 
 	if !subject.Enabled {
 		return
 	}
-	tenant, err := s.tenantRepo.GetTenantByID(ctx, scope.TenantID)
+	state, err := s.configRepo.Get(ctx, scope.TenantID)
 	if err != nil {
 		logger.Warnf(ctx, "memory: load policy for legacy extraction adapter failed: %v", err)
 		return
 	}
 	workspaceGeneration := int64(0)
-	if tenant != nil {
-		workspaceGeneration = tenant.MemoryGeneration
+	if state != nil {
+		workspaceGeneration = state.Generation
 	}
 	candidate, err := s.messageRepo.GetMessage(ctx, sessionID, messageID)
 	if err != nil {

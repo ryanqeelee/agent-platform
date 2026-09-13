@@ -120,23 +120,19 @@ func TestGetTenantViewerDoesNotLeakSecrets(t *testing.T) {
 	assert.NotContains(t, rec.Body.String(), "tenant-api-key-123")
 }
 
-func TestGetTenantKVViewerForbiddenForSecretKeys(t *testing.T) {
+func TestGetTenantKVViewerForbiddenForRetrievalConfig(t *testing.T) {
 	tenant := secretTenantFixture()
 	engine := newTenantHandlerTestEngine(t, types.TenantRoleViewer, false, tenant)
 
-	for _, key := range []string{"chat-history-config", "retrieval-config"} {
-		t.Run(key, func(t *testing.T) {
-			rec := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodGet, "/tenants/kv/"+key, nil)
-			engine.ServeHTTP(rec, req)
-			require.Equal(t, http.StatusForbidden, rec.Code)
-		})
-	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/tenants/kv/retrieval-config", nil)
+	engine.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusForbidden, rec.Code)
 }
 
 func TestTenantSharedConfigKVIsRetired(t *testing.T) {
 	engine := newTenantHandlerTestEngine(t, types.TenantRoleAdmin, true, secretTenantFixture())
-	for _, key := range []string{"web-search-config", "storage-engine-config"} {
+	for _, key := range []string{"web-search-config", "storage-engine-config", "chat-history-config"} {
 		for _, method := range []string{http.MethodGet, http.MethodPut} {
 			t.Run(key+method, func(t *testing.T) {
 				rec := httptest.NewRecorder()

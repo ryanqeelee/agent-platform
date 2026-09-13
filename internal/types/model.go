@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"reflect"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -19,6 +20,8 @@ import (
 var ErrModelCredentialEncryptionUnavailable = errors.New(
 	"SYSTEM_AES_KEY is not configured correctly; refusing to store model credentials in plaintext",
 )
+
+var ErrModelPlatformRuntimeBinding = errors.New("model is bound by platform runtime configuration")
 
 // ModelType represents the type of AI model
 type ModelType string
@@ -225,6 +228,25 @@ type Model struct {
 	UpdatedAt time.Time `yaml:"updated_at"  json:"updated_at"`
 	// Deletion time of the model
 	DeletedAt gorm.DeletedAt `yaml:"deleted_at"  json:"deleted_at"  gorm:"index"`
+}
+
+// EmbeddingModelSemanticIdentityChanged reports whether an in-place update
+// would change the vector space or endpoint behind an existing model ID.
+// Memory and chat-history bindings can reuse this comparison.
+func EmbeddingModelSemanticIdentityChanged(stored, incoming *Model) bool {
+	if stored == nil || incoming == nil {
+		return stored != incoming
+	}
+	return stored.Name != incoming.Name ||
+		stored.Type != incoming.Type ||
+		stored.Source != incoming.Source ||
+		stored.Parameters.BaseURL != incoming.Parameters.BaseURL ||
+		stored.Parameters.InterfaceType != incoming.Parameters.InterfaceType ||
+		stored.Parameters.EmbeddingParameters != incoming.Parameters.EmbeddingParameters ||
+		stored.Parameters.Provider != incoming.Parameters.Provider ||
+		!reflect.DeepEqual(stored.Parameters.ExtraConfig, incoming.Parameters.ExtraConfig) ||
+		!reflect.DeepEqual(stored.Parameters.CustomHeaders, incoming.Parameters.CustomHeaders) ||
+		stored.Parameters.AppID != incoming.Parameters.AppID
 }
 
 // Value implements the driver.Valuer interface, used to convert ModelParameters to database value.

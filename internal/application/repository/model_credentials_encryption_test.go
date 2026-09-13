@@ -20,7 +20,16 @@ func setupModelCredentialDB(t *testing.T) *gorm.DB {
 	dsn := "file:model-credentials-" + uuid.NewString() + "?mode=memory&cache=shared"
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&types.Model{}))
+	require.NoError(t, db.AutoMigrate(&types.Model{}, &types.PlatformMemoryRuntimeConfig{}))
+	require.NoError(t, db.Exec(`
+		CREATE TABLE platform_chat_history_config (id INTEGER PRIMARY KEY CHECK (id = 1), enabled BOOLEAN NOT NULL DEFAULT 0, embedding_model_id TEXT NOT NULL);
+		CREATE TABLE knowledge_bases (id TEXT PRIMARY KEY, embedding_model_id TEXT NOT NULL);
+		CREATE TABLE tenant_chat_history_indexes (tenant_id INTEGER PRIMARY KEY, knowledge_base_id TEXT NOT NULL UNIQUE)
+	`).Error)
+	require.NoError(t, db.Create(&types.PlatformMemoryRuntimeConfig{
+		ID: types.PlatformMemoryRuntimeConfigSingletonID, Runtime: types.DefaultMemoryRuntimeConfig(),
+		UpdatedBy: "test",
+	}).Error)
 	return db
 }
 

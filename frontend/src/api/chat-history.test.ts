@@ -3,14 +3,13 @@ import test from 'node:test'
 
 import { platformChatHistoryPath } from './chat-history-path'
 
-test('platform chat-history requests map to the explicitly selected enterprise', () => {
+test('platform chat-history requests are tenantless', () => {
   assert.equal(
-    platformChatHistoryPath(42, 'chat-history-config'),
-    '/api/v1/system/admin/tenants/42/chat-history-config',
+    platformChatHistoryPath('chat-history-config'),
+    '/api/v1/system/admin/chat-history-config',
   )
   assert.equal(
-    platformChatHistoryPath(77, 'chat-history-stats'),
-    '/api/v1/system/admin/tenants/77/chat-history-stats',
+    platformChatHistoryPath('chat-history-stats'),
+    '/api/v1/system/admin/chat-history-stats',
   )
-  assert.throws(() => platformChatHistoryPath(0, 'chat-history-config'), /请先选择企业/)
 })

@@ -12,6 +12,9 @@
 | GET    | `/system/parser-engines`          | 企业可用解析能力清单（不含配置） |
 | GET    | `/system/admin/parser-engines`    | 平台解析能力与连接状态 |
 | GET/PUT | `/system/admin/parser-engine-config` | 读取/保存平台共享解析配置 |
+| GET/PUT | `/system/admin/chat-history-config` | 读取/保存平台消息索引策略 |
+| GET | `/system/admin/chat-history-stats` | 汇总企业私有消息索引统计 |
+| GET/PUT | `/system/admin/memory-runtime-config` | 读取/保存平台共享记忆运行配置 |
 | POST   | `/system/admin/parser-engines/check`    | 检查解析引擎可用性     |
 
 ## GET `/system/capabilities` - 获取部署能力清单
@@ -71,6 +74,20 @@ Lite 版示例（共享空间不可用）:
 
 共享存储和向量连接的配置、测试及默认项分别见 [存储配置](./storage-backend.md) 和 [向量连接](./vector-store.md)。
 
+## 平台消息索引策略
+
+`GET/PUT /system/admin/chat-history-config` 维护唯一的平台消息索引策略，请求体只有
+`enabled` 和 `embedding_model_id`。关闭时允许模型为空；开启时必须选择一个处于 active 状态的
+平台 Embedding 模型。此接口不接受企业 ID，企业管理员也不能覆盖该配置。
+
+策略开启后，每个企业只在第一条符合条件的消息需要索引时创建自己的隐藏知识库。知识库、消息和
+搜索结果仍按真实企业及用户身份隔离，不存在承载多企业数据的虚拟平台企业或全局知识库。关闭策略
+只阻止新的索引任务；已经排队的任务可以完成。
+
+一旦任一企业已经绑定消息索引知识库，Embedding 模型不能直接切换，因为可能仍有异步写入。平台
+需先清理这些内部索引，再选择新模型。`GET /system/admin/chat-history-stats` 返回绑定企业数与已索引
+消息总数，用于判断当前平台状态。
+
 ## GET `/system/parser-engines` - 获取企业可用解析能力
 
 已认证的企业成员可读。响应仅含 `Name`、`Description`、`FileTypes`、`Available`，不返回服务地址、密钥或连接诊断。平台管理页使用 `/system/admin/parser-engines` 获取管理状态；配置本身由 `/system/admin/parser-engine-config` 维护，密钥返回掩码，保存掩码保留原值。
@@ -123,5 +140,4 @@ curl --location 'http://localhost:8080/api/v1/system/admin/parser-engines/check'
     "success": true
 }
 ```
-
 

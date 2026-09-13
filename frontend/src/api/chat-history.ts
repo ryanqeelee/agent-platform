@@ -1,20 +1,17 @@
 import { get, put, post } from '@/utils/request'
 import { platformChatHistoryPath } from './chat-history-path'
 
-// ChatHistoryConfig represents the chat history KB configuration for a tenant.
-// knowledge_base_id is auto-managed by the backend; frontend only sets other fields.
+// ChatHistoryConfig is the tenantless platform message-index policy.
 export interface ChatHistoryConfig {
   enabled: boolean
   embedding_model_id: string
-  knowledge_base_id?: string // read-only, auto-managed
 }
 
-// ChatHistoryKBStats represents statistics about the chat history knowledge base
-export interface ChatHistoryKBStats {
+// PlatformChatHistoryStats aggregates every tenant-private message-index KB.
+export interface PlatformChatHistoryStats {
   enabled: boolean
   embedding_model_id?: string
-  knowledge_base_id?: string
-  knowledge_base_name?: string
+  tenant_knowledge_base_count: number
   indexed_message_count: number
   has_indexed_messages: boolean
 }
@@ -45,28 +42,16 @@ export interface MessageSearchResult {
   total: number
 }
 
-// Get tenant chat history config via KV API or the explicit platform tenant control plane.
-export function getTenantChatHistoryConfig(platformTenantId?: number) {
-  if (platformTenantId !== undefined) {
-    return get(platformChatHistoryPath(platformTenantId, 'chat-history-config'))
-  }
-  return get('/api/v1/tenants/kv/chat-history-config')
+export function getPlatformChatHistoryConfig() {
+  return get(platformChatHistoryPath('chat-history-config'))
 }
 
-// Update tenant chat history config via KV API
-export function updateTenantChatHistoryConfig(config: ChatHistoryConfig, platformTenantId?: number) {
-  if (platformTenantId !== undefined) {
-    return put(platformChatHistoryPath(platformTenantId, 'chat-history-config'), config)
-  }
-  return put('/api/v1/tenants/kv/chat-history-config', config)
+export function updatePlatformChatHistoryConfig(config: ChatHistoryConfig) {
+  return put(platformChatHistoryPath('chat-history-config'), config)
 }
 
-// Get chat history KB statistics
-export function getChatHistoryKBStats(platformTenantId?: number) {
-  if (platformTenantId !== undefined) {
-    return get(platformChatHistoryPath(platformTenantId, 'chat-history-stats'))
-  }
-  return get('/api/v1/messages/chat-history-stats')
+export function getPlatformChatHistoryStats() {
+  return get(platformChatHistoryPath('chat-history-stats'))
 }
 
 // Search messages across all sessions (keyword + vector hybrid search)

@@ -555,8 +555,8 @@ curl --location 'http://localhost:8080/api/v1/tenants' \
 | `conversation-config`  | 普通模式会话/对话配置        |
 | `prompt-templates`     | 系统提示词模板（只读，按用户语言本地化） |
 | `storage-engine-config`| 存储引擎配置（Local/MinIO/COS） |
-| `chat-history-config`  | 聊天历史索引配置             |
 | `retrieval-config`     | 全局检索配置                 |
+| `memory-config`        | 长期记忆同意项（仅 `enabled` / `write_mode`） |
 
 **请求**:
 
@@ -638,7 +638,6 @@ curl --location --request PUT 'http://localhost:8080/api/v1/tenants/kv/agent-con
 - `conversation-config`: 包含多项阈值校验（如 `keyword_threshold` / `vector_threshold` ∈ `[0, 1]`，`rerank_threshold` ∈ `[-10, 10]`，`temperature` ∈ `[0, 2]`，`max_completion_tokens` ∈ `[1, 100000]` 等）。
 - `retrieval-config`: `embedding_top_k` / `rerank_top_k` ∈ `[0, 200]`；阈值范围同上。
 - `storage-engine-config`: `default_provider` 必须在 `STORAGE_ALLOW_LIST` 允许的列表内。
-- `chat-history-config`: 启用且设置了 `embedding_model_id` 而尚未关联知识库时，会自动创建一个隐藏知识库并将其 ID 写入配置。
 
 ## 空间邀请（邮箱邀请已注册用户）
 

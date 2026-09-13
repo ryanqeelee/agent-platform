@@ -1,47 +1,44 @@
 package types
 
-import (
-	"database/sql/driver"
-	"encoding/json"
-)
+import "time"
 
-// ChatHistoryConfig represents the chat history knowledge base configuration for a tenant.
-// This config is managed via the settings UI and controls how chat messages are indexed
-// and searched using a knowledge base for vector search.
-//
-// The KnowledgeBaseID is auto-managed: when the user enables the feature and picks an
-// embedding model, the backend automatically creates (or reuses) a hidden KB.
-// Users do NOT pick a KB themselves.
-type ChatHistoryConfig struct {
-	// Enabled controls whether chat history indexing is active
-	Enabled bool `json:"enabled"`
-	// EmbeddingModelID is the ID of the embedding model used for vectorizing chat messages.
-	// Once messages have been indexed, the model cannot be changed (requires re-indexing).
-	EmbeddingModelID string `json:"embedding_model_id"`
-	// KnowledgeBaseID is the auto-managed hidden knowledge base for chat history.
-	// This is set internally when the feature is first enabled; users should not set this directly.
-	KnowledgeBaseID string `json:"knowledge_base_id"`
+const PlatformChatHistoryConfigSingletonID int16 = 1
+
+// PlatformChatHistoryConfig is the sole deployment-wide switch and embedding
+// model selection for message indexing. Tenant-specific KB identity is kept in
+// TenantChatHistoryIndex and never accepted from the management API.
+type PlatformChatHistoryConfig struct {
+	ID               int16     `json:"-" gorm:"primaryKey;column:id"`
+	Enabled          bool      `json:"enabled" gorm:"column:enabled;not null"`
+	EmbeddingModelID string    `json:"embedding_model_id" gorm:"column:embedding_model_id;type:varchar(64);not null"`
+	UpdatedBy        string    `json:"-" gorm:"column:updated_by;type:varchar(36);not null"`
+	CreatedAt        time.Time `json:"-" gorm:"column:created_at"`
+	UpdatedAt        time.Time `json:"-" gorm:"column:updated_at"`
 }
 
-// Value implements the driver.Valuer interface for database serialization
-func (c ChatHistoryConfig) Value() (driver.Value, error) {
-	return json.Marshal(c)
+func (*PlatformChatHistoryConfig) TableName() string { return "platform_chat_history_config" }
+
+func (c *PlatformChatHistoryConfig) IsEnabled() bool {
+	return c != nil && c.Enabled && c.EmbeddingModelID != ""
 }
 
-// Scan implements the sql.Scanner interface for database deserialization
-func (c *ChatHistoryConfig) Scan(value interface{}) error {
-	if value == nil {
-		return nil
-	}
-	b, ok := value.([]byte)
-	if !ok {
-		return nil
-	}
-	return json.Unmarshal(b, c)
+// TenantChatHistoryIndex binds one tenant to its private hidden KB. It stores
+// no policy knobs; PlatformChatHistoryConfig remains the only configuration
+// authority.
+type TenantChatHistoryIndex struct {
+	TenantID        uint64    `json:"-" gorm:"primaryKey;column:tenant_id"`
+	KnowledgeBaseID string    `json:"-" gorm:"column:knowledge_base_id;type:varchar(36);not null;uniqueIndex"`
+	CreatedAt       time.Time `json:"-" gorm:"column:created_at"`
+	UpdatedAt       time.Time `json:"-" gorm:"column:updated_at"`
 }
 
-// IsConfigured returns true if the chat history KB is properly configured and ready to use.
-// Requires: enabled + embedding model selected + KB auto-created.
-func (c *ChatHistoryConfig) IsConfigured() bool {
-	return c != nil && c.Enabled && c.EmbeddingModelID != "" && c.KnowledgeBaseID != ""
+func (*TenantChatHistoryIndex) TableName() string { return "tenant_chat_history_indexes" }
+
+// PlatformChatHistoryStats is the tenantless management projection.
+type PlatformChatHistoryStats struct {
+	Enabled                  bool   `json:"enabled"`
+	EmbeddingModelID         string `json:"embedding_model_id,omitempty"`
+	TenantKnowledgeBaseCount int64  `json:"tenant_knowledge_base_count"`
+	IndexedMessageCount      int64  `json:"indexed_message_count"`
+	HasIndexedMessages       bool   `json:"has_indexed_messages"`
 }

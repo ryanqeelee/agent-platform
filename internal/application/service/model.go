@@ -274,6 +274,11 @@ func (s *modelService) UpdateModel(ctx context.Context, model *types.Model) erro
 	// Update model in repository
 	err = s.repo.Update(ctx, model)
 	if err != nil {
+		if errors.Is(err, types.ErrModelPlatformRuntimeBinding) {
+			return apperrors.NewBadRequestError(
+				"A model bound by platform runtime configuration cannot be disabled or changed incompatibly while it is in use",
+			)
+		}
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
 			"model_name": model.Name,
@@ -435,6 +440,15 @@ func (s *modelService) DeleteModel(ctx context.Context, id string) error {
 	// Delete model from repository
 	err = s.repo.Delete(ctx, existingModel.TenantID, id)
 	if err != nil {
+		if errors.Is(err, types.ErrModelPlatformRuntimeBinding) {
+			usage, usageErr := s.getModelUsageDetails(ctx, 0, id)
+			if usageErr != nil {
+				return usageErr
+			}
+			return apperrors.NewModelInUseError(
+				formatModelInUseMessage(0, 0, true), usage,
+			)
+		}
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":  id,
 			"tenant_id": tenantID,
@@ -485,52 +499,13 @@ func (s *modelService) getModelUsageDetails(
 		}
 	}
 
-	if s.tenantService == nil {
-		return details, nil
-	}
 	if tenantID == 0 {
-		tenants, err := s.tenantService.ListTenants(ctx)
+		bindings, err := s.repo.PlatformMemoryModelBindings(ctx, modelID)
 		if err != nil {
 			return details, err
 		}
-		embeddingUsed := false
-		extractUsed := false
-		for _, tenant := range tenants {
-			if tenant == nil || tenant.MemoryConfig == nil {
-				continue
-			}
-			embeddingUsed = embeddingUsed || strings.TrimSpace(tenant.MemoryConfig.EmbeddingModelID) == modelID
-			extractUsed = extractUsed || strings.TrimSpace(tenant.MemoryConfig.ExtractModelID) == modelID
-		}
-		if embeddingUsed {
-			details.LongTermMemory.Bindings = append(details.LongTermMemory.Bindings, types.ModelUsageBindingEmbeddingModel)
-		}
-		if extractUsed {
-			details.LongTermMemory.Bindings = append(details.LongTermMemory.Bindings, types.ModelUsageBindingExtractModel)
-		}
+		details.LongTermMemory.Bindings = append(details.LongTermMemory.Bindings, bindings...)
 		return details, nil
-	}
-	tenant, err := s.tenantService.GetTenantByID(ctx, tenantID)
-	if err != nil {
-		return details, err
-	}
-	if tenant == nil || tenant.MemoryConfig == nil {
-		return details, nil
-	}
-
-	// Both memory model pins have to be checked. Deleting either one leaves
-	// the workspace pointing at a model that no longer exists.
-	if strings.TrimSpace(tenant.MemoryConfig.EmbeddingModelID) == modelID {
-		details.LongTermMemory.Bindings = append(
-			details.LongTermMemory.Bindings,
-			types.ModelUsageBindingEmbeddingModel,
-		)
-	}
-	if strings.TrimSpace(tenant.MemoryConfig.ExtractModelID) == modelID {
-		details.LongTermMemory.Bindings = append(
-			details.LongTermMemory.Bindings,
-			types.ModelUsageBindingExtractModel,
-		)
 	}
 	return details, nil
 }

@@ -1,5 +1,4 @@
 import { get, put, post, del } from '@/utils/request'
-import { platformTenantPath } from './platform-tenant-path'
 
 // Kinds mirror internal/types/memory.go. profile and preference make up the
 // block injected on every turn; fact and task are pulled in only when the
@@ -122,6 +121,19 @@ export interface MemoryConfig {
   embedding_model_id: string
   /** Whether recall also matches on meaning, not only on wording. */
   vector_recall: boolean
+}
+
+export interface TenantMemoryConfig {
+  enabled: boolean
+  write_mode: 'explicit_only' | 'auto'
+}
+
+export type MemoryRuntimeConfig = Omit<
+  MemoryConfig,
+  'enabled' | 'write_mode' | 'vector_recall' | 'retrieval_conditioning'
+> & {
+  vector_recall: boolean | null
+  retrieval_conditioning: boolean | null
 }
 
 // ---------------------------------------------------------------------------
@@ -276,15 +288,21 @@ export function deleteMemoryDocument(id: string) {
 }
 
 // ---------------------------------------------------------------------------
-// Workspace configuration, stored on the tenant like the other KV configs.
+// Enterprise consent and deployment runtime are separate authorities.
 // ---------------------------------------------------------------------------
 
-export function getTenantMemoryConfig(platformTenantId?: number) {
-  const path = platformTenantId === undefined ? '/api/v1/tenants/kv/memory-config' : platformTenantPath(platformTenantId, 'memory-config')
-  return get<{ success: boolean; data: MemoryConfig }>(path)
+export function getTenantMemoryConfig() {
+  return get<{ success: boolean; data: TenantMemoryConfig }>('/api/v1/tenants/kv/memory-config')
 }
 
-export function updateTenantMemoryConfig(config: MemoryConfig, platformTenantId?: number) {
-  const path = platformTenantId === undefined ? '/api/v1/tenants/kv/memory-config' : platformTenantPath(platformTenantId, 'memory-config')
-  return put<{ success: boolean; data: MemoryConfig }>(path, config)
+export function updateTenantMemoryConfig(config: TenantMemoryConfig) {
+  return put<{ success: boolean; data: TenantMemoryConfig }>('/api/v1/tenants/kv/memory-config', config)
+}
+
+export function getPlatformMemoryRuntimeConfig() {
+  return get<{ success: boolean; data: MemoryRuntimeConfig }>('/api/v1/system/admin/memory-runtime-config')
+}
+
+export function updatePlatformMemoryRuntimeConfig(config: MemoryRuntimeConfig) {
+  return put<{ success: boolean; data: MemoryRuntimeConfig }>('/api/v1/system/admin/memory-runtime-config', config)
 }

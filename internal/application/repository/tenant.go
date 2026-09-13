@@ -607,7 +607,7 @@ func (r *tenantRepository) UpdateTenant(ctx context.Context, tenant *types.Tenan
 		Select(
 			"retriever_engines", "business", "context_config",
 			"credentials",
-			"chat_history_config", "retrieval_config", "api_principal_config", "updated_at",
+			"retrieval_config", "api_principal_config", "updated_at",
 		).Updates(tenant).Error
 }
 

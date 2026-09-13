@@ -98,6 +98,8 @@ type RouterParams struct {
 	WikiPageHandler              *handler.WikiPageHandler
 	MemoryHandler                *handler.MemoryHandler
 	TenantMemoryConfigHandler    *handler.TenantMemoryConfigHandler
+	PlatformChatHistoryHandler   *handler.PlatformChatHistoryHandler
+	PlatformMemoryRuntimeHandler *handler.PlatformMemoryRuntimeConfigHandler
 	OperatingBriefHandler        *handler.OperatingBriefHandler
 }
 
@@ -282,12 +284,10 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterOperatingAnalysisHandoffRoutes(v1, params.RedisClient, params.SessionService, params.MessageService, params.TenantMemberService, params.TenantService, rbacGuards)
 		RegisterOperatingBriefRoutes(v1, params.OperatingBriefHandler, rbacGuards)
 		RegisterModelRoutes(v1, params.ModelHandler, params.ModelCredentialsHandler, rbacGuards)
+		RegisterPlatformMemoryRuntimeConfigRoutes(v1, params.PlatformMemoryRuntimeHandler, rbacGuards)
 		RegisterSystemAdminTenantRuntimeRoutes(
 			v1,
 			params.TenantService,
-			params.TenantHandler,
-			params.MessageHandler,
-			params.TenantMemoryConfigHandler,
 			params.AICapabilityPlanHandler,
 			rbacGuards,
 		)
@@ -306,6 +306,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		params.SystemHandler.BindDeploymentCapabilities(deploymentCapabilitiesFromRouter(params))
 		RegisterSystemRoutes(v1, params.SystemHandler, rbacGuards)
 		RegisterSystemAdminRoutes(v1, params.SystemHandler, params.PlatformOperationsHandler, params.AuditLogHandler, rbacGuards)
+		RegisterPlatformChatHistoryRoutes(v1, params.PlatformChatHistoryHandler, rbacGuards)
 		RegisterMCPServiceRoutes(v1, params.MCPServiceHandler, params.MCPCredentialsHandler, params.MCPOAuthHandler, rbacGuards)
 		RegisterWebSearchRoutes(v1, params.WebSearchHandler, rbacGuards)
 		RegisterWebSearchProviderRoutes(v1, params.WebSearchProviderHandler, params.WebSearchCredentialsHandler, rbacGuards)

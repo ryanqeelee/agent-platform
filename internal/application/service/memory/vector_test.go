@@ -477,18 +477,24 @@ func TestLateEmbeddingCannotCrossPolicyGeneration(t *testing.T) {
 						return
 					}
 					cfgRepo := repository.NewTenantMemoryConfigRepository(tenants.db)
-					cfg := *tenants.configs[1]
+					state, stateErr := cfgRepo.Get(ctx, 1)
+					require.NoError(t, stateErr)
 					if change == "model-change" {
-						cfg.EmbeddingModelID = "embed-2"
-						_, err = cfgRepo.Update(ctx, 1, &cfg)
+						runtime := types.MemoryRuntimeConfigFromEffective(state.Config)
+						runtime.EmbeddingModelID = "embed-2"
+						_, err = repository.NewPlatformMemoryRuntimeConfigRepository(tenants.db).
+							Update(ctx, runtime, "test", time.Now(), nil)
 						require.NoError(t, err)
-						svc.storeItemEmbedding(ctx, scope, &cfg, item)
+						state, err = cfgRepo.Get(ctx, 1)
+						require.NoError(t, err)
+						svc.storeItemEmbedding(ctx, scope, state.Config, item)
 					} else {
-						cfg.Enabled = false
-						_, err = cfgRepo.Update(ctx, 1, &cfg)
+						consent := *state.Consent
+						consent.Enabled = false
+						_, err = cfgRepo.Update(ctx, 1, &consent)
 						require.NoError(t, err)
-						cfg.Enabled = true
-						_, err = cfgRepo.Update(ctx, 1, &cfg)
+						consent.Enabled = true
+						_, err = cfgRepo.Update(ctx, 1, &consent)
 						require.NoError(t, err)
 					}
 				}

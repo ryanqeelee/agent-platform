@@ -4,9 +4,10 @@ import test from 'node:test'
 
 const source = readFileSync(new URL('./MemoryWorkspaceSettings.vue', import.meta.url), 'utf8')
 
-test('disabled runtime configuration explains how the enterprise can enable memory', () => {
-  assert.match(source, /v-if="runtime && loaded && !config\.enabled" class="runtime-disabled-state"/)
-  assert.match(source, /memoryWorkspaceSettings\.runtimeDisabledTitle/)
-  assert.match(source, /memoryWorkspaceSettings\.runtimeDisabledDescription/)
-  assert.doesNotMatch(source, /runtime[^\n]*<t-switch[^\n]*config\.enabled/)
+test('platform runtime configuration is tenantless and independent of enterprise consent', () => {
+  assert.match(source, /getPlatformMemoryRuntimeConfig\(\)/)
+  assert.match(source, /updatePlatformMemoryRuntimeConfig\(runtimeConfig\)/)
+  assert.doesNotMatch(source, /usePlatformTenantControlID/)
+  assert.doesNotMatch(source, /v-if="runtime && config\.enabled"/)
+  assert.doesNotMatch(source, /runtimeDisabledTitle|runtimeDisabledDescription/)
 })

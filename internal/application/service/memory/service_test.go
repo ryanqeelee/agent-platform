@@ -35,17 +35,21 @@ func newMemoryHarness(t *testing.T) (*Service, *gorm.DB, *stubTenantRepo) {
 		id INTEGER PRIMARY KEY, memory_config TEXT, memory_generation INTEGER NOT NULL DEFAULT 0, updated_at DATETIME,
 		deleted_at DATETIME
 	)`).Error)
+	require.NoError(t, db.AutoMigrate(&types.PlatformMemoryRuntimeConfig{}))
+	require.NoError(t, db.Create(&types.PlatformMemoryRuntimeConfig{
+		ID: types.PlatformMemoryRuntimeConfigSingletonID, Runtime: types.DefaultMemoryRuntimeConfig(),
+		Generation: 0, UpdatedBy: "test",
+	}).Error)
 	require.NoError(t, db.AutoMigrate(&types.MemorySubject{}, &types.MemoryItem{}, &types.MemoryTombstone{},
 		&types.MemoryTopicStat{}, &types.MemoryDocAffinity{},
 		&types.MemoryItemEmbedding{}, &types.MemoryCommandReceipt{}, &types.MemoryExpression{}))
 
 	tenantRepo := &stubTenantRepo{
-		configs: map[uint64]*types.MemoryConfig{},
-		db:      db,
+		consents: map[uint64]*types.TenantMemoryConfig{}, tenantGenerations: map[uint64]int64{}, db: db,
 	}
 	svc := &Service{
 		repo:       repository.NewMemoryRepository(db),
-		tenantRepo: tenantRepo,
+		configRepo: repository.NewTenantMemoryConfigRepository(db),
 	}
 	return svc, db, tenantRepo
 }

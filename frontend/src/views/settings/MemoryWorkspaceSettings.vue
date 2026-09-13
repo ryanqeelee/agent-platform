@@ -19,14 +19,6 @@
       </div>
     </div>
 
-    <div v-if="runtime && loaded && !config.enabled" class="runtime-disabled-state">
-      <t-icon name="info-circle" class="runtime-disabled-icon" />
-      <div>
-        <p class="runtime-disabled-title">{{ t('memoryWorkspaceSettings.runtimeDisabledTitle') }}</p>
-        <p class="runtime-disabled-description">{{ t('memoryWorkspaceSettings.runtimeDisabledDescription') }}</p>
-      </div>
-    </div>
-
     <div class="settings-group">
       <div v-if="!runtime" class="setting-row">
         <div class="setting-info">
@@ -62,7 +54,7 @@
         </div>
       </div>
 
-      <div v-if="runtime && config.enabled && config.write_mode === 'auto'" class="setting-row">
+      <div v-if="runtime" class="setting-row">
         <div class="setting-info">
           <label>{{ t('memoryWorkspaceSettings.extractModelLabel') }}</label>
           <p class="desc">{{ t('memoryWorkspaceSettings.extractModelDescription') }}</p>
@@ -78,7 +70,7 @@
         </div>
       </div>
 
-      <div v-if="runtime && config.enabled && config.write_mode === 'auto'" class="setting-row">
+      <div v-if="runtime" class="setting-row">
         <div class="setting-info">
           <label>{{ t('memoryWorkspaceSettings.extractDelayLabel') }}</label>
           <p class="desc">{{ t('memoryWorkspaceSettings.extractDelayDescription') }}</p>
@@ -96,7 +88,7 @@
         </div>
       </div>
 
-      <div v-if="runtime && config.enabled && config.write_mode === 'auto'" class="setting-row">
+      <div v-if="runtime" class="setting-row">
         <div class="setting-info">
           <label>{{ t('memoryWorkspaceSettings.extractMinIntervalLabel') }}</label>
           <p class="desc">{{ t('memoryWorkspaceSettings.extractMinIntervalDescription') }}</p>
@@ -114,7 +106,7 @@
         </div>
       </div>
 
-      <div v-if="runtime && config.enabled" class="setting-row">
+      <div v-if="runtime" class="setting-row">
         <div class="setting-info">
           <label>{{ t('memoryWorkspaceSettings.vectorRecallLabel') }}</label>
           <p class="desc">{{ t('memoryWorkspaceSettings.vectorRecallDescription') }}</p>
@@ -124,7 +116,7 @@
         </div>
       </div>
 
-      <div v-if="runtime && config.enabled && config.vector_recall" class="setting-row">
+      <div v-if="runtime && config.vector_recall" class="setting-row">
         <div class="setting-info">
           <label>{{ t('memoryWorkspaceSettings.embeddingModelLabel') }}</label>
           <p class="desc">{{ t('memoryWorkspaceSettings.embeddingModelDescription') }}</p>
@@ -141,7 +133,7 @@
         </div>
       </div>
 
-      <div v-if="runtime && config.enabled" class="setting-row">
+      <div v-if="runtime" class="setting-row">
         <div class="setting-info">
           <label>{{ t('memoryWorkspaceSettings.conditioningLabel') }}</label>
           <p class="desc">{{ t('memoryWorkspaceSettings.conditioningDescription') }}</p>
@@ -155,7 +147,7 @@
         </div>
       </div>
 
-      <div v-if="runtime && config.enabled && config.write_mode === 'auto'" class="setting-row">
+      <div v-if="runtime" class="setting-row">
         <div class="setting-info">
           <label>{{ t('memoryWorkspaceSettings.interestThresholdLabel') }}</label>
           <p class="desc">{{ t('memoryWorkspaceSettings.interestThresholdDescription') }}</p>
@@ -172,7 +164,7 @@
         </div>
       </div>
 
-      <div v-if="runtime && config.enabled && config.write_mode === 'auto'" class="setting-row instructions-row">
+      <div v-if="runtime" class="setting-row instructions-row">
         <div class="setting-info">
           <label>{{ t('memoryWorkspaceSettings.instructionsLabel') }}</label>
           <p class="desc">{{ t('memoryWorkspaceSettings.instructionsDescription') }}</p>
@@ -189,7 +181,7 @@
         </div>
       </div>
 
-      <div v-if="runtime && config.enabled" class="setting-row">
+      <div v-if="runtime" class="setting-row">
         <div class="setting-info">
           <label>{{ t('memoryWorkspaceSettings.maxItemsLabel') }}</label>
           <p class="desc">{{ t('memoryWorkspaceSettings.maxItemsDescription') }}</p>
@@ -216,14 +208,20 @@ import { useI18n } from 'vue-i18n'
 import ModelSelector from '@/components/ModelSelector.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useUIStore } from '@/stores/ui'
-import { getTenantMemoryConfig, updateTenantMemoryConfig, type MemoryConfig } from '@/api/memory'
-import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
+import {
+  getPlatformMemoryRuntimeConfig,
+  getTenantMemoryConfig,
+  updatePlatformMemoryRuntimeConfig,
+  updateTenantMemoryConfig,
+  type MemoryConfig,
+  type MemoryRuntimeConfig,
+  type TenantMemoryConfig,
+} from '@/api/memory'
 
 const { runtime = false } = defineProps<{ runtime?: boolean }>()
 const { t } = useI18n()
 const authStore = useAuthStore()
 const uiStore = useUIStore()
-const platformTenantID = usePlatformTenantControlID()
 
 const config = reactive<MemoryConfig>({
   enabled: false,
@@ -249,19 +247,26 @@ const loadConfig = async () => {
   loaded.value = false
   loadError.value = ''
   try {
-    const response = await getTenantMemoryConfig(runtime ? platformTenantID.value : undefined)
+    const response = runtime
+      ? await getPlatformMemoryRuntimeConfig()
+      : await getTenantMemoryConfig()
     if (response.data) {
-      config.enabled = response.data.enabled ?? false
-      config.write_mode = response.data.write_mode === 'auto' ? 'auto' : 'explicit_only'
-      config.extract_model_id = response.data.extract_model_id || ''
-      config.max_items = response.data.max_items || 200
-      config.extract_delay_seconds = response.data.extract_delay_seconds || 90
-      config.extract_min_interval_seconds = response.data.extract_min_interval_seconds || 300
-      config.extract_instructions = response.data.extract_instructions || ''
-      config.interest_threshold = response.data.interest_threshold || 3
-      config.retrieval_conditioning = response.data.retrieval_conditioning !== false
-      config.embedding_model_id = response.data.embedding_model_id || ''
-      config.vector_recall = response.data.vector_recall !== false
+      if (runtime) {
+        const data = response.data as MemoryRuntimeConfig
+        config.extract_model_id = data.extract_model_id || ''
+        config.max_items = data.max_items || 200
+        config.extract_delay_seconds = data.extract_delay_seconds || 90
+        config.extract_min_interval_seconds = data.extract_min_interval_seconds || 300
+        config.extract_instructions = data.extract_instructions || ''
+        config.interest_threshold = data.interest_threshold || 3
+        config.retrieval_conditioning = data.retrieval_conditioning !== false
+        config.embedding_model_id = data.embedding_model_id || ''
+        config.vector_recall = data.vector_recall !== false
+      } else {
+        const data = response.data as TenantMemoryConfig
+        config.enabled = data.enabled ?? false
+        config.write_mode = data.write_mode === 'auto' ? 'auto' : 'explicit_only'
+      }
       loaded.value = true
     }
   } catch (error: any) {
@@ -278,9 +283,23 @@ const loadConfig = async () => {
 
 const saveConfig = async () => {
   if (!loaded.value) return
-  const targetTenantId = runtime ? platformTenantID.value : undefined
   try {
-    await updateTenantMemoryConfig({ ...config }, targetTenantId)
+    if (runtime) {
+      const runtimeConfig: MemoryRuntimeConfig = {
+        extract_model_id: config.extract_model_id,
+        max_items: config.max_items,
+        extract_delay_seconds: config.extract_delay_seconds,
+        extract_min_interval_seconds: config.extract_min_interval_seconds,
+        extract_instructions: config.extract_instructions,
+        interest_threshold: config.interest_threshold,
+        retrieval_conditioning: config.retrieval_conditioning,
+        embedding_model_id: config.embedding_model_id,
+        vector_recall: config.vector_recall,
+      }
+      await updatePlatformMemoryRuntimeConfig(runtimeConfig)
+    } else {
+      await updateTenantMemoryConfig({ enabled: config.enabled, write_mode: config.write_mode })
+    }
     MessagePlugin.success(t('memoryWorkspaceSettings.toasts.saveSuccess'))
   } catch (error: any) {
     MessagePlugin.error(
@@ -375,36 +394,6 @@ onUnmounted(() => { if (saveTimer) clearTimeout(saveTimer) })
 .settings-group {
   display: flex;
   flex-direction: column;
-}
-
-.runtime-disabled-state {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 20px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
-  background: var(--td-bg-color-secondarycontainer);
-}
-
-.runtime-disabled-icon {
-  flex-shrink: 0;
-  margin-top: 2px;
-  color: var(--td-brand-color);
-}
-
-.runtime-disabled-title {
-  margin: 0 0 6px;
-  color: var(--td-text-color-primary);
-  font-size: 15px;
-  font-weight: 500;
-}
-
-.runtime-disabled-description {
-  margin: 0;
-  color: var(--td-text-color-secondary);
-  font-size: 13px;
-  line-height: 1.6;
 }
 
 .setting-row {

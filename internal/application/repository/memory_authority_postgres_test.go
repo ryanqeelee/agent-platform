@@ -26,6 +26,13 @@ func newMemoryAuthorityPostgres(t *testing.T) (*gorm.DB, interfaces.MemoryReposi
 	require.NoError(t, db.Exec(`CREATE TABLE tenants (id BIGINT PRIMARY KEY, deleted_at TIMESTAMPTZ); CREATE TABLE messages (id VARCHAR(36) PRIMARY KEY)`).Error)
 	require.NoError(t, db.Exec(migrationSQL(t, "migrations/versioned/000091_memory.up.sql")).Error)
 	require.NoError(t, db.Exec(migrationSQL(t, "migrations/versioned/000101_unified_personal_memory.up.sql")).Error)
+	require.NoError(t, db.Exec(`CREATE TABLE platform_memory_runtime_config (
+		id SMALLINT PRIMARY KEY CHECK (id = 1), runtime JSONB NOT NULL,
+		generation BIGINT NOT NULL DEFAULT 0 CHECK (generation >= 0),
+		updated_by VARCHAR(36) NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+	); INSERT INTO platform_memory_runtime_config(id, runtime, generation, updated_by) VALUES
+		(1, '{"extract_model_id":"","max_items":200,"extract_delay_seconds":90,"extract_min_interval_seconds":300,"extract_instructions":"","interest_threshold":3,"embedding_model_id":"","vector_recall":null,"retrieval_conditioning":null}'::jsonb, 0, 'test')`).Error)
 	require.NoError(t, db.Exec(`INSERT INTO tenants(id, memory_config) VALUES
 		(1, '{"enabled":true,"write_mode":"auto"}'::jsonb)`).Error)
 	return db, NewMemoryRepository(db)
@@ -199,4 +206,79 @@ func TestPostgresAuthorityPreservesOpaqueSourceIDs(t *testing.T) {
 	found, err := repo.HasTombstoneForMessage(ctx, scope, sourceID, time.Hour)
 	require.NoError(t, err)
 	require.True(t, found)
+}
+
+func TestPostgresAuthorityRejectsStaleWorkAfterConcurrentPlatformRuntimeEdit(t *testing.T) {
+	for _, path := range []string{"command", "expression"} {
+		t.Run(path, func(t *testing.T) {
+			db, repo := newMemoryAuthorityPostgres(t)
+			scope := interfaces.MemoryScope{TenantID: 1, SubjectID: "web_user:global-stale"}
+			first, err := repo.WithAuthority(t.Context(), scope,
+				interfaces.MemoryAuthorityRequest{RequireEnabled: true, RequireAuto: true}, nil)
+			require.NoError(t, err)
+			require.Zero(t, first.WorkspaceGeneration)
+
+			tx := db.Begin()
+			require.NoError(t, tx.Error)
+			require.NoError(t, tx.Exec(`UPDATE platform_memory_runtime_config
+				SET runtime = jsonb_set(runtime, '{max_items}', '321'::jsonb), generation = generation + 1
+				WHERE id = 1`).Error)
+
+			type result struct {
+				status string
+				reason *string
+				err    error
+			}
+			finished := make(chan result, 1)
+			go func() {
+				if path == "command" {
+					receipt, callErr := repo.WithAuthority(t.Context(), scope, interfaces.MemoryAuthorityRequest{
+						Expected: &types.MemoryPolicyVersion{
+							WorkspaceGeneration: first.WorkspaceGeneration,
+							SubjectGeneration:   first.SubjectGeneration,
+							Revision:            first.Revision,
+						},
+						RequireEnabled: true, RequireAuto: true,
+					}, authorityCreate("must not be committed"))
+					if callErr != nil {
+						finished <- result{err: callErr}
+						return
+					}
+					finished <- result{status: receipt.Status, reason: receipt.ReasonCode}
+					return
+				}
+				text := "must not be accepted"
+				receipt, callErr := repo.AcceptExpression(t.Context(), scope, &types.MemoryExpression{
+					ExpressionID: "global-stale-expression", ExpressionHash: "global-stale-hash",
+					Runtime: "employee", SessionID: "session", MessageID: "message", Text: &text,
+					WorkspaceGeneration: first.WorkspaceGeneration, SubjectGeneration: first.SubjectGeneration,
+				})
+				if callErr != nil {
+					finished <- result{err: callErr}
+					return
+				}
+				finished <- result{status: receipt.Status, reason: receipt.ReasonCode}
+			}()
+
+			select {
+			case early := <-finished:
+				t.Fatalf("%s did not wait for platform runtime lock: %+v", path, early)
+			case <-time.After(150 * time.Millisecond):
+			}
+			require.NoError(t, tx.Commit().Error)
+			select {
+			case outcome := <-finished:
+				require.NoError(t, outcome.err)
+				if path == "command" {
+					require.Equal(t, types.MemoryReceiptRejected, outcome.status)
+				} else {
+					require.Equal(t, types.MemoryExpressionRejected, outcome.status)
+				}
+				require.NotNil(t, outcome.reason)
+				require.Equal(t, types.MemoryReasonPolicyStale, *outcome.reason)
+			case <-time.After(5 * time.Second):
+				t.Fatalf("%s did not finish after platform runtime lock was released", path)
+			}
+		})
+	}
 }

@@ -15,7 +15,7 @@
             <div class="settings-sidebar">
               <div class="sidebar-header">
                 <h2 class="sidebar-title">{{ settingsTitle }}</h2>
-                <p v-if="settingsSurface === 'enterprise' || ['memory-runtime', 'chathistory'].includes(currentSection)"
+                <p v-if="settingsSurface === 'enterprise'"
                   class="settings-tenant">{{ tenantSettingsName }}</p>
               </div>
               <div class="settings-nav">
@@ -106,12 +106,12 @@
 
                   <!-- 消息管理 -->
                   <div v-if="currentSection === 'chathistory'" class="section">
-                    <ChatHistorySettings :key="props.tenantControlId" />
+                    <ChatHistorySettings />
                   </div>
 
                   <!-- 长期记忆（空间级开关） -->
                   <div v-if="currentSection === 'memory' || currentSection === 'memory-runtime'" class="section">
-                    <MemoryWorkspaceSettings :key="`${currentSection}-${props.tenantControlId ?? 'self'}`" :runtime="currentSection === 'memory-runtime'" />
+                    <MemoryWorkspaceSettings :key="currentSection" :runtime="currentSection === 'memory-runtime'" />
                   </div>
 
                   <!-- 我的记忆（个人记忆管理） -->
@@ -205,7 +205,7 @@
 
 <script setup lang="ts">
 import PlatformAgentList from '@/views/agent/PlatformAgentList.vue'
-import { ref, computed, watch, onMounted, onUnmounted, provide, toRef } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { LocationQueryRaw } from 'vue-router'
 import { useUIStore } from '@/stores/ui'
@@ -248,7 +248,6 @@ import {
 import { SETTINGS_SECTION_CAPABILITY } from '@/config/deploymentCapabilities'
 import { getEnterpriseAdministrationCopy } from '@/config/productShellBrand'
 import { SKILL_ICON } from '@/types/mention'
-import { platformTenantControlIDKey } from '@/composables/platformTenantControl'
 import {
   buildSettingsRouteQuery,
   integrationSectionKey,
@@ -265,8 +264,6 @@ const authStore = useAuthStore()
 const deploymentCapabilities = useDeploymentCapabilitiesStore()
 const { t, locale } = useI18n()
 
-const props = defineProps<{ tenantControlId?: number; tenantControlName?: string }>()
-provide(platformTenantControlIDKey, toRef(props, 'tenantControlId'))
 
 const currentSection = ref<string>('general')
 const currentSubSection = ref<string>('')
@@ -290,7 +287,7 @@ type NavGroup = {
 const SYSTEM_ADMIN_SECTIONS = SYSTEM_ADMIN_SETTINGS_SECTIONS
 
 const settingsSurface = computed(() => settingsSurfaceForSection(currentSection.value))
-const tenantSettingsName = computed(() => props.tenantControlName || authStore.currentTenantName)
+const tenantSettingsName = computed(() => authStore.currentTenantName)
 const settingsTitle = computed(() => {
   if (settingsSurface.value === 'enterprise') return getEnterpriseAdministrationCopy(locale.value).eyebrow
   if (settingsSurface.value === 'platform') return t('settings.navGroups.systemAdministration')
@@ -328,7 +325,6 @@ const canSeeSection = (key: string): boolean => {
     return authStore.hasRole(min)
   }
   if (SYSTEM_ADMIN_SECTIONS.has(key)) {
-    if (['chathistory', 'memory-runtime'].includes(key) && !props.tenantControlId) return false
     return authStore.isSystemAdmin
   }
   const min = SETTINGS_SECTION_MIN_ROLE[key]

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -19,17 +20,18 @@ var regThinkIndex = regexp.MustCompile(`(?s)<think>.*?</think>`)
 
 // messageService implements the MessageService interface for managing messaging operations
 // It handles creating, retrieving, updating, and deleting messages within sessions.
-// It reads the chat history knowledge base configuration from the tenant's ChatHistoryConfig,
-// which is managed via the settings UI.
+// It reads the deployment-wide chat-history policy and resolves the caller
+// tenant's private hidden KB binding.
 type messageService struct {
 	messageRepo         interfaces.MessageRepository    // Repository for message storage operations
 	sessionRepo         interfaces.SessionRepository    // Repository for session validation
-	tenantService       interfaces.TenantService        // Service for tenant operations (read ChatHistoryConfig)
+	tenantService       interfaces.TenantService        // Service for tenant retrieval settings and governed session access
 	kbService           interfaces.KnowledgeBaseService // Service for knowledge base operations (search chat history KB)
 	knowService         interfaces.KnowledgeService     // Service for knowledge operations (index/delete passages)
 	modelService        interfaces.ModelService         // Service for model operations (rerank model)
 	suggestionRepo      interfaces.MessageSuggestionRepository
 	tenantMemberService interfaces.TenantMemberService
+	platformChatHistory *PlatformChatHistoryService
 }
 
 // NewMessageService creates a new message service instance with the required repositories
@@ -41,6 +43,7 @@ func NewMessageService(messageRepo interfaces.MessageRepository,
 	modelService interfaces.ModelService,
 	suggestionRepo interfaces.MessageSuggestionRepository,
 	tenantMemberService interfaces.TenantMemberService,
+	platformChatHistory *PlatformChatHistoryService,
 ) interfaces.MessageService {
 	return &messageService{
 		messageRepo:         messageRepo,
@@ -51,6 +54,7 @@ func NewMessageService(messageRepo interfaces.MessageRepository,
 		modelService:        modelService,
 		suggestionRepo:      suggestionRepo,
 		tenantMemberService: tenantMemberService,
+		platformChatHistory: platformChatHistory,
 	}
 }
 
@@ -372,20 +376,40 @@ func (s *messageService) ClearSessionMessages(ctx context.Context, sessionID str
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Chat History Knowledge Base — Configuration-driven (via Tenant.ChatHistoryConfig)
+// Chat History Knowledge Base — platform policy, tenant-private storage
 // ─────────────────────────────────────────────────────────────────────────────
 
-// getChatHistoryConfig reads the chat history KB configuration from the tenant's settings.
-// Returns nil if the feature is not configured or disabled.
-func (s *messageService) getChatHistoryConfig(ctx context.Context) *types.ChatHistoryConfig {
-	tenant, ok := types.TenantInfoFromContext(ctx)
-	if !ok {
-		return nil
+// chatHistoryKnowledgeBase resolves the caller tenant's internal KB under the
+// current platform policy. Creation is reserved for the first eligible index
+// write; search never materializes an empty KB. A config change detected after
+// KB preparation is retried once from the new singleton value.
+func (s *messageService) chatHistoryKnowledgeBase(
+	ctx context.Context, ensure bool,
+) (*types.KnowledgeBase, error) {
+	if s.platformChatHistory == nil {
+		return nil, fmt.Errorf("platform chat-history service is not configured")
 	}
-	if tenant.ChatHistoryConfig == nil || !tenant.ChatHistoryConfig.IsConfigured() {
-		return nil
+	for attempt := 0; attempt < 2; attempt++ {
+		config, err := s.platformChatHistory.RuntimeConfig(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if !config.IsEnabled() {
+			return nil, nil
+		}
+		tenantID := types.MustTenantIDFromContext(ctx)
+		var kb *types.KnowledgeBase
+		if ensure {
+			kb, err = s.kbService.EnsureChatHistoryKnowledgeBase(ctx, config.EmbeddingModelID)
+		} else {
+			kb, err = s.platformChatHistory.TenantKnowledgeBase(ctx, tenantID)
+		}
+		if errors.Is(err, repository.ErrPlatformChatHistoryConfigChanged) {
+			continue
+		}
+		return kb, err
 	}
-	return tenant.ChatHistoryConfig
+	return nil, repository.ErrPlatformChatHistoryConfigChanged
 }
 
 // getRetrievalConfig reads the global retrieval configuration from the tenant's settings.
@@ -404,7 +428,8 @@ func (s *messageService) getRetrievalConfig(ctx context.Context) *types.Retrieva
 // IndexMessageToKB indexes a message (Q&A pair) into the chat history knowledge base asynchronously.
 // It creates a Knowledge entry (passage) containing both the user query and assistant answer,
 // then links the message to the Knowledge entry via the knowledge_id field.
-// The KB ID is read from the tenant's ChatHistoryConfig — if not configured, indexing is skipped.
+// The KB ID is resolved from the tenant-private binding; if the platform policy
+// is disabled, indexing is skipped without creating a KB.
 func (s *messageService) IndexMessageToKB(ctx context.Context, userQuery string, assistantAnswer string, messageID string, sessionID string) {
 	// Strip thinking content (<think>...</think>) before indexing to avoid
 	// polluting the knowledge base with intermediate reasoning that would
@@ -416,12 +441,16 @@ func (s *messageService) IndexMessageToKB(ctx context.Context, userQuery string,
 		return
 	}
 
-	cfg := s.getChatHistoryConfig(ctx)
-	if cfg == nil {
+	kb, err := s.chatHistoryKnowledgeBase(ctx, true)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to resolve chat history KB: %v", err)
+		return
+	}
+	if kb == nil {
 		return
 	}
 
-	logger.Infof(ctx, "Indexing message to chat history KB %s, message ID: %s, session ID: %s", cfg.KnowledgeBaseID, messageID, sessionID)
+	logger.Infof(ctx, "Indexing message to chat history KB %s, message ID: %s, session ID: %s", kb.ID, messageID, sessionID)
 
 	// Build passage content: combine Q&A for better semantic search
 	var passages []string
@@ -429,7 +458,7 @@ func (s *messageService) IndexMessageToKB(ctx context.Context, userQuery string,
 	passages = append(passages, passage)
 
 	// Use async (non-sync) passage creation so it doesn't block the response
-	knowledge, err := s.knowService.CreateKnowledgeFromPassage(ctx, cfg.KnowledgeBaseID, passages, "")
+	knowledge, err := s.knowService.CreateKnowledgeFromPassage(ctx, kb.ID, passages, "")
 	if err != nil {
 		logger.Warnf(ctx, "Failed to index message to chat history KB: %v", err)
 		return
@@ -478,39 +507,10 @@ func (s *messageService) DeleteSessionKnowledge(ctx context.Context, sessionID s
 // GetChatHistoryKBStats returns statistics about the chat history knowledge base.
 func (s *messageService) GetChatHistoryKBStats(ctx context.Context) (*types.ChatHistoryKBStats, error) {
 	tenantID := types.MustTenantIDFromContext(ctx)
-	tenant, err := s.tenantService.GetTenantByID(ctx, tenantID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get tenant: %w", err)
+	if s.platformChatHistory == nil {
+		return nil, fmt.Errorf("platform chat-history service is not configured")
 	}
-
-	stats := &types.ChatHistoryKBStats{}
-	cfg := tenant.ChatHistoryConfig
-	if cfg == nil || !cfg.Enabled {
-		return stats, nil
-	}
-
-	stats.Enabled = true
-	stats.EmbeddingModelID = cfg.EmbeddingModelID
-	stats.KnowledgeBaseID = cfg.KnowledgeBaseID
-
-	if cfg.KnowledgeBaseID == "" {
-		return stats, nil
-	}
-
-	// Fetch KB info and fill counts (KnowledgeCount is gorm:"-", needs FillKnowledgeBaseCounts)
-	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, cfg.KnowledgeBaseID)
-	if err != nil {
-		logger.Warnf(ctx, "Failed to get chat history KB %s: %v", cfg.KnowledgeBaseID, err)
-		return stats, nil
-	}
-	if err := s.kbService.FillKnowledgeBaseCounts(ctx, kb); err != nil {
-		logger.Warnf(ctx, "Failed to fill chat history KB counts %s: %v", cfg.KnowledgeBaseID, err)
-	}
-	stats.KnowledgeBaseName = kb.Name
-	stats.IndexedMessageCount = kb.KnowledgeCount
-	stats.HasIndexedMessages = kb.KnowledgeCount > 0
-
-	return stats, nil
+	return s.platformChatHistory.TenantStats(ctx, tenantID)
 }
 
 // GetSessionArtifacts returns every skill-produced artifact recorded against
@@ -531,7 +531,7 @@ func (s *messageService) GetSessionArtifacts(
 // ─────────────────────────────────────────────────────────────────────────────
 
 // SearchMessages searches messages by keyword and/or vector similarity across all sessions of the current tenant.
-// Vector search is delegated to the chat history knowledge base's HybridSearch (configured via ChatHistoryConfig).
+// Vector search is delegated to the tenant-private chat-history knowledge base's HybridSearch.
 func (s *messageService) SearchMessages(ctx context.Context, params *types.MessageSearchParams) (*types.MessageSearchResult, error) {
 	logger.Infof(ctx, "Start searching messages, query: %s, mode: %s", params.Query, params.Mode)
 
@@ -653,10 +653,13 @@ func (s *messageService) restrictToOwnedSessions(
 }
 
 // vectorSearchViaKB performs vector search using the chat history knowledge base's HybridSearch.
-// The KB ID is read from ChatHistoryConfig, search params from RetrievalConfig.
+// The KB ID is read from the tenant-private binding, search params from RetrievalConfig.
 func (s *messageService) vectorSearchViaKB(ctx context.Context, params *types.MessageSearchParams) ([]*types.MessageSearchResultItem, error) {
-	cfg := s.getChatHistoryConfig(ctx)
-	if cfg == nil {
+	kb, err := s.chatHistoryKnowledgeBase(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	if kb == nil {
 		return nil, nil // Chat history KB not configured, skip vector search
 	}
 
@@ -671,7 +674,7 @@ func (s *messageService) vectorSearchViaKB(ctx context.Context, params *types.Me
 		DisableKeywordsMatch: true, // We handle keyword search separately on the messages table
 	}
 
-	kbResults, err := s.kbService.HybridSearch(ctx, cfg.KnowledgeBaseID, searchParams)
+	kbResults, err := s.kbService.HybridSearch(ctx, kb.ID, searchParams)
 	if err != nil {
 		return nil, fmt.Errorf("KB hybrid search failed: %w", err)
 	}

@@ -393,7 +393,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed, onUnmounted, nextTick, inject } from 'vue'
+import { ref, watch, computed, onUnmounted, nextTick } from 'vue'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { checkOllamaModels, checkRemoteModel, testEmbeddingModel, checkRerankModel, checkASRModel, listOllamaModels, downloadOllamaModel, getDownloadProgress, checkOllamaStatus, listModelProviders, type OllamaModelInfo, type ModelProviderOption } from '@/api/initialization'
 import {
@@ -404,7 +404,6 @@ import {
 } from '@/api/model'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
-import { platformTenantControlIDKey } from '@/composables/platformTenantControl'
 import {
   defaultThinkingControl,
   resolveThinkingControl,
@@ -464,7 +463,6 @@ interface Props {
 
 const { t, te } = useI18n()
 const authStore = useAuthStore()
-const platformTenantControlID = inject(platformTenantControlIDKey, null)
 
 const props = withDefaults(defineProps<Props>(), {
   visible: false,
@@ -480,13 +478,8 @@ const draftModelType = ref<EditorModelType>(props.modelType)
 
 const isEdit = computed(() => !!props.modelData)
 
-// Global model administration is tenantless and accepts only platform-owned
-// remote credentials. Tenant-scoped callers keep the existing choices.
-const isPlatformMode = computed(() => (
-  authStore.isSystemAdmin
-  && platformTenantControlID !== null
-  && platformTenantControlID.value === undefined
-))
+// Platform model administration is independent of the selected enterprise.
+const isPlatformMode = computed(() => authStore.isSystemAdmin)
 
 const activeModelType = computed(() => (
   isEdit.value ? props.modelType : draftModelType.value

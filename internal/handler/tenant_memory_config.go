@@ -26,11 +26,11 @@ func (h *TenantMemoryConfigHandler) Get(c *gin.Context) {
 		h.fail(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": state.Config, "generation": state.Generation})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": state.Consent, "generation": state.Generation})
 }
 
 func (h *TenantMemoryConfigHandler) Update(c *gin.Context) {
-	var cfg types.MemoryConfig
+	var cfg types.TenantMemoryConfig
 	if err := decodeStrictMemoryJSON(c, &cfg); err != nil {
 		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
 		return
@@ -45,32 +45,14 @@ func (h *TenantMemoryConfigHandler) Update(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"success": true, "data": state.Config, "generation": state.Generation,
+		"success": true, "data": state.Consent, "generation": state.Generation,
 		"message": "Memory configuration updated successfully",
 	})
 }
 
-func validateTenantMemoryConfig(cfg *types.MemoryConfig) error {
+func validateTenantMemoryConfig(cfg *types.TenantMemoryConfig) error {
 	if cfg.WriteMode != "" && cfg.WriteMode != types.MemoryWriteExplicitOnly && cfg.WriteMode != types.MemoryWriteAuto {
 		return fmt.Errorf("write_mode must be explicit_only or auto")
-	}
-	if cfg.MaxItems < 0 || cfg.MaxItems > 2000 {
-		return fmt.Errorf("max_items must be between 0 and 2000")
-	}
-	if cfg.ExtractDelaySeconds < 0 || cfg.ExtractDelaySeconds > types.MaxMemoryExtractDelaySeconds {
-		return fmt.Errorf("extract_delay_seconds must be between 0 and %d", types.MaxMemoryExtractDelaySeconds)
-	}
-	if cfg.ExtractMinIntervalSeconds < 0 || cfg.ExtractMinIntervalSeconds > types.MaxMemoryExtractMinIntervalSeconds {
-		return fmt.Errorf("extract_min_interval_seconds must be between 0 and %d", types.MaxMemoryExtractMinIntervalSeconds)
-	}
-	if len(cfg.EmbeddingModelID) > 64 {
-		return fmt.Errorf("embedding_model_id is too long")
-	}
-	if cfg.InterestThreshold < 0 || cfg.InterestThreshold > types.MaxMemoryInterestThreshold {
-		return fmt.Errorf("interest_threshold must be between 1 and %d", types.MaxMemoryInterestThreshold)
-	}
-	if len([]rune(cfg.ExtractInstructions)) > types.MaxMemoryExtractInstructionsRunes {
-		return fmt.Errorf("extract_instructions must be at most %d characters", types.MaxMemoryExtractInstructionsRunes)
 	}
 	cfg.Normalize()
 	return nil

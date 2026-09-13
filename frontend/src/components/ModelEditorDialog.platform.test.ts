@@ -7,7 +7,7 @@ const source = readFileSync(new URL('./ModelEditorDialog.vue', import.meta.url),
 test('tenantless system administration only offers platform remote providers', () => {
   assert.match(
     source,
-    /authStore\.isSystemAdmin\s*&& platformTenantControlID !== null\s*&& platformTenantControlID\.value === undefined/,
+    /const isPlatformMode = computed\(\(\) => authStore\.isSystemAdmin\)/,
   )
   assert.match(
     source,

@@ -66,6 +66,9 @@ type processSyncKBService struct {
 func (s *processSyncKBService) CreateKnowledgeBase(context.Context, *types.KnowledgeBase) (*types.KnowledgeBase, error) {
 	return nil, nil
 }
+func (s *processSyncKBService) EnsureChatHistoryKnowledgeBase(context.Context, string) (*types.KnowledgeBase, error) {
+	return nil, nil
+}
 
 func (s *processSyncKBService) GetKnowledgeBaseByID(context.Context, string) (*types.KnowledgeBase, error) {
 	return s.kb, s.getErr

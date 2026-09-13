@@ -1,5 +1,4 @@
 import { get, post, put, del, patch, postUpload } from '@/utils/request'
-import { platformTenantPath } from '../platform-tenant-path'
 import type { CreatedTenantAPIKey, TenantAPIKey, TenantAPIKeyCapability } from '@/api/tenant'
 
 export interface CreatePlatformAPIKeyPayload {

@@ -115,10 +115,12 @@ func (s *stubAgentRepoForModelDelete) ListNamesBySandboxConfigID(context.Context
 }
 
 type stubModelRepoForDelete struct {
-	model  *types.Model
-	create func(model *types.Model) error
-	list   func(tenantID uint64) ([]*types.Model, error)
-	delete func(id string) error
+	model          *types.Model
+	create         func(model *types.Model) error
+	list           func(tenantID uint64) ([]*types.Model, error)
+	delete         func(id string) error
+	memoryBindings []types.ModelUsageBinding
+	memoryErr      error
 	// deleteTenantID captures the persisted row scope used by Delete.
 	deleteTenantID *uint64
 	update         func(model *types.Model) error
@@ -157,6 +159,11 @@ func (s *stubModelRepoForDelete) Delete(_ context.Context, tenantID uint64, id s
 		return s.delete(id)
 	}
 	return nil
+}
+func (s *stubModelRepoForDelete) PlatformMemoryModelBindings(
+	context.Context, string,
+) ([]types.ModelUsageBinding, error) {
+	return s.memoryBindings, s.memoryErr
 }
 func (s *stubModelRepoForDelete) ClearDefaultByType(context.Context, uint, types.ModelType, string) error {
 	return nil
@@ -446,12 +453,13 @@ func TestDeleteModel_YAMLManagedBuiltinIsProtected(t *testing.T) {
 	assert.False(t, deleted)
 }
 
-func TestDeleteModel_ManualGlobalChecksEveryTenantMemoryBinding(t *testing.T) {
+func TestDeleteModel_ManualGlobalChecksPlatformMemoryBindingWithoutTenants(t *testing.T) {
 	modelID := "manual-global"
 	deleted := false
 	svc := NewModelService(
 		&stubModelRepoForDelete{
-			model: &types.Model{ID: modelID, IsBuiltin: true},
+			model:          &types.Model{ID: modelID, IsBuiltin: true},
+			memoryBindings: []types.ModelUsageBinding{types.ModelUsageBindingExtractModel},
 			delete: func(string) error {
 				deleted = true
 				return nil
@@ -459,10 +467,7 @@ func TestDeleteModel_ManualGlobalChecksEveryTenantMemoryBinding(t *testing.T) {
 		},
 		&stubKBRepoForModelDelete{},
 		&stubAgentRepoForModelDelete{},
-		nil, nil, &stubTenantServiceForModelDelete{tenants: []*types.Tenant{
-			{ID: 1},
-			{ID: 2, MemoryConfig: &types.MemoryConfig{ExtractModelID: modelID}},
-		}},
+		nil, nil, nil,
 	)
 
 	err := svc.DeleteModel(tenantlessSystemAdminModelContext(), modelID)
@@ -496,23 +501,19 @@ func (s *stubTenantServiceForModelDelete) GetWeKnoraCloudCredentials(context.Con
 }
 
 func TestDeleteModel_RejectsWhenUsedByMemory(t *testing.T) {
-	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
 	modelID := "memory-embed"
 
 	svc := NewModelService(
-		&stubModelRepoForDelete{model: &types.Model{ID: modelID, TenantID: 1}},
+		&stubModelRepoForDelete{
+			model:          &types.Model{ID: modelID, IsBuiltin: true},
+			memoryBindings: []types.ModelUsageBinding{types.ModelUsageBindingEmbeddingModel},
+		},
 		&stubKBRepoForModelDelete{},
 		&stubAgentRepoForModelDelete{},
-		nil, nil,
-		&stubTenantServiceForModelDelete{
-			tenant: &types.Tenant{
-				ID:           1,
-				MemoryConfig: &types.MemoryConfig{Enabled: true, EmbeddingModelID: modelID},
-			},
-		},
+		nil, nil, nil,
 	)
 
-	err := svc.DeleteModel(ctx, modelID)
+	err := svc.DeleteModel(tenantlessSystemAdminModelContext(), modelID)
 	require.Error(t, err)
 	appErr, ok := apperrors.IsAppError(err)
 	require.True(t, ok)
@@ -528,25 +529,19 @@ func TestDeleteModel_RejectsWhenUsedByMemory(t *testing.T) {
 // distillation only warns when it cannot resolve one, so auto extraction would
 // stop silently instead of the delete being refused.
 func TestDeleteModel_RejectsWhenUsedByMemoryExtraction(t *testing.T) {
-	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
 	modelID := "memory-extract"
 
 	svc := NewModelService(
-		&stubModelRepoForDelete{model: &types.Model{ID: modelID, TenantID: 1}},
+		&stubModelRepoForDelete{
+			model:          &types.Model{ID: modelID, IsBuiltin: true},
+			memoryBindings: []types.ModelUsageBinding{types.ModelUsageBindingExtractModel},
+		},
 		&stubKBRepoForModelDelete{},
 		&stubAgentRepoForModelDelete{},
-		nil, nil,
-		&stubTenantServiceForModelDelete{
-			tenant: &types.Tenant{
-				ID: 1,
-				MemoryConfig: &types.MemoryConfig{
-					Enabled: true, ExtractModelID: modelID, EmbeddingModelID: "some-other-model",
-				},
-			},
-		},
+		nil, nil, nil,
 	)
 
-	err := svc.DeleteModel(ctx, modelID)
+	err := svc.DeleteModel(tenantlessSystemAdminModelContext(), modelID)
 	require.Error(t, err)
 	appErr, ok := apperrors.IsAppError(err)
 	require.True(t, ok)
@@ -558,25 +553,22 @@ func TestDeleteModel_RejectsWhenUsedByMemoryExtraction(t *testing.T) {
 }
 
 func TestDeleteModel_ReportsAllMemoryBindings(t *testing.T) {
-	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
 	modelID := "shared-memory-model"
 
 	svc := NewModelService(
-		&stubModelRepoForDelete{model: &types.Model{ID: modelID, TenantID: 1}},
-		&stubKBRepoForModelDelete{},
-		&stubAgentRepoForModelDelete{},
-		nil, nil,
-		&stubTenantServiceForModelDelete{
-			tenant: &types.Tenant{
-				ID: 1,
-				MemoryConfig: &types.MemoryConfig{
-					Enabled: true, EmbeddingModelID: modelID, ExtractModelID: modelID,
-				},
+		&stubModelRepoForDelete{
+			model: &types.Model{ID: modelID, IsBuiltin: true},
+			memoryBindings: []types.ModelUsageBinding{
+				types.ModelUsageBindingEmbeddingModel,
+				types.ModelUsageBindingExtractModel,
 			},
 		},
+		&stubKBRepoForModelDelete{},
+		&stubAgentRepoForModelDelete{},
+		nil, nil, nil,
 	)
 
-	err := svc.DeleteModel(ctx, modelID)
+	err := svc.DeleteModel(tenantlessSystemAdminModelContext(), modelID)
 	require.Error(t, err)
 	appErr, ok := apperrors.IsAppError(err)
 	require.True(t, ok)

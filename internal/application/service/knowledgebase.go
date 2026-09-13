@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/datasource"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
@@ -50,6 +51,7 @@ type knowledgeBaseService struct {
 	governance      interfaces.KnowledgeGovernanceService
 	planResolver    interfaces.KnowledgeProcessingPlanResolver
 	resourceCatalog interfaces.ResourceCatalog
+	chatHistoryRepo repository.PlatformChatHistoryRepository
 }
 
 // NewKnowledgeBaseService creates a new knowledge base service
@@ -75,6 +77,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	governance interfaces.KnowledgeGovernanceService,
 	planResolver interfaces.KnowledgeProcessingPlanResolver,
 	resourceCatalog interfaces.ResourceCatalog,
+	chatHistoryRepo repository.PlatformChatHistoryRepository,
 ) interfaces.KnowledgeBaseService {
 	return &knowledgeBaseService{
 		repo:            repo,
@@ -99,6 +102,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 		governance:      governance,
 		planResolver:    planResolver,
 		resourceCatalog: resourceCatalog,
+		chatHistoryRepo: chatHistoryRepo,
 	}
 }
 
@@ -121,61 +125,7 @@ func (s *knowledgeBaseService) GetRepository() interfaces.KnowledgeBaseRepositor
 func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	kb *types.KnowledgeBase,
 ) (*types.KnowledgeBase, error) {
-	// Generate UUID and set creation timestamps
-	if kb.ID == "" {
-		kb.ID = uuid.New().String()
-	}
-	kb.CreatedAt = time.Now()
-	kb.TenantID = types.MustTenantIDFromContext(ctx)
-	kb.UpdatedAt = time.Now()
-	// Record the creator for display and audit. Knowledge maintenance authority
-	// comes from the current role and access policy, not creator identity.
-	if uid, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(uid) {
-		kb.CreatorID = uid
-	}
-	kb.EnsureDefaults()
-	_, authenticatedPrincipal := types.UserIDFromContext(ctx)
-	if authenticatedPrincipal && !types.IsSystemAdminFromContext(ctx) {
-		if _, apiKeyPrincipal := types.TenantAPIKeyScopeFromContext(ctx); !apiKeyPrincipal {
-			pin, err := s.planResolver.ResolveKnowledgeProcessingPlan(ctx, kb.TenantID)
-			if err != nil || pin == nil || strings.TrimSpace(pin.PlanVersionID) == "" {
-				return nil, interfaces.ErrAICapabilityUnavailable
-			}
-			kb.AICapabilityPlanVersionID = pin.PlanVersionID
-		}
-		if err := s.applyPlatformModelDefaults(ctx, kb); err != nil {
-			return nil, err
-		}
-	}
-	if err := s.applyAndValidateStorageBackend(ctx, kb); err != nil {
-		return nil, err
-	}
-
-	// Fold empty-string vector_store_id into nil so this path and the
-	// retrieve-engine factory's pre-condition share a single representation.
-	wasEmpty := kb.VectorStoreID != nil && *kb.VectorStoreID == ""
-	kb.Normalize()
-	if wasEmpty {
-		logger.Debugf(ctx,
-			"[kb.create] empty vector_store_id normalized to nil for tenant=%d",
-			kb.TenantID)
-	}
-
-	if !kb.HasVectorStore() {
-		if s.ownership == nil {
-			return nil, apperrors.NewServiceUnavailableError("platform vector store configuration is unavailable")
-		}
-		defaultID, err := s.ownership.DefaultStoreID(ctx)
-		if err != nil {
-			return nil, err
-		}
-		defaultID = strings.TrimSpace(defaultID)
-		if defaultID == "" {
-			return nil, apperrors.NewBadRequestError("platform default vector store is not configured")
-		}
-		kb.VectorStoreID = &defaultID
-	}
-	if err := s.validateVectorStoreBinding(ctx, kb.TenantID, *kb.VectorStoreID); err != nil {
+	if err := s.prepareKnowledgeBase(ctx, kb, false); err != nil {
 		return nil, err
 	}
 
@@ -195,6 +145,119 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 
 	logger.Infof(ctx, "Knowledge base created successfully, ID: %s, name: %s", kb.ID, kb.Name)
 	return kb, nil
+}
+
+// prepareKnowledgeBase centralizes the established creation defaults and
+// infrastructure validation. The chat-history path preserves its explicitly
+// selected platform embedding model while still using every other normal KB
+// creation rule.
+func (s *knowledgeBaseService) prepareKnowledgeBase(
+	ctx context.Context, kb *types.KnowledgeBase, preserveExplicitEmbedding bool,
+) error {
+	if kb == nil {
+		return apperrors.NewBadRequestError("knowledge base is required")
+	}
+	explicitEmbedding := strings.TrimSpace(kb.EmbeddingModelID)
+	// Generate UUID and set creation timestamps
+	if kb.ID == "" {
+		kb.ID = uuid.New().String()
+	}
+	kb.CreatedAt = time.Now()
+	kb.TenantID = types.MustTenantIDFromContext(ctx)
+	kb.UpdatedAt = time.Now()
+	// Record the creator for display and audit. Knowledge maintenance authority
+	// comes from the current role and access policy, not creator identity.
+	if uid, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(uid) {
+		kb.CreatorID = uid
+	}
+	kb.EnsureDefaults()
+	_, authenticatedPrincipal := types.UserIDFromContext(ctx)
+	if authenticatedPrincipal && !types.IsSystemAdminFromContext(ctx) {
+		if _, apiKeyPrincipal := types.TenantAPIKeyScopeFromContext(ctx); !apiKeyPrincipal {
+			pin, err := s.planResolver.ResolveKnowledgeProcessingPlan(ctx, kb.TenantID)
+			if err != nil || pin == nil || strings.TrimSpace(pin.PlanVersionID) == "" {
+				return interfaces.ErrAICapabilityUnavailable
+			}
+			kb.AICapabilityPlanVersionID = pin.PlanVersionID
+		}
+		if err := s.applyPlatformModelDefaults(ctx, kb); err != nil {
+			return err
+		}
+		if preserveExplicitEmbedding {
+			kb.EmbeddingModelID = explicitEmbedding
+		}
+	}
+	if err := s.applyAndValidateStorageBackend(ctx, kb); err != nil {
+		return err
+	}
+
+	// Fold empty-string vector_store_id into nil so this path and the
+	// retrieve-engine factory's pre-condition share a single representation.
+	wasEmpty := kb.VectorStoreID != nil && *kb.VectorStoreID == ""
+	kb.Normalize()
+	if wasEmpty {
+		logger.Debugf(ctx,
+			"[kb.create] empty vector_store_id normalized to nil for tenant=%d",
+			kb.TenantID)
+	}
+
+	if !kb.HasVectorStore() {
+		if s.ownership == nil {
+			return apperrors.NewServiceUnavailableError("platform vector store configuration is unavailable")
+		}
+		defaultID, err := s.ownership.DefaultStoreID(ctx)
+		if err != nil {
+			return err
+		}
+		defaultID = strings.TrimSpace(defaultID)
+		if defaultID == "" {
+			return apperrors.NewBadRequestError("platform default vector store is not configured")
+		}
+		kb.VectorStoreID = &defaultID
+	}
+	if err := s.validateVectorStoreBinding(ctx, kb.TenantID, *kb.VectorStoreID); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *knowledgeBaseService) EnsureChatHistoryKnowledgeBase(
+	ctx context.Context, expectedModelID string,
+) (*types.KnowledgeBase, error) {
+	if s.chatHistoryRepo == nil {
+		return nil, fmt.Errorf("platform chat-history repository is not configured")
+	}
+	tenantID := types.MustTenantIDFromContext(ctx)
+	if existing, err := s.chatHistoryRepo.GetTenantKnowledgeBase(ctx, tenantID); err != nil {
+		return nil, err
+	} else if existing != nil {
+		if existing.EmbeddingModelID != expectedModelID {
+			return nil, repository.ErrPlatformChatHistoryConfigChanged
+		}
+		return existing, nil
+	}
+
+	kb := &types.KnowledgeBase{
+		Name:             "__chat_history__",
+		Type:             types.KnowledgeBaseTypeDocument,
+		IsTemporary:      true,
+		Description:      "Auto-managed knowledge base for chat history message indexing",
+		EmbeddingModelID: strings.TrimSpace(expectedModelID),
+	}
+	if err := s.prepareKnowledgeBase(ctx, kb, true); err != nil {
+		return nil, err
+	}
+	ensured, created, err := s.chatHistoryRepo.EnsureTenantKnowledgeBase(ctx, expectedModelID, kb)
+	if err != nil {
+		return nil, err
+	}
+	if created {
+		recordKBActivity(ctx, s.audit, ensured.TenantID, ensured.ID, types.AuditActionKBCreated,
+			"knowledge_base", ensured.ID, types.AuditOutcomeSuccess, map[string]any{
+				"name": ensured.Name, "type": ensured.Type,
+			})
+	}
+	return ensured, nil
 }
 
 func (s *knowledgeBaseService) applyPlatformModelDefaults(ctx context.Context, kb *types.KnowledgeBase) error {

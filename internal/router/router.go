@@ -91,9 +91,11 @@ type RouterParams struct {
 	DataSourceCredentialsHandler *handler.DataSourceCredentialsHandler
 	WeKnoraCloudHandler          *handler.WeKnoraCloudHandler
 	AICapabilityPlanHandler      *handler.AICapabilityPlanHandler
+	CapabilityPlanAdminHandler   *handler.CapabilityPlanAdminHandler
 	WikiPageHandler              *handler.WikiPageHandler
 	MemoryHandler                *handler.MemoryHandler
 	TenantMemoryConfigHandler    *handler.TenantMemoryConfigHandler
+	OperatingBriefHandler        *handler.OperatingBriefHandler
 }
 
 // NewRouter 创建新的路由
@@ -238,6 +240,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterTenantRoutes(v1, params.TenantHandler, params.TenantMemberHandler, params.TenantInvitationHandler, params.AuditLogHandler, rbacGuards)
 		RegisterTenantMemoryConfigRoutes(v1, params.TenantMemoryConfigHandler, rbacGuards)
 		RegisterCapabilityPlanRoutes(v1, params.AICapabilityPlanHandler, rbacGuards)
+		RegisterCapabilityPlanAdminRoutes(v1, params.CapabilityPlanAdminHandler, rbacGuards)
 		RegisterKnowledgeGovernanceRoutes(v1, params.KnowledgeGovernanceHandler, rbacGuards)
 		RegisterMyInvitationRoutes(v1, params.TenantInvitationHandler)
 		RegisterEnterpriseAdministrationRoutes(v1, params.EnterpriseAdminHandler, rbacGuards)
@@ -275,7 +278,8 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterSessionRoutes(v1, params.SessionHandler, params.MessageSuggestionHandler, rbacGuards)
 		RegisterChatRoutes(v1, params.SessionHandler, rbacGuards)
 		RegisterMessageRoutes(v1, params.MessageHandler, rbacGuards)
-		RegisterOperatingAnalysisHandoffRoutes(v1, params.RedisClient, params.SessionService, params.MessageService, rbacGuards)
+		RegisterOperatingAnalysisHandoffRoutes(v1, params.RedisClient, params.SessionService, params.MessageService, params.TenantMemberService, params.TenantService, rbacGuards)
+		RegisterOperatingBriefRoutes(v1, params.OperatingBriefHandler, rbacGuards)
 		RegisterModelRoutes(v1, params.ModelHandler, params.ModelCredentialsHandler, rbacGuards)
 		RegisterSystemAdminTenantRuntimeRoutes(
 			v1,

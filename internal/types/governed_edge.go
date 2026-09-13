@@ -6,15 +6,17 @@ import (
 	"fmt"
 )
 
-// GovernedEdgeBinding is a Center management projection, not a second member
-// permission model. Revisions reject delayed management writes after revocation.
+// GovernedEdgeBinding is Platform-owned product connection authority. Revision
+// serializes product binding changes; DeploymentRevision records the Center
+// node-control revision that was explicitly accepted for the current node.
 type GovernedEdgeBinding struct {
-	BindingID    string `json:"binding_id"`
-	Revision     int64  `json:"revision"`
-	EnterpriseID string `json:"enterprise_id"`
-	EdgeNodeID   string `json:"edge_node_id"`
-	SourceID     string `json:"source_id"`
-	Enabled      bool   `json:"enabled"`
+	BindingID         string `json:"binding_id"`
+	Revision          int64  `json:"revision"`
+	DeploymentRevision int64  `json:"deployment_revision"`
+	EnterpriseID      string `json:"enterprise_id"`
+	EdgeNodeID        string `json:"edge_node_id"`
+	SourceID          string `json:"source_id"`
+	Enabled           bool   `json:"enabled"`
 }
 
 func (b GovernedEdgeBinding) Value() (driver.Value, error) { return json.Marshal(b) }
@@ -34,6 +36,7 @@ type GovernedEdgeConnection struct {
 	SourceID     string `json:"-"`
 	BindingID    string `json:"-"`
 	Revision     int64  `json:"-"`
+	DeploymentRevision int64 `json:"-"`
 	BaseURL      string `json:"-"`
 	Token        string `json:"-"`
 }

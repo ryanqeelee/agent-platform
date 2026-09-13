@@ -48,17 +48,6 @@ func RegisterTenantRoutes(
 	auditLogHandler *handler.AuditLogHandler,
 	g *rbacGuards,
 ) {
-	// Narrow Ringxun activation adapter. It is tenant-header optional because
-	// the prepared tenant does not exist when the first command arrives. The
-	// route-specific guard also rejects JWT principals so activation can only
-	// enter through the Ringxun platform API-key command path.
-	g.apiKeyRoute(r, http.MethodPut, "/system/enterprise-activations/:activation_id",
-		apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage),
-		middleware.RequirePlatformAPIKeyCapability(types.APIKeyCapabilitySystemTenantsManage),
-		handler.PutEnterpriseActivation)
-	g.apiKeyRoute(r, http.MethodPut, "/system/tenants/:id/edge-binding",
-		apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage), handler.PutGovernedEdgeBinding)
-
 	// Cross-tenant superuser endpoints — promoted from handler if-blocks
 	// to middleware.RequireCrossTenantAccess at the route layer.
 	g.apiKeyRoute(r, http.MethodGet, "/tenants/all",
@@ -297,6 +286,12 @@ func RegisterSystemAdminRoutes(
 	auditLogHandler *handler.AuditLogHandler,
 	g *rbacGuards,
 ) {
+	if operations != nil {
+		g.apiKeyRoute(r, http.MethodPost, "/system/edge-node-revocations",
+			apiKeyPlatform(types.APIKeyCapabilitySystemTenantsManage),
+			middleware.RequirePlatformAPIKeyCapability(types.APIKeyCapabilitySystemTenantsManage),
+			operations.RevokeEdgeNode)
+	}
 	// Apply SystemAdmin() at the group level — every route below inherits
 	// the guard, so adding new endpoints can't accidentally drop the gate.
 	adminRoutes := r.Group("/system/admin", g.SystemAdmin())
@@ -313,6 +308,9 @@ func RegisterSystemAdminRoutes(
 			ops.GET("/enterprises/:tenant_id", operations.GetEnterprise)
 			ops.PATCH("/enterprises/:tenant_id", operations.UpdateEnterprise)
 			ops.GET("/enterprises/:tenant_id/edge", operations.GetEnterpriseEdge)
+			ops.POST("/enterprises/:tenant_id/edge/nodes/:node_id/disable", operations.DisableEnterpriseEdgeNode)
+			ops.POST("/enterprises/:tenant_id/edge-binding/prepare", operations.PrepareEnterpriseEdgeBinding)
+			ops.POST("/enterprises/:tenant_id/edge-binding/confirm", operations.ConfirmEnterpriseEdgeBinding)
 			ops.POST("/enterprises/:tenant_id/edge-enrollment-token/rotate", operations.RotateEnterpriseEnrollmentToken)
 			ops.GET("/enterprises/:tenant_id/members", operations.ListMembers)
 			ops.POST("/enterprises/:tenant_id/employees", operations.CreateEmployee)

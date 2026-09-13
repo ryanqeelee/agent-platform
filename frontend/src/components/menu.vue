@@ -439,9 +439,9 @@ const topMenuItems = computed<MenuItem[]>(() => {
             return [];
         }
         if (item.path !== 'operating-analysis' && item.path !== 'operating-brief') return [item];
-        const state = operatingAnalysisAvailability.value?.availability.state;
-        if (!state || state === 'hidden') return [];
-        return [{ ...item, disabled: state !== 'enabled' }];
+		const availability = operatingAnalysisAvailability.value?.availability;
+		if (!availability || availability.state === 'hidden') return [];
+		return [{ ...item, disabled: !availability.canReadHistory }];
     });
 });
 
@@ -1057,7 +1057,7 @@ const navigationIcon = (icon: string): string => ({
 
 const emit = defineEmits<{ navigate: [] }>();
 const handleMenuClick = async (path: string) => {
-    if ((path === 'operating-analysis' || path === 'operating-brief') && operatingAnalysisAvailability.value?.availability.state !== 'enabled') {
+	if ((path === 'operating-analysis' || path === 'operating-brief') && !operatingAnalysisAvailability.value?.availability.canReadHistory) {
         const nextAction = operatingAnalysisAvailability.value?.availability.nextAction;
         MessagePlugin.info(t(nextAction === 'contact_admin'
             ? 'menu.operatingAnalysisContactAdmin'

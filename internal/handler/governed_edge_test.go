@@ -7,42 +7,47 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
-type edgeBindingService struct {
-	interfaces.TenantService
-	calls int
+type revocationBindingService struct {
+	request interfaces.EdgeNodeRevocationReceipt
 }
 
-func (s *edgeBindingService) ApplyGovernedEdgeBinding(_ context.Context, tenantID uint64, b types.GovernedEdgeBinding) error {
-	s.calls++
-	return nil
+func (*revocationBindingService) Prepare(context.Context, interfaces.GovernedEdgeBindingPrepareCommand) (*types.GovernedEdgeBinding, error) {
+	return nil, nil
 }
 
-func TestGovernedEdgeBindingRequiresPlatformMachineIdentity(t *testing.T) {
-	for _, scope := range []types.APIKeyScopeType{"", types.APIKeyScopeTenant, types.APIKeyScopePlatform} {
-		t.Run(string(scope), func(t *testing.T) {
-			service := &edgeBindingService{}
-			h := &TenantHandler{service: service}
-			r := gin.New()
-			r.PUT("/system/tenants/:id/edge-binding", h.PutGovernedEdgeBinding)
-			req := httptest.NewRequest(http.MethodPut, "/system/tenants/10001/edge-binding", bytes.NewBufferString(`{"binding_id":"b","enterprise_id":"e","revision":1,"enabled":false}`))
-			if scope != "" {
-				req = req.WithContext(types.WithTenantAPIKeyScope(req.Context(), types.TenantAPIKeyScope{ScopeType: scope}))
-			}
-			response := httptest.NewRecorder()
-			r.ServeHTTP(response, req)
-			if scope == types.APIKeyScopePlatform {
-				require.Equal(t, 200, response.Code)
-				require.Equal(t, 1, service.calls)
-			} else {
-				require.Equal(t, 403, response.Code)
-				require.Zero(t, service.calls)
-			}
-		})
+func (*revocationBindingService) Confirm(context.Context, interfaces.GovernedEdgeBindingConfirmCommand) (*types.GovernedEdgeBinding, error) {
+	return nil, nil
+}
+
+func (s *revocationBindingService) Revoke(_ context.Context, enterpriseID, edgeNodeID string, revision int64) (*interfaces.EdgeNodeRevocationReceipt, error) {
+	s.request = interfaces.EdgeNodeRevocationReceipt{
+		EnterpriseID: enterpriseID, EdgeNodeID: edgeNodeID,
+		SentControlRevision: revision, AcceptedControlRevision: 3,
+		BindingRevision: 9, Status: "superseded",
 	}
+	return &s.request, nil
+}
+
+func TestEdgeNodeRevocationUsesFrozenReceipt(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := &revocationBindingService{}
+	h := NewPlatformOperationsHandler(nil, nil, nil, nil, nil, nil, nil, nil, service)
+	router := gin.New()
+	router.Use(middleware.ErrorHandler())
+	router.POST("/api/v1/system/edge-node-revocations", h.RevokeEdgeNode)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/system/edge-node-revocations",
+		bytes.NewBufferString(`{"enterprise_id":"enterprise","edge_node_id":"old-node","control_revision":40}`))
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.Equal(t, int64(40), service.request.SentControlRevision)
+	require.JSONEq(t, `{"schema":"EdgeNodeRevocationReceiptV1","enterprise_id":"enterprise","edge_node_id":"old-node","sent_control_revision":40,"accepted_control_revision":3,"binding_revision":9,"status":"superseded"}`, response.Body.String())
 }

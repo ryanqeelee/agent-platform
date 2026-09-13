@@ -3,13 +3,11 @@ package service
 import (
 	"context"
 	stderrors "errors"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
-	"github.com/Tencent/WeKnora/internal/infrastructure/capabilityplan"
 	"github.com/Tencent/WeKnora/internal/storageallowlist"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -252,33 +250,6 @@ func TestCreateKnowledgeBase_APIKeyKeepsExistingCreationPath(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Empty(t, kb.AICapabilityPlanVersionID)
-	require.Len(t, repo.rows, 1)
-}
-
-func TestRingxunKnowledgeProcessingPlanIntegrationPinsKnowledgeBase(t *testing.T) {
-	baseURL := os.Getenv("RINGXUN_CAPABILITY_PLAN_INTEGRATION_BASE_URL")
-	if baseURL == "" {
-		t.Skip("requires the Ringxun capability-plan integration fixture")
-	}
-	t.Setenv("RINGXUN_CAPABILITY_PLAN_BASE_URL", baseURL)
-	t.Setenv(
-		"RINGXUN_CAPABILITY_PLAN_SERVICE_TOKEN",
-		os.Getenv("RINGXUN_CAPABILITY_PLAN_INTEGRATION_SERVICE_TOKEN"),
-	)
-
-	repo := newFakeKBRepo()
-	svc := newPR3KBService(repo, &fakeRegistry{registered: map[string]struct{}{}}, &fakeOwnership{})
-	svc.planResolver = capabilityplan.NewKnowledgeProcessingPlanResolverFromEnv()
-	svc.modelService = &stubModelService{modelsByID: map[string]*types.Model{
-		"chat-default":  {ID: "chat-default", Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusActive, IsDefault: true},
-		"embed-default": {ID: "embed-default", Type: types.ModelTypeEmbedding, Status: types.ModelStatusActive, IsDefault: true},
-	}}
-	ctx := context.WithValue(ctxWithTenant(7), types.UserIDContextKey, "integration-user")
-
-	kb, err := svc.CreateKnowledgeBase(ctx, &types.KnowledgeBase{Name: "integration"})
-
-	require.NoError(t, err)
-	require.Equal(t, os.Getenv("RINGXUN_CAPABILITY_PLAN_INTEGRATION_VERSION_ID"), kb.AICapabilityPlanVersionID)
 	require.Len(t, repo.rows, 1)
 }
 

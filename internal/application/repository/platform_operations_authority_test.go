@@ -51,7 +51,7 @@ func TestPlatformOperationsRejectsEmployeeCreationForInactiveEnterprise(t *testi
 	one := 1
 	_, _, err = NewPlatformOperationsTenantRepository(db).UpdateForPlatformOperations(
 		context.Background(), "system-admin", tenant.ID, tenant.Name, tenant.Description,
-		types.TenantStatusActive, &one, 0)
+		types.TenantStatusActive, false, &one, 0)
 	require.ErrorIs(t, err, ErrEnterpriseStatusImmutable)
 	var unchanged types.Tenant
 	require.NoError(t, db.First(&unchanged, tenant.ID).Error)
@@ -83,7 +83,7 @@ func TestPlatformOperationsSeatReductionCountsOnlyActiveBoundMembers(t *testing.
 	one := 1
 	updated, used, err := NewPlatformOperationsTenantRepository(db).UpdateForPlatformOperations(
 		context.Background(), "system-admin", tenant.ID, tenant.Name, tenant.Description,
-		types.TenantStatusSuspended, &one, 8192)
+		types.TenantStatusSuspended, true, &one, 8192)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), used)
 	require.Equal(t, 1, *updated.SeatsTotal)
@@ -97,7 +97,7 @@ func TestPlatformOperationsSeatReductionCountsOnlyActiveBoundMembers(t *testing.
 	}).Error)
 	_, used, err = NewPlatformOperationsTenantRepository(db).UpdateForPlatformOperations(
 		context.Background(), "system-admin", tenant.ID, tenant.Name, tenant.Description,
-		types.TenantStatusActive, &one, 8192)
+		types.TenantStatusActive, true, &one, 8192)
 	require.ErrorIs(t, err, ErrSeatLimitBelowUsage)
 	require.Equal(t, int64(2), used)
 }

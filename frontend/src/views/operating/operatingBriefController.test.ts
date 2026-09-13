@@ -40,6 +40,7 @@ function brief(scopeRef: string | null, displayState: OperatingBriefDTO['display
 function source(overrides: Partial<OperatingBriefClient>): OperatingBriefClient {
   return {
     getOperatingBrief: async () => brief(null),
+	refreshOperatingBrief: async () => {},
     createOperatingBriefAnalysisHandoff: async () => ({
       schema: 'OperatingAnalysisHandoffV1',
       question: 'server question',

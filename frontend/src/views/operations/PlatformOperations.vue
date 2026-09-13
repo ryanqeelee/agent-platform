@@ -63,6 +63,7 @@
                 <small v-if="selected.storage_used !== undefined" class="hint">已用 {{ formatStorage(selected.storage_used) }}</small>
               </t-form-item>
             </div>
+            <t-form-item label="经营分析权限"><t-switch v-model="editEnterprise.analysis_enabled" /></t-form-item>
             <t-button type="submit" :loading="savingEnterprise">保存企业信息</t-button>
           </t-form>
         </t-card>
@@ -106,9 +107,13 @@
                 <span><small>连接状态</small><strong>{{ edgeStatusLabel(enterpriseEdge.summary.connectionStatus) }}</strong></span>
                 <span><small>最近心跳</small><strong>{{ formatTimestamp(enterpriseEdge.summary.lastSeenAt) }}</strong></span>
               </div>
+              <div class="form-grid">
+                <t-form-item label="经营数据来源标识"><t-input v-model="bindingSourceID" placeholder="部署时配置的来源标识" /></t-form-item>
+                <p class="hint">{{ enterpriseEdge.binding.enabled ? '经营数据连接已启用' : enterpriseEdge.binding.source_id ? '连接准备完成，确认后可查询' : '经营数据连接未启用' }}。准备新连接会立即停用旧连接。</p>
+              </div>
               <div v-if="enterpriseEdge.nodes.length" class="table-scroll">
                 <table>
-                  <thead><tr><th>节点</th><th>状态</th><th>版本</th><th>Catalog</th><th>数据服务</th><th>最近心跳</th></tr></thead>
+                  <thead><tr><th>节点</th><th>状态</th><th>版本</th><th>Catalog</th><th>数据服务</th><th>最近心跳</th><th>操作</th></tr></thead>
                   <tbody>
                     <tr v-for="node in enterpriseEdge.nodes" :key="node.edgeNodeId">
                       <td><strong>{{ node.displayName || node.edgeNodeId }}</strong><small>{{ node.edgeNodeId }}</small></td>
@@ -117,6 +122,11 @@
                       <td>{{ node.catalogVersion || '未发布' }}</td>
                       <td>{{ dataServiceStatusLabel(node.dataServiceStatus) }}</td>
                       <td>{{ formatTimestamp(node.lastSeenAt) }}</td>
+                      <td class="actions">
+                        <t-button size="small" variant="text" :disabled="edgeMutating || node.status === 'disabled' || !selected.analysis_enabled || !bindingSourceID.trim()" @click="prepareBinding(node)">准备连接</t-button>
+                        <t-button v-if="!enterpriseEdge.binding.enabled && enterpriseEdge.binding.source_id && enterpriseEdge.binding.edge_node_id === node.edgeNodeId" size="small" variant="text" :disabled="edgeMutating || node.status === 'disabled'" @click="confirmBinding()">确认启用</t-button>
+                        <t-button size="small" variant="text" theme="danger" :disabled="edgeMutating" @click="disableNode(node)">{{ node.status === 'disabled' ? '重试停用通知' : '停用节点' }}</t-button>
+                      </td>
                     </tr>
                   </tbody>
                 </table>
@@ -261,8 +271,9 @@ import {
   getInitialAdministratorCommand,
   getOperationsEnterprise, getOperationsEnterpriseEdge, listOperationsEnterprises, listOperationsMembers,
   resetOperationsMemberPassword, rotateOperationsEnrollmentToken,
+  prepareOperationsBinding, confirmOperationsBinding, disableOperationsNode,
   updateOperationsEnterprise, updateOperationsMemberRole, updateOperationsMemberStatus,
-  type EnterpriseActivation, type OperationsEnterprise, type OperationsEnterpriseEdge, type OperationsMember,
+  type EnterpriseActivation, type OperationsEnterprise, type OperationsEnterpriseEdge, type OperationsMember, type OperationsEdgeNode,
 } from '@/api/platformOperations'
 import {
   activationPayload,
@@ -293,6 +304,7 @@ const creationOpen = ref(false), employeeOpen = ref(false), passwordOpen = ref(f
 const passwordTarget = ref<OperationsMember>(), newPassword = ref(''), errorMessage = ref('')
 const passwordResetNotice = ref('')
 const edgeErrorMessage = ref(''), enrollmentToken = ref('')
+const bindingSourceID = ref(''), edgeMutating = ref(false)
 const suggestedEdgeNodeID = computed(() => {
   const source = String(selected.value?.name || selected.value?.id || 'enterprise').trim().toLowerCase()
   const slug = source.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
@@ -324,7 +336,7 @@ const memberActionsUnavailableReason = computed(() => {
   if (selected.value?.status === 'activation_abandoned') return '企业开通已放弃，成员角色、状态和密码操作不可用。'
   return ''
 })
-const editEnterprise = reactive<{ name: string; description: string; status: OperationsEnterprise['status']; seats_total: number | null; storage_quota_gib: number }>({ name: '', description: '', status: 'active', seats_total: null, storage_quota_gib: 10 })
+const editEnterprise = reactive<{ name: string; description: string; status: OperationsEnterprise['status']; analysis_enabled: boolean; seats_total: number | null; storage_quota_gib: number }>({ name: '', description: '', status: 'active', analysis_enabled: false, seats_total: null, storage_quota_gib: 10 })
 const creation = reactive(freshEnterpriseCreationDraft())
 const employee = reactive({ username: '', email: '', password: '' })
 
@@ -348,6 +360,7 @@ function dataServiceStatusLabel(status: Record<string, unknown>) {
   return { available: '可用', degraded: '异常', unavailable: '不可用' }[value] || '未知'
 }
 function edgeErrorText(error: any) {
+  if (error?.message === 'edge_node_disabled_projection_pending') return '节点已停用，Platform 撤权尚未确认。请重试停用通知。'
   if (error?.message === 'enterprise_binding_not_found') return '企业尚未完成边缘服务绑定，完成开通后即可接入节点。'
   if (error?.status === 503) return '节点服务暂不可用，请稍后刷新。'
   return error?.message || '节点信息暂不可用'
@@ -398,6 +411,7 @@ async function selectEnterprise(enterprise: OperationsEnterprise) {
   enterpriseEdge.value = undefined
   edgeErrorMessage.value = ''
   enrollmentToken.value = ''
+  bindingSourceID.value = ''
   const detailPromise = getOperationsEnterprise(selectedID).then((detail) => {
     if (selected.value?.id !== selectedID) return
     selected.value = detail
@@ -413,7 +427,10 @@ async function loadEnterpriseEdge() {
   edgeErrorMessage.value = ''
   try {
     const result = await getOperationsEnterpriseEdge(tenantID)
-    if (selected.value?.id === tenantID) enterpriseEdge.value = result
+    if (selected.value?.id === tenantID) {
+      enterpriseEdge.value = result
+      if (!bindingSourceID.value) bindingSourceID.value = result.binding.source_id
+    }
   } catch (error: any) {
     if (selected.value?.id === tenantID) {
       enterpriseEdge.value = undefined
@@ -422,6 +439,41 @@ async function loadEnterpriseEdge() {
   } finally {
     if (selected.value?.id === tenantID) loadingEdge.value = false
   }
+}
+
+async function mutateEdge(action: (tenantID: number) => Promise<unknown>) {
+  if (!selected.value || edgeMutating.value) return
+  const tenantID = selected.value.id
+  edgeMutating.value = true
+  edgeErrorMessage.value = ''
+  let failure = ''
+  try { await action(tenantID) } catch (error) { failure = edgeErrorText(error) }
+  finally {
+    if (selected.value?.id === tenantID) {
+      await loadEnterpriseEdge()
+      if (failure) edgeErrorMessage.value = failure
+    }
+    edgeMutating.value = false
+  }
+}
+async function prepareBinding(node: OperationsEdgeNode) {
+  const binding = enterpriseEdge.value?.binding
+  if (!binding || !bindingSourceID.value.trim()) return
+  await mutateEdge(tenantID => prepareOperationsBinding(tenantID, {
+    expectedRevision: binding.revision, edgeNodeId: node.edgeNodeId,
+    sourceId: bindingSourceID.value.trim(), deploymentRevision: node.controlRevision,
+  }))
+}
+async function confirmBinding() {
+  const binding = enterpriseEdge.value?.binding
+  if (!binding || binding.enabled || !binding.source_id) return
+  await mutateEdge(tenantID => confirmOperationsBinding(tenantID, {
+    expectedRevision: binding.revision, edgeNodeId: binding.edge_node_id,
+    sourceId: binding.source_id, deploymentRevision: binding.deployment_revision,
+  }))
+}
+async function disableNode(node: OperationsEdgeNode) {
+  await mutateEdge(tenantID => disableOperationsNode(tenantID, node.edgeNodeId))
 }
 
 async function rotateEnrollmentToken() {

@@ -104,6 +104,7 @@ export function createOperatingBriefController(
   let launchIntent = 0
   let launchStarted = false
   let handoffController: AbortController | null = null
+	let refreshController: AbortController | null = null
 
   function clearPendingPollTimer() {
     if (pendingPollTimer === null) return
@@ -121,6 +122,11 @@ export function createOperatingBriefController(
     state.pending = null
   }
 
+	function cancelRefresh() {
+		refreshController?.abort()
+		refreshController = null
+	}
+
   function ownsRequest(request: ActiveBriefRequest): boolean {
     return !disposed
       && !request.controller.signal.aborted
@@ -131,9 +137,7 @@ export function createOperatingBriefController(
     return Boolean(
       active
       && visible
-      && brief?.displayState === 'preparing'
-      && brief.weeklyCore.status === 'preparing'
-      && brief.weeklyCore.pollable,
+		&& brief?.weeklyCore.pollable,
     )
   }
 
@@ -209,8 +213,24 @@ export function createOperatingBriefController(
   }
 
   return {
-    refresh() {
+	async refresh() {
       if (!active || state.launching) return Promise.resolve()
+		cancelRefresh()
+		const controller = new AbortController()
+		const generation = ownerGeneration
+		refreshController = controller
+		state.loading = true
+		state.error = ''
+		try {
+			await options.source.refreshOperatingBrief(state.selectedScopeRef, controller.signal)
+		} catch (error) {
+			if (!isAbort(error) && generation === ownerGeneration) state.error = operatingBriefErrorText(error)
+			return
+		} finally {
+			if (refreshController === controller) refreshController = null
+			if (generation === ownerGeneration) state.loading = false
+		}
+		if (disposed || controller.signal.aborted || generation !== ownerGeneration) return
       return load(state.selectedScopeRef, { resetPolling: true })
     },
 
@@ -221,6 +241,7 @@ export function createOperatingBriefController(
 
     resetIdentity() {
       clearPendingPollTimer()
+		cancelRefresh()
       activeRequest?.controller.abort()
       activeRequest = null
       requestSequence += 1
@@ -239,6 +260,7 @@ export function createOperatingBriefController(
       active = nextActive
       invalidateLaunch()
       if (!active) {
+			cancelRefresh()
         pausePollingRequest()
         return
       }
@@ -318,6 +340,7 @@ export function createOperatingBriefController(
     dispose() {
       if (disposed) return
       disposed = true
+		cancelRefresh()
       active = false
       clearPendingPollTimer()
       activeRequest?.controller.abort()

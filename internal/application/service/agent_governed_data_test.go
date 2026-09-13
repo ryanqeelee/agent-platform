@@ -30,6 +30,16 @@ func (r *governedTestResolver) Resolve(_ context.Context, tenant uint64) (types.
 	return r.connection, nil
 }
 
+func (r *governedTestResolver) VerifyCandidate(context.Context, types.GovernedEdgeBinding) error {
+	return nil
+}
+
+type governedTestTenants struct{ interfaces.TenantService }
+
+func (governedTestTenants) GetTenantByID(context.Context, uint64) (*types.Tenant, error) {
+	return &types.Tenant{ID: 10001, Status: types.TenantStatusActive, AnalysisEnabled: true}, nil
+}
+
 type governedTestMembers struct {
 	interfaces.TenantMemberService
 	allowed bool
@@ -52,7 +62,8 @@ func TestGovernedDataRegistrationUsesCurrentUser(t *testing.T) {
 	defer edge.Close()
 	members := &governedTestMembers{allowed: true}
 	resolver := &governedTestResolver{connection: types.GovernedEdgeConnection{EnterpriseID: "enterprise", EdgeNodeID: "edge", SourceID: "retail", BaseURL: edge.URL, Token: "edge-secret"}}
-	s := &agentService{userService: governedTestUsers{}, tenantMemberService: members, governedEdgeResolver: resolver}
+	tenants := governedTestTenants{}
+	s := &agentService{userService: governedTestUsers{}, tenantMemberService: members, tenantService: tenants, governedEdgeResolver: resolver}
 	ctx := operatingReadContext("user-a", 10001)
 	bound := types.WithGovernedDataUserCredential(ctx, "user-jwt")
 	selected := &types.AgentConfig{AllowedTools: []string{tools.ToolGovernedDataSchema, tools.ToolGovernedDataQuery}, EmployeeAssistant: true}
@@ -82,7 +93,7 @@ func TestGovernedDataRegistrationUsesCurrentUser(t *testing.T) {
 	}
 	require.Equal(t, 1, calls)
 	members.allowed = false
-	_, err := AuthorizeGovernedData(bound, governedTestUsers{}, members, resolver)
+	_, err := AuthorizeGovernedData(bound, governedTestUsers{}, members, tenants, resolver)
 	require.ErrorIs(t, err, tools.ErrGovernedDataAccessDenied)
 	members.allowed = true
 	registry := tools.NewToolRegistry()

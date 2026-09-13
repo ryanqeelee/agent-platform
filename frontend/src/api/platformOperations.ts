@@ -14,6 +14,7 @@ export interface OperationsEnterprise {
   name: string
   description: string
   status: 'active' | 'suspended' | 'provisioning' | 'activation_abandoned'
+  analysis_enabled: boolean
   seats_total: number | null
   seats_used: number
   storage_quota: number
@@ -22,7 +23,7 @@ export interface OperationsEnterprise {
 
 export type EnterpriseUpdatePayload = Pick<
   OperationsEnterprise,
-  'name' | 'description' | 'status' | 'seats_total' | 'storage_quota'
+  'name' | 'description' | 'status' | 'analysis_enabled' | 'seats_total' | 'storage_quota'
 >
 
 export interface OperationsMember {
@@ -38,10 +39,28 @@ export interface OperationsEdgeNode {
   displayName: string
   version: string
   status: 'online' | 'offline' | 'disabled'
+  controlRevision: number
   catalogVersion: string | null
   dataServiceStatus: Record<string, unknown>
   registeredAt: string | null
   lastSeenAt: string | null
+}
+
+export interface OperationsBinding {
+  binding_id: string
+  enterprise_id: string
+  edge_node_id: string
+  source_id: string
+  revision: number
+  deployment_revision: number
+  enabled: boolean
+}
+
+export interface EdgeBindingCommand {
+  expectedRevision: number
+  edgeNodeId: string
+  sourceId: string
+  deploymentRevision: number
 }
 
 export interface OperationsEnterpriseEdge {
@@ -49,6 +68,7 @@ export interface OperationsEnterpriseEdge {
   productBaseTenantId: string
   enterpriseId: string
   bindingId: string
+  binding: OperationsBinding
   summary: {
     connectionStatus: 'online' | 'offline' | 'disabled' | 'not_connected'
     policyStatus: string
@@ -144,6 +164,15 @@ export const resetOperationsMemberPassword = (tenantId: number, userId: string, 
 
 export const getOperationsEnterpriseEdge = (tenantId: number) =>
   get<OperationsResponse<OperationsEnterpriseEdge>>(`${base}/enterprises/${tenantId}/edge`).then(unwrapOperationsData)
+
+export const prepareOperationsBinding = (tenantId: number, payload: EdgeBindingCommand) =>
+  post<OperationsResponse<OperationsBinding>>(`${base}/enterprises/${tenantId}/edge-binding/prepare`, payload).then(unwrapOperationsData)
+
+export const confirmOperationsBinding = (tenantId: number, payload: EdgeBindingCommand) =>
+  post<OperationsResponse<OperationsBinding>>(`${base}/enterprises/${tenantId}/edge-binding/confirm`, payload).then(unwrapOperationsData)
+
+export const disableOperationsNode = (tenantId: number, nodeId: string) =>
+  post<OperationsResponse<unknown>>(`${base}/enterprises/${tenantId}/edge/nodes/${encodeURIComponent(nodeId)}/disable`).then(unwrapOperationsData)
 
 export const rotateOperationsEnrollmentToken = (tenantId: number) =>
   post<OperationsResponse<OperationsEnrollmentToken>>(`${base}/enterprises/${tenantId}/edge-enrollment-token/rotate`).then(unwrapOperationsData)

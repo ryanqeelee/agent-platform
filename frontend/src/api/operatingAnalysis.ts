@@ -13,32 +13,21 @@ export interface OperatingAnalysisAvailabilityV1 {
   }
 }
 
-export interface OperatingAnalysisExchangeV1 {
-  access_token: string
-  expires_in: number
-}
-
 export interface OperatingAnalysisHandoffV1 {
   schema: 'OperatingAnalysisHandoffV1'
   handoffRef: string
   expiresAt: string
 }
 
-export interface OperatingAnalysisHandoffExchangeV1 extends OperatingAnalysisExchangeV1 {
-  handoff: {
-    schema: 'OperatingAnalysisHandoffV1'
-    question: string
-  }
+export interface OperatingAnalysisHandoffConsumedV1 {
+  schema: 'OperatingAnalysisHandoffV1'
+  question: string
 }
 
 export const OPERATING_ANALYSIS_HANDOFF_REF_KEY = 'operating_analysis_handoff_ref_v1'
 export const OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY = 'operating_analysis_handoff_prompt_v1'
 export async function getOperatingAnalysisAvailability(): Promise<OperatingAnalysisAvailabilityV1> {
-  return (await get('/api/auth/operating-analysis-availability')) as unknown as OperatingAnalysisAvailabilityV1
-}
-
-export async function exchangeOperatingAnalysis(signal?: AbortSignal): Promise<OperatingAnalysisExchangeV1> {
-  return (await post('/api/auth/weknora-exchange', {}, signal ? { signal } : undefined)) as unknown as OperatingAnalysisExchangeV1
+  return (await get('/api/v1/operating-analysis-availability')) as unknown as OperatingAnalysisAvailabilityV1
 }
 
 export async function createOperatingAnalysisHandoff(
@@ -53,6 +42,6 @@ export async function createOperatingAnalysisHandoff(
 
 export async function consumeOperatingAnalysisHandoff(
   handoffRef: string,
-): Promise<OperatingAnalysisHandoffExchangeV1> {
-  return (await post(`/api/auth/operating-analysis-handoffs/${encodeURIComponent(handoffRef)}/consume`)) as unknown as OperatingAnalysisHandoffExchangeV1
+): Promise<OperatingAnalysisHandoffConsumedV1> {
+  return (await post(`/api/v1/operating-analysis-handoffs/${encodeURIComponent(handoffRef)}/consume`)) as unknown as OperatingAnalysisHandoffConsumedV1
 }

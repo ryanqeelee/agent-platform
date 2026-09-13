@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -78,6 +79,8 @@ type operatingAnalysisHandoffHandler struct {
 	store          *operatingAnalysisHandoffStore
 	sessionService interfaces.SessionService
 	messageService interfaces.MessageService
+	members        interfaces.TenantMemberService
+	tenants        interfaces.TenantService
 }
 
 type createOperatingAnalysisHandoffRequest struct {
@@ -87,6 +90,11 @@ type createOperatingAnalysisHandoffRequest struct {
 
 func (h *operatingAnalysisHandoffHandler) Create(c *gin.Context) {
 	ctx := c.Request.Context()
+	permission, permissionErr := service.CurrentOperatingAnalysisReadPermission(ctx, h.members, h.tenants)
+	if permissionErr != nil || !permission.Allowed() {
+		c.JSON(http.StatusForbidden, gin.H{"error": "operating analysis handoff not permitted"})
+		return
+	}
 	tenantID, actorID, ok := operatingAnalysisHandoffActor(ctx)
 	if !ok {
 		c.JSON(http.StatusForbidden, gin.H{"error": "operating analysis handoff not permitted"})
@@ -131,6 +139,11 @@ func (h *operatingAnalysisHandoffHandler) Create(c *gin.Context) {
 
 func (h *operatingAnalysisHandoffHandler) Consume(c *gin.Context) {
 	ctx := c.Request.Context()
+	permission, permissionErr := service.CurrentOperatingAnalysisReadPermission(ctx, h.members, h.tenants)
+	if permissionErr != nil || !permission.Allowed() {
+		c.JSON(http.StatusForbidden, gin.H{"error": "operating analysis handoff not permitted"})
+		return
+	}
 	tenantID, actorID, ok := operatingAnalysisHandoffActor(ctx)
 	if !ok {
 		c.JSON(http.StatusForbidden, gin.H{"error": "operating analysis handoff not permitted"})
@@ -156,11 +169,8 @@ func (h *operatingAnalysisHandoffHandler) Consume(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"schema":              "OperatingAnalysisHandoffV1",
-		"question":            message.Content,
-		"productBaseTenantId": value.TenantID,
-		"actorId":             value.ActorID,
-		"sourceSessionId":     value.SourceSessionID,
+		"schema":   "OperatingAnalysisHandoffV1",
+		"question": message.Content,
 	})
 }
 
@@ -189,12 +199,16 @@ func RegisterOperatingAnalysisHandoffRoutes(
 	rdb *redis.Client,
 	sessionService interfaces.SessionService,
 	messageService interfaces.MessageService,
+	members interfaces.TenantMemberService,
+	tenants interfaces.TenantService,
 	g *rbacGuards,
 ) {
 	handler := &operatingAnalysisHandoffHandler{
 		store:          &operatingAnalysisHandoffStore{rdb: rdb},
 		sessionService: sessionService,
 		messageService: messageService,
+		members:        members,
+		tenants:        tenants,
 	}
 	routes := r.Group("/operating-analysis-handoffs", g.Viewer())
 	routes.POST("", handler.Create)

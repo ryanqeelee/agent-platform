@@ -23,6 +23,12 @@ func (s operatingReadMembers) GetMembership(context.Context, string, uint64) (*t
 	return s.member, nil
 }
 
+type operatingReadTenants struct{ interfaces.TenantService }
+
+func (operatingReadTenants) GetTenantByID(context.Context, uint64) (*types.Tenant, error) {
+	return &types.Tenant{ID: 1, Status: types.TenantStatusActive, AnalysisEnabled: true}, nil
+}
+
 func operatingReadContext(userID string, tenantID uint64) context.Context {
 	ctx := context.WithValue(context.Background(), types.UserIDContextKey, userID)
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, tenantID)
@@ -40,8 +46,9 @@ func newOperatingReadFixture(t *testing.T, allowed bool) (*sessionService, *mess
 	}}
 	sessions := repository.NewSessionRepository(db)
 	messages := repository.NewMessageRepository(db)
-	return &sessionService{sessionRepo: sessions, messageRepo: messages, tenantMemberService: members},
-		&messageService{sessionRepo: sessions, messageRepo: messages, tenantMemberService: members},
+	tenants := operatingReadTenants{}
+	return &sessionService{sessionRepo: sessions, messageRepo: messages, tenantMemberService: members, tenantService: tenants},
+		&messageService{sessionRepo: sessions, messageRepo: messages, tenantMemberService: members, tenantService: tenants},
 		operatingReadContext("employee", 1), db
 }
 

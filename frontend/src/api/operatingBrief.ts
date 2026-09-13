@@ -126,11 +126,9 @@ export class OperatingBriefRequestError extends Error {
   }
 }
 
-type Exchange = (signal?: AbortSignal) => Promise<{ access_token: string; expires_in: number }>
 type Fetch = typeof globalThis.fetch
 
 interface OperatingBriefClientDependencies {
-  exchange: Exchange
   fetch: Fetch
   readPlatformCredentials: () => { token: string; tenantId: string }
   resolveBaseUrl?: () => string
@@ -138,6 +136,7 @@ interface OperatingBriefClientDependencies {
 
 export interface OperatingBriefClient {
   getOperatingBrief(scopeRef?: string | null, signal?: AbortSignal): Promise<OperatingBriefDTO>
+	refreshOperatingBrief(scopeRef?: string | null, signal?: AbortSignal): Promise<void>
   createOperatingBriefAnalysisHandoff(
     input: OperatingBriefAnalysisHandoffInput,
     signal?: AbortSignal,
@@ -166,21 +165,11 @@ export function createOperatingBriefClient(
 ): OperatingBriefClient {
   async function request<T>(path: string, init: RequestInit, signal?: AbortSignal): Promise<T> {
     abortIfNeeded(signal)
-    const exchange = await dependencies.exchange(signal)
-    abortIfNeeded(signal)
-    if (!exchange.access_token || exchange.expires_in !== 900) {
-      throw new Error('无法获取经营数据访问权限。')
-    }
-
-    // The Center token proves the exchanged identity. These live Platform
-    // credentials make Center revalidate the current actor and tenant on every
-    // read; the exchanged token is deliberately never written to browser storage.
     const platform = dependencies.readPlatformCredentials()
     const headers = new Headers(init.headers)
-    headers.set('authorization', `Bearer ${exchange.access_token}`)
+	if (platform.token) headers.set('authorization', `Bearer ${platform.token}`)
     if (platform.token && platform.tenantId) {
-      headers.set('x-platform-authorization', `Bearer ${platform.token}`)
-      headers.set('x-platform-tenant-id', platform.tenantId)
+		headers.set('x-tenant-id', platform.tenantId)
     }
 
     const response = await dependencies.fetch(`${dependencies.resolveBaseUrl?.() ?? ''}${path}`, {
@@ -197,17 +186,26 @@ export function createOperatingBriefClient(
     getOperatingBrief(scopeRef, signal) {
       const params = new URLSearchParams()
       if (scopeRef) params.set('scopeRef', scopeRef)
-      params.set('preparedOnly', 'true')
       return request<OperatingBriefDTO>(
-        `/api/agents/data/operating-brief?${params.toString()}`,
+		`/api/v1/operating-brief${params.size ? `?${params.toString()}` : ''}`,
         { method: 'GET' },
         signal,
       )
     },
 
+	async refreshOperatingBrief(scopeRef, signal) {
+		const params = new URLSearchParams()
+		if (scopeRef) params.set('scopeRef', scopeRef)
+		await request<void>(
+			`/api/v1/operating-brief/refresh${params.size ? `?${params.toString()}` : ''}`,
+			{ method: 'POST' },
+			signal,
+		)
+	},
+
     createOperatingBriefAnalysisHandoff(input, signal) {
       return request<OperatingBriefAnalysisHandoffDTO>(
-        '/api/agents/data/operating-brief/analysis-handoff',
+		'/api/v1/operating-brief/analysis-handoff',
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -226,10 +224,6 @@ export function createCurrentUserOperatingBriefClient(
   readPlatformCredentials: OperatingBriefClientDependencies['readPlatformCredentials'],
 ): OperatingBriefClient {
   return createOperatingBriefClient({
-  exchange: async signal => {
-    const { exchangeOperatingAnalysis } = await import('./operatingAnalysis')
-    return exchangeOperatingAnalysis(signal)
-  },
   fetch: (...args) => globalThis.fetch(...args),
   readPlatformCredentials,
   resolveBaseUrl: getApiBaseUrl,

@@ -44,6 +44,10 @@ func NewTenantService(
 	}
 }
 
+func NewEnterpriseActivationService(tenants interfaces.TenantService) interfaces.EnterpriseActivationService {
+	return tenants.(interfaces.EnterpriseActivationService)
+}
+
 // ApplyEnterpriseActivation validates the narrow platform command and lets the
 // repository own all cross-row concurrency and state-transition invariants.
 func (s *tenantService) ApplyEnterpriseActivation(
@@ -53,8 +57,19 @@ func (s *tenantService) ApplyEnterpriseActivation(
 	if command.ActivationID == "" || command.ActivationID != strings.TrimSpace(command.ActivationID) || len(command.ActivationID) > 128 {
 		return nil, werrors.NewBadRequestError("activation_id is invalid")
 	}
+	if command.ActorUserID == "" || command.ActorUserID != strings.TrimSpace(command.ActorUserID) || len(command.ActorUserID) > 128 {
+		return nil, werrors.NewBadRequestError("activation actor is invalid")
+	}
+	if !enterpriseActivationSHA256.MatchString(command.IdempotencyKeySHA256) {
+		return nil, werrors.NewBadRequestError("idempotency key digest must be 64 lowercase hexadecimal characters")
+	}
 	if !enterpriseActivationSHA256.MatchString(command.RequestSHA256) {
 		return nil, werrors.NewBadRequestError("requestSha256 must be 64 lowercase hexadecimal characters")
+	}
+	if command.AICapabilityPlanVersionID == "" ||
+		command.AICapabilityPlanVersionID != strings.TrimSpace(command.AICapabilityPlanVersionID) ||
+		len(command.AICapabilityPlanVersionID) > 128 {
+		return nil, werrors.NewBadRequestError("aiCapabilityPlanVersionId is invalid")
 	}
 	if command.TenantName == "" || strings.TrimSpace(command.TenantName) == "" || len(command.TenantName) > 128 {
 		return nil, werrors.NewBadRequestError("tenant.name is invalid")
@@ -85,6 +100,8 @@ func (s *tenantService) ApplyEnterpriseActivation(
 			return nil, errors.New("activation storage precondition returned no tenant")
 		}
 		if ensureErr := s.ensureActivationDefaultStorageBackend(ctx, result.TenantID); ensureErr != nil {
+			code := "storage_backend_unavailable"
+			_ = s.repo.SetEnterpriseActivationError(ctx, command.ActivationID, &code)
 			return nil, ensureErr
 		}
 		result, err = s.repo.ApplyEnterpriseActivation(ctx, command)
@@ -100,15 +117,27 @@ func (s *tenantService) ApplyEnterpriseActivation(
 	}
 	if result.State == types.EnterpriseActivationStatePrepared {
 		if err := s.ensureActivationDefaultStorageBackend(ctx, result.TenantID); err != nil {
+			code := "storage_backend_unavailable"
+			_ = s.repo.SetEnterpriseActivationError(ctx, command.ActivationID, &code)
 			return nil, err
 		}
 	}
 	if result.State != types.EnterpriseActivationStateAbandoned {
 		if _, err := s.webSearchProviderRepo.EnsureDefault(ctx, result.TenantID); err != nil {
+			code := "web_search_provider_unavailable"
+			_ = s.repo.SetEnterpriseActivationError(ctx, command.ActivationID, &code)
 			return nil, err
 		}
 	}
 	return result, nil
+}
+
+func (s *tenantService) GetEnterpriseActivation(ctx context.Context, activationID string) (*interfaces.EnterpriseActivationResult, error) {
+	activationID = strings.TrimSpace(activationID)
+	if activationID == "" || len(activationID) > 128 {
+		return nil, werrors.NewBadRequestError("activation_id is invalid")
+	}
+	return s.repo.GetEnterpriseActivation(ctx, activationID)
 }
 
 // CreateTenant creates a new tenant

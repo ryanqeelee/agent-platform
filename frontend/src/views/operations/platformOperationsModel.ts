@@ -8,6 +8,7 @@ export interface EnterpriseFormDraft {
   name: string
   description: string
   status: OperationsEnterprise['status']
+  analysis_enabled: boolean
   seats_total: number | null
   storage_quota_gib: number
 }
@@ -59,6 +60,7 @@ export function enterpriseFormDraft(enterprise: OperationsEnterprise): Enterpris
     name: enterprise.name,
     description: enterprise.description,
     status: enterprise.status,
+    analysis_enabled: enterprise.analysis_enabled,
     seats_total: enterprise.seats_total,
     storage_quota_gib: bytesToGiB(enterprise.storage_quota),
   }
@@ -71,6 +73,7 @@ export function enterpriseUpdatePayload(
     name: draft.name.trim(),
     description: draft.description.trim(),
     status: draft.status,
+    analysis_enabled: draft.analysis_enabled,
     seats_total: draft.seats_total == null ? null : Number(draft.seats_total),
     storage_quota: gibToBytes(draft.storage_quota_gib),
   }

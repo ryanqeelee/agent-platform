@@ -71,6 +71,13 @@ function employeeWorkspaceMinRole(to: RouteLocationNormalized) {
 
 async function admitNativeOperatingAnalysis(to: RouteLocationNormalized) {
   try {
+	const availability = await getOperatingAnalysisAvailability()
+	if (to.name === 'operatingAnalysisChat') {
+		return availability.availability.canReadHistory ? true : '/platform/creatChat'
+	}
+	if (availability.availability.state !== 'enabled' || !availability.availability.canExchange) {
+		return '/platform/creatChat'
+	}
     const handoffRef = sessionStorage.getItem(OPERATING_ANALYSIS_HANDOFF_REF_KEY)
     if (handoffRef && to.path === '/platform/operating-analysis') {
       sessionStorage.removeItem(OPERATING_ANALYSIS_HANDOFF_REF_KEY)
@@ -79,16 +86,13 @@ async function admitNativeOperatingAnalysis(to: RouteLocationNormalized) {
       const owner = currentOwner()
       const response = await consumeOperatingAnalysisHandoff(handoffRef)
       if (!sameOperatingPromptOwner(owner, currentOwner())) return '/platform/creatChat'
-      if (response.handoff?.schema !== 'OperatingAnalysisHandoffV1' || !response.handoff.question) {
+	  if (response.schema !== 'OperatingAnalysisHandoffV1' || !response.question) {
         return '/platform/creatChat'
       }
-      sessionStorage.setItem(OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY, JSON.stringify({ ...response.handoff, owner }))
+	  sessionStorage.setItem(OPERATING_ANALYSIS_HANDOFF_PROMPT_KEY, JSON.stringify({ ...response, owner }))
       return true
     }
-    const availability = await getOperatingAnalysisAvailability()
-    return availability.availability.state === 'enabled' && availability.availability.canExchange
-      ? true
-      : '/platform/creatChat'
+	return true
   } catch {
     return '/platform/creatChat'
   }

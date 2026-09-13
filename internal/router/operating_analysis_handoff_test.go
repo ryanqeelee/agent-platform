@@ -13,6 +13,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
+	"github.com/stretchr/testify/require"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -35,6 +36,24 @@ type handoffMessageService struct {
 	message *types.Message
 }
 
+type handoffTenantService struct{ interfaces.TenantService }
+
+func (handoffTenantService) GetTenantByID(_ context.Context, id uint64) (*types.Tenant, error) {
+	return &types.Tenant{ID: id, Status: types.TenantStatusActive, AnalysisEnabled: true}, nil
+}
+
+type handoffMemberService struct {
+	interfaces.TenantMemberService
+	allowed bool
+}
+
+func (s *handoffMemberService) GetMembership(_ context.Context, userID string, tenantID uint64) (*types.TenantMember, error) {
+	return &types.TenantMember{
+		UserID: userID, TenantID: tenantID, Status: types.TenantMemberStatusActive,
+		OperatingAnalysisAccess: s.allowed,
+	}, nil
+}
+
 func (s *handoffMessageService) GetMessage(_ context.Context, sessionID, id string) (*types.Message, error) {
 	if s.message == nil || s.message.SessionID != sessionID || s.message.ID != id {
 		return nil, context.Canceled
@@ -55,6 +74,8 @@ func handoffTestHandler(t *testing.T) (*operatingAnalysisHandoffHandler, *minire
 		messageService: &handoffMessageService{message: &types.Message{
 			ID: "message-1", SessionID: "session-1", Role: "user", Content: "分析本月门店销售变化",
 		}},
+		members: &handoffMemberService{allowed: true},
+		tenants: handoffTenantService{},
 	}, server
 }
 
@@ -73,12 +94,28 @@ func handoffRequest(
 	request.Header.Set("Content-Type", "application/json")
 	ctx := context.WithValue(request.Context(), types.TenantIDContextKey, tenantID)
 	ctx = context.WithValue(ctx, types.UserIDContextKey, actorID)
+	ctx = types.WithPrincipal(ctx, types.Principal{Type: types.PrincipalWebUser, ID: actorID})
 	c.Request = request.WithContext(ctx)
 	if target != "/" {
 		c.Params = gin.Params{{Key: "ref", Value: target}}
 	}
 	handler(c)
 	return recorder
+}
+
+func TestOperatingAnalysisHandoffConsumeRechecksCurrentMemberAccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler, _ := handoffTestHandler(t)
+	ref := createHandoff(t, handler)
+	members := handler.members.(*handoffMemberService)
+	members.allowed = false
+
+	denied := handoffRequest(t, http.MethodPost, ref, nil, 31, "user-1", handler.Consume)
+	require.Equal(t, http.StatusForbidden, denied.Code)
+
+	members.allowed = true
+	consumed := handoffRequest(t, http.MethodPost, ref, nil, 31, "user-1", handler.Consume)
+	require.Equal(t, http.StatusOK, consumed.Code)
 }
 
 func createHandoff(t *testing.T, handler *operatingAnalysisHandoffHandler) string {

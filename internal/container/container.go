@@ -76,8 +76,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/im/wechat"
 	"github.com/Tencent/WeKnora/internal/im/wecom"
 	"github.com/Tencent/WeKnora/internal/im/yunzhijia"
-	"github.com/Tencent/WeKnora/internal/infrastructure/capabilityplan"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
+	operatingbriefinfra "github.com/Tencent/WeKnora/internal/infrastructure/operatingbrief"
 	"github.com/Tencent/WeKnora/internal/infrastructure/operations"
 	infra_web_search "github.com/Tencent/WeKnora/internal/infrastructure/web_search"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -135,12 +135,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// External service clients
 	logger.Debugf(ctx, "[Container] Registering external service clients...")
 	must(container.Provide(initDocReaderClient))
-	must(container.Provide(capabilityplan.NewClientFromEnv))
-	must(container.Provide(capabilityplan.NewKnowledgeProcessingPlanResolverFromEnv))
-	must(container.Provide(capabilityplan.NewPlatformModelRuntimeSettingsResolverFromEnv))
-	must(container.Provide(capabilityplan.NewPlatformRetrievalProcessingSettingsResolverFromEnv))
-	must(container.Provide(capabilityplan.NewAssistantScenarioCapabilityResolverFromEnv))
-	must(container.Provide(capabilityplan.NewEnterpriseAdministrationQueueResolverFromEnv))
 	must(container.Provide(operations.NewClientFromEnv))
 	must(container.Provide(docparser.NewImageResolver))
 	must(container.Provide(initOllamaService))
@@ -172,6 +166,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewUserRepository))
 	must(container.Provide(repository.NewAuthTokenRepository))
 	must(container.Provide(repository.NewSystemSettingRepository))
+	must(container.Provide(repository.NewCapabilityPlanRepository))
 	must(container.Provide(neo4jRepo.NewNeo4jRepository))
 	must(container.Provide(repository.NewMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
@@ -193,6 +188,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewTenantMemoryConfigRepository))
 	must(container.Provide(repository.NewTaskPendingOpsRepository))
 	must(container.Provide(repository.NewTaskDeadLetterRepository))
+	must(container.Provide(repository.NewOperatingBriefRepository))
 
 	// MCP manager for managing MCP client connections
 	logger.Debugf(ctx, "[Container] Registering MCP manager...")
@@ -233,6 +229,15 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewEvaluationService))
 	must(container.Provide(service.NewUserService))
 	must(container.Provide(service.NewSystemSettingService))
+	must(container.Provide(service.NewCapabilityPlanService))
+	must(container.Provide(func(s *service.CapabilityPlanService) interfaces.AICapabilityPlanResolver { return s }))
+	must(container.Provide(func(s *service.CapabilityPlanService) interfaces.KnowledgeProcessingPlanResolver { return s }))
+	must(container.Provide(func(s *service.CapabilityPlanService) interfaces.PlatformModelRuntimeSettingsResolver { return s }))
+	must(container.Provide(func(s *service.CapabilityPlanService) interfaces.PlatformRetrievalProcessingSettingsResolver {
+		return s
+	}))
+	must(container.Provide(func(s *service.CapabilityPlanService) interfaces.AssistantScenarioCapabilityResolver { return s }))
+	must(container.Provide(func(s *service.CapabilityPlanService) interfaces.EnterpriseAdministrationQueueResolver { return s }))
 	must(container.Provide(func(
 		repo repository.TenantSandboxConfigRepository,
 		agents interfaces.CustomAgentRepository,
@@ -305,6 +310,10 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// Expose Gate as MCPApproval interface so AgentService and others can depend on the abstraction.
 	must(container.Provide(func(g *approval.Gate) approval.MCPApproval { return g }))
 	must(container.Provide(service.NewGovernedEdgeResolver))
+	must(container.Provide(operatingbriefinfra.NewClient))
+	must(container.Provide(service.NewOperatingBriefService))
+	must(container.Provide(service.NewGovernedEdgeBindingService))
+	must(container.Provide(service.NewEnterpriseActivationService))
 	must(container.Provide(service.NewAgentService))
 
 	// Session service (depends on agent service)
@@ -412,6 +421,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Registering HTTP handlers...")
 	must(container.Provide(handler.NewTenantHandler))
 	must(container.Provide(handler.NewAICapabilityPlanHandler))
+	must(container.Provide(handler.NewCapabilityPlanAdminHandler))
 	must(container.Provide(handler.NewTenantMemberHandler))
 	must(container.Provide(handler.NewKnowledgeGovernanceHandler))
 	must(container.Provide(handler.NewTenantInvitationHandler))
@@ -457,6 +467,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewOrganizationHandler))
 	must(container.Provide(handler.NewMemoryHandler))
 	must(container.Provide(handler.NewTenantMemoryConfigHandler))
+	must(container.Provide(handler.NewOperatingBriefHandler))
 
 	// Data source handler
 	must(container.Provide(handler.NewDataSourceHandler))

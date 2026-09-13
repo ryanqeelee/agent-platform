@@ -110,6 +110,6 @@ func (h *Handler) authorizeGovernedAgent(ctx context.Context, agent *types.Custo
 	if !agentRequiresGovernedAdmission(agent) {
 		return nil
 	}
-	_, err := service.AuthorizeGovernedData(ctx, h.userService, h.tenantMemberService, h.governedEdgeResolver)
+	_, err := service.AuthorizeGovernedData(ctx, h.userService, h.tenantMemberService, h.tenantService, h.governedEdgeResolver)
 	return err
 }

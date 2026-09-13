@@ -8,12 +8,12 @@
       </div>
       <div class="page-actions">
         <t-button variant="outline" @click="uiStore.openSettings('models')">模型配置</t-button>
-        <t-button variant="outline" :disabled="!selected" @click="openTenantSettings('sandbox')">沙箱配置</t-button>
-        <t-button variant="outline" :disabled="!selected" @click="openTenantSettings('skills')">技能管理</t-button>
+        <t-button variant="outline" @click="uiStore.openSettings('sandbox')">沙箱配置</t-button>
+        <t-button variant="outline" @click="uiStore.openSettings('skills')">技能管理</t-button>
         <t-button variant="outline" :disabled="!selected" @click="openTenantSettings('chathistory')">消息索引</t-button>
         <t-button variant="outline" :disabled="!selected" @click="openTenantSettings('memory-runtime')">记忆运行配置</t-button>
         <t-button theme="primary" @click="openCreationWizard">创建企业</t-button>
-        <small v-if="!selected" class="tenant-settings-hint">选择企业后可配置沙箱、技能和消息索引</small>
+        <small v-if="!selected" class="tenant-settings-hint">选择企业后可管理该企业的消息索引和记忆运行配置</small>
       </div>
     </header>
 
@@ -343,7 +343,7 @@ const creation = reactive(freshEnterpriseCreationDraft())
 const employee = reactive({ username: '', email: '', password: '' })
 
 function showError(error: any) { errorMessage.value = error?.message || '操作失败' }
-function openTenantSettings(section: 'sandbox' | 'skills' | 'chathistory' | 'memory-runtime') {
+function openTenantSettings(section: 'chathistory' | 'memory-runtime') {
   if (!selected.value) return
   uiStore.openSettings(section)
 }

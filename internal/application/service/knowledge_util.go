@@ -35,10 +35,11 @@ var supportedImportFileExtensions = map[string]struct{}{
 	"mp3": {}, "wav": {}, "m4a": {}, "flac": {}, "ogg": {},
 }
 
-// dataTableFileExtensions are the spreadsheet formats that get an extra
-// table-summary task after their document-process task.
+// dataTableFileExtensions are the tabular formats supported by the structured
+// SQL analysis path. Legacy XLS remains a supported document import, but
+// DuckDB's read_xlsx reader cannot load the binary XLS format.
 var dataTableFileExtensions = map[string]struct{}{
-	"csv": {}, "xlsx": {}, "xls": {},
+	"csv": {}, "xlsx": {},
 }
 
 // normalizeFileExtension lowercases an extension and strips a leading dot so
@@ -62,7 +63,8 @@ func isValidFileType(filename string) bool {
 	return isSupportedImportExtension(getFileType(filename))
 }
 
-// isDataTableFileType reports whether an extension is a spreadsheet format.
+// isDataTableFileType reports whether an extension supports structured SQL
+// analysis and therefore gets an extra table-summary task.
 func isDataTableFileType(ext string) bool {
 	_, ok := dataTableFileExtensions[normalizeFileExtension(ext)]
 	return ok

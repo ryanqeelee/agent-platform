@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -35,6 +36,22 @@ const excelSheetNameColumn = "__sheet_name"
 // embedded inside a single-quoted SQL literal.
 func sqlSingleQuoteEscape(s string) string {
 	return strings.ReplaceAll(s, "'", "''")
+}
+
+func validateDataAnalysisFileType(fileType string) error {
+	fileType = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(fileType)), ".")
+	if fileType == "csv" || fileType == "xlsx" {
+		return nil
+	}
+	if fileType == "xls" {
+		return errors.New(
+			"unsupported analytical file format .xls: legacy XLS can be parsed as document knowledge but structured SQL analysis requires XLSX; convert the file to .xlsx",
+		)
+	}
+	return fmt.Errorf(
+		"unsupported analytical file format %q: structured SQL analysis supports CSV and XLSX",
+		fileType,
+	)
 }
 
 func normalizeIdentifierForMatch(s string) string {
@@ -624,11 +641,13 @@ func (t *DataAnalysisTool) LoadFromKnowledge(ctx context.Context, knowledge *typ
 	}
 	tableName := t.TableName(knowledge)
 
-	// Normalize file type to lowercase for comparison
-	fileType := strings.ToLower(knowledge.FileType)
+	fileType := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(knowledge.FileType)), ".")
 
 	logger.Infof(ctx, "[Tool][DataAnalysis] Loading knowledge '%s' (type: %s) into table '%s' for session %s",
 		knowledge.ID, fileType, tableName, t.sessionID)
+	if err := validateDataAnalysisFileType(fileType); err != nil {
+		return nil, err
+	}
 
 	localPath, cleanup, err := t.materializeKnowledgeFile(ctx, knowledge)
 	if err != nil {
@@ -636,16 +655,10 @@ func (t *DataAnalysisTool) LoadFromKnowledge(ctx context.Context, knowledge *typ
 	}
 	defer cleanup()
 
-	switch fileType {
-	case "csv":
+	if fileType == "csv" {
 		return t.LoadFromCSV(ctx, localPath, tableName)
-	case "xlsx", "xls":
-		return t.LoadFromExcel(ctx, localPath, tableName)
-	default:
-		logger.Warnf(ctx, "[Tool][DataAnalysis] Unsupported file type '%s' for knowledge '%s' in session %s",
-			fileType, knowledge.ID, t.sessionID)
-		return nil, fmt.Errorf("unsupported file type: %s (supported types: csv, xlsx, xls)", fileType)
 	}
+	return t.LoadFromExcel(ctx, localPath, tableName)
 }
 
 // materializeKnowledgeFile copies the knowledge's backing blob into a fresh
@@ -755,8 +768,8 @@ func (t *DataAnalysisTool) loadFromSessionDocument(ctx context.Context, document
 	}
 
 	fileType := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(document.FileType)), ".")
-	if fileType != "csv" && fileType != "xlsx" && fileType != "xls" {
-		return nil, fmt.Errorf("unsupported session document type: %s (supported types: csv, xlsx, xls)", fileType)
+	if err := validateDataAnalysisFileType(fileType); err != nil {
+		return nil, fmt.Errorf("unsupported session document type: %w", err)
 	}
 
 	reader, _, err := t.temporaryDocuments.OpenFile(ctx, t.sessionDocumentTenant, t.sessionID, documentID)
@@ -774,14 +787,10 @@ func (t *DataAnalysisTool) loadFromSessionDocument(ctx context.Context, document
 	defer cleanup()
 
 	tableName := t.sessionDocumentTableName(documentID)
-	switch fileType {
-	case "csv":
+	if fileType == "csv" {
 		return t.LoadFromCSV(ctx, localPath, tableName)
-	case "xlsx", "xls":
-		return t.LoadFromExcel(ctx, localPath, tableName)
-	default:
-		return nil, fmt.Errorf("unsupported session document type: %s", fileType)
 	}
+	return t.LoadFromExcel(ctx, localPath, tableName)
 }
 
 func (t *DataAnalysisTool) materializeSessionDocumentFile(

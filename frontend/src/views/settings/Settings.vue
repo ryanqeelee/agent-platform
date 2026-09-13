@@ -15,7 +15,7 @@
             <div class="settings-sidebar">
               <div class="sidebar-header">
                 <h2 class="sidebar-title">{{ settingsTitle }}</h2>
-                <p v-if="settingsSurface === 'enterprise' || ['memory-runtime', 'chathistory', 'websearch', 'parser', 'mcp', 'vectorstore', 'storage', 'sandbox', 'skills'].includes(currentSection)"
+                <p v-if="settingsSurface === 'enterprise' || ['memory-runtime', 'chathistory'].includes(currentSection)"
                   class="settings-tenant">{{ tenantSettingsName }}</p>
               </div>
               <div class="settings-nav">
@@ -101,7 +101,7 @@
 
                   <!-- 网络搜索配置 -->
                   <div v-if="currentSection === 'websearch'" class="section">
-                    <WebSearchSettings :key="props.tenantControlId" />
+                    <WebSearchSettings />
                   </div>
 
                   <!-- 消息管理 -->
@@ -121,28 +121,28 @@
 
                   <!-- 向量数据库引擎 -->
                   <div v-if="currentSection === 'vectorstore'" class="section">
-                    <VectorStoreSettings :key="props.tenantControlId" />
+                    <VectorStoreSettings />
                   </div>
 
                   <!-- 解析引擎 -->
                   <div v-if="currentSection === 'parser'" class="section">
-                    <ParserEngineSettings :key="props.tenantControlId" />
+                    <ParserEngineSettings />
                   </div>
 
                   <!-- 存储引擎 -->
                   <div v-if="currentSection === 'storage'" class="section">
-                    <StorageEngineSettings :key="props.tenantControlId" />
+                    <StorageEngineSettings />
                   </div>
 
                   <!-- 沙箱 -->
                   <div v-if="currentSection === 'sandbox'" class="section">
-                    <SandboxSettings :key="props.tenantControlId" />
+                    <SandboxSettings />
                   </div>
 
                   <div v-if="currentSection === 'enterprise-skills'" class="section"><EnterpriseSkillSettings /></div>
                   <!-- 技能目录：登记后可装到多份沙箱，智能体只从当前沙箱的就绪集合选用 -->
                   <div v-if="currentSection === 'skills'" class="section">
-                    <SkillSettings :key="props.tenantControlId" :initial-sandbox-id="currentSubSection" />
+                    <SkillSettings :initial-sandbox-id="currentSubSection" />
                   </div>
 
                   <!-- 系统信息 -->
@@ -191,7 +191,7 @@
 
                   <!-- MCP 服务 -->
                   <div v-if="currentSection === 'mcp'" class="section">
-                    <McpSettings :key="props.tenantControlId" />
+                    <McpSettings />
                   </div>
                 </template>
               </div>
@@ -328,7 +328,7 @@ const canSeeSection = (key: string): boolean => {
     return authStore.hasRole(min)
   }
   if (SYSTEM_ADMIN_SECTIONS.has(key)) {
-    if (['sandbox', 'skills', 'chathistory', 'memory-runtime', 'websearch', 'parser', 'mcp', 'vectorstore', 'storage'].includes(key) && !props.tenantControlId) return false
+    if (['chathistory', 'memory-runtime'].includes(key) && !props.tenantControlId) return false
     return authStore.isSystemAdmin
   }
   const min = SETTINGS_SECTION_MIN_ROLE[key]
@@ -377,8 +377,7 @@ const navItems = computed(() => {
     ...integrationItems,
   ]
   // currentTenantRole 为空表示「membership 还没加载」。普通用户先不渲染
-  // 空间入口；tenantless SystemAdmin 仍须看到平台控制面以完成首个
-  // Platform API Key / 企业初始化。
+  // 空间入口；tenantless SystemAdmin 仍须看到平台配置与企业初始化入口。
   if (!authStore.currentTenantRole && !authStore.effectiveCrossTenantAccess && !authStore.isSystemAdmin) {
     return [] as NavItem[]
   }

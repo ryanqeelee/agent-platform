@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -22,6 +23,15 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 )
+
+var errUnsupportedAnalyticalFileType = errors.New("unsupported analytical file format")
+
+func tableSummaryPreparationError(err error) error {
+	if errors.Is(err, errUnsupportedAnalyticalFileType) {
+		return fmt.Errorf("%w: %w", asynq.SkipRetry, err)
+	}
+	return err
+}
 
 const (
 	// tableDescriptionPromptTemplate is the prompt template for generating table descriptions
@@ -475,7 +485,7 @@ func (s *DataTableSummaryService) Handle(ctx context.Context, t *asynq.Task) err
 	// 2. 准备所有必需的资源（知识、模型、引擎等）
 	resources, err := s.prepareResources(ctx, payload)
 	if err != nil {
-		return err
+		return tableSummaryPreparationError(err)
 	}
 
 	// 3. 加载表格数据并生成摘要
@@ -514,11 +524,21 @@ func (s *DataTableSummaryService) prepareResources(ctx context.Context, payload 
 		return nil, err
 	}
 
-	// 验证文件类型
-	fileType := strings.ToLower(knowledge.FileType)
-	if fileType != "csv" && fileType != "xlsx" && fileType != "xls" {
-		logger.Warnf(ctx, "knowledge %s is not a CSV or Excel file, skipping table summary", payload.KnowledgeID)
-		return nil, fmt.Errorf("unsupported file type: %s", fileType)
+	// Structured table analysis uses DuckDB readers. Legacy XLS can still be
+	// parsed by DocReader as ordinary knowledge, but read_xlsx only accepts XLSX.
+	fileType := normalizeFileExtension(knowledge.FileType)
+	if !isDataTableFileType(fileType) {
+		if fileType == "xls" {
+			return nil, fmt.Errorf(
+				"%w: legacy .xls is available as document knowledge but not for structured SQL analysis; convert the file to .xlsx",
+				errUnsupportedAnalyticalFileType,
+			)
+		}
+		return nil, fmt.Errorf(
+			"%w %q: structured SQL analysis supports .csv and .xlsx",
+			errUnsupportedAnalyticalFileType,
+			fileType,
+		)
 	}
 
 	// 获取空间信息

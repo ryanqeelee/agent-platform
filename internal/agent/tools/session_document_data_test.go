@@ -190,6 +190,15 @@ func TestDataAnalysisSessionDocumentRejectsInvalidLiveState(t *testing.T) {
 			}(),
 			wantError: "unsupported session document type",
 		},
+		{
+			name: "legacy xls", tenantID: 42, sessionID: "session-1",
+			document: func() *types.TemporaryDocument {
+				doc := readySessionCSV(42, "session-1")
+				doc.FileType = ".xls"
+				return doc
+			}(),
+			wantError: "convert the file to .xlsx",
+		},
 	}
 
 	for _, test := range tests {

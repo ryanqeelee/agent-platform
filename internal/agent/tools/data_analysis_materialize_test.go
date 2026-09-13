@@ -18,7 +18,8 @@ import (
 // materializeKnowledgeFile. Every method we don't care about simply errors
 // out so accidental usage is loud.
 type fakeFileService struct {
-	readers map[string]func() (io.ReadCloser, error)
+	readers      map[string]func() (io.ReadCloser, error)
+	getFileCalls []string
 }
 
 func (f *fakeFileService) CheckConnectivity(ctx context.Context) error { return nil }
@@ -29,12 +30,14 @@ func (f *fakeFileService) SaveBytes(ctx context.Context, _ []byte, _ uint64, _ s
 	return "", errors.New("not implemented in fake")
 }
 func (f *fakeFileService) GetFile(ctx context.Context, filePath string) (io.ReadCloser, error) {
+	f.getFileCalls = append(f.getFileCalls, filePath)
 	fn, ok := f.readers[filePath]
 	if !ok {
 		return nil, errors.New("unknown path: " + filePath)
 	}
 	return fn()
 }
+
 func (f *fakeFileService) GetFileURL(ctx context.Context, filePath string) (string, error) {
 	// Return a URL that DuckDB would NOT be able to open on its own; the
 	// production code must *not* pass this through to DuckDB.
@@ -43,6 +46,28 @@ func (f *fakeFileService) GetFileURL(ctx context.Context, filePath string) (stri
 func (f *fakeFileService) DeleteFile(ctx context.Context, _ string) error { return nil }
 func (f *fakeFileService) CopyFile(ctx context.Context, _ string, _ uint64, _ string) (string, error) {
 	return "", nil
+}
+
+func TestLoadFromKnowledgeRejectsLegacyXLSBeforeFileAccess(t *testing.T) {
+	fs := &fakeFileService{readers: map[string]func() (io.ReadCloser, error){}}
+	tool := &DataAnalysisTool{fileService: fs, sessionID: "test-legacy-xls"}
+
+	_, err := tool.LoadFromKnowledge(context.Background(), &types.Knowledge{
+		ID:       "legacy-xls",
+		FileType: "xls",
+		FilePath: "tenants/42/legacy.xls",
+	})
+	if err == nil {
+		t.Fatal("LoadFromKnowledge() succeeded for legacy XLS, want analytical format error")
+	}
+	for _, want := range []string{"unsupported analytical file format .xls", "convert the file to .xlsx"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("LoadFromKnowledge() error = %q, want substring %q", err, want)
+		}
+	}
+	if len(fs.getFileCalls) != 0 {
+		t.Fatalf("GetFile called before analytical format validation: %#v", fs.getFileCalls)
+	}
 }
 
 // TestMaterializeKnowledgeFile_HandlesLocalScheme is the regression guard

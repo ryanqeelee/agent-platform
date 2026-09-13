@@ -5,7 +5,6 @@
       <div class="section-header__top">
         <div>
           <h2>{{ $t('modelSettings.title') }}</h2>
-          <p class="section-description">{{ $t('modelSettings.description') }}</p>
         </div>
         <t-button
           v-if="authStore.isSystemAdmin"

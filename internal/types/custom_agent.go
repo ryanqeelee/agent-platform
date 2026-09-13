@@ -597,9 +597,46 @@ var builtinAgentIDsOrdered = []string{
 	BuiltinDocumentAssistantID,
 }
 
+// platformManagedBuiltinAgentIDsOrdered is the platform control-plane catalog.
+// It includes internal product definitions that are not shown in the employee
+// picker, but deliberately excludes the skill installer: that agent's fixed
+// identity is part of the privileged install trust boundary.
+var platformManagedBuiltinAgentIDsOrdered = []string{
+	BuiltinEmployeeAssistantID,
+	BuiltinQuickAnswerID,
+	BuiltinSmartReasoningID,
+	BuiltinDeepResearcherID,
+	BuiltinDataAnalystID,
+	BuiltinDataAnalysisBaseID,
+	BuiltinOperatingAnalystID,
+	BuiltinKnowledgeGraphExpertID,
+	BuiltinDocumentAssistantID,
+	BuiltinWikiResearcherID,
+	BuiltinWikiFixerID,
+}
+
 // GetBuiltinAgentIDs returns all built-in agent IDs in fixed order
 func GetBuiltinAgentIDs() []string {
 	return builtinAgentIDsOrdered
+}
+
+// GetPlatformManagedBuiltinAgentIDs returns the canonical platform-editable
+// built-in definitions in stable display order. Missing optional definitions
+// are filtered by callers through GetBuiltinAgentWithContext.
+func GetPlatformManagedBuiltinAgentIDs() []string {
+	return append([]string(nil), platformManagedBuiltinAgentIDsOrdered...)
+}
+
+// IsPlatformManagedBuiltinAgentID reports whether the platform agent control
+// plane owns this built-in definition. The skill installer is intentionally
+// false even though it remains registered for its dedicated runtime path.
+func IsPlatformManagedBuiltinAgentID(id string) bool {
+	for _, candidate := range platformManagedBuiltinAgentIDsOrdered {
+		if id == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 // IsBuiltinAgentID checks if the given ID is a built-in agent ID

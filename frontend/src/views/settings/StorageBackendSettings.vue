@@ -10,6 +10,9 @@
     </div>
 
     <PlatformRuntimeContext v-if="authStore.isSystemAdmin" context="retrieval" />
+    <t-alert v-if="loadError" theme="error" :message="loadError">
+      <template #operation><t-button size="small" @click="load">{{ t('common.retry') }}</t-button></template>
+    </t-alert>
 
     <t-loading :loading="loading" size="small" class="backend-list-loading">
       <t-empty
@@ -254,6 +257,7 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import PlatformRuntimeContext from './components/PlatformRuntimeContext.vue'
+import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 import { providerLogo } from './providerLogos'
 import {
   createStorageBackend, deleteStorageBackend, listStorageBackends, listStorageBackendTypes,
@@ -263,7 +267,9 @@ import {
 
 const { t } = useI18n()
 const authStore = useAuthStore()
+const platformTenantID = usePlatformTenantControlID()
 const loading = ref(false), saving = ref(false), testing = ref(false), visible = ref(false)
+const loadError = ref('')
 const backends = ref<StorageBackend[]>([]), providers = ref<string[]>([]), defaultID = ref('')
 const editing = ref<StorageBackend | null>(null)
 const rawTestResult = ref<'ok' | 'error' | null>(null)
@@ -330,10 +336,11 @@ function onCardClick(event: Event, backend: StorageBackend) {
 
 async function load() {
   loading.value = true
+  loadError.value = ''
   try {
-    const [list, types] = await Promise.all([listStorageBackends(), listStorageBackendTypes()])
+    const [list, types] = await Promise.all([listStorageBackends(platformTenantID.value), listStorageBackendTypes(platformTenantID.value)])
     backends.value = list.data || []; defaultID.value = list.default_storage_backend_id || ''; providers.value = types.data || []
-  } finally { loading.value = false }
+  } catch (e: any) { loadError.value = e?.message || t('common.loadFailed') } finally { loading.value = false }
 }
 function resetConfig() { form.config = blankConfig(); rawTestResult.value = null }
 function openCreate() { editing.value = null; form.name = ''; form.provider = providers.value[0] || 'local'; form.config = blankConfig(); rawTestResult.value = null; visible.value = true }
@@ -342,24 +349,24 @@ async function testRaw() {
   testing.value = true
   rawTestResult.value = null
   try {
-    const r: any = editing.value ? await testStorageBackendByID(editing.value.id) : await testStorageBackend(form)
+    const r: any = editing.value ? await testStorageBackendByID(editing.value.id, platformTenantID.value) : await testStorageBackend(form, platformTenantID.value)
     if (r.success) { rawTestResult.value = 'ok'; MessagePlugin.success(t('settings.storageBackend.testSuccess')) }
     else { rawTestResult.value = 'error'; MessagePlugin.error(r.error || t('settings.storageBackend.testFailed')) }
   } finally { testing.value = false }
 }
-async function testSaved(backend: StorageBackend) { const r: any = await testStorageBackendByID(backend.id); r.success ? MessagePlugin.success(t('settings.storageBackend.testSuccess')) : MessagePlugin.error(r.error || t('settings.storageBackend.testFailed')) }
+async function testSaved(backend: StorageBackend) { const r: any = await testStorageBackendByID(backend.id, platformTenantID.value); r.success ? MessagePlugin.success(t('settings.storageBackend.testSuccess')) : MessagePlugin.error(r.error || t('settings.storageBackend.testFailed')) }
 async function save() {
   if (!form.name.trim()) { MessagePlugin.warning(t('settings.storageBackend.nameRequired')); return }
   saving.value = true
   try {
     const payload = { name: form.name.trim(), provider: form.provider, config: { ...form.config } }
-    if (editing.value) await updateStorageBackend(editing.value.id, payload); else await createStorageBackend(payload)
+    if (editing.value) await updateStorageBackend(editing.value.id, payload, platformTenantID.value); else await createStorageBackend(payload, platformTenantID.value)
     MessagePlugin.success(t('settings.storageBackend.saveSuccess')); visible.value = false; await load()
   } catch (e: any) { MessagePlugin.error(e?.message || t('settings.storageBackend.saveFailed')) } finally { saving.value = false }
 }
-async function makeDefault(backend: StorageBackend) { await setDefaultStorageBackend(backend.id); defaultID.value = backend.id; MessagePlugin.success(t('settings.storageBackend.defaultUpdated')) }
+async function makeDefault(backend: StorageBackend) { await setDefaultStorageBackend(backend.id, platformTenantID.value); defaultID.value = backend.id; MessagePlugin.success(t('settings.storageBackend.defaultUpdated')) }
 function remove(backend: StorageBackend) {
-  const dialog = DialogPlugin.confirm({ header: t('settings.storageBackend.deleteTitle'), body: t('settings.storageBackend.deleteConfirm', { name: backend.name }), onConfirm: async () => { dialog.destroy(); try { await deleteStorageBackend(backend.id); await load(); MessagePlugin.success(t('settings.storageBackend.deleted')) } catch (e: any) { MessagePlugin.error(e?.message || t('settings.storageBackend.deleteFailed')) } }, onCancel: () => dialog.destroy() })
+  const dialog = DialogPlugin.confirm({ header: t('settings.storageBackend.deleteTitle'), body: t('settings.storageBackend.deleteConfirm', { name: backend.name }), onConfirm: async () => { dialog.destroy(); try { await deleteStorageBackend(backend.id, platformTenantID.value); await load(); MessagePlugin.success(t('settings.storageBackend.deleted')) } catch (e: any) { MessagePlugin.error(e?.message || t('settings.storageBackend.deleteFailed')) } }, onCancel: () => dialog.destroy() })
 }
 onMounted(load)
 </script>

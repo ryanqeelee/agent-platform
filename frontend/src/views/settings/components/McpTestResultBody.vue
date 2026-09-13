@@ -110,6 +110,7 @@ interface Props {
   /** When true, (re)loads approval flags. Lets the dialog gate the fetch on
    *  visibility; defaults to true for always-rendered inline usage. */
   active?: boolean
+  tenantId?: number
 }
 
 const props = withDefaults(defineProps<Props>(), { active: true })
@@ -130,7 +131,7 @@ const mergeApprovals = async () => {
     return
   }
   try {
-    const rows = await getMCPToolApprovals(props.serviceId)
+    const rows = await getMCPToolApprovals(props.serviceId, props.tenantId)
     const map = new Map(rows.map((r) => [r.tool_name, r.require_approval]))
     displayTools.value = tools.map((tool) => ({
       ...tool,
@@ -155,7 +156,7 @@ const onRequireApprovalChange = async (toolName: string, value: boolean) => {
   if (!props.serviceId) return
   approvalLoading.value = { ...approvalLoading.value, [toolName]: true }
   try {
-    await setMCPToolApproval(props.serviceId, toolName, value)
+    await setMCPToolApproval(props.serviceId, toolName, value, props.tenantId)
     displayTools.value = displayTools.value.map((x) =>
       x.name === toolName ? { ...x, require_approval: value } : x
     )

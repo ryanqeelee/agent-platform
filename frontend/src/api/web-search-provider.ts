@@ -1,4 +1,7 @@
 import { get, post, put, del } from '@/utils/request'
+import { platformTenantPath } from './platform-tenant-path'
+
+const basePath = (tenantId?: number) => tenantId === undefined ? '/api/v1/web-search-providers' : platformTenantPath(tenantId, 'web-search-providers')
 
 // WebSearchProviderEntity represents a configured web search provider instance
 export interface WebSearchProviderEntity {
@@ -52,33 +55,33 @@ export interface WebSearchProviderConfigField {
 }
 
 // Create a new web search provider
-export function createWebSearchProvider(data: Partial<WebSearchProviderEntity>) {
-  return post('/api/v1/web-search-providers', data)
+export function createWebSearchProvider(data: Partial<WebSearchProviderEntity>, tenantId?: number) {
+  return post(basePath(tenantId), data)
 }
 
 // List all web search providers for the current tenant
-export function listWebSearchProviders() {
-  return get('/api/v1/web-search-providers')
+export function listWebSearchProviders(tenantId?: number) {
+  return get(basePath(tenantId))
 }
 
 // Get a single web search provider by ID
-export function getWebSearchProvider(id: string) {
-  return get(`/api/v1/web-search-providers/${id}`)
+export function getWebSearchProvider(id: string, tenantId?: number) {
+  return get(`${basePath(tenantId)}/${id}`)
 }
 
 // Update an existing web search provider
-export function updateWebSearchProvider(id: string, data: Partial<WebSearchProviderEntity>) {
-  return put(`/api/v1/web-search-providers/${id}`, data)
+export function updateWebSearchProvider(id: string, data: Partial<WebSearchProviderEntity>, tenantId?: number) {
+  return put(`${basePath(tenantId)}/${id}`, data)
 }
 
 // Delete a web search provider
-export function deleteWebSearchProvider(id: string) {
-  return del(`/api/v1/web-search-providers/${id}`)
+export function deleteWebSearchProvider(id: string, tenantId?: number) {
+  return del(`${basePath(tenantId)}/${id}`)
 }
 
 // Get available provider types (for dynamic form rendering)
-export function listWebSearchProviderTypes(): Promise<WebSearchProviderTypeInfo[]> {
-  return get('/api/v1/web-search-providers/types').then((res: any) => {
+export function listWebSearchProviderTypes(tenantId?: number): Promise<WebSearchProviderTypeInfo[]> {
+  return get(`${basePath(tenantId)}/types`).then((res: any) => {
     if (res.success && res.data) {
       return res.data
     }
@@ -99,24 +102,26 @@ export interface WebSearchCredentialsResponse {
 export async function putWebSearchProviderCredentials(
   id: string,
   body: Partial<Record<WebSearchCredentialField, string>>,
+  tenantId?: number,
 ): Promise<WebSearchCredentialsResponse> {
-  const response: any = await put(`/api/v1/web-search-providers/${id}/credentials`, body)
+  const response: any = await put(`${basePath(tenantId)}/${id}/credentials`, body)
   return (response.data ?? response) as WebSearchCredentialsResponse
 }
 
 export async function deleteWebSearchProviderCredentialField(
   id: string,
   field: WebSearchCredentialField,
+  tenantId?: number,
 ): Promise<void> {
-  await del(`/api/v1/web-search-providers/${id}/credentials/${field}`)
+  await del(`${basePath(tenantId)}/${id}/credentials/${field}`)
 }
 
 // Test a web search provider connection.
 // If id is provided, tests the existing saved provider.
 // If data is provided, tests with raw credentials (no persistence).
-export function testWebSearchProvider(id?: string, data?: { provider: string; parameters: any }): Promise<any> {
+export function testWebSearchProvider(id?: string, data?: { provider: string; parameters: any }, tenantId?: number): Promise<any> {
   if (id) {
-    return post(`/api/v1/web-search-providers/${id}/test`, {})
+    return post(`${basePath(tenantId)}/${id}/test`, {})
   }
-  return post('/api/v1/web-search-providers/test', data || {})
+  return post(`${basePath(tenantId)}/test`, data || {})
 }

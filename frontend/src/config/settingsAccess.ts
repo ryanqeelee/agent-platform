@@ -59,15 +59,12 @@ export const SYSTEM_ADMIN_SETTINGS_SECTIONS = new Set([
   'websearch',
   'parser',
   'mcp',
-  'ollama',
-  'weknoracloud',
   'vectorstore',
   'storage',
   'sandbox',
   'skills',
   'system-global',
   'runtime-queues',
-  'platform-api-keys',
   'system-audit-log',
 ])
 

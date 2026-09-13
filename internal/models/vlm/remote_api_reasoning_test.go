@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/models/provider"
 	openai "github.com/sashabaranov/go-openai"
 )
 
@@ -209,6 +210,51 @@ func TestRemoteAPIVLMKeepsMaxTokensForNonReasoningModel(t *testing.T) {
 		t.Error("request is missing temperature")
 	} else if f, isFloat := got.(float64); !isFloat || math.Abs(f-float64(defaultTemp)) > 1e-6 {
 		t.Errorf("temperature = %v, want %v", got, defaultTemp)
+	}
+}
+
+func TestRemoteAPIVLMDisablesThinkingOnlyForAliyunQwen38Flash(t *testing.T) {
+	withVLMSSRFWhitelist(t, "127.0.0.1")
+
+	tests := []struct {
+		name                string
+		provider            string
+		model               string
+		wantReasoningEffort bool
+	}{
+		{name: "Aliyun qwen3.8-flash", provider: string(provider.ProviderAliyun), model: "qwen3.8-flash", wantReasoningEffort: true},
+		{name: "generic qwen3.8-flash", provider: string(provider.ProviderGeneric), model: "qwen3.8-flash"},
+		{name: "Aliyun future snapshot", provider: string(provider.ProviderAliyun), model: "qwen3.8-flash-2026-09-13"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var lastRequest map[string]interface{}
+			server := newVLMChatTestServer(t, &lastRequest)
+			defer server.Close()
+
+			v, err := NewRemoteAPIVLM(&Config{
+				BaseURL:   server.URL,
+				ModelName: tc.model,
+				APIKey:    "sk-test",
+				Provider:  tc.provider,
+			})
+			if err != nil {
+				t.Fatalf("NewRemoteAPIVLM: %v", err)
+			}
+			if _, err := v.Predict(t.Context(), [][]byte{testPNG}, "extract the text"); err != nil {
+				t.Fatalf("Predict: %v", err)
+			}
+
+			got, present := lastRequest["reasoning_effort"]
+			if tc.wantReasoningEffort {
+				if !present || got != "none" {
+					t.Errorf("reasoning_effort = %v, present=%v, want none", got, present)
+				}
+			} else if present {
+				t.Errorf("unexpected reasoning_effort = %v", got)
+			}
+		})
 	}
 }
 

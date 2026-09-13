@@ -1,4 +1,6 @@
 import { get, post, put, del } from '@/utils/request'
+import { platformTenantPath } from './platform-tenant-path'
+const basePath = (tenantId?: number) => tenantId === undefined ? '/api/v1/vector-stores' : platformTenantPath(tenantId, 'vector-stores')
 
 // ===== Types =====
 
@@ -43,32 +45,27 @@ export interface FieldSchema {
 
 // ===== API Functions =====
 
-export function listVectorStoreTypes(): Promise<VectorStoreTypeInfo[]> {
-  return get('/api/v1/vector-stores/types').then((res: any) => {
+export function listVectorStoreTypes(tenantId?: number): Promise<VectorStoreTypeInfo[]> {
+  return get(`${basePath(tenantId)}/types`).then((res: any) => {
     return res.success && res.data ? res.data : []
   })
 }
 
-export function listVectorStores(): Promise<{ success: boolean; data: VectorStoreEntity[] }> {
-  return get('/api/v1/vector-stores')
+export function listVectorStores(tenantId?: number): Promise<{ success: boolean; data: VectorStoreEntity[] }> {
+  return get(basePath(tenantId))
 }
 
-export function createVectorStore(data: Partial<VectorStoreEntity>) {
-  return post('/api/v1/vector-stores', data)
+export function createVectorStore(data: Partial<VectorStoreEntity>, tenantId?: number) { return post(basePath(tenantId), data)
 }
 
-export function updateVectorStore(id: string, data: Partial<VectorStoreEntity>) {
-  return put(`/api/v1/vector-stores/${id}`, data)
+export function updateVectorStore(id: string, data: Partial<VectorStoreEntity>, tenantId?: number) { return put(`${basePath(tenantId)}/${id}`, data)
 }
 
-export function deleteVectorStore(id: string) {
-  return del(`/api/v1/vector-stores/${id}`)
+export function deleteVectorStore(id: string, tenantId?: number) { return del(`${basePath(tenantId)}/${id}`)
 }
 
-export function testVectorStoreRaw(data: { engine_type: string; connection_config: any }): Promise<any> {
-  return post('/api/v1/vector-stores/test', data)
+export function testVectorStoreRaw(data: { engine_type: string; connection_config: any }, tenantId?: number): Promise<any> { return post(`${basePath(tenantId)}/test`, data)
 }
 
-export function testVectorStoreById(id: string): Promise<any> {
-  return post(`/api/v1/vector-stores/${id}/test`, {})
+export function testVectorStoreById(id: string, tenantId?: number): Promise<any> { return post(`${basePath(tenantId)}/${id}/test`, {})
 }

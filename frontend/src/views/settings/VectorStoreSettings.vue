@@ -6,6 +6,9 @@
     </div>
 
     <PlatformRuntimeContext v-if="authStore.isSystemAdmin" context="retrieval" />
+    <t-alert v-if="loadError" theme="error" :message="loadError">
+      <template #operation><t-button size="small" @click="loadAll">{{ t('common.retry') }}</t-button></template>
+    </t-alert>
 
     <!-- Loading -->
     <div v-if="loading" class="loading-container">
@@ -370,9 +373,11 @@ import { useAuthStore } from '@/stores/auth'
 import { providerLogo } from './providerLogos'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import PlatformRuntimeContext from './components/PlatformRuntimeContext.vue'
+import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
+const platformTenantID = usePlatformTenantControlID()
 
 // ===== State =====
 const stores = ref<VectorStoreEntity[]>([])
@@ -382,6 +387,7 @@ const showDialog = ref(false)
 const editingStore = ref<VectorStoreEntity | null>(null)
 const testing = ref(false)
 const saving = ref(false)
+const loadError = ref('')
 const showAdvanced = ref(false)
 const formRef = ref<any>()
 
@@ -588,19 +594,21 @@ const indexNumberTextProxy = new Proxy(indexNumberText, {
 
 const loadStores = async () => {
   try {
-    const response = await listVectorStores()
+    const response = await listVectorStores(platformTenantID.value)
     if (response.data && Array.isArray(response.data)) {
       stores.value = response.data
     }
   } catch (error) {
+    loadError.value = (error as any)?.message || t('common.loadFailed')
     console.error('Failed to load vector stores:', error)
   }
 }
 
 const loadStoreTypes = async () => {
   try {
-    storeTypes.value = await listVectorStoreTypes()
+    storeTypes.value = await listVectorStoreTypes(platformTenantID.value)
   } catch (error) {
+    loadError.value = (error as any)?.message || t('common.loadFailed')
     console.error('Failed to load vector store types:', error)
   }
 }
@@ -667,7 +675,7 @@ const onDrawerConfirm = async () => {
   saving.value = true
   try {
     if (editingStore.value) {
-      await updateVectorStore(editingStore.value.id!, { name: form.value.name.trim() })
+      await updateVectorStore(editingStore.value.id!, { name: form.value.name.trim() }, platformTenantID.value)
       MessagePlugin.success(t('vectorStoreSettings.toasts.storeUpdated'))
     } else {
       const data: Partial<VectorStoreEntity> = {
@@ -676,7 +684,7 @@ const onDrawerConfirm = async () => {
         connection_config: { ...form.value.connection_config },
         index_config: showAdvanced.value ? { ...form.value.index_config } : {},
       }
-      await createVectorStore(data)
+      await createVectorStore(data, platformTenantID.value)
       MessagePlugin.success(t('vectorStoreSettings.toasts.storeCreated'))
     }
     showDialog.value = false
@@ -710,7 +718,7 @@ const confirmDelete = (store: VectorStoreEntity) => {
     theme: 'warning',
     onConfirm: async () => {
       try {
-        await deleteVectorStoreAPI(store.id!)
+        await deleteVectorStoreAPI(store.id!, platformTenantID.value)
         MessagePlugin.success(t('vectorStoreSettings.toasts.storeDeleted'))
         await loadStores()
       } catch (error: any) {
@@ -731,7 +739,7 @@ const onDrawerTest = async () => {
       engine_type: form.value.engine_type,
       connection_config: { ...form.value.connection_config },
     }
-    const res = await testVectorStoreRaw(data)
+    const res = await testVectorStoreRaw(data, platformTenantID.value)
     lastTestOk.value = !!res.success
     if (res.success) {
       MessagePlugin.success(t('vectorStoreSettings.toasts.testSuccess'))
@@ -747,14 +755,16 @@ const onDrawerTest = async () => {
 }
 
 // ===== Init =====
-onMounted(async () => {
+const loadAll = async () => {
+  loadError.value = ''
   loading.value = true
   try {
     await Promise.all([loadStoreTypes(), loadStores()])
   } finally {
     loading.value = false
   }
-})
+}
+onMounted(loadAll)
 </script>
 
 <style lang="less" scoped>

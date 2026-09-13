@@ -42,8 +42,8 @@ type AliyunRerankInput struct {
 
 // AliyunRerankParameters contains parameters for the reranking request
 type AliyunRerankParameters struct {
-	ReturnDocuments bool `json:"return_documents"` // Whether to return documents in response
-	TopN            int  `json:"top_n"`            // Number of top results to return
+	ReturnDocuments bool `json:"return_documents,omitempty"` // Whether to return documents in response
+	TopN            int  `json:"top_n"`                      // Number of top results to return
 }
 
 // AliyunRerankResponse represents the response from Aliyun DashScope reranking request
@@ -104,7 +104,7 @@ func (r *AliyunReranker) Rerank(ctx context.Context, query string, documents []s
 			Documents: documents,
 		},
 		Parameters: AliyunRerankParameters{
-			ReturnDocuments: true,
+			ReturnDocuments: r.modelName != "qwen3.7-text-rerank",
 			TopN:            len(documents), // Return all documents
 		},
 	}

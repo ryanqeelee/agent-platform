@@ -10,8 +10,8 @@ import (
 // employeeAssistant resolves a platform-owned definition in the current tenant.
 // Saved presets cannot change its tool authority or bind another tenant's provider.
 func (s *customAgentService) employeeAssistant(ctx context.Context, tenantID uint64) (*types.CustomAgent, error) {
-	agent := types.GetBuiltinAgentWithContext(ctx, types.BuiltinEmployeeAssistantID, tenantID)
-	if agent == nil {
+	agent, err := s.platformBuiltinAgent(ctx, types.BuiltinEmployeeAssistantID, tenantID)
+	if err != nil {
 		return nil, fmt.Errorf("employee assistant definition is missing")
 	}
 	if s.scenarioCapabilities == nil {
@@ -21,10 +21,13 @@ func (s *customAgentService) employeeAssistant(ctx context.Context, tenantID uin
 	if err != nil || settings == nil {
 		return nil, ErrAssistantScenarioCapabilityUnavailable
 	}
+	platformSkillsMode := agent.Config.SkillsSelectionMode
+	if platformSkillsMode == "" {
+		platformSkillsMode = "all"
+	}
 	agent.Config.SandboxConfigID = ""
-	agent.Config.SkillsSelectionMode = "none"
 	agent.Config.SelectedSkills = nil
-	if settings.Capabilities.Tools && s.sandboxConfigs != nil {
+	if platformSkillsMode != "none" && settings.Capabilities.Tools && s.sandboxConfigs != nil {
 		if s.provisionEmployeeSandbox != nil {
 			if err := s.provisionEmployeeSandbox(ctx, tenantID); err != nil {
 				return nil, err
@@ -43,12 +46,15 @@ func (s *customAgentService) employeeAssistant(ctx context.Context, tenantID uin
 				return nil, fmt.Errorf("employee assistant sandbox configuration is ambiguous or outside the workspace")
 			}
 			agent.Config.SandboxConfigID = config.ID
-			agent.Config.SkillsSelectionMode = "all"
+			agent.Config.SkillsSelectionMode = platformSkillsMode
 		}
+	}
+	if agent.Config.SandboxConfigID == "" {
+		agent.Config.SkillsSelectionMode = "none"
 	}
 	ready := false
 	agent.WebSearchReady = &ready
-	agent.Config.WebSearchEnabled = settings.Capabilities.ExternalSearch
+	agent.Config.WebSearchEnabled = agent.Config.WebSearchEnabled && settings.Capabilities.ExternalSearch
 	if agent.Config.WebSearchEnabled {
 		if s.webSearchProviders == nil {
 			return nil, ErrAssistantScenarioCapabilityUnavailable

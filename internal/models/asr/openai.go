@@ -141,10 +141,14 @@ func DetectAudioFormat(data []byte, fileName string) string {
 		if data[0] == 'R' && data[1] == 'I' && data[2] == 'F' && data[3] == 'F' {
 			return ".wav"
 		}
+		// WebM: EBML header
+		if data[0] == 0x1A && data[1] == 0x45 && data[2] == 0xDF && data[3] == 0xA3 {
+			return ".webm"
+		}
 	}
 	// M4A: check for ftyp box
 	if len(data) >= 8 && data[4] == 'f' && data[5] == 't' && data[6] == 'y' && data[7] == 'p' {
 		return ".m4a"
 	}
-	return ".mp3" // default
+	return ""
 }

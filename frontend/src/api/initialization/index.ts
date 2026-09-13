@@ -321,6 +321,7 @@ export function checkRemoteModel(modelConfig: {
     baseUrl: string;
     apiKey?: string;
     provider?: string;
+    modelType?: 'KnowledgeQA' | 'VLLM';
     // 编辑已存在模型时传 modelId，后端会自动从存储中带出 apiKey
     // （前端不再回显明文密钥，所以测试连接必须用这个回填路径）
     modelId?: string;
@@ -386,7 +387,7 @@ export function checkRerankModel(modelConfig: {
     });
 }
 
-// 检查 ASR 模型连接（通过 /v1/audio/transcriptions 端点测试）
+// 检查 ASR 模型连接（后端按 provider 选择协议）
 export function checkASRModel(modelConfig: {
     modelName: string;
     baseUrl: string;

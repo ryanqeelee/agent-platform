@@ -6,6 +6,11 @@
           <div v-if="editorInitializing" class="editor-initializing" role="status" :aria-label="$t('common.loading')">
             <t-loading size="medium" :text="$t('common.loading')" />
           </div>
+          <div v-else-if="dependencyLoadError" class="editor-initializing" role="alert">
+            <t-alert theme="error" :message="dependencyLoadError">
+              <template #operation><t-button size="small" @click="retryInitialization">{{ $t('common.retry') }}</t-button></template>
+            </t-alert>
+          </div>
           <!-- 关闭按钮 -->
           <button class="close-btn" @click="handleClose" :aria-label="$t('common.close')">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
@@ -63,7 +68,7 @@
 
                   <div class="settings-group">
                     <!-- 智能体 ID（用于 API 集成） -->
-                    <div v-if="editorMode === 'edit' && editorAgent?.id" class="setting-row">
+                    <div v-if="editorMode === 'edit' && editorAgent?.id && !isPlatformMode" class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.agentId') }}</label>
                         <p class="desc">{{ $t('agent.editor.agentIdDesc') }}</p>
@@ -82,7 +87,7 @@
                     </div>
 
                     <!-- 集成渠道状态（编辑模式，配置在集成中心） -->
-                    <div v-if="editorMode === 'edit' && editorAgent?.id" class="setting-row">
+                    <div v-if="editorMode === 'edit' && editorAgent?.id && !isPlatformMode" class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('integrations.agentEditor.label') }}</label>
                         <p class="desc">{{ isPostCreateSession ? $t('agent.editor.postCreateHint.integrationDesc') : $t('integrations.agentEditor.desc') }}</p>
@@ -243,7 +248,7 @@
                           <t-textarea ref="promptTextareaRef" v-model="formData.config.system_prompt"
                             :placeholder="systemPromptPlaceholder" :autosize="{ minRows: 10, maxRows: 25 }"
                             @input="handlePromptInput" class="system-prompt-textarea" />
-                          <PromptTemplateSelector type="agentSystemPrompt" position="corner"
+                          <PromptTemplateSelector type="agentSystemPrompt" position="corner" :scope="props.scope"
                             :hasKnowledgeBase="hasKnowledgeBase" @select="handleSystemPromptTemplateSelect"
                             @reset-default="handleAgentSystemPromptResetDefault" />
                         </div>
@@ -252,7 +257,7 @@
                           <t-textarea ref="promptTextareaRef" v-model="formData.config.system_prompt"
                             :placeholder="systemPromptPlaceholder" :autosize="{ minRows: 10, maxRows: 25 }"
                             @input="handlePromptInput" class="system-prompt-textarea" />
-                          <PromptTemplateSelector type="systemPrompt" position="corner"
+                          <PromptTemplateSelector type="systemPrompt" position="corner" :scope="props.scope"
                             :hasKnowledgeBase="hasKnowledgeBase" @select="handleSystemPromptTemplateSelect"
                             @reset-default="handleSystemPromptTemplateSelect" />
                         </div>
@@ -300,7 +305,7 @@
                           <t-textarea ref="contextTemplateTextareaRef" v-model="formData.config.context_template"
                             :placeholder="contextTemplatePlaceholder" :autosize="{ minRows: 8, maxRows: 20 }"
                             @input="handleContextTemplateInput" class="system-prompt-textarea" />
-                          <PromptTemplateSelector type="contextTemplate" position="corner"
+                          <PromptTemplateSelector type="contextTemplate" position="corner" :scope="props.scope"
                             :hasKnowledgeBase="hasKnowledgeBase" @select="handleContextTemplateSelect"
                             @reset-default="handleContextTemplateSelect" />
                         </div>
@@ -373,7 +378,7 @@
                                 :disabled="props.readOnly || !selectedIntent"
                                 :placeholder="currentIntentTemplate?.content || $t('agentEditor.intentPrompts.promptPlaceholder')"
                                 @input="handleIntentPromptInput" />
-                              <PromptTemplateSelector type="intentPrompt" position="corner" :intent-id="selectedIntent"
+                              <PromptTemplateSelector type="intentPrompt" position="corner" :intent-id="selectedIntent" :scope="props.scope"
                                 :show-template-picker="false" @reset-default="resetCurrentIntentPrompt" />
                             </div>
 
@@ -423,7 +428,7 @@
                             <t-textarea ref="rewriteSystemTextareaRef" v-model="formData.config.rewrite_prompt_system"
                               :placeholder="defaultRewritePromptSystem || $t('agent.editor.rewritePromptSystemPlaceholder')"
                               :autosize="{ minRows: 4, maxRows: 10 }" @input="handleRewriteSystemInput" />
-                            <PromptTemplateSelector type="rewrite" position="corner" @select="handleRewriteTemplateSelect"
+                            <PromptTemplateSelector type="rewrite" position="corner" :scope="props.scope" @select="handleRewriteTemplateSelect"
                               @reset-default="handleRewriteTemplateSelect" />
                           </div>
                           <Teleport to="body">
@@ -468,7 +473,7 @@
                             <t-textarea ref="rewriteUserTextareaRef" v-model="formData.config.rewrite_prompt_user"
                               :placeholder="defaultRewritePromptUser || $t('agent.editor.rewritePromptUserPlaceholder')"
                               :autosize="{ minRows: 4, maxRows: 10 }" @input="handleRewriteUserInput" />
-                            <PromptTemplateSelector type="rewrite" position="corner" @select="handleRewriteTemplateSelect"
+                            <PromptTemplateSelector type="rewrite" position="corner" :scope="props.scope" @select="handleRewriteTemplateSelect"
                               @reset-default="handleRewriteTemplateSelect" />
                           </div>
                           <Teleport to="body">
@@ -519,7 +524,7 @@
                             <t-textarea v-model="formData.config.fallback_response"
                               :placeholder="defaultFallbackResponse || $t('agent.editor.fallbackResponsePlaceholder')"
                               :autosize="{ minRows: 2, maxRows: 6 }" />
-                            <PromptTemplateSelector type="fallback" position="corner" fallbackMode="fixed"
+                            <PromptTemplateSelector type="fallback" position="corner" fallbackMode="fixed" :scope="props.scope"
                               @select="handleFallbackResponseTemplateSelect"
                               @reset-default="handleFallbackResponseTemplateSelect" />
                           </div>
@@ -548,7 +553,7 @@
                             <t-textarea ref="fallbackPromptTextareaRef" v-model="formData.config.fallback_prompt"
                               :placeholder="defaultFallbackPrompt || $t('agent.editor.fallbackPromptPlaceholder')"
                               :autosize="{ minRows: 4, maxRows: 10 }" @input="handleFallbackPromptInput" />
-                            <PromptTemplateSelector type="fallback" position="corner" fallbackMode="model"
+                            <PromptTemplateSelector type="fallback" position="corner" fallbackMode="model" :scope="props.scope"
                               @select="handleFallbackPromptTemplateSelect"
                               @reset-default="handleFallbackPromptTemplateSelect" />
                           </div>
@@ -803,8 +808,8 @@
                       </div>
                     </div>
 
-                    <!-- 图片存储 Provider（图片上传启用时） -->
-                    <div v-if="authStore.isSystemAdmin && formData.config.image_upload_enabled" class="setting-row">
+                    <!-- 图片存储 Provider（企业运行时资源，平台定义不绑定） -->
+                    <div v-if="authStore.isSystemAdmin && !isPlatformMode && formData.config.image_upload_enabled" class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agentEditor.imageUpload.storageProvider') }}</label>
                         <p class="desc">{{ $t('agentEditor.imageUpload.storageProviderDesc') }}</p>
@@ -870,7 +875,7 @@
                     </div>
 
                     <!-- 聊天附件解析策略 -->
-                    <div v-if="authStore.isSystemAdmin" class="parser-policy-block">
+                    <div v-if="authStore.isSystemAdmin && !isPlatformMode" class="parser-policy-block">
                       <div class="parser-policy-block__header">
                         <label>{{ $t('agentEditor.chatParser.label') }}</label>
                         <p class="desc">{{ $t('agentEditor.chatParser.desc') }}</p>
@@ -1206,6 +1211,19 @@
                       </div>
                     </div>
 
+                    <div v-if="isPlatformMode" class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agent.editor.platformSkills') }}</label>
+                        <p class="desc">{{ $t('agent.editor.platformSkillsDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-radio-group v-model="formData.config.skills_selection_mode">
+                          <t-radio-button value="none">{{ $t('agent.editor.platformSkillsNone') }}</t-radio-button>
+                          <t-radio-button value="all">{{ $t('agent.editor.platformSkillsAll') }}</t-radio-button>
+                        </t-radio-group>
+                      </div>
+                    </div>
+
                     <!-- 有效工具预览：所见即所得 -->
                     <div class="setting-row setting-row-vertical">
                       <div class="setting-info">
@@ -1234,7 +1252,7 @@
                 </div>
 
                 <!-- MCP 服务配置（仅 Agent 模式） -->
-                <div v-if="canConfigureMCP" v-show="currentSection === 'mcp' && isAgentMode" class="section">
+                <div v-if="canConfigureMCP && !isPlatformMode" v-show="currentSection === 'mcp' && isAgentMode" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agentEditor.mcp.label') }}</h2>
                     <p class="section-description">{{ $t('agentEditor.mcp.desc') }}</p>
@@ -1286,7 +1304,7 @@
                 </div>
 
                 <!-- 知识库配置 -->
-                <div v-show="currentSection === 'knowledge'" class="section">
+                <div v-if="!isPlatformMode" v-show="currentSection === 'knowledge'" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agent.editor.knowledgeConfig') }}</h2>
                     <p class="section-description">{{ $t('agent.editor.knowledgeConfigDesc') }}</p>
@@ -1404,7 +1422,7 @@
                     </div>
 
                     <!-- 网络搜索最大结果数 -->
-                    <div v-if="authStore.isSystemAdmin && formData.config.web_search_enabled" class="setting-row">
+                    <div v-if="authStore.isSystemAdmin && !isPlatformMode && formData.config.web_search_enabled" class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.webSearchProvider') }}</label>
                         <p class="desc">{{ $t('agentEditor.desc.webSearchProvider') }}</p>
@@ -1600,7 +1618,7 @@
                 </div>
 
                 <!-- 共享管理（仅编辑模式且非内置智能体） -->
-                <div v-if="editorMode === 'edit' && editorAgent?.id && !editorAgent?.is_builtin && authStore.hasRole('admin')"
+                <div v-if="!isPlatformMode && editorMode === 'edit' && editorAgent?.id && !editorAgent?.is_builtin && authStore.hasRole('admin')"
                   v-show="currentSection === 'share'" class="section">
                   <AgentShareSettings :agent-id="editorAgent.id" :agent="editorAgent" />
                 </div>
@@ -1620,7 +1638,7 @@
                     $t('common.cancel')
                     }}</t-button>
                   <t-button v-if="!props.readOnly" theme="primary" data-guide="agent-create-submit" :loading="saving"
-                    :disabled="editorInitializing"
+                    :disabled="editorInitializing || !!dependencyLoadError"
                     @click="handleSave">{{
                     saveButtonLabel
                     }}</t-button>
@@ -1634,7 +1652,7 @@
   </Teleport>
 
 
-  <AgentCreateContextualGuide :when="visible && editorMode === 'create'" :is-agent-mode="isAgentMode" />
+  <AgentCreateContextualGuide :when="visible && editorMode === 'create' && !isPlatformMode" :is-agent-mode="isAgentMode" />
 </template>
 
 <script setup lang="ts">
@@ -1652,6 +1670,10 @@ import { MessagePlugin } from 'tdesign-vue-next';
 import {
   createAgent,
   updateAgent,
+  updatePlatformAgent,
+  getPlatformAgentPlaceholders,
+  getPlatformAgentTypePresets,
+  getPlatformAgentPromptTemplates,
   getAssistantScenarioCapabilities,
   listIMChannels,
   type CustomAgent,
@@ -1738,12 +1760,15 @@ const props = defineProps<{
   // wired here yet (the modal has 3000+ lines of form inputs); instead
   // we just remove the only mutation surface — the footer button.
   readOnly?: boolean;
+  scope?: 'tenant' | 'platform';
 }>();
 
 const emit = defineEmits<{
   (e: 'update:visible', visible: boolean): void;
   (e: 'success', agent?: CustomAgent): void;
 }>();
+
+const isPlatformMode = computed(() => props.scope === 'platform');
 
 /** 首次保存创建成功后留在弹窗内，用本地状态切换到编辑模式以展示 IM / 嵌入等入口 */
 const savedAgent = ref<CustomAgent | null>(null);
@@ -1848,6 +1873,7 @@ onBeforeUnmount(() => {
 
 const saving = ref(false);
 const editorInitializing = ref(false);
+const dependencyLoadError = ref('');
 const allModels = ref<ModelConfig[]>([]);
 const kbOptions = ref<{ label: string; value: string; type?: 'document' | 'faq'; count?: number; shared?: boolean; orgName?: string; ragEnabled?: boolean; wikiEnabled?: boolean; capabilities?: KBCapabilities }[]>([]);
 
@@ -2007,7 +2033,7 @@ const sharedKbOptions = computed(() => kbOptions.value.filter(kb => kb.shared));
 
 // 根据知识库配置动态计算是否有知识库能力
 const hasKnowledgeBase = computed(() => {
-  return kbSelectionMode.value !== 'none';
+  return isPlatformMode.value || kbSelectionMode.value !== 'none';
 });
 
 const showRerankModelField = computed(() => {
@@ -2089,6 +2115,9 @@ const missKindToReason = (kind: RequirementMissKind): string | undefined => {
 };
 
 const availableTools = computed(() => {
+  if (isPlatformMode.value) {
+    return allTools.value.map(tool => ({ ...tool, disabled: false, disabledReason: undefined }));
+  }
   const scope = scopeCapabilities.value;
   const hasAnyKb = hasKnowledgeBase.value;
   return allTools.value.map(tool => {
@@ -2251,8 +2280,10 @@ const navItems = computed(() => {
   }
   // 多轮对话（两种模式都需要：Agent 模式同样按 history_turns 截断历史）
   items.push({ key: 'conversation', icon: 'chat', label: t('agent.editor.conversationSettings') });
-  // 知识库与检索
-  items.push({ key: 'knowledge', icon: 'folder', label: t('agent.editor.knowledgeConfig') });
+  // 知识库绑定属于企业空间；平台定义只保留全局检索预算。
+  if (!isPlatformMode.value) {
+    items.push({ key: 'knowledge', icon: 'folder', label: t('agent.editor.knowledgeConfig') });
+  }
 
   if (authStore.isSystemAdmin) {
     if (hasKnowledgeBase.value) {
@@ -2266,11 +2297,11 @@ const navItems = computed(() => {
   if (isAgentMode.value && canConfigureTools.value) {
     items.push({ key: 'tools', icon: 'tools', label: t('agent.editor.toolsConfig') });
   }
-  if (isAgentMode.value && canConfigureMCP.value) {
+  if (isAgentMode.value && canConfigureMCP.value && !isPlatformMode.value) {
     items.push({ key: 'mcp', icon: 'server', label: t('agentEditor.mcp.label') });
   }
   // 发布（仅编辑模式）
-  if (editorMode.value === 'edit' && editorAgent.value?.id && !editorAgent.value?.is_builtin && !authStore.isLiteMode && authStore.hasRole('admin')) {
+  if (!isPlatformMode.value && editorMode.value === 'edit' && editorAgent.value?.id && !editorAgent.value?.is_builtin && !authStore.isLiteMode && authStore.hasRole('admin')) {
     items.push({ key: 'share', icon: 'share', label: t('knowledgeEditor.sidebar.share') });
   }
   return items;
@@ -2978,9 +3009,10 @@ const needsRerankModel = computed(() => {
 });
 
 let editorInitializationGeneration = 0;
+const editorRetryKey = ref(0);
 
 // 监听可见性变化，重置表单
-watch(() => props.visible, async (val) => {
+watch(() => [props.visible, editorRetryKey.value] as const, async ([val]) => {
   const generation = ++editorInitializationGeneration;
   if (val) {
     editorInitializing.value = true;
@@ -3068,7 +3100,9 @@ watch(() => props.visible, async (val) => {
       if (agentData.is_builtin) {
         fillBuiltinAgentDefaults();
       }
-      void loadAgentIntegrationCounts(agentData.id);
+      if (!isPlatformMode.value) {
+        void loadAgentIntegrationCounts(agentData.id);
+      }
     } else {
       // 创建新智能体，使用系统默认值
       const newFormData = JSON.parse(JSON.stringify(defaultFormData));
@@ -3247,6 +3281,7 @@ watch(mcpSelectionMode, (mode) => {
 
 // 监听模式变化，自动调整配置
 watch(agentMode, (val, _oldVal) => {
+  if (isInitializing.value || editorInitializing.value) return;
   if (val === 'smart-reasoning') {
     // 切换到 Agent 模式，根据知识库配置启用工具。
     // 注意：默认不注入 thinking / todo_write —— 它们用于显式反思或多步计划，
@@ -3345,10 +3380,9 @@ watch(isAgentMode, (isAgent) => {
 watch(() => uiStore.showSettingsModal, async (visible, prevVisible) => {
   if (authStore.isSystemAdmin && prevVisible && !visible && props.visible) {
     try {
-      await Promise.all([
-        chatResources.ensureModels(true),
-        editorResources.ensureStorageEngine(true),
-      ]);
+      const refreshes = [chatResources.ensureModels(true)];
+      if (!isPlatformMode.value) refreshes.push(editorResources.ensureStorageEngine(true));
+      await Promise.all(refreshes);
       if (chatResources.allModels.length > 0) {
         allModels.value = chatResources.allModels;
       }
@@ -3415,9 +3449,26 @@ const applyPromptTemplateDefaults = (cfg: PromptTemplatesConfig | null) => {
 
 // 加载依赖数据（复用空间级缓存，避免重复请求）
 const loadDependencies = async () => {
+  dependencyLoadError.value = '';
   try {
     scenarioCapabilities.value = { ...disabledScenarioCapabilities };
     scenarioPolicyLoadFailed.value = false;
+    if (isPlatformMode.value) {
+      const [presetsResponse, placeholdersResponse, promptTemplatesResponse] = await Promise.all([
+        getPlatformAgentTypePresets(),
+        getPlatformAgentPlaceholders(),
+        getPlatformAgentPromptTemplates(),
+        chatResources.ensureModels(),
+      ]);
+      allModels.value = chatResources.allModels;
+      agentTypePresets.value = Array.isArray(presetsResponse?.data) ? presetsResponse.data : [];
+      if (placeholdersResponse?.data) placeholderData.value = placeholdersResponse.data;
+      applyPromptTemplateDefaults(promptTemplatesResponse?.data ?? null);
+      kbOptions.value = [];
+      webSearchProviderList.value = [];
+      storageEngineStatus.value = [];
+      return;
+    }
     if (enterpriseScenarioAdmin.value) {
       try {
         const response = await getAssistantScenarioCapabilities();
@@ -3472,6 +3523,8 @@ const loadDependencies = async () => {
     if (rc?.rerank_threshold !== undefined) defaultRerankThreshold.value = rc.rerank_threshold;
   } catch (e) {
     console.error('Failed to load dependencies', e);
+    dependencyLoadError.value = e instanceof Error ? e.message : t('common.loadFailed');
+    throw e;
   }
 };
 
@@ -3488,6 +3541,11 @@ const handleClose = () => {
   rewriteUserPopup.value.show = false;
   fallbackPromptPopup.value.show = false;
   emit('update:visible', false);
+};
+
+const retryInitialization = () => {
+  dependencyLoadError.value = '';
+  editorRetryKey.value += 1;
 };
 
 // 过滤后的占位符列表
@@ -4289,6 +4347,10 @@ const hasPlaceholder = (text: string | undefined, placeholder: string): boolean 
 };
 
 const handleSave = async () => {
+  if (dependencyLoadError.value) {
+    MessagePlugin.error(dependencyLoadError.value);
+    return;
+  }
   // 验证必填项（内置智能体不验证名称和系统提示词）
   if (!isBuiltinAgent.value) {
     if (!formData.value.name || !formData.value.name.trim()) {
@@ -4347,7 +4409,7 @@ const handleSave = async () => {
   }
 
   // 校验 VLM 模型（当图片上传启用时必填）
-  if (authStore.isSystemAdmin && formData.value.config.image_upload_enabled && !formData.value.config.vlm_model_id) {
+  if (!isPlatformMode.value && authStore.isSystemAdmin && formData.value.config.image_upload_enabled && !formData.value.config.vlm_model_id) {
     MessagePlugin.error(t('agentEditor.imageUpload.vlmModelRequired'));
     currentSection.value = 'multimodal';
     return;
@@ -4381,7 +4443,27 @@ const handleSave = async () => {
       MessagePlugin.success(t('agent.messages.created'));
       emit('success', created);
     } else {
-      await updateAgent(formData.value.id, formData.value);
+      if (isPlatformMode.value) {
+        const config = JSON.parse(JSON.stringify(formData.value.config));
+        delete config.knowledge_bases;
+        delete config.mcp_services;
+        delete config.selected_skills;
+        delete config.sandbox_config_id;
+        delete config.web_search_provider_id;
+        delete config.image_storage_provider;
+        delete config.chat_parser_engine_rules;
+        if (config.kb_selection_mode === 'selected') config.kb_selection_mode = 'none';
+        if (config.mcp_selection_mode === 'selected') config.mcp_selection_mode = 'none';
+        if (config.skills_selection_mode === 'selected') config.skills_selection_mode = 'none';
+        await updatePlatformAgent(formData.value.id, {
+          name: formData.value.name,
+          description: formData.value.description,
+          avatar: formData.value.avatar,
+          config,
+        });
+      } else {
+        await updateAgent(formData.value.id, formData.value);
+      }
       MessagePlugin.success(t('agent.messages.updated'));
       emit('success');
       handleClose();
@@ -4406,7 +4488,7 @@ const handleSave = async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: 1200;
   backdrop-filter: blur(4px);
 }
 

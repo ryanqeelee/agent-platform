@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
 
+	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -54,6 +55,7 @@ func (s *stubAuthTokenRepo) RevokeTokensByUserID(_ context.Context, userID strin
 
 type stubUserRepoForAuth struct {
 	users             map[string]*types.User
+	getByEmailErr     error
 	updateCalls       int
 	credentialUpdates int
 }
@@ -70,12 +72,15 @@ func (s *stubUserRepoForAuth) GetUsersByIDs(context.Context, []string) (map[stri
 	return nil, nil
 }
 func (s *stubUserRepoForAuth) GetUserByEmail(context.Context, string) (*types.User, error) {
+	if s.getByEmailErr != nil {
+		return nil, s.getByEmailErr
+	}
 	for _, user := range s.users {
 		if user.Email != "" {
 			return user, nil
 		}
 	}
-	return nil, errors.New("user not found")
+	return nil, apprepo.ErrUserNotFound
 }
 func (s *stubUserRepoForAuth) GetUserByUsername(context.Context, string) (*types.User, error) {
 	return nil, nil
@@ -126,6 +131,55 @@ func newAuthTestUserService(tokenRepo *stubAuthTokenRepo) *userService {
 		tokenRepo:     tokenRepo,
 		tenantService: &authTenantService{status: types.TenantStatusActive},
 	}
+}
+
+func TestLoginDistinguishesCredentialFailureFromRepositoryFailure(t *testing.T) {
+	t.Run("missing user remains an invalid-credentials response", func(t *testing.T) {
+		svc := &userService{userRepo: &stubUserRepoForAuth{users: map[string]*types.User{}}}
+
+		response, err := svc.Login(context.Background(), &types.LoginRequest{
+			Email: "missing@example.invalid", Password: "irrelevant",
+		})
+
+		require.NoError(t, err)
+		require.NotNil(t, response)
+		require.False(t, response.Success)
+		require.Equal(t, "Invalid email or password", response.Message)
+	})
+
+	t.Run("wrong password remains an invalid-credentials response", func(t *testing.T) {
+		hash, err := bcrypt.GenerateFromPassword([]byte("CorrectHorse9"), bcrypt.MinCost)
+		require.NoError(t, err)
+		svc := &userService{userRepo: &stubUserRepoForAuth{users: map[string]*types.User{
+			"user-1": {
+				ID: "user-1", Email: "user@example.invalid", IsActive: true,
+				PasswordHash: string(hash),
+			},
+		}}}
+
+		response, err := svc.Login(context.Background(), &types.LoginRequest{
+			Email: "user@example.invalid", Password: "WrongHorse9",
+		})
+
+		require.NoError(t, err)
+		require.NotNil(t, response)
+		require.False(t, response.Success)
+		require.Equal(t, "Invalid email or password", response.Message)
+	})
+
+	t.Run("repository outage is propagated", func(t *testing.T) {
+		databaseErr := errors.New("database unavailable")
+		svc := &userService{userRepo: &stubUserRepoForAuth{
+			users: map[string]*types.User{}, getByEmailErr: databaseErr,
+		}}
+
+		response, err := svc.Login(context.Background(), &types.LoginRequest{
+			Email: "user@example.invalid", Password: "CorrectHorse9",
+		})
+
+		require.Nil(t, response)
+		require.ErrorIs(t, err, databaseErr)
+	})
 }
 
 func signTestJWT(claims jwt.MapClaims) string {

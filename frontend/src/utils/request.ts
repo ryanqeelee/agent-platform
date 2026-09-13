@@ -32,6 +32,7 @@ instance.interceptors.request.use(
     const existingAuth = config.headers?.Authorization ?? config.headers?.authorization;
     const isEmbedAuth = typeof existingAuth === 'string' && existingAuth.startsWith('Embed ');
     const isEmbedPath = typeof config.url === 'string' && config.url.includes('/api/v1/embed/');
+    const isSystemAdminPath = typeof config.url === 'string' && config.url.includes('/api/v1/system/admin/');
 
     // 嵌入渠道使用 Embed token；勿用本地 JWT 覆盖（否则调试页会 401）
     if (!isEmbedAuth) {
@@ -53,7 +54,7 @@ instance.interceptors.request.use(
     // 换之后只有第一批请求带 X-Tenant-ID"调成永久状态。
     // 后端 IsTenantAccessible 已经允许 header 指向 home 空间（自家），
     // 所以无脑附不会引入新风险。
-    if (!isEmbedAuth && !isEmbedPath) {
+    if (!isEmbedAuth && !isEmbedPath && !isSystemAdminPath) {
       const selectedTenantId = localStorage.getItem('weknora_selected_tenant_id');
       if (selectedTenantId) {
         config.headers["X-Tenant-ID"] = selectedTenantId;

@@ -1,4 +1,5 @@
 import { get, put, post } from '@/utils/request'
+import { platformChatHistoryPath } from './chat-history-path'
 
 // ChatHistoryConfig represents the chat history KB configuration for a tenant.
 // knowledge_base_id is auto-managed by the backend; frontend only sets other fields.
@@ -44,18 +45,27 @@ export interface MessageSearchResult {
   total: number
 }
 
-// Get tenant chat history config via KV API
-export function getTenantChatHistoryConfig() {
+// Get tenant chat history config via KV API or the explicit platform tenant control plane.
+export function getTenantChatHistoryConfig(platformTenantId?: number) {
+  if (platformTenantId !== undefined) {
+    return get(platformChatHistoryPath(platformTenantId, 'chat-history-config'))
+  }
   return get('/api/v1/tenants/kv/chat-history-config')
 }
 
 // Update tenant chat history config via KV API
-export function updateTenantChatHistoryConfig(config: ChatHistoryConfig) {
+export function updateTenantChatHistoryConfig(config: ChatHistoryConfig, platformTenantId?: number) {
+  if (platformTenantId !== undefined) {
+    return put(platformChatHistoryPath(platformTenantId, 'chat-history-config'), config)
+  }
   return put('/api/v1/tenants/kv/chat-history-config', config)
 }
 
 // Get chat history KB statistics
-export function getChatHistoryKBStats() {
+export function getChatHistoryKBStats(platformTenantId?: number) {
+  if (platformTenantId !== undefined) {
+    return get(platformChatHistoryPath(platformTenantId, 'chat-history-stats'))
+  }
   return get('/api/v1/messages/chat-history-stats')
 }
 

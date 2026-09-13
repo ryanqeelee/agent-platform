@@ -51,6 +51,7 @@ func TestPlatformInfrastructureRoutesRequireSystemAdmin(t *testing.T) {
 		{http.MethodGet, "/api/v1/models/weknoracloud/status"},
 		{http.MethodGet, "/api/v1/system/parser-engines"},
 		{http.MethodGet, "/api/v1/system/storage-engine-status"},
+		{http.MethodGet, "/api/v1/system/admin/capabilities"},
 		{http.MethodGet, "/api/v1/web-search/providers"},
 	} {
 		w := httptest.NewRecorder()
@@ -72,5 +73,16 @@ func TestPlatformInfrastructureRoutesRequireSystemAdmin(t *testing.T) {
 	r.ServeHTTP(allowed, req)
 	if allowed.Code != http.StatusOK {
 		t.Fatalf("system admin status = %d, want %d", allowed.Code, http.StatusOK)
+	}
+
+	adminCapabilities := httptest.NewRecorder()
+	adminCapabilitiesRequest := httptest.NewRequest(http.MethodGet, "/api/v1/system/admin/capabilities", nil)
+	adminCapabilitiesRequest.Header.Set("X-Test-System-Admin", "true")
+	r.ServeHTTP(adminCapabilities, adminCapabilitiesRequest)
+	if adminCapabilities.Code != http.StatusOK {
+		t.Fatalf("system admin capabilities status = %d, want %d", adminCapabilities.Code, http.StatusOK)
+	}
+	if _, ok := g.apiKeyAuthorizer.Lookup(http.MethodGet, "/api/v1/system/admin/capabilities"); ok {
+		t.Fatal("system admin capabilities must remain default-denied for API keys")
 	}
 }

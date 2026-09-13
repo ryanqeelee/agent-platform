@@ -12,6 +12,7 @@ import (
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 	"go.uber.org/dig"
+	"gorm.io/gorm"
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/handler"
@@ -29,6 +30,7 @@ type RouterParams struct {
 	dig.In
 
 	Config                       *config.Config
+	Database                     *gorm.DB
 	FileService                  interfaces.FileService
 	UserService                  interfaces.UserService
 	KBService                    interfaces.KnowledgeBaseService
@@ -80,6 +82,7 @@ type RouterParams struct {
 	FAQHandler                   *handler.FAQHandler
 	TagHandler                   *handler.TagHandler
 	CustomAgentHandler           *handler.CustomAgentHandler
+	PlatformAgentHandler         *handler.PlatformAgentHandler
 	UserFavoriteHandler          *handler.UserResourceFavoriteHandler
 	SkillHandler                 *handler.SkillHandler
 	OrganizationHandler          *handler.OrganizationHandler
@@ -136,9 +139,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 	r.Use(middleware.ErrorHandler())
 
 	// 健康检查（不需要认证）
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{"status": "ok"})
-	})
+	registerHealthRoutes(r, params.Database)
 
 	// Swagger API 文档（仅在非生产环境下启用）
 	// 通过 GIN_MODE 环境变量判断：release 模式下禁用 Swagger
@@ -284,11 +285,21 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterSystemAdminTenantRuntimeRoutes(
 			v1,
 			params.TenantService,
+			params.TenantHandler,
+			params.MessageHandler,
 			params.SandboxConfigHandler,
 			params.SandboxSkillHandler,
 			params.SkillHandler,
 			params.CustomAgentHandler,
 			params.SystemHandler,
+			params.TenantMemoryConfigHandler,
+			params.AICapabilityPlanHandler,
+			params.MCPServiceHandler,
+			params.MCPCredentialsHandler,
+			params.WebSearchProviderHandler,
+			params.WebSearchCredentialsHandler,
+			params.VectorStoreHandler,
+			params.StorageBackendHandler,
 			rbacGuards,
 		)
 		RegisterMyEnvVarRoutes(v1, params.MeEnvVarHandler)
@@ -303,6 +314,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterVectorStoreRoutes(v1, params.VectorStoreHandler, rbacGuards)
 		RegisterStorageBackendRoutes(v1, params.StorageBackendHandler, rbacGuards)
 		RegisterCustomAgentRoutes(v1, params.CustomAgentHandler, rbacGuards)
+		RegisterPlatformAgentRoutes(v1, params.PlatformAgentHandler, rbacGuards)
 		RegisterUserFavoriteRoutes(v1, params.UserFavoriteHandler, rbacGuards)
 		RegisterSkillRoutes(v1, params.SkillHandler, rbacGuards)
 		RegisterIMChannelRoutes(v1, params.IMHandler, rbacGuards)

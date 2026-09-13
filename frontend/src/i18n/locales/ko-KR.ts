@@ -4612,7 +4612,7 @@ export default {
     firstTime: 'Huanshu가 처음이신가요?',
     registerSuccess: '가입이 완료되었습니다. 로그인해주세요',
     registerFailed: '가입 실패',
-    subtitle: '기업 계정으로 소속 조직의 에이전트 업무 공간에 로그인하세요.',
+    subtitle: '플랫폼 또는 기업 계정으로 로그인하여 해당 관리 및 업무 공간으로 이동하세요.',
     registerSubtitle: '계정을 만들고 Huanshu를 시작하세요',
     emailPlaceholder: '이메일 주소 입력',
     passwordPlaceholder: '비밀번호 입력',
@@ -5790,6 +5790,8 @@ export default {
     contextCompactedDegraded: '요약을 사용할 수 없어 원본 기록을 유지했습니다',
     title: '에이전트',
     subtitle: '플랫폼에서 프롬프트, 검색 및 도구를 관리합니다. 직원은 하나의 어시스턴트를 사용하며 기본 설정은 플랫폼 릴리스로 관리됩니다.',
+    platformSubtitle: '모든 기업이 공유하는 에이전트 구성을 관리합니다. 비교와 회귀 확인을 위해 기존 내장 에이전트도 유지됩니다.',
+    platformBuiltin: '플랫폼 내장',
     createAgent: '에이전트 만들기',
     builtin: '내장',
     disabled: '비활성화됨',
@@ -5820,6 +5822,10 @@ export default {
       capabilityUnconfigured: '미구성'
     },
     editor: {
+      platformSkills: '내장 스킬',
+      platformSkillsDesc: '이 플랫폼 에이전트가 모든 내장 스킬을 사용할지 선택합니다. 기업별 스킬 연결은 각 기업에서 설정합니다.',
+      platformSkillsNone: '사용 안 함',
+      platformSkillsAll: '모든 내장 스킬',
       createTitle: '에이전트 만들기',
       editTitle: '에이전트 편집',
       buttons: {

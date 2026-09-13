@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math/rand"
 	"strings"
@@ -469,20 +470,39 @@ func (s *customAgentService) GetAgentByID(ctx context.Context, id string) (*type
 	if id == "builtin-operating-analyst" || id == "builtin-data-analysis-base" {
 		return s.nativeAnalysisAgent(ctx, id, tenantID)
 	}
+	if id == types.BuiltinSkillInstallerID {
+		agent, err := s.repo.GetAgentByID(ctx, id, tenantID)
+		if err != nil {
+			if !errors.Is(err, repository.ErrCustomAgentNotFound) {
+				return nil, err
+			}
+			agent = types.GetBuiltinAgentWithContext(ctx, id, tenantID)
+			if agent == nil {
+				return nil, ErrAgentNotFound
+			}
+		}
+		cloned, err := cloneCustomAgentDefinition(agent)
+		if err != nil {
+			return nil, err
+		}
+		cloned.ID = id
+		cloned.TenantID = tenantID
+		cloned.IsBuiltin = true
+		types.ApplyBuiltinAgentLocalization(ctx, cloned)
+		cloned.EnsureDefaults()
+		return cloned, nil
+	}
 
 	// Check if it's a built-in agent using the registry
 	if types.IsBuiltinAgentID(id) {
-		// Try to get from database first (for customized config)
-		agent, err := s.repo.GetAgentByID(ctx, id, tenantID)
+		// Platform definitions are global. Tenant-specific built-in rows do not
+		// override platform policy.
+		agent, err := s.platformBuiltinAgent(ctx, id, tenantID)
 		if err == nil {
-			// Found in database, overlay locale-specific name/description/avatar
-			agent.EnsureDefaults()
-			types.ApplyBuiltinAgentLocalization(ctx, agent)
 			return agent, nil
 		}
-		// Not in database, return default built-in agent from registry (i18n-aware)
-		if builtinAgent := types.GetBuiltinAgentWithContext(ctx, id, tenantID); builtinAgent != nil {
-			return builtinAgent, nil
+		if !errors.Is(err, repository.ErrCustomAgentNotFound) {
+			return nil, err
 		}
 	}
 
@@ -535,13 +555,8 @@ func (s *customAgentService) ListAgents(ctx context.Context) ([]*types.CustomAge
 		return nil, err
 	}
 
-	// Track which built-in agents exist in database
-	builtinInDB := make(map[string]bool)
 	for _, agent := range allAgents {
 		agent.EnsureDefaults()
-		if types.IsBuiltinAgentID(agent.ID) {
-			builtinInDB[agent.ID] = true
-		}
 	}
 
 	// Build result: built-in agents first, then custom agents
@@ -558,20 +573,11 @@ func (s *customAgentService) ListAgents(ctx context.Context) ([]*types.CustomAge
 			result = append(result, agent)
 			continue
 		}
-		if builtinInDB[builtinID] {
-			// Use customized config from database
-			for _, agent := range allAgents {
-				if agent.ID == builtinID {
-					types.ApplyBuiltinAgentLocalization(ctx, agent)
-					result = append(result, agent)
-					break
-				}
-			}
-		} else {
-			// Use default built-in agent (i18n-aware)
-			if agent := types.GetBuiltinAgentWithContext(ctx, builtinID, tenantID); agent != nil {
-				result = append(result, agent)
-			}
+		agent, err := s.platformBuiltinAgent(ctx, builtinID, tenantID)
+		if err == nil {
+			result = append(result, agent)
+		} else if !errors.Is(err, repository.ErrCustomAgentNotFound) {
+			return nil, err
 		}
 	}
 
@@ -585,9 +591,54 @@ func (s *customAgentService) ListAgents(ctx context.Context) ([]*types.CustomAge
 	return result, nil
 }
 
+func (s *customAgentService) platformBuiltinAgent(
+	ctx context.Context,
+	id string,
+	tenantID uint64,
+) (*types.CustomAgent, error) {
+	var agent *types.CustomAgent
+	var err error
+	persisted := false
+	agent, err = s.repo.GetAgentByID(ctx, id, platformAgentTenantID)
+	persisted = err == nil
+	if err != nil {
+		if !errors.Is(err, repository.ErrCustomAgentNotFound) {
+			return nil, err
+		}
+		agent = types.GetBuiltinAgentWithContext(ctx, id, tenantID)
+		if agent == nil {
+			return nil, repository.ErrCustomAgentNotFound
+		}
+	}
+	cloned, err := cloneCustomAgentDefinition(agent)
+	if err != nil {
+		return nil, err
+	}
+	agent = cloned
+	agent.TenantID = tenantID
+	agent.IsBuiltin = true
+	if persisted {
+		types.ApplyBuiltinAgentLocalization(ctx, agent)
+	}
+	agent.EnsureDefaults()
+	return agent, nil
+}
+
+func cloneCustomAgentDefinition(agent *types.CustomAgent) (*types.CustomAgent, error) {
+	data, err := json.Marshal(agent)
+	if err != nil {
+		return nil, err
+	}
+	var cloned types.CustomAgent
+	if err := json.Unmarshal(data, &cloned); err != nil {
+		return nil, err
+	}
+	return &cloned, nil
+}
+
 // UpdateAgent updates an agent's information
 func (s *customAgentService) UpdateAgent(ctx context.Context, agent *types.CustomAgent) (*types.CustomAgent, error) {
-	if agent.ID == types.BuiltinEmployeeAssistantID {
+	if types.IsPlatformManagedBuiltinAgentID(agent.ID) {
 		return nil, ErrCannotModifyBuiltin
 	}
 	if agent.ID == "" {
@@ -601,9 +652,13 @@ func (s *customAgentService) UpdateAgent(ctx context.Context, agent *types.Custo
 		return nil, ErrInvalidTenantID
 	}
 
-	// Handle built-in agents specially using registry
+	// Tenant authoring cannot change platform-owned built-in definitions. The
+	// skill installer retains its dedicated tenant-scoped configuration path.
 	if types.IsBuiltinAgentID(agent.ID) {
-		return s.updateBuiltinAgent(ctx, agent, tenantID)
+		if agent.ID == types.BuiltinSkillInstallerID {
+			return s.updateBuiltinAgent(ctx, agent, tenantID)
+		}
+		return nil, ErrCannotModifyBuiltin
 	}
 
 	// Get existing agent

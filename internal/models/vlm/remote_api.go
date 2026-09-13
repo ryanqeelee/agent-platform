@@ -42,6 +42,7 @@ func vlmHTTPTimeout() time.Duration {
 type RemoteAPIVLM struct {
 	modelName   string
 	modelID     string
+	provider    provider.ProviderName
 	client      *openai.Client
 	baseURL     string
 	temperature float32
@@ -100,6 +101,7 @@ func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
 	return &RemoteAPIVLM{
 		modelName:   config.ModelName,
 		modelID:     config.ModelID,
+		provider:    providerName,
 		client:      openai.NewClientWithConfig(apiCfg),
 		baseURL:     config.BaseURL,
 		temperature: temp,
@@ -142,6 +144,12 @@ func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, promp
 		},
 		MaxTokens:   defaultMaxToks,
 		Temperature: v.temperature,
+	}
+	if v.provider == provider.ProviderAliyun && v.modelName == "qwen3.8-flash" {
+		// Qwen3.8 Flash defaults to xhigh reasoning. For image extraction,
+		// reasoning_effort=none is Aliyun's documented equivalent of
+		// enable_thinking=false and is supported by the pinned OpenAI SDK.
+		req.ReasoningEffort = "none"
 	}
 	shapeReasoningVLMRequest(&req)
 

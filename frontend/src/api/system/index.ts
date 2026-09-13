@@ -1,4 +1,5 @@
 import { get, post, put, del, patch, postUpload } from '@/utils/request'
+import { platformTenantPath } from '../platform-tenant-path'
 import type { CreatedTenantAPIKey, TenantAPIKey, TenantAPIKeyCapability } from '@/api/tenant'
 
 export interface CreatePlatformAPIKeyPayload {
@@ -62,8 +63,8 @@ export interface DeploymentCapabilitiesResponse {
   capabilities: Record<string, DeploymentCapability>
 }
 
-export function getDeploymentCapabilities(): Promise<{ data: DeploymentCapabilitiesResponse }> {
-  return get('/api/v1/system/capabilities')
+export function getDeploymentCapabilities(systemAdmin = false): Promise<{ data: DeploymentCapabilitiesResponse }> {
+  return get(systemAdmin ? '/api/v1/system/admin/capabilities' : '/api/v1/system/capabilities')
 }
 
 export interface PlaceholderDefinition {
@@ -170,12 +171,12 @@ export function checkParserEngines(config: ParserEngineConfig): Promise<ParserEn
   return post('/api/v1/system/parser-engines/check', config)
 }
 
-export function getParserEngineConfig(): Promise<{ data: ParserEngineConfig }> {
-  return get('/api/v1/tenants/kv/parser-engine-config')
+export function getParserEngineConfig(tenantId?: number): Promise<{ data: ParserEngineConfig }> {
+  return get(tenantId === undefined ? '/api/v1/tenants/kv/parser-engine-config' : platformTenantPath(tenantId, 'parser-engine-config'))
 }
 
-export function updateParserEngineConfig(config: ParserEngineConfig): Promise<{ data: ParserEngineConfig }> {
-  return put('/api/v1/tenants/kv/parser-engine-config', config)
+export function updateParserEngineConfig(config: ParserEngineConfig, tenantId?: number): Promise<{ data: ParserEngineConfig }> {
+  return put(tenantId === undefined ? '/api/v1/tenants/kv/parser-engine-config' : platformTenantPath(tenantId, 'parser-engine-config'), config)
 }
 
 export function reconnectDocReader(addr: string): Promise<ParserEnginesResponse & { msg?: string }> {

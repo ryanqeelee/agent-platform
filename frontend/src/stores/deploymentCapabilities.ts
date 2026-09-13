@@ -21,7 +21,7 @@ export const useDeploymentCapabilitiesStore = defineStore('deploymentCapabilitie
 
     loadingPromise = (async () => {
       try {
-        const response = await getDeploymentCapabilities()
+        const response = await getDeploymentCapabilities(useAuthStore().isSystemAdmin)
         edition.value = response.data?.edition || ''
         capabilities.value = response.data?.capabilities || {}
         loadError.value = ''

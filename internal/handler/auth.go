@@ -273,6 +273,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 // @Param        request  body      types.LoginRequest  true  "登录请求参数"
 // @Success      200      {object}  types.LoginResponse
 // @Failure      401      {object}  errors.AppError  "认证失败"
+// @Failure      503      {object}  errors.AppError  "登录服务暂不可用"
 // @Router       /auth/login [post]
 func (h *AuthHandler) Login(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -300,8 +301,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	response, err := h.userService.Login(ctx, &req)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to login user: %v", err)
-		appErr := errors.NewUnauthorizedError("Login failed").WithDetails(err.Error())
-		c.Error(appErr)
+		c.Error(errors.NewServiceUnavailableError("Service temporarily unavailable"))
 		return
 	}
 

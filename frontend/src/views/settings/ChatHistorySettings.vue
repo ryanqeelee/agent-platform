@@ -4,6 +4,9 @@
       <h2>{{ t('chatHistorySettings.title') }}</h2>
       <p class="section-description">{{ t('chatHistorySettings.description') }}</p>
     </div>
+    <t-alert v-if="loadError" theme="error" :message="loadError">
+      <template #operation><t-button size="small" @click="reload">{{ t('common.retry') }}</t-button></template>
+    </t-alert>
 
     <div class="settings-group">
       <!-- 启用开关 -->
@@ -15,6 +18,7 @@
         <div class="setting-control">
           <t-switch
             v-model="localEnabled"
+            :disabled="!loaded"
             @change="handleEnabledChange"
           />
         </div>
@@ -33,7 +37,7 @@
           <ModelSelector
             model-type="Embedding"
             :selected-model-id="localEmbeddingModelId"
-            :disabled="modelLocked"
+            :disabled="!loaded || modelLocked"
             @update:selected-model-id="handleModelChange"
           />
         </div>
@@ -58,10 +62,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import ModelSelector from '@/components/ModelSelector.vue'
+import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 import {
   getTenantChatHistoryConfig,
   updateTenantChatHistoryConfig,
@@ -71,6 +76,7 @@ import {
 } from '@/api/chat-history'
 
 const { t } = useI18n()
+const platformTenantID = usePlatformTenantControlID()
 
 // Local state
 const localEnabled = ref(false)
@@ -80,12 +86,15 @@ const initialConfig = ref<ChatHistoryConfig | null>(null)
 const stats = ref<ChatHistoryKBStats | null>(null)
 
 // Whether the embedding model is locked (has indexed messages — cannot change)
-const modelLocked = ref(false)
+const modelLocked = ref(true)
+const loaded = ref(false)
+const loadError = ref('')
 
 // Load tenant config
 const loadConfig = async () => {
+  loaded.value = false
   try {
-    const response = await getTenantChatHistoryConfig()
+    const response = await getTenantChatHistoryConfig(platformTenantID.value)
     if (response.data) {
       const config = response.data
       isInitializing.value = true
@@ -97,40 +106,32 @@ const loadConfig = async () => {
 
       localEnabled.value = config.enabled || false
       localEmbeddingModelId.value = config.embedding_model_id || ''
+      loaded.value = true
 
       await nextTick()
       await nextTick()
       setTimeout(() => { isInitializing.value = false }, 100)
-    } else {
-      initialConfig.value = {
-        enabled: false,
-        embedding_model_id: '',
-      }
-      await nextTick()
-      setTimeout(() => { isInitializing.value = false }, 100)
-    }
+    } else throw new Error(t('common.loadFailed'))
   } catch (error: any) {
     console.error('Failed to load chat history config:', error)
-    initialConfig.value = {
-      enabled: false,
-      embedding_model_id: '',
-    }
-    await nextTick()
-    setTimeout(() => { isInitializing.value = false }, 100)
+    loadError.value = error?.message || t('common.loadFailed')
   }
 }
 
 // Load stats
 const loadStats = async () => {
+  modelLocked.value = true
   try {
-    const response = await getChatHistoryKBStats()
+    const response = await getChatHistoryKBStats(platformTenantID.value)
     if (response.data) {
       stats.value = response.data
       // Lock model if there are indexed messages
       modelLocked.value = response.data.has_indexed_messages === true
-    }
+    } else throw new Error(t('common.loadFailed'))
   } catch (error: any) {
     console.error('Failed to load chat history stats:', error)
+    modelLocked.value = true
+    loadError.value = error?.message || t('common.loadFailed')
   }
 }
 
@@ -145,7 +146,8 @@ const hasConfigChanged = (): boolean => {
 
 // Save config
 const saveConfig = async () => {
-  if (!hasConfigChanged()) return
+  if (!loaded.value || !hasConfigChanged()) return
+  const targetTenantID = platformTenantID.value
 
   try {
     const config: ChatHistoryConfig = {
@@ -153,7 +155,7 @@ const saveConfig = async () => {
       embedding_model_id: localEmbeddingModelId.value,
     }
 
-    const response = await updateTenantChatHistoryConfig(config)
+    const response = await updateTenantChatHistoryConfig(config, targetTenantID)
 
     // Update initial config from response (includes auto-managed knowledge_base_id)
     if (response.data) {
@@ -192,11 +194,18 @@ const handleModelChange = (modelId: string) => {
   debouncedSave()
 }
 
-// Init
-onMounted(async () => {
+const reload = async () => {
+  loadError.value = ''
   isInitializing.value = true
   await loadConfig()
-  await loadStats()
+  if (loaded.value) await loadStats()
+}
+
+// Init
+onMounted(reload)
+
+onUnmounted(() => {
+  if (saveTimer) clearTimeout(saveTimer)
 })
 </script>
 

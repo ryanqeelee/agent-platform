@@ -26,18 +26,20 @@ func (p *AliyunProvider) Info() ProviderInfo {
 	return ProviderInfo{
 		Name:        ProviderAliyun,
 		DisplayName: "阿里云 DashScope",
-		Description: "qwen-plus, tongyi-embedding-vision-plus, qwen3-rerank, etc.",
+		Description: "qwen-plus, qwen-vl, qwen3-asr-flash, qwen3.7-text-rerank, etc.",
 		DefaultURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: AliyunChatBaseURL,
 			types.ModelTypeEmbedding:   AliyunChatBaseURL,
 			types.ModelTypeRerank:      AliyunRerankBaseURL,
 			types.ModelTypeVLLM:        AliyunChatBaseURL,
+			types.ModelTypeASR:         AliyunChatBaseURL,
 		},
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
 			types.ModelTypeEmbedding,
 			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
+			types.ModelTypeASR,
 		},
 		RequiresAuth: true,
 	}

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 const systemAPI = readFileSync(new URL('./system/index.ts', import.meta.url), 'utf8')
+const deploymentCapabilitiesStore = readFileSync(new URL('../stores/deploymentCapabilities.ts', import.meta.url), 'utf8')
 const skillAPI = readFileSync(new URL('./skill/index.ts', import.meta.url), 'utf8')
 const chatHistoryAPI = readFileSync(new URL('./chat-history.ts', import.meta.url), 'utf8')
 const chatHistoryPath = readFileSync(new URL('./chat-history-path.ts', import.meta.url), 'utf8')
@@ -17,6 +18,12 @@ test('platform sandbox and skill APIs require an explicit tenant path', () => {
   assert.match(skillAPI, /\/api\/v1\/system\/admin\/tenants\/\$\{tenantId\}\/skills/)
   assert.doesNotMatch(systemAPI, /['`]\/api\/v1\/sandbox-configs/)
   assert.doesNotMatch(skillAPI, /['`]\/api\/v1\/skills/)
+})
+
+test('deployment capabilities use the tenantless system-admin route for platform login', () => {
+  assert.match(systemAPI, /getDeploymentCapabilities\(systemAdmin = false\)/)
+  assert.match(systemAPI, /systemAdmin \? '\/api\/v1\/system\/admin\/capabilities' : '\/api\/v1\/system\/capabilities'/)
+  assert.match(deploymentCapabilitiesStore, /getDeploymentCapabilities\(useAuthStore\(\)\.isSystemAdmin\)/)
 })
 
 test('settings provides the selected tenant only to its existing component tree', () => {

@@ -63,8 +63,8 @@ export interface DeploymentCapabilitiesResponse {
   capabilities: Record<string, DeploymentCapability>
 }
 
-export function getDeploymentCapabilities(): Promise<{ data: DeploymentCapabilitiesResponse }> {
-  return get('/api/v1/system/capabilities')
+export function getDeploymentCapabilities(systemAdmin = false): Promise<{ data: DeploymentCapabilitiesResponse }> {
+  return get(systemAdmin ? '/api/v1/system/admin/capabilities' : '/api/v1/system/capabilities')
 }
 
 export interface PlaceholderDefinition {

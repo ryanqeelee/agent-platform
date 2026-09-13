@@ -262,9 +262,14 @@ func RegisterSystemRoutes(
 	handler *handler.SystemHandler,
 	g *rbacGuards,
 ) {
-	systemRoutes := g.apiKeyGroup(r.Group("/system"), apiKeyManageVectorStores(apiKeyFullAccess()))
+	systemGroup := r.Group("/system")
+	systemRoutes := g.apiKeyGroup(systemGroup, apiKeyManageVectorStores(apiKeyFullAccess()))
 	{
 		systemRoutes.With(apiKeyAny()).GET("/capabilities", g.Viewer(), handler.GetDeploymentCapabilities)
+		// Platform login has no active workspace, so it cannot pass Viewer().
+		// Keep this browser-only alias outside apiKeyGroup: API keys remain
+		// default-denied while SystemAdmin supplies the platform identity gate.
+		systemGroup.GET("/admin/capabilities", g.SystemAdmin(), handler.GetDeploymentCapabilities)
 		systemRoutes.GET("/info", g.Viewer(), handler.GetSystemInfo)
 		systemRoutes.GET("/parser-engines", g.SystemAdmin(), handler.ListParserEngines)
 		systemRoutes.POST("/parser-engines/check", g.SystemAdmin(), handler.CheckParserEngines)

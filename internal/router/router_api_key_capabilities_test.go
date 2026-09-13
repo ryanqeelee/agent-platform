@@ -2,6 +2,7 @@ package router
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/handler"
@@ -335,6 +336,7 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 	RegisterModelRoutes(v1, &handler.ModelHandler{}, &handler.ModelCredentialsHandler{}, g)
 	RegisterEvaluationRoutes(v1, &handler.EvaluationHandler{}, g)
 	RegisterSystemRoutes(v1, &handler.SystemHandler{}, g)
+	RegisterMCPServiceRoutes(v1, &handler.MCPServiceHandler{}, &handler.MCPCredentialsHandler{}, &handler.MCPOAuthHandler{}, g)
 	RegisterWebSearchProviderRoutes(v1, &handler.WebSearchProviderHandler{}, &handler.WebSearchProviderCredentialsHandler{}, g)
 	RegisterVectorStoreRoutes(v1, &handler.VectorStoreHandler{}, g)
 	RegisterStorageBackendRoutes(v1, &handler.StorageBackendHandler{}, g)
@@ -356,6 +358,7 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 		{http.MethodGet, "/api/v1/tenants", types.APIKeyCapabilityManageTenantSettings},
 		{http.MethodPost, "/api/v1/evaluation", types.APIKeyCapabilityRunEvaluations},
 		{http.MethodGet, "/api/v1/system/info", types.APIKeyCapabilityManageVectorStores},
+		{http.MethodGet, "/api/v1/mcp-services", types.APIKeyCapabilityManageMCPServices},
 		{http.MethodGet, "/api/v1/web-search-providers", types.APIKeyCapabilityManageWebSearch},
 		{http.MethodGet, "/api/v1/embed-channels", types.APIKeyCapabilityManageChannels},
 		{http.MethodGet, "/api/v1/im-channels", types.APIKeyCapabilityManageChannels},
@@ -365,7 +368,11 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
 			policy := mustLookupAPIKeyPolicy(t, g, tc.method, tc.path)
-			if !policy.RequireFullAccess {
+			if tc.path == "/api/v1/mcp-services" {
+				if !policy.PlatformOnly {
+					t.Fatal("MCP runtime catalog policy must be platform-only")
+				}
+			} else if !policy.RequireFullAccess {
 				t.Fatal("policy should require full access without a matching capability")
 			}
 			if !policyHasCapability(policy, tc.cap) {
@@ -382,6 +389,7 @@ func TestPlatformInfrastructureRoutesRejectWorkspaceAPIKeys(t *testing.T) {
 	RegisterModelRoutes(v1, &handler.ModelHandler{}, &handler.ModelCredentialsHandler{}, g)
 	RegisterInitializationRoutes(v1, &handler.InitializationHandler{}, g)
 	RegisterMCPServiceRoutes(v1, &handler.MCPServiceHandler{}, &handler.MCPCredentialsHandler{}, &handler.MCPOAuthHandler{}, g)
+	RegisterWebSearchProviderRoutes(v1, &handler.WebSearchProviderHandler{}, &handler.WebSearchProviderCredentialsHandler{}, g)
 	RegisterVectorStoreRoutes(v1, &handler.VectorStoreHandler{}, g)
 	RegisterStorageBackendRoutes(v1, &handler.StorageBackendHandler{}, g)
 	RegisterWeKnoraCloudRoutes(v1, &handler.WeKnoraCloudHandler{}, g)
@@ -394,13 +402,23 @@ func TestPlatformInfrastructureRoutesRejectWorkspaceAPIKeys(t *testing.T) {
 		{http.MethodGet, "/api/v1/models", types.APIKeyCapabilityManageModels},
 		{http.MethodPost, "/api/v1/initialization/initialize/:kbId", types.APIKeyCapabilityManageModels},
 		{http.MethodGet, "/api/v1/initialization/ollama/models", types.APIKeyCapabilityManageModels},
-		{http.MethodGet, "/api/v1/mcp-services", types.APIKeyCapabilityManageMCPServices},
+		{http.MethodGet, "/api/v1/system/admin/mcp-services", types.APIKeyCapabilityManageMCPServices},
+		{http.MethodPut, "/api/v1/system/admin/mcp-services/:id/credentials", types.APIKeyCapabilityManageMCPServices},
+		{http.MethodGet, "/api/v1/system/admin/web-search-providers", types.APIKeyCapabilityManageWebSearch},
+		{http.MethodPost, "/api/v1/system/admin/web-search-providers/test", types.APIKeyCapabilityManageWebSearch},
 		{http.MethodGet, "/api/v1/vector-stores", types.APIKeyCapabilityManageVectorStores},
 		{http.MethodGet, "/api/v1/storage-backends", types.APIKeyCapabilityManageStorageBackends},
 		{http.MethodGet, "/api/v1/models/weknoracloud/status", types.APIKeyCapabilityManageModels},
 	} {
-		policy := mustLookupAPIKeyPolicy(t, g, tc.method, tc.path)
-		if !policy.PlatformOnly {
+		policy, declared := g.apiKeyAuthorizer.Lookup(tc.method, tc.path)
+		if strings.HasPrefix(tc.path, "/api/v1/system/admin/mcp-services") ||
+			strings.HasPrefix(tc.path, "/api/v1/system/admin/web-search-providers") {
+			if declared {
+				t.Fatalf("%s must be default-denied for API keys, got %#v", tc.path, policy)
+			}
+			continue
+		}
+		if !declared || !policy.PlatformOnly {
 			t.Fatalf("%s must reject workspace API keys", tc.path)
 		}
 		if !policyHasCapability(policy, tc.cap) {

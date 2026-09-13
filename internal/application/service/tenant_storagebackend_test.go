@@ -23,8 +23,7 @@ func TestCreateTenantCreatesConcreteDefaultStorageBackend(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(&types.Tenant{}, &types.StorageBackend{}, &types.WebSearchProviderEntity{}))
 	tenantRepo := repository.NewTenantRepository(db)
 	storageRepo := repository.NewStorageBackendRepository(db)
-	webSearchRepo := repository.NewWebSearchProviderRepository(db)
-	tenantSvc := service.NewTenantService(tenantRepo, storageRepo, webSearchRepo)
+	tenantSvc := service.NewTenantService(tenantRepo, storageRepo)
 
 	tenant, err := tenantSvc.CreateTenant(context.Background(), &types.Tenant{Name: "workspace"})
 	require.NoError(t, err)
@@ -36,11 +35,6 @@ func TestCreateTenantCreatesConcreteDefaultStorageBackend(t *testing.T) {
 	assert.Equal(t, "local", backend.Provider)
 	assert.Equal(t, types.StorageBackendSourceEnv, backend.Source)
 	assert.True(t, backend.LegacyAlias)
-	searchProvider, err := webSearchRepo.GetDefault(context.Background(), tenant.ID)
-	require.NoError(t, err)
-	require.NotNil(t, searchProvider)
-	assert.Equal(t, types.WebSearchProviderTypeKeenable, searchProvider.Provider)
-	assert.Empty(t, searchProvider.Parameters.APIKey)
 }
 
 func TestEnterpriseActivationResumesDefaultBackendBeforeOpening(t *testing.T) {
@@ -54,8 +48,7 @@ func TestEnterpriseActivationResumesDefaultBackendBeforeOpening(t *testing.T) {
 	))
 	tenantRepo := repository.NewTenantRepository(db)
 	storageRepo := repository.NewStorageBackendRepository(db)
-	webSearchRepo := repository.NewWebSearchProviderRepository(db)
-	tenantSvc := service.NewTenantService(tenantRepo, storageRepo, webSearchRepo)
+	tenantSvc := service.NewTenantService(tenantRepo, storageRepo)
 	require.NoError(t, db.Create(&types.User{
 		ID: "activation-owner", Username: "activation-owner", Email: "activation-owner@example.invalid", IsActive: true,
 	}).Error)
@@ -102,10 +95,6 @@ func TestEnterpriseActivationResumesDefaultBackendBeforeOpening(t *testing.T) {
 	require.NoError(t, db.Model(&types.Tenant{}).Count(&tenantCount).Error)
 	require.NoError(t, db.Model(&types.TenantMember{}).Count(&memberCount).Error)
 	require.NoError(t, db.Model(&types.StorageBackend{}).Count(&backendCount).Error)
-	searchProvider, err := webSearchRepo.GetDefault(context.Background(), result.TenantID)
-	require.NoError(t, err)
-	require.NotNil(t, searchProvider)
-	require.Equal(t, types.WebSearchProviderTypeKeenable, searchProvider.Provider)
 	require.Equal(t, int64(1), tenantCount)
 	require.Equal(t, int64(1), memberCount)
 	require.Equal(t, int64(1), backendCount)

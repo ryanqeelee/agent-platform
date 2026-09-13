@@ -669,7 +669,7 @@ func (g *Gate) deliverLocal(tenantID uint64, userID, pendingID string, d Decisio
 // Adapter makes MCPToolApprovalService satisfy Checker without importing the service package here.
 type Adapter struct {
 	Svc interface {
-		IsRequired(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error)
+		IsRequired(ctx context.Context, serviceID, toolName string) (bool, error)
 	}
 }
 
@@ -678,5 +678,5 @@ func (a *Adapter) IsRequired(ctx context.Context, tenantID uint64, serviceID, to
 	if a == nil || a.Svc == nil {
 		return false, nil
 	}
-	return a.Svc.IsRequired(ctx, tenantID, serviceID, toolName)
+	return a.Svc.IsRequired(ctx, serviceID, toolName)
 }

@@ -26,21 +26,18 @@ type ListTenantsParams struct {
 
 // tenantService implements the TenantService interface
 type tenantService struct {
-	repo                  interfaces.TenantRepository // Repository for tenant data operations
-	storageRepo           interfaces.StorageBackendRepository
-	webSearchProviderRepo interfaces.WebSearchProviderRepository
+	repo        interfaces.TenantRepository // Repository for tenant data operations
+	storageRepo interfaces.StorageBackendRepository
 }
 
 // NewTenantService creates a new tenant service instance
 func NewTenantService(
 	repo interfaces.TenantRepository,
 	storageRepo interfaces.StorageBackendRepository,
-	webSearchProviderRepo interfaces.WebSearchProviderRepository,
 ) interfaces.TenantService {
 	return &tenantService{
-		repo:                  repo,
-		storageRepo:           storageRepo,
-		webSearchProviderRepo: webSearchProviderRepo,
+		repo:        repo,
+		storageRepo: storageRepo,
 	}
 }
 
@@ -122,13 +119,6 @@ func (s *tenantService) ApplyEnterpriseActivation(
 			return nil, err
 		}
 	}
-	if result.State != types.EnterpriseActivationStateAbandoned {
-		if _, err := s.webSearchProviderRepo.EnsureDefault(ctx, result.TenantID); err != nil {
-			code := "web_search_provider_unavailable"
-			_ = s.repo.SetEnterpriseActivationError(ctx, command.ActivationID, &code)
-			return nil, err
-		}
-	}
 	return result, nil
 }
 
@@ -177,14 +167,6 @@ func (s *tenantService) CreateTenant(ctx context.Context, tenant *types.Tenant) 
 		_ = s.repo.DeleteTenant(ctx, tenant.ID)
 		return nil, err
 	}
-	if _, err := s.webSearchProviderRepo.EnsureDefault(ctx, tenant.ID); err != nil {
-		if tenant.DefaultStorageBackendID != nil {
-			_ = s.storageRepo.Delete(ctx, tenant.ID, *tenant.DefaultStorageBackendID)
-		}
-		_ = s.repo.DeleteTenant(ctx, tenant.ID)
-		return nil, err
-	}
-
 	logger.Infof(ctx, "Tenant created successfully, ID: %d, name: %s", tenant.ID, tenant.Name)
 	return tenant, nil
 }

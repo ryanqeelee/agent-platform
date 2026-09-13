@@ -220,7 +220,7 @@ func TestEmployeeRuntimeKeepsGlobalPolicyAndInjectsEnterpriseBindings(t *testing
 		repo:                 repo,
 		scenarioCapabilities: assistantScenarioResolverStub{settings: assistantScenarioSettings(true, false, true)},
 		sandboxConfigs:       &employeeSandboxRepoStub{rows: []*types.TenantSandboxConfigEntity{{ID: "tenant-sandbox", TenantID: 7, Name: "employee-assistant"}}},
-		webSearchProviders:   &employeeProviderStub{provider: &types.WebSearchProviderEntity{ID: "tenant-provider", TenantID: 7, Provider: types.WebSearchProviderTypeKeenable}},
+		webSearchProviders:   &employeeProviderStub{provider: &types.WebSearchProviderEntity{ID: "tenant-provider", Provider: types.WebSearchProviderTypeKeenable}},
 	}
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
 

@@ -27,7 +27,7 @@ func (r *fakeMCPRepo) Create(_ context.Context, s *types.MCPService) error {
 	return nil
 }
 
-func (r *fakeMCPRepo) GetByID(_ context.Context, _ uint64, id string) (*types.MCPService, error) {
+func (r *fakeMCPRepo) GetByID(_ context.Context, id string) (*types.MCPService, error) {
 	s, ok := r.store[id]
 	if !ok {
 		return nil, nil
@@ -56,7 +56,7 @@ func cloneService(s *types.MCPService) *types.MCPService {
 	return &cp
 }
 
-func (r *fakeMCPRepo) List(_ context.Context, _ uint64) ([]*types.MCPService, error) {
+func (r *fakeMCPRepo) List(_ context.Context) ([]*types.MCPService, error) {
 	out := make([]*types.MCPService, 0, len(r.store))
 	for _, s := range r.store {
 		out = append(out, cloneService(s))
@@ -64,11 +64,11 @@ func (r *fakeMCPRepo) List(_ context.Context, _ uint64) ([]*types.MCPService, er
 	return out, nil
 }
 
-func (r *fakeMCPRepo) ListEnabled(ctx context.Context, tenantID uint64) ([]*types.MCPService, error) {
-	return r.List(ctx, tenantID)
+func (r *fakeMCPRepo) ListEnabled(ctx context.Context) ([]*types.MCPService, error) {
+	return r.List(ctx)
 }
 
-func (r *fakeMCPRepo) ListByIDs(_ context.Context, _ uint64, ids []string) ([]*types.MCPService, error) {
+func (r *fakeMCPRepo) ListByIDs(_ context.Context, ids []string) ([]*types.MCPService, error) {
 	out := make([]*types.MCPService, 0, len(ids))
 	for _, id := range ids {
 		if s, ok := r.store[id]; ok {
@@ -83,7 +83,7 @@ func (r *fakeMCPRepo) Update(_ context.Context, s *types.MCPService) error {
 	return nil
 }
 
-func (r *fakeMCPRepo) Delete(_ context.Context, _ uint64, id string) error {
+func (r *fakeMCPRepo) Delete(_ context.Context, id string) error {
 	delete(r.store, id)
 	return nil
 }
@@ -92,7 +92,6 @@ func seedService(t *testing.T, repo *fakeMCPRepo, apiKey, token string) string {
 	t.Helper()
 	s := &types.MCPService{
 		ID:            "svc-test",
-		TenantID:      1,
 		Name:          "test",
 		Enabled:       true,
 		TransportType: types.MCPTransportSSE,
@@ -112,7 +111,6 @@ func newTestService() (*mcpServiceService, *fakeMCPRepo) {
 	svc := &mcpServiceService{
 		mcpServiceRepo: repo,
 		mcpManager:     mcp.NewMCPManager(nil),
-		oauthRepo:      nil,
 	}
 	return svc, repo
 }
@@ -168,7 +166,6 @@ func TestUpdateMCPService_RespectsScalarFieldPresence(t *testing.T) {
 			repo.store[id].Description = "before"
 
 			tt.update.ID = id
-			tt.update.TenantID = 1
 			require.NoError(t, svc.UpdateMCPService(ctx, tt.update, tt.updateFields))
 
 			got := repo.store[id]
@@ -180,20 +177,18 @@ func TestUpdateMCPService_RespectsScalarFieldPresence(t *testing.T) {
 }
 
 func TestUpdateMCPService_AppliesNonScalarUpdateWithoutName(t *testing.T) {
+	withSSRFWhitelist(t, "example.com")
 	ctx := context.Background()
 	svc, repo := newTestService()
 	id := seedService(t, repo, "stored-api", "stored-token")
-	// Use resolvable example.com paths: subdomains like before.example.com fail
-	// SSRF DNS checks because they do not resolve to a public IP.
 	beforeURL := "https://example.com/before"
 	repo.store[id].Description = "before"
 	repo.store[id].URL = &beforeURL
 
 	afterURL := "https://example.com/after"
 	update := &types.MCPService{
-		ID:       id,
-		TenantID: 1,
-		URL:      &afterURL,
+		ID:  id,
+		URL: &afterURL,
 	}
 	require.NoError(t, svc.UpdateMCPService(ctx, update, nil))
 
@@ -218,7 +213,6 @@ func TestUpdateMCPService_DoesNotTouchSecretsEvenIfPassed(t *testing.T) {
 
 	upd := &types.MCPService{
 		ID:            id,
-		TenantID:      1,
 		Name:          "renamed",
 		Enabled:       true,
 		TransportType: types.MCPTransportSSE,
@@ -249,7 +243,6 @@ func TestUpdateMCPService_CustomHeadersPreserveOnNil(t *testing.T) {
 
 	upd := &types.MCPService{
 		ID:            id,
-		TenantID:      1,
 		Name:          "test",
 		Enabled:       true,
 		TransportType: types.MCPTransportSSE,
@@ -271,7 +264,6 @@ func TestUpdateMCPService_CustomHeadersReplaceOnNonNil(t *testing.T) {
 
 	upd := &types.MCPService{
 		ID:            id,
-		TenantID:      1,
 		Name:          "test",
 		Enabled:       true,
 		TransportType: types.MCPTransportSSE,
@@ -294,7 +286,7 @@ func TestUpdateMCPCredentials_WritesAPIKey(t *testing.T) {
 	id := seedService(t, repo, "", "")
 
 	newKey := "fresh-api-key"
-	got, err := svc.UpdateMCPCredentials(ctx, 1, id, &newKey, nil)
+	got, err := svc.UpdateMCPCredentials(ctx, id, &newKey, nil)
 	require.NoError(t, err)
 	require.NotNil(t, got.AuthConfig)
 	assert.Equal(t, "fresh-api-key", got.AuthConfig.APIKey)
@@ -309,7 +301,7 @@ func TestUpdateMCPCredentials_NilPointerIsNoop(t *testing.T) {
 	svc, repo := newTestService()
 	id := seedService(t, repo, "stored-api", "stored-token")
 
-	got, err := svc.UpdateMCPCredentials(ctx, 1, id, nil, nil)
+	got, err := svc.UpdateMCPCredentials(ctx, id, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "stored-api", got.AuthConfig.APIKey)
 	assert.Equal(t, "stored-token", got.AuthConfig.Token)
@@ -321,7 +313,7 @@ func TestUpdateMCPCredentials_EmptyStringIsNoop(t *testing.T) {
 	id := seedService(t, repo, "stored-api", "stored-token")
 
 	empty := ""
-	got, err := svc.UpdateMCPCredentials(ctx, 1, id, &empty, &empty)
+	got, err := svc.UpdateMCPCredentials(ctx, id, &empty, &empty)
 	require.NoError(t, err)
 	assert.Equal(t, "stored-api", got.AuthConfig.APIKey,
 		"empty string is treated as no-op; clearing goes through ClearMCPCredential")
@@ -334,7 +326,7 @@ func TestUpdateMCPCredentials_ReplacesExisting(t *testing.T) {
 	id := seedService(t, repo, "old-api", "old-token")
 
 	newKey, newTok := "new-api", "new-tok"
-	got, err := svc.UpdateMCPCredentials(ctx, 1, id, &newKey, &newTok)
+	got, err := svc.UpdateMCPCredentials(ctx, id, &newKey, &newTok)
 	require.NoError(t, err)
 	assert.Equal(t, "new-api", got.AuthConfig.APIKey)
 	assert.Equal(t, "new-tok", got.AuthConfig.Token)
@@ -347,7 +339,7 @@ func TestUpdateMCPCredentials_RejectsBuiltin(t *testing.T) {
 	repo.store[id].IsBuiltin = true
 
 	newKey := "anything"
-	_, err := svc.UpdateMCPCredentials(ctx, 1, id, &newKey, nil)
+	_, err := svc.UpdateMCPCredentials(ctx, id, &newKey, nil)
 	require.Error(t, err)
 	assert.Contains(t, strings.ToLower(err.Error()), "builtin")
 }
@@ -356,7 +348,7 @@ func TestUpdateMCPCredentials_ServiceNotFound(t *testing.T) {
 	ctx := context.Background()
 	svc, _ := newTestService()
 	newKey := "x"
-	_, err := svc.UpdateMCPCredentials(ctx, 1, "nope", &newKey, nil)
+	_, err := svc.UpdateMCPCredentials(ctx, "nope", &newKey, nil)
 	require.Error(t, err)
 }
 
@@ -367,7 +359,7 @@ func TestClearMCPCredential_ClearsAPIKey(t *testing.T) {
 	svc, repo := newTestService()
 	id := seedService(t, repo, "stored-api", "stored-token")
 
-	require.NoError(t, svc.ClearMCPCredential(ctx, 1, id, "api_key"))
+	require.NoError(t, svc.ClearMCPCredential(ctx, id, "api_key"))
 	stored := repo.store[id]
 	assert.Empty(t, stored.AuthConfig.APIKey)
 	assert.Equal(t, "stored-token", stored.AuthConfig.Token, "other field untouched")
@@ -378,7 +370,7 @@ func TestClearMCPCredential_ClearsToken(t *testing.T) {
 	svc, repo := newTestService()
 	id := seedService(t, repo, "stored-api", "stored-token")
 
-	require.NoError(t, svc.ClearMCPCredential(ctx, 1, id, "token"))
+	require.NoError(t, svc.ClearMCPCredential(ctx, id, "token"))
 	stored := repo.store[id]
 	assert.Equal(t, "stored-api", stored.AuthConfig.APIKey)
 	assert.Empty(t, stored.AuthConfig.Token)
@@ -389,7 +381,7 @@ func TestClearMCPCredential_IdempotentOnEmpty(t *testing.T) {
 	svc, repo := newTestService()
 	id := seedService(t, repo, "stored-api", "") // token already empty
 
-	require.NoError(t, svc.ClearMCPCredential(ctx, 1, id, "token"),
+	require.NoError(t, svc.ClearMCPCredential(ctx, id, "token"),
 		"clearing already-empty field must not error")
 	stored := repo.store[id]
 	assert.Equal(t, "stored-api", stored.AuthConfig.APIKey)
@@ -401,7 +393,7 @@ func TestClearMCPCredential_UnknownFieldErrors(t *testing.T) {
 	svc, repo := newTestService()
 	id := seedService(t, repo, "stored-api", "")
 
-	err := svc.ClearMCPCredential(ctx, 1, id, "bogus")
+	err := svc.ClearMCPCredential(ctx, id, "bogus")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown")
 }
@@ -412,7 +404,7 @@ func TestClearMCPCredential_RejectsBuiltin(t *testing.T) {
 	id := seedService(t, repo, "stored-api", "")
 	repo.store[id].IsBuiltin = true
 
-	err := svc.ClearMCPCredential(ctx, 1, id, "api_key")
+	err := svc.ClearMCPCredential(ctx, id, "api_key")
 	require.Error(t, err)
 	assert.Contains(t, strings.ToLower(err.Error()), "builtin")
 }
@@ -428,7 +420,7 @@ func TestGetMCPServiceByID_ReturnsRawCredentials(t *testing.T) {
 	svc, repo := newTestService()
 	id := seedService(t, repo, "real-api", "real-token")
 
-	got, err := svc.GetMCPServiceByID(ctx, 1, id)
+	got, err := svc.GetMCPServiceByID(ctx, id)
 	require.NoError(t, err)
 	require.NotNil(t, got.AuthConfig)
 	assert.Equal(t, "real-api", got.AuthConfig.APIKey,
@@ -441,7 +433,7 @@ func TestListMCPServices_ReturnsRawCredentials(t *testing.T) {
 	svc, repo := newTestService()
 	seedService(t, repo, "real-api", "real-token")
 
-	got, err := svc.ListMCPServices(ctx, 1)
+	got, err := svc.ListMCPServices(ctx)
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, "real-api", got[0].AuthConfig.APIKey)

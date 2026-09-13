@@ -552,7 +552,6 @@ curl --location 'http://localhost:8080/api/v1/tenants' \
 | key                    | 说明                          |
 | ---------------------- | ----------------------------- |
 | `agent-config`         | Agent 配置（最大迭代次数、温度、System Prompt、可用工具等） |
-| `web-search-config`    | 网页搜索配置                 |
 | `conversation-config`  | 普通模式会话/对话配置        |
 | `prompt-templates`     | 系统提示词模板（只读，按用户语言本地化） |
 | `storage-engine-config`| 存储引擎配置（Local/MinIO/COS） |
@@ -636,7 +635,6 @@ curl --location --request PUT 'http://localhost:8080/api/v1/tenants/kv/agent-con
 **约束**:
 
 - `agent-config`: `max_iterations` 为正整数时上限 100，`-1` 表示不限制；`temperature` 取值范围 `[0, 2]`。
-- `web-search-config`: `max_results` 取值范围 `[1, 50]`。
 - `conversation-config`: 包含多项阈值校验（如 `keyword_threshold` / `vector_threshold` ∈ `[0, 1]`，`rerank_threshold` ∈ `[-10, 10]`，`temperature` ∈ `[0, 2]`，`max_completion_tokens` ∈ `[1, 100000]` 等）。
 - `retrieval-config`: `embedding_top_k` / `rerank_top_k` ∈ `[0, 200]`；阈值范围同上。
 - `storage-engine-config`: `default_provider` 必须在 `STORAGE_ALLOW_LIST` 允许的列表内。

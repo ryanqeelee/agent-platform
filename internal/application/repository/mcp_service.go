@@ -24,13 +24,11 @@ func (r *mcpServiceRepository) Create(ctx context.Context, service *types.MCPSer
 	return r.db.WithContext(ctx).Create(service).Error
 }
 
-// GetByID retrieves an MCP service by ID and tenant ID
-// Builtin MCP services are visible to all tenants
-func (r *mcpServiceRepository) GetByID(ctx context.Context, tenantID uint64, id string) (*types.MCPService, error) {
+// GetByID retrieves a platform MCP service by ID.
+func (r *mcpServiceRepository) GetByID(ctx context.Context, id string) (*types.MCPService, error) {
 	var service types.MCPService
 	err := r.db.WithContext(ctx).
 		Where("id = ?", id).
-		Where("tenant_id = ? OR is_builtin = true", tenantID).
 		First(&service).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -42,12 +40,10 @@ func (r *mcpServiceRepository) GetByID(ctx context.Context, tenantID uint64, id 
 	return &service, nil
 }
 
-// List retrieves all MCP services for a tenant
-// Includes builtin MCP services visible to all tenants
-func (r *mcpServiceRepository) List(ctx context.Context, tenantID uint64) ([]*types.MCPService, error) {
+// List retrieves all platform MCP services.
+func (r *mcpServiceRepository) List(ctx context.Context) ([]*types.MCPService, error) {
 	var services []*types.MCPService
 	err := r.db.WithContext(ctx).
-		Where("tenant_id = ? OR is_builtin = true", tenantID).
 		Order("created_at DESC").
 		Find(&services).Error
 	if err != nil {
@@ -57,12 +53,11 @@ func (r *mcpServiceRepository) List(ctx context.Context, tenantID uint64) ([]*ty
 	return services, nil
 }
 
-// ListEnabled retrieves all enabled MCP services for a tenant
-// Includes enabled builtin MCP services visible to all tenants
-func (r *mcpServiceRepository) ListEnabled(ctx context.Context, tenantID uint64) ([]*types.MCPService, error) {
+// ListEnabled retrieves all enabled platform MCP services.
+func (r *mcpServiceRepository) ListEnabled(ctx context.Context) ([]*types.MCPService, error) {
 	var services []*types.MCPService
 	err := r.db.WithContext(ctx).
-		Where("(tenant_id = ? OR is_builtin = true) AND enabled = ?", tenantID, true).
+		Where("enabled = ?", true).
 		Order("created_at DESC").
 		Find(&services).Error
 	if err != nil {
@@ -72,11 +67,9 @@ func (r *mcpServiceRepository) ListEnabled(ctx context.Context, tenantID uint64)
 	return services, nil
 }
 
-// ListByIDs retrieves MCP services by multiple IDs for a tenant
-// Includes builtin MCP services visible to all tenants
+// ListByIDs retrieves platform MCP services by exact IDs.
 func (r *mcpServiceRepository) ListByIDs(
 	ctx context.Context,
-	tenantID uint64,
 	ids []string,
 ) ([]*types.MCPService, error) {
 	if len(ids) == 0 {
@@ -85,7 +78,7 @@ func (r *mcpServiceRepository) ListByIDs(
 
 	var services []*types.MCPService
 	err := r.db.WithContext(ctx).
-		Where("(tenant_id = ? OR is_builtin = true) AND id IN ?", tenantID, ids).
+		Where("id IN ?", ids).
 		Find(&services).Error
 	if err != nil {
 		return nil, err
@@ -134,13 +127,13 @@ func (r *mcpServiceRepository) Update(ctx context.Context, service *types.MCPSer
 
 	return r.db.WithContext(ctx).
 		Model(&types.MCPService{}).
-		Where("id = ? AND tenant_id = ?", service.ID, service.TenantID).
+		Where("id = ?", service.ID).
 		Updates(updateMap).Error
 }
 
 // Delete deletes an MCP service (soft delete)
-func (r *mcpServiceRepository) Delete(ctx context.Context, tenantID uint64, id string) error {
+func (r *mcpServiceRepository) Delete(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).
-		Where("id = ? AND tenant_id = ?", id, tenantID).
+		Where("id = ?", id).
 		Delete(&types.MCPService{}).Error
 }

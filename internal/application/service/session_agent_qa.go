@@ -406,17 +406,18 @@ func (s *sessionService) buildAgentConfig(
 	logger.Infof(ctx, "Custom agent config applied: MaxIterations=%d, Temperature=%.2f, AllowedTools=%v, WebSearchEnabled=%v",
 		agentConfig.MaxIterations, agentConfig.Temperature, agentConfig.AllowedTools, agentConfig.WebSearchEnabled)
 
-	// Set web search max results from tenant config if not set (default: 5)
+	// Set web search max results from the request/agent policy if not set.
 	if agentConfig.WebSearchMaxResults == 0 {
 		agentConfig.WebSearchMaxResults = 5
-		if tenantInfo.WebSearchConfig != nil && tenantInfo.WebSearchConfig.MaxResults > 0 {
-			agentConfig.WebSearchMaxResults = tenantInfo.WebSearchConfig.MaxResults
-		}
 	}
 
-	// Resolve web search provider ID: agent-level > tenant default (is_default=true)
-	if agentConfig.WebSearchProviderID == "" {
-		if defaultProvider, err := s.webSearchProviderRepo.GetDefault(ctx, tenantInfo.ID); err == nil && defaultProvider != nil {
+	// Resolve web search provider ID: agent-level > platform default.
+	if agentConfig.WebSearchEnabled && agentConfig.WebSearchProviderID == "" {
+		defaultProvider, err := s.webSearchProviderRepo.GetDefault(ctx)
+		if err != nil {
+			return nil, nil, fmt.Errorf("resolve platform web search default: %w", err)
+		}
+		if defaultProvider != nil {
 			agentConfig.WebSearchProviderID = defaultProvider.ID
 		}
 	}

@@ -127,7 +127,7 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { AddIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
 import {
-  listMCPServices,
+  listPlatformMCPServices,
   updateMCPService,
   deleteMCPService,
   type MCPService
@@ -135,11 +135,9 @@ import {
 import McpServiceDialog from './components/McpServiceDialog.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useAuthStore } from '@/stores/auth'
-import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
-const platformTenantID = usePlatformTenantControlID()
 const canManage = authStore.isSystemAdmin || authStore.hasRole('admin')
 const confirmDelete = useConfirmDelete()
 
@@ -155,7 +153,7 @@ const loadServices = async () => {
   loading.value = true
   loadError.value = ''
   try {
-    services.value = await listMCPServices(platformTenantID.value)
+    services.value = await listPlatformMCPServices()
   } catch (error) {
     loadError.value = (error as any)?.message || t('common.loadFailed')
     MessagePlugin.error(t('mcpSettings.toasts.loadFailed'))
@@ -217,7 +215,7 @@ const handleToggleEnabled = async (service: MCPService) => {
 
   const originalState = service.enabled
   try {
-    await updateMCPService(service.id, { enabled: service.enabled }, platformTenantID.value)
+    await updateMCPService(service.id, { enabled: service.enabled })
     MessagePlugin.success(service.enabled ? t('mcpSettings.toasts.enabled') : t('mcpSettings.toasts.disabled'))
   } catch (error) {
     service.enabled = originalState
@@ -234,7 +232,7 @@ const handleDelete = (service: MCPService) => {
     body: t('mcpSettings.deleteConfirmBody', { name: service.name || t('mcpSettings.unnamed') }),
     onConfirm: async () => {
       try {
-        await deleteMCPService(service.id, platformTenantID.value)
+        await deleteMCPService(service.id)
         MessagePlugin.success(t('mcpSettings.toasts.deleted'))
         loadServices()
       } catch (error) {

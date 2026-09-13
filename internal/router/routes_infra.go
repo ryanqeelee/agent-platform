@@ -131,29 +131,37 @@ func RegisterMCPServiceRoutes(
 	// redirect carries no WeKnora bearer — the single-use state authenticates.
 	r.GET("/mcp-oauth/callback", oauthHandler.Callback)
 
+	// Enterprise surface: safe catalog projection plus tenant/principal OAuth.
 	mcpServices := g.apiKeyGroup(
 		r.Group("/mcp-services"),
 		apiKeyPlatform(types.APIKeyCapabilityManageMCPServices),
 	)
 	{
-		mcpServices.POST("", g.SystemAdmin(), handler.CreateMCPService)
-		mcpServices.GET("", g.Admin(), handler.ListMCPServices)
-		mcpServices.GET("/:id", g.SystemAdmin(), handler.GetMCPService)
-		mcpServices.PUT("/:id", g.SystemAdmin(), handler.UpdateMCPService)
-		mcpServices.DELETE("/:id", g.SystemAdmin(), handler.DeleteMCPService)
-		mcpServices.POST("/:id/test", g.SystemAdmin(), handler.TestMCPService)
-		mcpServices.GET("/:id/tools", g.SystemAdmin(), handler.GetMCPServiceTools)
-		mcpServices.GET("/:id/resources", g.SystemAdmin(), handler.GetMCPServiceResources)
-		mcpServices.PUT("/:id/credentials", g.SystemAdmin(), credHandler.Put)
-		mcpServices.DELETE("/:id/credentials/:field", g.SystemAdmin(), credHandler.DeleteField)
-		mcpServices.GET("/:id/tool-approvals", g.SystemAdmin(), handler.ListMCPToolApprovals)
-		mcpServices.PUT("/:id/tool-approvals/:tool_name", g.SystemAdmin(), handler.SetMCPToolApproval)
+		mcpServices.GET("", g.Viewer(), handler.ListMCPServices)
 		// Per-user OAuth authorization flow. Viewer+ may authorize/inspect/
 		// revoke their own token; the callback is the separate public route
 		// registered above.
 		mcpServices.POST("/:id/oauth/authorize-url", g.Viewer(), oauthHandler.AuthorizeURL)
 		mcpServices.GET("/:id/oauth/status", g.Viewer(), oauthHandler.Status)
 		mcpServices.DELETE("/:id/oauth/token", g.Viewer(), oauthHandler.Revoke)
+	}
+
+	// Platform connection definitions. This surface is intentionally absent
+	// from API-key policy routing: only an authenticated SystemAdmin may use it.
+	admin := r.Group("/system/admin/mcp-services", g.SystemAdmin())
+	{
+		admin.POST("", handler.CreateMCPService)
+		admin.GET("", handler.ListMCPServices)
+		admin.GET("/:id", handler.GetMCPService)
+		admin.PUT("/:id", handler.UpdateMCPService)
+		admin.DELETE("/:id", handler.DeleteMCPService)
+		admin.POST("/:id/test", handler.TestMCPService)
+		admin.GET("/:id/tools", handler.GetMCPServiceTools)
+		admin.GET("/:id/resources", handler.GetMCPServiceResources)
+		admin.PUT("/:id/credentials", credHandler.Put)
+		admin.DELETE("/:id/credentials/:field", credHandler.DeleteField)
+		admin.GET("/:id/tool-approvals", handler.ListMCPToolApprovals)
+		admin.PUT("/:id/tool-approvals/:tool_name", handler.SetMCPToolApproval)
 	}
 
 	// /agent tool-approval + OAuth resolution are interactive human flows;
@@ -193,19 +201,29 @@ func RegisterWebSearchProviderRoutes(
 	credHandler *handler.WebSearchProviderCredentialsHandler,
 	g *rbacGuards,
 ) {
-	providers := g.apiKeyGroup(r.Group("/web-search-providers"), apiKeyManageWebSearch(apiKeyFullAccess()))
+	// Enterprise-safe readiness projection used by chat surfaces.
+	providers := g.apiKeyGroup(
+		r.Group("/web-search-providers"),
+		apiKeyManageWebSearch(apiKeyFullAccess()),
+	)
 	{
-		providers.GET("/types", g.SystemAdmin(), h.ListProviderTypes)
-		providers.POST("/test", g.SystemAdmin(), h.TestProviderRaw)
-		// CRUD
-		providers.POST("", g.SystemAdmin(), h.CreateProvider)
 		providers.GET("", g.Viewer(), h.ListProviders)
-		providers.GET("/:id", g.SystemAdmin(), h.GetProvider)
-		providers.PUT("/:id", g.SystemAdmin(), h.UpdateProvider)
-		providers.DELETE("/:id", g.SystemAdmin(), h.DeleteProvider)
-		providers.PUT("/:id/credentials", g.SystemAdmin(), credHandler.Put)
-		providers.DELETE("/:id/credentials/:field", g.SystemAdmin(), credHandler.DeleteField)
-		providers.POST("/:id/test", g.SystemAdmin(), h.TestProviderByID)
+	}
+
+	// Like MCP definitions, provider configuration is a browser-only
+	// SystemAdmin surface and is default-deny for API keys.
+	admin := r.Group("/system/admin/web-search-providers", g.SystemAdmin())
+	{
+		admin.GET("/types", h.ListProviderTypes)
+		admin.POST("/test", h.TestProviderRaw)
+		admin.POST("", h.CreateProvider)
+		admin.GET("", h.ListProviders)
+		admin.GET("/:id", h.GetProvider)
+		admin.PUT("/:id", h.UpdateProvider)
+		admin.DELETE("/:id", h.DeleteProvider)
+		admin.PUT("/:id/credentials", credHandler.Put)
+		admin.DELETE("/:id/credentials/:field", credHandler.DeleteField)
+		admin.POST("/:id/test", h.TestProviderByID)
 	}
 }
 

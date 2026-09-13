@@ -25,10 +25,6 @@ func RegisterSystemAdminTenantRuntimeRoutes(
 	system *handler.SystemHandler,
 	memory *handler.TenantMemoryConfigHandler,
 	capabilityPlan *handler.AICapabilityPlanHandler,
-	mcp *handler.MCPServiceHandler,
-	mcpCredentials *handler.MCPCredentialsHandler,
-	webSearch *handler.WebSearchProviderHandler,
-	webSearchCredentials *handler.WebSearchProviderCredentialsHandler,
 	vectorStores *handler.VectorStoreHandler,
 	storageBackends *handler.StorageBackendHandler,
 	g *rbacGuards,
@@ -59,20 +55,6 @@ func RegisterSystemAdminTenantRuntimeRoutes(
 		tenantRuntime.GET("/retrieval-processing-settings", capabilityPlan.GetPlatformRetrievalProcessingSettings)
 	}
 
-	if webSearch != nil && webSearchCredentials != nil {
-		providers := tenantRuntime.Group("/web-search-providers")
-		providers.GET("/types", webSearch.ListProviderTypes)
-		providers.POST("/test", webSearch.TestProviderRaw)
-		providers.POST("", webSearch.CreateProvider)
-		providers.GET("", webSearch.ListProviders)
-		providers.GET("/:id", webSearch.GetProvider)
-		providers.PUT("/:id", webSearch.UpdateProvider)
-		providers.DELETE("/:id", webSearch.DeleteProvider)
-		providers.PUT("/:id/credentials", webSearchCredentials.Put)
-		providers.DELETE("/:id/credentials/:field", webSearchCredentials.DeleteField)
-		providers.POST("/:id/test", webSearch.TestProviderByID)
-	}
-
 	if vectorStores != nil {
 		stores := tenantRuntime.Group("/vector-stores")
 		stores.GET("/types", vectorStores.ListStoreTypes)
@@ -96,22 +78,6 @@ func RegisterSystemAdminTenantRuntimeRoutes(
 		backends.DELETE("/:id", storageBackends.Delete)
 		backends.POST("/:id/test", storageBackends.TestByID)
 		backends.PUT("/:id/default", storageBackends.SetDefault)
-	}
-
-	if mcp != nil && mcpCredentials != nil {
-		services := tenantRuntime.Group("/mcp-services")
-		services.POST("", mcp.CreateMCPService)
-		services.GET("", mcp.ListMCPServices)
-		services.GET("/:id", mcp.GetMCPService)
-		services.PUT("/:id", mcp.UpdateMCPService)
-		services.DELETE("/:id", mcp.DeleteMCPService)
-		services.POST("/:id/test", mcp.TestMCPService)
-		services.GET("/:id/tools", mcp.GetMCPServiceTools)
-		services.GET("/:id/resources", mcp.GetMCPServiceResources)
-		services.PUT("/:id/credentials", mcpCredentials.Put)
-		services.DELETE("/:id/credentials/:field", mcpCredentials.DeleteField)
-		services.GET("/:id/tool-approvals", mcp.ListMCPToolApprovals)
-		services.PUT("/:id/tool-approvals/:tool_name", mcp.SetMCPToolApproval)
 	}
 
 	skillRoutes := tenantRuntime.Group("/skills")

@@ -44,7 +44,7 @@ var versionedSQLiteColumns = map[string][]string{
 	"memory_items":       {"scope"},                          // 000101
 }
 
-const expectedSQLiteMigrationVersion = 28
+const expectedSQLiteMigrationVersion = 32
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
@@ -252,7 +252,7 @@ func assertSQLiteShareLinkInvitationsWork(t *testing.T, db *sql.DB) {
 func assertSQLiteMCPOAuthPrincipalUpsertWorks(t *testing.T, db *sql.DB) {
 	t.Helper()
 	_, err := db.Exec(
-		"INSERT INTO mcp_services (id, tenant_id, name, transport_type) VALUES (?, 1, 'svc', 'http')",
+		"INSERT INTO mcp_services (id, name, transport_type) VALUES (?, 'svc', 'http')",
 		"svc-migration-1",
 	)
 	require.NoError(t, err)

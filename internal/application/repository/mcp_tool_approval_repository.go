@@ -24,10 +24,10 @@ func NewMCPToolApprovalRepository(db *gorm.DB) interfaces.MCPToolApprovalReposit
 }
 
 // ListByService returns all stored approval rows for an MCP service (may be empty).
-func (r *MCPToolApprovalRepository) ListByService(ctx context.Context, tenantID uint64, serviceID string) ([]*types.MCPToolApproval, error) {
+func (r *MCPToolApprovalRepository) ListByService(ctx context.Context, serviceID string) ([]*types.MCPToolApproval, error) {
 	var rows []*types.MCPToolApproval
 	err := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND service_id = ?", tenantID, serviceID).
+		Where("service_id = ?", serviceID).
 		Order("tool_name ASC").
 		Find(&rows).Error
 	if err != nil {
@@ -37,11 +37,11 @@ func (r *MCPToolApprovalRepository) ListByService(ctx context.Context, tenantID 
 }
 
 // IsRequired returns true when a row exists with require_approval = true.
-func (r *MCPToolApprovalRepository) IsRequired(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error) {
+func (r *MCPToolApprovalRepository) IsRequired(ctx context.Context, serviceID, toolName string) (bool, error) {
 	var row types.MCPToolApproval
 	err := r.db.WithContext(ctx).
 		Select("require_approval").
-		Where("tenant_id = ? AND service_id = ? AND tool_name = ?", tenantID, serviceID, toolName).
+		Where("service_id = ? AND tool_name = ?", serviceID, toolName).
 		First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return false, nil
@@ -53,7 +53,7 @@ func (r *MCPToolApprovalRepository) IsRequired(ctx context.Context, tenantID uin
 }
 
 // Upsert creates or updates the approval flag for a tool atomically.
-// Uses ON CONFLICT against the (tenant_id, service_id, tool_name) unique index
+// Uses ON CONFLICT against the (service_id, tool_name) unique index
 // so concurrent writers don't race the prior SELECT-then-INSERT path into
 // duplicate-key 500s.
 func (r *MCPToolApprovalRepository) Upsert(ctx context.Context, row *types.MCPToolApproval) error {
@@ -70,7 +70,6 @@ func (r *MCPToolApprovalRepository) Upsert(ctx context.Context, row *types.MCPTo
 	}
 	err := r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{
-			{Name: "tenant_id"},
 			{Name: "service_id"},
 			{Name: "tool_name"},
 		},

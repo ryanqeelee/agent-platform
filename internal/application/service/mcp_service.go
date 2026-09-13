@@ -19,19 +19,16 @@ import (
 type mcpServiceService struct {
 	mcpServiceRepo interfaces.MCPServiceRepository
 	mcpManager     *mcp.MCPManager
-	oauthRepo      interfaces.MCPOAuthRepository
 }
 
 // NewMCPServiceService creates a new MCP service service
 func NewMCPServiceService(
 	mcpServiceRepo interfaces.MCPServiceRepository,
 	mcpManager *mcp.MCPManager,
-	oauthRepo interfaces.MCPOAuthRepository,
 ) interfaces.MCPServiceService {
 	return &mcpServiceService{
 		mcpServiceRepo: mcpServiceRepo,
 		mcpManager:     mcpManager,
-		oauthRepo:      oauthRepo,
 	}
 }
 
@@ -71,10 +68,9 @@ func (s *mcpServiceService) CreateMCPService(ctx context.Context, service *types
 // the unredacted form to function correctly.
 func (s *mcpServiceService) GetMCPServiceByID(
 	ctx context.Context,
-	tenantID uint64,
 	id string,
 ) (*types.MCPService, error) {
-	service, err := s.mcpServiceRepo.GetByID(ctx, tenantID, id)
+	service, err := s.mcpServiceRepo.GetByID(ctx, id)
 	if err != nil {
 		logger.GetLogger(ctx).Errorf("Failed to get MCP service: %v", err)
 		return nil, fmt.Errorf("failed to get MCP service: %w", err)
@@ -86,12 +82,12 @@ func (s *mcpServiceService) GetMCPServiceByID(
 	return service, nil
 }
 
-// ListMCPServices lists all MCP services for a tenant.
+// ListMCPServices lists all platform MCP services.
 //
 // Same contract as GetMCPServiceByID — returns raw entities; handlers MUST
 // convert to dto.MCPServiceResponse before responding.
-func (s *mcpServiceService) ListMCPServices(ctx context.Context, tenantID uint64) ([]*types.MCPService, error) {
-	services, err := s.mcpServiceRepo.List(ctx, tenantID)
+func (s *mcpServiceService) ListMCPServices(ctx context.Context) ([]*types.MCPService, error) {
+	services, err := s.mcpServiceRepo.List(ctx)
 	if err != nil {
 		logger.GetLogger(ctx).Errorf("Failed to list MCP services: %v", err)
 		return nil, fmt.Errorf("failed to list MCP services: %w", err)
@@ -102,17 +98,25 @@ func (s *mcpServiceService) ListMCPServices(ctx context.Context, tenantID uint64
 // ListMCPServicesByIDs retrieves multiple MCP services by IDs
 func (s *mcpServiceService) ListMCPServicesByIDs(
 	ctx context.Context,
-	tenantID uint64,
 	ids []string,
 ) ([]*types.MCPService, error) {
 	if len(ids) == 0 {
 		return []*types.MCPService{}, nil
 	}
 
-	services, err := s.mcpServiceRepo.ListByIDs(ctx, tenantID, ids)
+	services, err := s.mcpServiceRepo.ListByIDs(ctx, ids)
 	if err != nil {
 		logger.GetLogger(ctx).Errorf("Failed to list MCP services by IDs: %v", err)
 		return nil, fmt.Errorf("failed to list MCP services by IDs: %w", err)
+	}
+	found := make(map[string]struct{}, len(services))
+	for _, service := range services {
+		found[service.ID] = struct{}{}
+	}
+	for _, id := range ids {
+		if _, ok := found[id]; !ok {
+			return nil, fmt.Errorf("MCP service not found: %s", id)
+		}
 	}
 
 	return services, nil
@@ -125,7 +129,7 @@ func (s *mcpServiceService) UpdateMCPService(
 	updateFields map[string]bool,
 ) error {
 	// Check if service exists
-	existing, err := s.mcpServiceRepo.GetByID(ctx, service.TenantID, service.ID)
+	existing, err := s.mcpServiceRepo.GetByID(ctx, service.ID)
 	if err != nil {
 		return fmt.Errorf("failed to get MCP service: %w", err)
 	}
@@ -321,9 +325,9 @@ func (s *mcpServiceService) UpdateMCPService(
 }
 
 // DeleteMCPService deletes an MCP service
-func (s *mcpServiceService) DeleteMCPService(ctx context.Context, tenantID uint64, id string) error {
+func (s *mcpServiceService) DeleteMCPService(ctx context.Context, id string) error {
 	// Check if service exists
-	existing, err := s.mcpServiceRepo.GetByID(ctx, tenantID, id)
+	existing, err := s.mcpServiceRepo.GetByID(ctx, id)
 	if err != nil {
 		return fmt.Errorf("failed to get MCP service: %w", err)
 	}
@@ -339,7 +343,7 @@ func (s *mcpServiceService) DeleteMCPService(ctx context.Context, tenantID uint6
 	// Close client connection
 	s.mcpManager.CloseClient(id)
 
-	if err := s.mcpServiceRepo.Delete(ctx, tenantID, id); err != nil {
+	if err := s.mcpServiceRepo.Delete(ctx, id); err != nil {
 		logger.GetLogger(ctx).Errorf("Failed to delete MCP service: %v", err)
 		return fmt.Errorf("failed to delete MCP service: %w", err)
 	}
@@ -371,11 +375,10 @@ func mcpTestFailure(err error, prefix string) *types.MCPTestResult {
 
 func (s *mcpServiceService) TestMCPService(
 	ctx context.Context,
-	tenantID uint64,
 	id string,
 ) (*types.MCPTestResult, error) {
 	// Get service
-	service, err := s.mcpServiceRepo.GetByID(ctx, tenantID, id)
+	service, err := s.mcpServiceRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get MCP service: %w", err)
 	}
@@ -383,17 +386,10 @@ func (s *mcpServiceService) TestMCPService(
 		return nil, fmt.Errorf("MCP service not found")
 	}
 
-	// Create temporary client for testing. For OAuth services, wire the
-	// per-user token store so the test connects with the current user's
-	// authorization (and surfaces an authorization-required message when the
-	// user has not authorized yet).
+	// Control-plane tests always use a transient client. They never enter the
+	// tenant runtime cache or fabricate a tenant/principal identity.
 	config := &mcp.ClientConfig{
 		Service: service,
-	}
-	if service.AuthConfig.IsOAuth() {
-		config.OAuthRepo = s.oauthRepo
-		config.TenantID, _ = types.TenantIDFromContext(ctx)
-		config.Principal, _ = types.PrincipalFromContext(ctx)
 	}
 
 	client, err := mcp.NewMCPClient(config)
@@ -449,31 +445,16 @@ func (s *mcpServiceService) TestMCPService(
 // GetMCPServiceTools retrieves the list of tools from an MCP service
 func (s *mcpServiceService) GetMCPServiceTools(
 	ctx context.Context,
-	tenantID uint64,
 	id string,
 ) ([]*types.MCPTool, error) {
-	// Get service
-	service, err := s.mcpServiceRepo.GetByID(ctx, tenantID, id)
+	result, err := s.TestMCPService(ctx, id)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get MCP service: %w", err)
+		return nil, err
 	}
-	if service == nil {
-		return nil, fmt.Errorf("MCP service not found")
+	if !result.Success {
+		return nil, fmt.Errorf("failed to inspect MCP service: %s", result.Message)
 	}
-
-	// Get or create client
-	client, err := s.mcpManager.GetOrCreateClient(ctx, service)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get MCP client: %w", err)
-	}
-
-	// List tools
-	tools, err := client.ListTools(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list tools: %w", err)
-	}
-
-	return tools, nil
+	return result.Tools, nil
 }
 
 // UpdateMCPCredentials writes one or more credential fields and recycles any
@@ -490,9 +471,9 @@ func (s *mcpServiceService) GetMCPServiceTools(
 //   - Always re-fetches existing AuthConfig before merge to avoid clobbering
 //     CustomHeaders or the unrelated credential field.
 func (s *mcpServiceService) UpdateMCPCredentials(
-	ctx context.Context, tenantID uint64, id string, apiKey *string, token *string,
+	ctx context.Context, id string, apiKey *string, token *string,
 ) (*types.MCPService, error) {
-	existing, err := s.mcpServiceRepo.GetByID(ctx, tenantID, id)
+	existing, err := s.mcpServiceRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get MCP service: %w", err)
 	}
@@ -536,9 +517,9 @@ func (s *mcpServiceService) UpdateMCPCredentials(
 // ClearMCPCredential removes a single credential field. Idempotent: clearing
 // an already-empty field returns nil without writing or reconnecting.
 func (s *mcpServiceService) ClearMCPCredential(
-	ctx context.Context, tenantID uint64, id, field string,
+	ctx context.Context, id, field string,
 ) error {
-	existing, err := s.mcpServiceRepo.GetByID(ctx, tenantID, id)
+	existing, err := s.mcpServiceRepo.GetByID(ctx, id)
 	if err != nil {
 		return fmt.Errorf("failed to get MCP service: %w", err)
 	}
@@ -587,29 +568,14 @@ func (s *mcpServiceService) ClearMCPCredential(
 // GetMCPServiceResources retrieves the list of resources from an MCP service
 func (s *mcpServiceService) GetMCPServiceResources(
 	ctx context.Context,
-	tenantID uint64,
 	id string,
 ) ([]*types.MCPResource, error) {
-	// Get service
-	service, err := s.mcpServiceRepo.GetByID(ctx, tenantID, id)
+	result, err := s.TestMCPService(ctx, id)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get MCP service: %w", err)
+		return nil, err
 	}
-	if service == nil {
-		return nil, fmt.Errorf("MCP service not found")
+	if !result.Success {
+		return nil, fmt.Errorf("failed to inspect MCP service: %s", result.Message)
 	}
-
-	// Get or create client
-	client, err := s.mcpManager.GetOrCreateClient(ctx, service)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get MCP client: %w", err)
-	}
-
-	// List resources
-	resources, err := client.ListResources(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list resources: %w", err)
-	}
-
-	return resources, nil
+	return result.Resources, nil
 }

@@ -31,10 +31,6 @@ func TestSystemAdminTenantRuntimeRouteSurfaceAndAPIKeyDefaultDeny(t *testing.T) 
 		&handler.SystemHandler{},
 		&handler.TenantMemoryConfigHandler{},
 		&handler.AICapabilityPlanHandler{},
-		&handler.MCPServiceHandler{},
-		&handler.MCPCredentialsHandler{},
-		&handler.WebSearchProviderHandler{},
-		&handler.WebSearchProviderCredentialsHandler{},
 		&handler.VectorStoreHandler{},
 		&handler.StorageBackendHandler{},
 		guards,
@@ -55,14 +51,10 @@ func TestSystemAdminTenantRuntimeRouteSurfaceAndAPIKeyDefaultDeny(t *testing.T) 
 		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/memory-config"},
 		{http.MethodPut, "/api/v1/system/admin/tenants/:tenant_id/memory-config"},
 		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/retrieval-processing-settings"},
-		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/web-search-providers"},
-		{http.MethodPost, "/api/v1/system/admin/tenants/:tenant_id/web-search-providers"},
 		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/vector-stores"},
 		{http.MethodPost, "/api/v1/system/admin/tenants/:tenant_id/vector-stores"},
 		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/storage-backends"},
 		{http.MethodPost, "/api/v1/system/admin/tenants/:tenant_id/storage-backends"},
-		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/mcp-services"},
-		{http.MethodPost, "/api/v1/system/admin/tenants/:tenant_id/mcp-services"},
 		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs"},
 		{http.MethodPut, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs/workspace-policy"},
 		{http.MethodPost, "/api/v1/system/admin/tenants/:tenant_id/sandbox-configs"},
@@ -182,7 +174,7 @@ func TestSystemAdminTenantRuntimeEnablesChatHistoryForTargetTenant(t *testing.T)
 		&handler.SkillHandler{},
 		&handler.CustomAgentHandler{},
 		&handler.SystemHandler{},
-		nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil,
 		&rbacGuards{},
 	)
 
@@ -247,7 +239,7 @@ func TestSystemAdminTenantRuntimeChatHistoryRejectsMissingAuthorityOrTenant(t *t
 				&handler.SkillHandler{},
 				&handler.CustomAgentHandler{},
 				&handler.SystemHandler{},
-				nil, nil, nil, nil, nil, nil, nil, nil,
+				nil, nil, nil, nil,
 				&rbacGuards{},
 			)
 

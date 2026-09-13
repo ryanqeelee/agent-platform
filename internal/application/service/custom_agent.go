@@ -164,7 +164,7 @@ func NewCustomAgentService(
 }
 
 type assistantScenarioMCPCatalog interface {
-	ListMCPServicesByIDs(context.Context, uint64, []string) ([]*types.MCPService, error)
+	ListMCPServicesByIDs(context.Context, []string) ([]*types.MCPService, error)
 }
 
 func assistantScenarioCapabilityUse(
@@ -246,7 +246,7 @@ func validateAssistantScenarioMCPSelection(
 	if catalog == nil {
 		return ErrAssistantScenarioCapabilityUnavailable
 	}
-	services, err := catalog.ListMCPServicesByIDs(ctx, tenantID, config.MCPServices)
+	services, err := catalog.ListMCPServicesByIDs(ctx, config.MCPServices)
 	if err != nil {
 		return ErrAssistantScenarioCapabilityUnavailable
 	}

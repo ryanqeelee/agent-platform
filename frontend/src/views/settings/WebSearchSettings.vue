@@ -317,7 +317,7 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { AddIcon } from 'tdesign-icons-vue-next'
 import {
-  listWebSearchProviders,
+  listPlatformWebSearchProviders,
   listWebSearchProviderTypes,
   createWebSearchProvider,
   updateWebSearchProvider,
@@ -337,11 +337,9 @@ import CredentialResource, {
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useAuthStore } from '@/stores/auth'
 import { providerLogo } from './providerLogos'
-import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
-const platformTenantID = usePlatformTenantControlID()
 const confirmDelete = useConfirmDelete()
 
 // ===== State =====
@@ -413,11 +411,11 @@ const credentialApi = computed<CredentialResourceApi<WebSearchCredentialField>>(
   const id = editingProvider.value?.id ?? ''
   return {
     save: async (patch) => {
-      const meta = await putWebSearchProviderCredentials(id, patch, platformTenantID.value)
+      const meta = await putWebSearchProviderCredentials(id, patch)
       return meta.fields
     },
     remove: async (field) => {
-      await deleteWebSearchProviderCredentialField(id, field, platformTenantID.value)
+      await deleteWebSearchProviderCredentialField(id, field)
     },
   }
 })
@@ -516,7 +514,7 @@ const onProviderTypeChange = () => {
 
 const loadProviderEntities = async () => {
   try {
-    const response = await listWebSearchProviders(platformTenantID.value)
+    const response = await listPlatformWebSearchProviders()
     if (response.data && Array.isArray(response.data)) {
       providerEntities.value = response.data
     }
@@ -528,7 +526,7 @@ const loadProviderEntities = async () => {
 
 const loadProviderTypes = async () => {
   try {
-    providerTypes.value = await listWebSearchProviderTypes(platformTenantID.value)
+    providerTypes.value = await listWebSearchProviderTypes()
   } catch (error) {
     loadError.value = (error as any)?.message || t('common.loadFailed')
     console.error('Failed to load provider types:', error)
@@ -612,10 +610,10 @@ const saveProvider = async () => {
     }
 
     if (editingProvider.value) {
-      await updateWebSearchProvider(editingProvider.value.id!, data, platformTenantID.value)
+      await updateWebSearchProvider(editingProvider.value.id!, data)
       MessagePlugin.success(t('webSearchSettings.toasts.providerUpdated'))
     } else {
-      await createWebSearchProvider(data, platformTenantID.value)
+      await createWebSearchProvider(data)
       MessagePlugin.success(t('webSearchSettings.toasts.providerCreated'))
     }
     showAddProviderDialog.value = false
@@ -632,7 +630,7 @@ const deleteProvider = (entity: WebSearchProviderEntity) => {
     body: t('webSearchSettings.deleteConfirm'),
     onConfirm: async () => {
       try {
-        await deleteWebSearchProviderAPI(entity.id!, platformTenantID.value)
+        await deleteWebSearchProviderAPI(entity.id!)
         MessagePlugin.success(t('webSearchSettings.toasts.providerDeleted'))
         await loadProviderEntities()
       } catch (error: any) {
@@ -652,7 +650,7 @@ const testConnection = async () => {
 
     let ok = false
     if (editingProvider.value && !data.parameters.api_key) {
-      const res = await testWebSearchProvider(editingProvider.value.id!, undefined, platformTenantID.value)
+      const res = await testWebSearchProvider(editingProvider.value.id!)
       ok = !!res.success
       if (res.success) {
         MessagePlugin.success(t('webSearchSettings.toasts.testSuccess'))
@@ -660,7 +658,7 @@ const testConnection = async () => {
         MessagePlugin.error(res.error || t('webSearchSettings.toasts.testFailed'))
       }
     } else {
-      const res = await testWebSearchProvider(undefined, data, platformTenantID.value)
+      const res = await testWebSearchProvider(undefined, data)
       ok = !!res.success
       if (res.success) {
         MessagePlugin.success(t('webSearchSettings.toasts.testSuccess'))

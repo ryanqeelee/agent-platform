@@ -25,7 +25,8 @@ type WebSearchService struct {
 }
 
 // NewWebSearchService creates a new web search service.
-// The registry holds provider type factories; the providerRepo loads tenant-specific configurations.
+// The registry holds provider type factories; the providerRepo loads global
+// platform configurations.
 func NewWebSearchService(
 	cfg *config.Config,
 	registry *infra_web_search.Registry,
@@ -44,7 +45,6 @@ func NewWebSearchService(
 }
 
 // Search performs web search using the provider entity identified by providerID.
-// If providerID is empty, it falls back to the deprecated config.Provider field for backward compatibility.
 func (s *WebSearchService) Search(
 	ctx context.Context,
 	providerID string,
@@ -56,7 +56,7 @@ func (s *WebSearchService) Search(
 	}
 
 	// Resolve the provider
-	searchProvider, err := s.resolveProvider(ctx, providerID, config)
+	searchProvider, err := s.resolveProvider(ctx, providerID)
 	if err != nil {
 		return nil, err
 	}
@@ -82,22 +82,14 @@ func (s *WebSearchService) Search(
 	return results, nil
 }
 
-// resolveProvider resolves a WebSearchProvider instance from either:
-// 1. A provider entity ID (new path) — loads from DB, creates via registry
-// 2. The deprecated config.Provider field (backward compatibility) — creates with empty params
+// resolveProvider resolves one explicit platform provider ID. Missing or
+// deleted IDs fail; no other provider configuration is consulted.
 func (s *WebSearchService) resolveProvider(
 	ctx context.Context,
 	providerID string,
-	cfg *types.WebSearchConfig,
 ) (interfaces.WebSearchProvider, error) {
-	// New path: load provider entity from DB
 	if providerID != "" {
-		tenantID, ok := types.TenantIDFromContext(ctx)
-		if !ok {
-			return nil, fmt.Errorf("workspace ID not found in context")
-		}
-
-		entity, err := s.providerRepo.GetByID(ctx, tenantID, providerID)
+		entity, err := s.providerRepo.GetByID(ctx, providerID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load web search provider %s: %w", providerID, err)
 		}
@@ -105,38 +97,14 @@ func (s *WebSearchService) resolveProvider(
 			return nil, fmt.Errorf("web search provider not found: %s", providerID)
 		}
 
-		params := mergeProxyFromWebSearchConfig(entity.Parameters, cfg)
-		provider, err := s.registry.CreateProvider(string(entity.Provider), params)
+		provider, err := s.registry.CreateProvider(string(entity.Provider), entity.Parameters)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create provider %s (%s): %w", entity.Name, entity.Provider, err)
 		}
 		return provider, nil
 	}
 
-	// Backward compatibility: use the deprecated config.Provider field
-	if cfg.Provider != "" {
-		logger.Warnf(ctx, "Using deprecated WebSearchConfig.Provider field: %s. Please migrate to WebSearchProviderEntity.", cfg.Provider)
-		params := mergeProxyFromWebSearchConfig(types.WebSearchProviderParameters{
-			APIKey: cfg.APIKey,
-		}, cfg)
-		provider, err := s.registry.CreateProvider(cfg.Provider, params)
-		if err != nil {
-			return nil, fmt.Errorf("web search provider %s is not available: %w", cfg.Provider, err)
-		}
-		return provider, nil
-	}
-
-	return nil, fmt.Errorf("no web search provider configured")
-}
-
-// mergeProxyFromWebSearchConfig applies cfg.ProxyURL over stored provider params when non-empty (call-time override).
-func mergeProxyFromWebSearchConfig(base types.WebSearchProviderParameters, cfg *types.WebSearchConfig) types.WebSearchProviderParameters {
-	if cfg != nil {
-		if pu := strings.TrimSpace(cfg.ProxyURL); pu != "" {
-			base.ProxyURL = pu
-		}
-	}
-	return base
+	return nil, fmt.Errorf("web search provider ID is required")
 }
 
 // CompressWithRAG performs RAG-based compression using a temporary, hidden knowledge base.

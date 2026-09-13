@@ -591,10 +591,9 @@ func (p *PluginSearch) searchSingleTarget(
 
 // searchWebIfEnabled executes web search when enabled and returns converted results
 func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types.ChatManage) []*types.SearchResult {
-	if !chatManage.WebSearchEnabled || p.webSearchService == nil || p.tenantService == nil {
+	if !chatManage.WebSearchEnabled || p.webSearchService == nil {
 		return nil
 	}
-	tenant, _ := types.TenantInfoFromContext(ctx)
 	providerID := chatManage.WebSearchProviderID
 
 	if providerID == "" {
@@ -606,9 +605,6 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 	}
 
 	webConfig := types.EffectiveWebSearchConfig(nil)
-	if tenant != nil {
-		webConfig = types.EffectiveWebSearchConfig(tenant.WebSearchConfig)
-	}
 
 	// Apply agent-level web search overrides
 	if chatManage.WebSearchMaxResults > 0 {

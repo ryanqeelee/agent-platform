@@ -16,16 +16,14 @@ type webSearchProviderService struct {
 }
 
 // NewWebSearchProviderService creates a new web search provider service
-func NewWebSearchProviderService(repo interfaces.WebSearchProviderRepository) interfaces.WebSearchProviderService {
+func NewWebSearchProviderService(
+	repo interfaces.WebSearchProviderRepository,
+) interfaces.WebSearchProviderService {
 	return &webSearchProviderService{repo: repo}
 }
 
 // CreateProvider creates a new web search provider configuration.
 func (s *webSearchProviderService) CreateProvider(ctx context.Context, provider *types.WebSearchProviderEntity) error {
-	if provider.TenantID == 0 {
-		return fmt.Errorf("tenant ID is required")
-	}
-
 	if !isValidProviderType(provider.Provider) {
 		return fmt.Errorf("invalid provider type: %s", provider.Provider)
 	}
@@ -34,31 +32,26 @@ func (s *webSearchProviderService) CreateProvider(ctx context.Context, provider 
 		return err
 	}
 
-	if provider.IsDefault {
-		if err := s.repo.ClearDefault(ctx, provider.TenantID, ""); err != nil {
-			logger.Warnf(ctx, "Failed to clear default providers: %v", err)
-		}
+	logger.Infof(ctx, "Creating platform web search provider: name=%s, type=%s", provider.Name, provider.Provider)
+	makeDefault := provider.IsDefault
+	provider.IsDefault = false
+	if err := s.repo.Create(ctx, provider); err != nil {
+		return err
 	}
-
-	logger.Infof(ctx, "Creating web search provider: tenant=%d, name=%s, type=%s", provider.TenantID, provider.Name, provider.Provider)
-	return s.repo.Create(ctx, provider)
+	if makeDefault {
+		if err := s.repo.SetDefault(ctx, provider.ID); err != nil {
+			return err
+		}
+		provider.IsDefault = true
+	}
+	return nil
 }
 
 // UpdateProvider updates an existing provider.
 func (s *webSearchProviderService) UpdateProvider(ctx context.Context, provider *types.WebSearchProviderEntity) error {
-	if provider.TenantID == 0 {
-		return fmt.Errorf("tenant ID is required")
-	}
-
 	// Validate provider type if set
 	if provider.Provider != "" && !isValidProviderType(provider.Provider) {
 		return fmt.Errorf("invalid provider type: %s", provider.Provider)
-	}
-
-	if provider.IsDefault {
-		if err := s.repo.ClearDefault(ctx, provider.TenantID, provider.ID); err != nil {
-			logger.Warnf(ctx, "Failed to clear default providers: %v", err)
-		}
 	}
 
 	if provider.Provider != "" {
@@ -67,17 +60,23 @@ func (s *webSearchProviderService) UpdateProvider(ctx context.Context, provider 
 		}
 	}
 
-	logger.Infof(ctx, "Updating web search provider: tenant=%d, id=%s", provider.TenantID, provider.ID)
-	return s.repo.Update(ctx, provider)
+	logger.Infof(ctx, "Updating platform web search provider: id=%s", provider.ID)
+	if err := s.repo.Update(ctx, provider); err != nil {
+		return err
+	}
+	if provider.IsDefault {
+		return s.repo.SetDefault(ctx, provider.ID)
+	}
+	return nil
 }
 
 // UpdateProviderCredentials writes the api_key credential field. Web search
 // providers are stateless from our side — every search call rebuilds a
 // transport from current Parameters — so no cache invalidation is required.
 func (s *webSearchProviderService) UpdateProviderCredentials(
-	ctx context.Context, tenantID uint64, id string, apiKey *string,
+	ctx context.Context, id string, apiKey *string,
 ) (*types.WebSearchProviderEntity, error) {
-	existing, err := s.repo.GetByID(ctx, tenantID, id)
+	existing, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -90,19 +89,19 @@ func (s *webSearchProviderService) UpdateProviderCredentials(
 		if err := s.repo.Update(ctx, existing); err != nil {
 			return nil, err
 		}
-		logger.Infof(ctx, "WebSearch provider credentials updated: tenant=%d id=%s", tenantID, id)
+		logger.Infof(ctx, "Platform web search provider credentials updated: id=%s", id)
 	}
 	return existing, nil
 }
 
 // ClearProviderCredential clears the api_key credential. Idempotent.
 func (s *webSearchProviderService) ClearProviderCredential(
-	ctx context.Context, tenantID uint64, id, field string,
+	ctx context.Context, id, field string,
 ) error {
 	if field != "api_key" {
 		return fmt.Errorf("unknown credential field: %s", field)
 	}
-	existing, err := s.repo.GetByID(ctx, tenantID, id)
+	existing, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -116,14 +115,14 @@ func (s *webSearchProviderService) ClearProviderCredential(
 	if err := s.repo.Update(ctx, existing); err != nil {
 		return err
 	}
-	logger.Infof(ctx, "WebSearch provider credential cleared by user: tenant=%d id=%s field=%s", tenantID, id, field)
+	logger.Infof(ctx, "Platform web search provider credential cleared: id=%s field=%s", id, field)
 	return nil
 }
 
-// DeleteProvider deletes a provider by tenant + id.
-func (s *webSearchProviderService) DeleteProvider(ctx context.Context, tenantID uint64, id string) error {
-	logger.Infof(ctx, "Deleting web search provider: tenant=%d, id=%s", tenantID, id)
-	return s.repo.Delete(ctx, tenantID, id)
+// DeleteProvider deletes a platform provider by id.
+func (s *webSearchProviderService) DeleteProvider(ctx context.Context, id string) error {
+	logger.Infof(ctx, "Deleting platform web search provider: id=%s", id)
+	return s.repo.Delete(ctx, id)
 }
 
 // isValidProviderType checks if the given provider type is supported

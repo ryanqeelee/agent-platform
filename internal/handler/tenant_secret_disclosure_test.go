@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/middleware"
@@ -123,12 +124,25 @@ func TestGetTenantKVViewerForbiddenForSecretKeys(t *testing.T) {
 	tenant := secretTenantFixture()
 	engine := newTenantHandlerTestEngine(t, types.TenantRoleViewer, false, tenant)
 
-	for _, key := range []string{"web-search-config", "parser-engine-config", "storage-engine-config", "chat-history-config", "retrieval-config"} {
+	for _, key := range []string{"storage-engine-config", "chat-history-config", "retrieval-config"} {
 		t.Run(key, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodGet, "/tenants/kv/"+key, nil)
 			engine.ServeHTTP(rec, req)
 			require.Equal(t, http.StatusForbidden, rec.Code)
+		})
+	}
+}
+
+func TestTenantWebSearchKVIsRetired(t *testing.T) {
+	engine := newTenantHandlerTestEngine(t, types.TenantRoleAdmin, true, secretTenantFixture())
+	for _, method := range []string{http.MethodGet, http.MethodPut} {
+		t.Run(method, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(method, "/tenants/kv/web-search-config", strings.NewReader(`{"max_results":20}`))
+			req.Header.Set("Content-Type", "application/json")
+			engine.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusBadRequest, rec.Code)
 		})
 	}
 }
@@ -147,9 +161,6 @@ func secretTenantFixture() *types.Tenant {
 	return &types.Tenant{
 		ID:   42,
 		Name: "tenant",
-		WebSearchConfig: &types.WebSearchConfig{
-			APIKey: "legacy-search-secret-999",
-		},
 		StorageEngineConfig: &types.StorageEngineConfig{
 			MinIO: &types.MinIOEngineConfig{
 				SecretAccessKey: "minio-secret-789",

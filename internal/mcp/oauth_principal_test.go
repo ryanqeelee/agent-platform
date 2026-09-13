@@ -16,6 +16,34 @@ type fakeOAuthRepo struct {
 	tokens  map[string]*types.MCPOAuthToken
 }
 
+type fakeCachedClient struct {
+	serviceID   string
+	connected   bool
+	disconnects int
+}
+
+func (c *fakeCachedClient) Connect(context.Context) error { c.connected = true; return nil }
+func (c *fakeCachedClient) Disconnect() error {
+	c.connected = false
+	c.disconnects++
+	return nil
+}
+func (c *fakeCachedClient) Initialize(context.Context) (*InitializeResult, error) {
+	return &InitializeResult{}, nil
+}
+func (c *fakeCachedClient) ListTools(context.Context) ([]*types.MCPTool, error) { return nil, nil }
+func (c *fakeCachedClient) ListResources(context.Context) ([]*types.MCPResource, error) {
+	return nil, nil
+}
+func (c *fakeCachedClient) CallTool(context.Context, string, map[string]interface{}) (*CallToolResult, error) {
+	return nil, nil
+}
+func (c *fakeCachedClient) ReadResource(context.Context, string) (*ReadResourceResult, error) {
+	return nil, nil
+}
+func (c *fakeCachedClient) IsConnected() bool    { return c.connected }
+func (c *fakeCachedClient) GetServiceID() string { return c.serviceID }
+
 func newFakeOAuthRepo() *fakeOAuthRepo {
 	return &fakeOAuthRepo{
 		clients: map[string]*types.MCPOAuthClient{},
@@ -156,7 +184,7 @@ func TestManagedTokenStoreLeavesRefreshToOAuthRuntime(t *testing.T) {
 	require.False(t, row.ExpiresAt.IsZero(), "the database must retain the real expiry for preflight checks")
 }
 
-func TestOAuthCacheKeyUsesPrincipalForOAuthServices(t *testing.T) {
+func TestMCPClientCacheKeyIsolatesTenantAndOAuthPrincipal(t *testing.T) {
 	service := &types.MCPService{
 		ID:         "svc-1",
 		AuthConfig: &types.MCPAuthConfig{AuthType: types.MCPAuthOAuth},
@@ -164,10 +192,32 @@ func TestOAuthCacheKeyUsesPrincipalForOAuthServices(t *testing.T) {
 	alice := types.Principal{Type: types.PrincipalAPIExternalUser, ID: "7:alice"}
 	bob := types.Principal{Type: types.PrincipalAPIExternalUser, ID: "7:bob"}
 
-	require.NotEqual(t, cacheKey(service, alice), cacheKey(service, bob))
-	require.Contains(t, cacheKey(service, alice), alice.StorageID())
+	require.NotEqual(t, cacheKey(service, 7, alice), cacheKey(service, 7, bob))
+	require.NotEqual(t, cacheKey(service, 7, alice), cacheKey(service, 8, alice))
+	require.Contains(t, cacheKey(service, 7, alice), alice.ID)
 
 	service.AuthConfig.AuthType = types.MCPAuthAPIKey
-	require.Equal(t, "svc-1", cacheKey(service, alice))
-	require.Equal(t, cacheKey(service, alice), cacheKey(service, bob))
+	require.Equal(t, "svc-1\x007", cacheKey(service, 7, alice))
+	require.Equal(t, cacheKey(service, 7, alice), cacheKey(service, 7, bob))
+	require.NotEqual(t, cacheKey(service, 7, alice), cacheKey(service, 8, alice))
+}
+
+func TestCloseClientInvalidatesEveryTenantAndPrincipalForGlobalService(t *testing.T) {
+	manager := NewMCPManager(nil)
+	t.Cleanup(manager.Shutdown)
+
+	aliceTenant7 := &fakeCachedClient{serviceID: "svc-1", connected: true}
+	aliceTenant8 := &fakeCachedClient{serviceID: "svc-1", connected: true}
+	otherService := &fakeCachedClient{serviceID: "svc-10", connected: true}
+	manager.clients["svc-1\x007\x00api_external_user\x007:alice"] = aliceTenant7
+	manager.clients["svc-1\x008\x00api_external_user\x008:alice"] = aliceTenant8
+	manager.clients["svc-10\x007"] = otherService
+
+	require.NoError(t, manager.CloseClient("svc-1"))
+	require.Equal(t, 1, aliceTenant7.disconnects)
+	require.Equal(t, 1, aliceTenant8.disconnects)
+	require.Equal(t, 0, otherService.disconnects)
+	require.Empty(t, manager.clients["svc-1\x007\x00api_external_user\x007:alice"])
+	require.Empty(t, manager.clients["svc-1\x008\x00api_external_user\x008:alice"])
+	require.Same(t, otherService, manager.clients["svc-10\x007"])
 }

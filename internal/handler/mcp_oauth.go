@@ -93,7 +93,7 @@ func (h *MCPOAuthHandler) AuthorizeURL(c *gin.Context) {
 		req.FrontendRedirect = "/"
 	}
 
-	service, err := h.svc.GetMCPServiceByID(ctx, tenantID, serviceID)
+	service, err := h.svc.GetMCPServiceByID(ctx, serviceID)
 	if err != nil || service == nil {
 		c.Error(errors.NewNotFoundError("MCP service not found"))
 		return
@@ -133,7 +133,7 @@ func (h *MCPOAuthHandler) AuthorizeURL(c *gin.Context) {
 // @Param        state  query  string  false  "状态参数"
 // @Param        error  query  string  false  "授权错误码"
 // @Success      302
-// @Router       /mcp-services/oauth/callback [get]
+// @Router       /mcp-oauth/callback [get]
 func (h *MCPOAuthHandler) Callback(c *gin.Context) {
 	ctx := c.Request.Context()
 	state := strings.TrimSpace(c.Query("state"))

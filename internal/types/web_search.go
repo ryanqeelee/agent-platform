@@ -1,18 +1,12 @@
 package types
 
 import (
-	"database/sql/driver"
-	"encoding/json"
 	"time"
 )
 
-// WebSearchConfig represents the web search configuration for a tenant
+// WebSearchConfig contains request-local search behavior. Provider definitions,
+// credentials, and defaults are platform-owned and referenced separately.
 type WebSearchConfig struct {
-	// Deprecated: Use WebSearchProviderEntity.Parameters.APIKey instead.
-	Provider string `json:"provider,omitempty"`
-	// Deprecated: Use WebSearchProviderEntity.Parameters.APIKey instead.
-	APIKey string `json:"api_key,omitempty"`
-
 	MaxResults        int      `json:"max_results"`        // 最大搜索结果数
 	IncludeDate       bool     `json:"include_date"`       // 是否包含日期
 	CompressionMethod string   `json:"compression_method"` // 压缩方法：none, summary, extract, rag
@@ -22,7 +16,6 @@ type WebSearchConfig struct {
 	EmbeddingDimension int    `json:"embedding_dimension,omitempty"` // 嵌入维度（用于RAG压缩）
 	RerankModelID      string `json:"rerank_model_id,omitempty"`     // 重排模型ID（用于RAG压缩）
 	DocumentFragments  int    `json:"document_fragments,omitempty"`  // 文档片段数量（用于RAG压缩）
-	ProxyURL           string `json:"proxy_url,omitempty"`           // Optional per-request proxy override; normally empty — use WebSearchProviderEntity.Parameters.proxy_url. Merged at call time when set.
 }
 
 const (
@@ -30,7 +23,7 @@ const (
 	DefaultWebSearchCompressionMethod = "none"
 )
 
-// DefaultWebSearchConfig returns the shared default tenant-level web search configuration.
+// DefaultWebSearchConfig returns the shared default request-level web search configuration.
 func DefaultWebSearchConfig() *WebSearchConfig {
 	return &WebSearchConfig{
 		MaxResults:        DefaultWebSearchMaxResults,
@@ -58,23 +51,6 @@ func EffectiveWebSearchConfig(cfg *WebSearchConfig) *WebSearchConfig {
 	}
 
 	return &normalized
-}
-
-// Value implements driver.Valuer interface for WebSearchConfig
-func (c WebSearchConfig) Value() (driver.Value, error) {
-	return json.Marshal(c)
-}
-
-// Scan implements sql.Scanner interface for WebSearchConfig
-func (c *WebSearchConfig) Scan(value interface{}) error {
-	if value == nil {
-		return nil
-	}
-	b, ok := value.([]byte)
-	if !ok {
-		return nil
-	}
-	return json.Unmarshal(b, c)
 }
 
 // WebSearchResult represents a single web search result

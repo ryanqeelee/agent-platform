@@ -16,7 +16,6 @@ type employeeProviderStub struct {
 	interfaces.WebSearchProviderRepository
 	provider *types.WebSearchProviderEntity
 	err      error
-	tenant   uint64
 }
 
 type employeeModelsStub struct{ interfaces.ModelService }
@@ -65,8 +64,7 @@ func TestEmployeeAssistantUsesConfiguredModelAndFallsBackWhenUnavailable(t *test
 		})
 	}
 }
-func (s *employeeProviderStub) GetDefault(_ context.Context, tenant uint64) (*types.WebSearchProviderEntity, error) {
-	s.tenant = tenant
+func (s *employeeProviderStub) GetDefault(_ context.Context) (*types.WebSearchProviderEntity, error) {
 	return s.provider, s.err
 }
 
@@ -84,11 +82,10 @@ func TestEmployeeAssistantReadinessAndCanonicalConfig(t *testing.T) {
 		err      error
 		ready    bool
 	}{
-		{"enabled", true, &types.WebSearchProviderEntity{ID: "local", TenantID: 7, Provider: types.WebSearchProviderTypeKeenable}, nil, true},
+		{"enabled", true, &types.WebSearchProviderEntity{ID: "local", Provider: types.WebSearchProviderTypeKeenable}, nil, true},
 		{"no_default", true, nil, nil, false},
-		{"other_tenant", true, &types.WebSearchProviderEntity{ID: "foreign", TenantID: 8, Provider: types.WebSearchProviderTypeKeenable}, nil, false},
 		{"disabled", false, nil, nil, false},
-		{"invalid_credentials", true, &types.WebSearchProviderEntity{ID: "local", TenantID: 7, Provider: types.WebSearchProviderTypeGoogle}, nil, false},
+		{"invalid_credentials", true, &types.WebSearchProviderEntity{ID: "local", Provider: types.WebSearchProviderTypeGoogle}, nil, false},
 		{"storage_error", true, nil, errors.New("storage unavailable"), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -107,11 +104,6 @@ func TestEmployeeAssistantReadinessAndCanonicalConfig(t *testing.T) {
 			view := AgentView(ctx, agent)
 			require.Equal(t, tc.ready, *view.WebSearchReady)
 			require.Empty(t, view.Config.WebSearchProviderID)
-			if tc.enabled {
-				require.Equal(t, uint64(7), provider.tenant)
-			} else {
-				require.Zero(t, provider.tenant)
-			}
 		})
 	}
 }

@@ -2,277 +2,72 @@
 
 [返回目录](./README.md)
 
-包含两组接口：
-- `/web-search/providers`：返回**可用的 provider 类型**（只读元数据）
-- `/web-search-providers/*`：当前空间**自定义保存**的 provider CRUD 与连通性测试
+网络搜索 Provider 定义、默认选择和凭据由平台统一管理。企业请求只携带显式
+Provider ID，或使用平台唯一的默认 Provider；不存在的显式 ID 会返回错误，不会
+回退到其他配置。原有空间级 `web-search-config` KV 接口已移除。
 
-| 方法   | 路径                                  | 描述                                |
-| ------ | ------------------------------------- | ----------------------------------- |
-| GET    | `/web-search/providers`               | 获取网络搜索服务商类型列表           |
-| GET    | `/web-search-providers/types`         | 获取 Provider 类型元数据（含参数定义） |
-| POST   | `/web-search-providers/test`          | 使用原始凭证测试连通性（不落库）       |
-| POST   | `/web-search-providers`               | 创建空间级 Provider 配置             |
-| GET    | `/web-search-providers`               | 获取当前空间已保存的 Provider 列表     |
-| GET    | `/web-search-providers/:id`           | 获取指定 Provider 详情               |
-| PUT    | `/web-search-providers/:id`           | 更新 Provider                       |
-| DELETE | `/web-search-providers/:id`           | 删除 Provider                       |
-| POST   | `/web-search-providers/:id/test`      | 使用已保存凭证测试连通性             |
+## 鉴权与接口
 
-## GET `/web-search/providers` - 获取网络搜索服务商类型列表
+平台配置接口仅接受已登录的 `SystemAdmin`，不接受 API Key：
 
-获取系统中可用的网络搜索服务商列表（系统级元数据，与空间无关）。
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/system/admin/web-search-providers` | 获取完整全局 Provider 列表 |
+| POST | `/system/admin/web-search-providers` | 创建全局 Provider |
+| GET | `/system/admin/web-search-providers/types` | 获取 Provider 类型及参数元数据 |
+| POST | `/system/admin/web-search-providers/test` | 用未保存配置测试连接，不落库 |
+| GET | `/system/admin/web-search-providers/:id` | 获取全局 Provider 详情 |
+| PUT | `/system/admin/web-search-providers/:id` | 更新非凭据字段，可设为全局默认 |
+| DELETE | `/system/admin/web-search-providers/:id` | 删除非默认 Provider |
+| POST | `/system/admin/web-search-providers/:id/test` | 测试已保存 Provider |
+| PUT | `/system/admin/web-search-providers/:id/credentials` | 写入 API Key |
+| DELETE | `/system/admin/web-search-providers/:id/credentials/api_key` | 删除 API Key |
 
-**请求**:
+`GET /web-search-providers` 是企业运行时的安全投影。普通 Bearer 用户只会看到
+平台默认 Provider 是否已配置，不会看到 ID、地址、代理或凭据。已有的 Platform
+API Key 能力策略仍适用于该运行时接口。
 
-```curl
-curl --location 'http://localhost:8080/api/v1/web-search/providers' \
---header 'X-API-Key: sk-xxxxx' \
---header 'Content-Type: application/json'
-```
-
-**响应**:
+## 创建和更新
 
 ```json
 {
-    "data": [
-        {
-            "name": "google",
-            "label": "Google Search",
-            "description": "通过 Google 自定义搜索 API 进行网络搜索",
-            "enabled": true
-        },
-        {
-            "name": "bing",
-            "label": "Bing Search",
-            "description": "通过 Bing Search API 进行网络搜索",
-            "enabled": true
-        },
-        {
-            "name": "serpapi",
-            "label": "SerpAPI",
-            "description": "通过 SerpAPI 进行搜索引擎结果抓取",
-            "enabled": false
-        }
-    ],
-    "success": true
-}
-```
-
-## GET `/web-search-providers/types` - 获取 Provider 类型元数据
-
-返回 UI 表单需要的所有 provider 类型及参数定义（每种 provider 需要哪些字段、类型、是否必填）。
-
-**请求**:
-
-```curl
-curl --location 'http://localhost:8080/api/v1/web-search-providers/types' \
---header 'X-API-Key: sk-xxxxx'
-```
-
-**响应**:
-
-```json
-{
-    "data": [
-        {
-            "provider": "google",
-            "label": "Google Search",
-            "description": "...",
-            "parameter_schema": [
-                { "name": "api_key", "label": "API Key", "type": "string", "required": true },
-                { "name": "cx", "label": "Search Engine ID", "type": "string", "required": true }
-            ]
-        }
-    ],
-    "success": true
-}
-```
-
-## POST `/web-search-providers/test` - 使用原始凭证测试连通性
-
-前端表单"测试连接"按钮使用：用尚未保存的凭证发起一次样本搜索。
-
-**参数说明（请求体）**:
-
-| 字段       | 类型   | 必填 | 说明                              |
-| ---------- | ------ | ---- | --------------------------------- |
-| provider   | string | 是   | provider 类型（如 `google`、`bing`） |
-| parameters | object | 是   | 该 provider 所需凭证与参数（与 `/types` 中 `parameter_schema` 对应） |
-
-**请求**:
-
-```curl
-curl --location --request POST 'http://localhost:8080/api/v1/web-search-providers/test' \
---header 'X-API-Key: sk-xxxxx' \
---header 'Content-Type: application/json' \
---data '{
-    "provider": "google",
-    "parameters": {
-        "api_key": "AIza...",
-        "cx": "0123456789:abcdefg"
+  "name": "Keenable",
+  "provider": "keenable",
+  "description": "平台网络搜索",
+  "parameters": {
+    "base_url": "https://search.example.com",
+    "extra_config": {
+      "search_engine": "search_std"
     }
-}'
-```
-
-**响应**:
-
-```json
-{ "success": true }
-```
-
-失败时：
-
-```json
-{ "success": false, "error": "google api: 403 forbidden" }
-```
-
-### 智谱 AI 配置
-
-智谱使用独立的 Web Search API。`search_engine` 和 `content_size` 存放在
-`parameters.extra_config` 中；未指定时分别使用 `search_std` 和 `medium`。
-
-```json
-{
-    "provider": "zhipu",
-    "parameters": {
-        "api_key": "your-zhipu-api-key",
-        "extra_config": {
-            "search_engine": "search_std",
-            "content_size": "medium"
-        }
-    }
+  },
+  "is_default": true
 }
 ```
 
-`search_engine` 支持 `search_std`、`search_pro`、`search_pro_sogou` 和
-`search_pro_quark`；`content_size` 支持 `medium` 和 `high`。
+`provider` 创建后不可修改。主资源响应不会返回 `api_key`，只在
+`credentials.api_key.configured` 中返回是否已配置。写入凭据使用专用接口：
 
-## POST `/web-search-providers` - 创建 Provider
+```http
+PUT /api/v1/system/admin/web-search-providers/{id}/credentials
+Content-Type: application/json
 
-**参数说明（请求体）**:
-
-| 字段        | 类型    | 必填 | 说明                                       |
-| ----------- | ------- | ---- | ------------------------------------------ |
-| name        | string  | 是   | Provider 显示名（在空间内唯一友好名）       |
-| provider    | string  | 是   | Provider 类型（来自 `/web-search-providers/types`） |
-| description | string  | 否   | 备注                                       |
-| parameters  | object  | 否   | 凭证与参数                                 |
-| is_default  | boolean | 否   | 是否设为当前空间默认 Provider              |
-
-**请求**:
-
-```curl
-curl --location 'http://localhost:8080/api/v1/web-search-providers' \
---header 'X-API-Key: sk-xxxxx' \
---header 'Content-Type: application/json' \
---data '{
-    "name": "公司 Google CSE",
-    "provider": "google",
-    "description": "用于内网搜索",
-    "parameters": {
-        "api_key": "AIza...",
-        "cx": "0123456789:abcdefg"
-    },
-    "is_default": true
-}'
+{"api_key":"new-secret"}
 ```
 
-**响应**:
+全局只能有一个 `is_default=true` 的有效 Provider。设置默认与删除操作在仓储事务
+中串行化；默认 Provider 必须先切换后才能删除。升级迁移会保留所有 Provider ID，
+并清除旧空间默认标记，等待 SystemAdmin 明确选择全局默认。
 
-```json
-{
-    "data": {
-        "id": "wsp-...",
-        "tenant_id": 1,
-        "name": "公司 Google CSE",
-        "provider": "google",
-        "is_default": true,
-        "parameters": { "api_key": "***", "cx": "0123456789:abcdefg" }
-    },
-    "success": true
-}
+## 连接测试
+
+保存前测试接收与创建接口相同的 `provider` 和 `parameters`：
+
+```http
+POST /api/v1/system/admin/web-search-providers/test
+Content-Type: application/json
+
+{"provider":"keenable","parameters":{"api_key":"test-secret"}}
 ```
 
-## GET `/web-search-providers` - 获取 Provider 列表
-
-返回当前空间已保存的所有 Provider。
-
-**请求**:
-
-```curl
-curl --location 'http://localhost:8080/api/v1/web-search-providers' \
---header 'X-API-Key: sk-xxxxx'
-```
-
-**响应**:
-
-```json
-{
-    "data": [
-        { "id": "wsp-001", "name": "公司 Google CSE", "provider": "google", "is_default": true }
-    ],
-    "success": true
-}
-```
-
-## GET `/web-search-providers/:id` - 获取 Provider 详情
-
-**路径参数**:
-
-| 字段 | 类型   | 说明        |
-| ---- | ------ | ----------- |
-| id   | string | Provider ID |
-
-**请求**:
-
-```curl
-curl --location 'http://localhost:8080/api/v1/web-search-providers/wsp-001' \
---header 'X-API-Key: sk-xxxxx'
-```
-
-**响应**: 同创建接口。404 表示不存在。
-
-## PUT `/web-search-providers/:id` - 更新 Provider
-
-**说明**：`provider` 字段（类型）创建后不可修改，仅支持更新 `name` / `description` / `parameters` / `is_default`。
-
-**参数说明（请求体）**: 同创建接口，但不包含 `provider`。
-
-**请求**:
-
-```curl
-curl --location --request PUT 'http://localhost:8080/api/v1/web-search-providers/wsp-001' \
---header 'X-API-Key: sk-xxxxx' \
---header 'Content-Type: application/json' \
---data '{
-    "name": "公司 Google CSE (v2)",
-    "parameters": { "api_key": "NEW...", "cx": "0123456789:abcdefg" },
-    "is_default": false
-}'
-```
-
-**响应**: `{ "data": {...更新后实体...}, "success": true }`
-
-## DELETE `/web-search-providers/:id` - 删除 Provider
-
-**请求**:
-
-```curl
-curl --location --request DELETE 'http://localhost:8080/api/v1/web-search-providers/wsp-001' \
---header 'X-API-Key: sk-xxxxx'
-```
-
-**响应**: `{ "success": true }`
-
-## POST `/web-search-providers/:id/test` - 测试已保存的 Provider
-
-使用数据库中已保存的凭证发起一次样本搜索。
-
-**请求**:
-
-```curl
-curl --location --request POST 'http://localhost:8080/api/v1/web-search-providers/wsp-001/test' \
---header 'X-API-Key: sk-xxxxx'
-```
-
-**响应**: 同 `POST /web-search-providers/test`。
+保存后测试使用 `POST /system/admin/web-search-providers/:id/test`。两种测试都执行
+真实样本搜索，但保存前测试不会写数据库。

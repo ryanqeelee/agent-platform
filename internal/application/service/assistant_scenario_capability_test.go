@@ -32,7 +32,6 @@ type assistantScenarioMCPCatalogStub struct {
 
 func (s assistantScenarioMCPCatalogStub) ListMCPServicesByIDs(
 	context.Context,
-	uint64,
 	[]string,
 ) ([]*types.MCPService, error) {
 	return s.services, s.err

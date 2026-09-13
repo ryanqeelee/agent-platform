@@ -113,8 +113,9 @@ const (
 	// APIKeyCapabilityManageModels lets a key manage tenant model
 	// definitions, credentials, model checks, and WeKnoraCloud credentials.
 	APIKeyCapabilityManageModels APIKeyCapability = "manage_models"
-	// APIKeyCapabilityManageMCPServices lets a key manage tenant MCP service
-	// definitions, credentials, tool policies, and per-principal OAuth state.
+	// APIKeyCapabilityManageMCPServices authorizes the declared MCP runtime
+	// catalog surface. Platform connection definitions and credentials remain
+	// browser-only SystemAdmin configuration.
 	APIKeyCapabilityManageMCPServices APIKeyCapability = "manage_mcp_services"
 	// APIKeyCapabilityManageDataSources lets a key manage data-source
 	// connectors and sync jobs. KB scoping applies to data sources bound to a

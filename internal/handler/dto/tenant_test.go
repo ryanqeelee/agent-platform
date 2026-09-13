@@ -66,10 +66,6 @@ func sampleSecretTenant() *types.Tenant {
 	return &types.Tenant{
 		ID:   42,
 		Name: "tenant",
-		WebSearchConfig: &types.WebSearchConfig{
-			APIKey:   "legacy-search-secret-999",
-			ProxyURL: "http://proxy.internal:8080",
-		},
 		Credentials: &types.CredentialsConfig{
 			WeKnoraCloud: &types.WeKnoraCloudCredentials{
 				AppID:     "wk-app-id-abc",

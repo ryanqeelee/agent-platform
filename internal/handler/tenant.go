@@ -1281,7 +1281,7 @@ func (h *TenantHandler) SearchTenants(c *gin.Context) {
 
 // GetTenantKV godoc
 // @Summary      获取空间KV配置
-// @Description  获取空间级别的KV配置（支持web-search-config、prompt-templates、storage-engine-config、chat-history-config、retrieval-config）
+// @Description  获取空间级别的KV配置（支持prompt-templates、storage-engine-config、chat-history-config、retrieval-config）
 // @Tags         空间管理
 // @Accept       json
 // @Produce      json
@@ -1296,7 +1296,7 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 	key := secutils.SanitizeForLog(c.Param("key"))
 
 	switch key {
-	case "web-search-config", "storage-engine-config", "chat-history-config", "retrieval-config":
+	case "storage-engine-config", "chat-history-config", "retrieval-config":
 		if !types.IsSystemAdminFromContext(ctx) {
 			c.Error(errors.NewForbiddenError("platform configuration requires system administrator access"))
 			return
@@ -1304,9 +1304,6 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 	}
 
 	switch key {
-	case "web-search-config":
-		h.GetTenantWebSearchConfig(c)
-		return
 	case "prompt-templates":
 		h.GetPromptTemplates(c)
 		return
@@ -1328,7 +1325,7 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 
 // UpdateTenantKV godoc
 // @Summary      更新空间KV配置
-// @Description  更新空间级别的KV配置（支持web-search-config、storage-engine-config、chat-history-config、retrieval-config）
+// @Description  更新空间级别的KV配置（支持storage-engine-config、chat-history-config、retrieval-config）
 // @Tags         空间管理
 // @Accept       json
 // @Produce      json
@@ -1344,7 +1341,7 @@ func (h *TenantHandler) UpdateTenantKV(c *gin.Context) {
 	key := secutils.SanitizeForLog(c.Param("key"))
 
 	switch key {
-	case "web-search-config", "storage-engine-config", "chat-history-config", "retrieval-config":
+	case "storage-engine-config", "chat-history-config", "retrieval-config":
 		if !types.IsSystemAdminFromContext(ctx) {
 			c.Error(errors.NewForbiddenError("platform configuration requires system administrator access"))
 			return
@@ -1352,9 +1349,6 @@ func (h *TenantHandler) UpdateTenantKV(c *gin.Context) {
 	}
 
 	switch key {
-	case "web-search-config":
-		h.updateTenantWebSearchConfigInternal(c)
-		return
 	case "storage-engine-config":
 		h.updateTenantStorageEngineConfigInternal(c)
 		return
@@ -1369,81 +1363,6 @@ func (h *TenantHandler) UpdateTenantKV(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("unsupported key"))
 		return
 	}
-}
-
-// updateTenantWebSearchConfigInternal updates tenant's web search config
-func (h *TenantHandler) updateTenantWebSearchConfigInternal(c *gin.Context) {
-	ctx := c.Request.Context()
-
-	// Bind directly into the strong typed struct
-	var cfg types.WebSearchConfig
-	if err := c.ShouldBindJSON(&cfg); err != nil {
-		logger.Error(ctx, "Failed to parse request parameters", err)
-		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
-		return
-	}
-
-	tenant, _ := types.TenantInfoFromContext(ctx)
-	if tenant == nil {
-		logger.Error(ctx, "Workspace is empty")
-		c.Error(errors.NewBadRequestError("Workspace is empty"))
-		return
-	}
-
-	cfg = *types.MergeWebSearchConfigForUpdate(&cfg, tenant.WebSearchConfig)
-
-	// Validate configuration
-	if cfg.MaxResults < 1 || cfg.MaxResults > 50 {
-		c.Error(errors.NewBadRequestError("max_results must be between 1 and 50"))
-		return
-	}
-
-	tenant.WebSearchConfig = &cfg
-	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
-	if err != nil {
-		if appErr, ok := errors.IsAppError(err); ok {
-			logger.Error(ctx, "Failed to update workspace: application error", appErr)
-			c.Error(appErr)
-		} else {
-			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to update workspace web search config").WithDetails(err.Error()))
-		}
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    types.WebSearchConfigForResponse(updatedTenant.WebSearchConfig, true),
-		"message": "Web search configuration updated successfully",
-	})
-}
-
-// GetTenantWebSearchConfig godoc
-// @Summary      获取空间网络搜索配置
-// @Description  获取空间的网络搜索配置
-// @Tags         空间管理
-// @Accept       json
-// @Produce      json
-// @Success      200  {object}  map[string]interface{}  "网络搜索配置"
-// @Failure      400  {object}  errors.AppError         "请求参数错误"
-// @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /tenants/kv/web-search-config [get]
-func (h *TenantHandler) GetTenantWebSearchConfig(c *gin.Context) {
-	ctx := c.Request.Context()
-	logger.Info(ctx, "Start getting tenant web search config")
-	// Get tenant
-	tenant, _ := types.TenantInfoFromContext(ctx)
-	if tenant == nil {
-		logger.Error(ctx, "Workspace is empty")
-		c.Error(errors.NewBadRequestError("Workspace is empty"))
-		return
-	}
-
-	logger.Infof(ctx, "Tenant web search config retrieved successfully, Tenant ID: %d", tenant.ID)
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    types.WebSearchConfigForResponse(tenant.WebSearchConfig, true),
-	})
 }
 
 // GetTenantStorageEngineConfig returns the tenant's storage engine config (Local, MinIO, COS parameters).

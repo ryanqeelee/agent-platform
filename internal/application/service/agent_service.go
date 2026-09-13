@@ -451,14 +451,14 @@ func (s *agentService) registerMCPTools(
 			logger.Infof(ctx, "MCP services disabled by agent config (mode: selected, no services)")
 			return
 		}
-		mcpServices, err = s.mcpServiceService.ListMCPServicesByIDs(ctx, tenantID, config.MCPServices)
+		mcpServices, err = s.mcpServiceService.ListMCPServicesByIDs(ctx, config.MCPServices)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to list selected MCP services: %v", err)
 			return
 		}
 		logger.Infof(ctx, "Using %d selected MCP services from agent config", len(mcpServices))
 	} else {
-		mcpServices, err = s.mcpServiceService.ListMCPServices(ctx, tenantID)
+		mcpServices, err = s.mcpServiceService.ListMCPServices(ctx)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to list MCP services: %v", err)
 			return
@@ -1610,7 +1610,7 @@ func (s *agentService) resolvePinnedMCPServiceInfos(
 		return fallbackPinnedMCPInfos(config.PinnedMCPServiceIDs)
 	}
 
-	services, err := s.mcpServiceService.ListMCPServicesByIDs(ctx, tenantID, config.PinnedMCPServiceIDs)
+	services, err := s.mcpServiceService.ListMCPServicesByIDs(ctx, config.PinnedMCPServiceIDs)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to resolve pinned MCP services: %v", err)
 		return fallbackPinnedMCPInfos(config.PinnedMCPServiceIDs)

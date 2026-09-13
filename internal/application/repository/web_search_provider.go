@@ -3,10 +3,12 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // webSearchProviderRepository implements the WebSearchProviderRepository interface
@@ -24,12 +26,9 @@ func (r *webSearchProviderRepository) Create(ctx context.Context, provider *type
 	return r.db.WithContext(ctx).Create(provider).Error
 }
 
-// GetByID retrieves a web search provider by ID within a tenant scope
-func (r *webSearchProviderRepository) GetByID(ctx context.Context, tenantID uint64, id string) (*types.WebSearchProviderEntity, error) {
+func (r *webSearchProviderRepository) GetDefault(ctx context.Context) (*types.WebSearchProviderEntity, error) {
 	var provider types.WebSearchProviderEntity
-	if err := r.db.WithContext(ctx).Where(
-		"id = ? AND tenant_id = ?", id, tenantID,
-	).First(&provider).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("is_default = ?", true).Take(&provider).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
@@ -38,75 +37,56 @@ func (r *webSearchProviderRepository) GetByID(ctx context.Context, tenantID uint
 	return &provider, nil
 }
 
-// GetDefault retrieves the default provider (is_default=true) for a tenant, or nil if none.
-func (r *webSearchProviderRepository) GetDefault(ctx context.Context, tenantID uint64) (*types.WebSearchProviderEntity, error) {
-	var provider types.WebSearchProviderEntity
-	if err := r.db.WithContext(ctx).Where(
-		"tenant_id = ? AND is_default = ?", tenantID, true,
-	).First(&provider).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return &provider, nil
-}
-
-// EnsureDefault provisions the tenant-owned keyless provider only before any
-// provider history exists. Locking the tenant row makes concurrent activation
-// and tenant-creation replays converge on one provider.
-func (r *webSearchProviderRepository) EnsureDefault(
-	ctx context.Context,
-	tenantID uint64,
-) (*types.WebSearchProviderEntity, error) {
-	var provider *types.WebSearchProviderEntity
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var tenant types.Tenant
-		if err := tx.WithContext(ctx).Clauses(forUpdateClause()).Select("id").
-			Where("id = ?", tenantID).Take(&tenant).Error; err != nil {
+func (r *webSearchProviderRepository) SetDefault(ctx context.Context, id string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockWebSearchDefault(tx); err != nil {
 			return err
 		}
-
-		var providerCount int64
-		if err := tx.WithContext(ctx).Unscoped().Model(&types.WebSearchProviderEntity{}).
-			Where("tenant_id = ?", tenantID).Count(&providerCount).Error; err != nil {
-			return err
+		var provider types.WebSearchProviderEntity
+		query := tx.Where("id = ?", id)
+		if tx.Dialector.Name() == "postgres" {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
 		}
-		if providerCount > 0 {
-			var existing types.WebSearchProviderEntity
-			err := tx.WithContext(ctx).Where(
-				"tenant_id = ? AND is_default = ?", tenantID, true,
-			).First(&existing).Error
+		if err := query.Take(&provider).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				provider = nil
-				return nil
+				return fmt.Errorf("web search provider not found")
 			}
-			if err != nil {
-				return err
-			}
-			provider = &existing
-			return nil
+			return err
 		}
-
-		provider = &types.WebSearchProviderEntity{
-			TenantID:    tenantID,
-			Name:        "Keenable",
-			Provider:    types.WebSearchProviderTypeKeenable,
-			Description: "Platform-provisioned keyless web search",
-			Parameters:  types.WebSearchProviderParameters{},
-			IsDefault:   true,
+		if err := tx.Model(&types.WebSearchProviderEntity{}).
+			Where("is_default = ? AND id <> ?", true, id).
+			Update("is_default", false).Error; err != nil {
+			return err
 		}
-		return tx.WithContext(ctx).Create(provider).Error
+		return tx.Model(&types.WebSearchProviderEntity{}).
+			Where("id = ?", id).
+			Update("is_default", true).Error
 	})
-	return provider, err
 }
 
-// List lists all web search providers for a tenant
-func (r *webSearchProviderRepository) List(ctx context.Context, tenantID uint64) ([]*types.WebSearchProviderEntity, error) {
+func lockWebSearchDefault(tx *gorm.DB) error {
+	if tx.Dialector.Name() != "postgres" {
+		return nil
+	}
+	return tx.Exec("SELECT pg_advisory_xact_lock(?)", int64(0x5745425345415243)).Error
+}
+
+// GetByID retrieves a platform web search provider by ID.
+func (r *webSearchProviderRepository) GetByID(ctx context.Context, id string) (*types.WebSearchProviderEntity, error) {
+	var provider types.WebSearchProviderEntity
+	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&provider).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &provider, nil
+}
+
+// List lists all platform web search providers.
+func (r *webSearchProviderRepository) List(ctx context.Context) ([]*types.WebSearchProviderEntity, error) {
 	var providers []*types.WebSearchProviderEntity
-	if err := r.db.WithContext(ctx).Where(
-		"tenant_id = ?", tenantID,
-	).Order("created_at ASC").Find(&providers).Error; err != nil {
+	if err := r.db.WithContext(ctx).Order("created_at ASC").Find(&providers).Error; err != nil {
 		return nil, err
 	}
 	return providers, nil
@@ -115,24 +95,30 @@ func (r *webSearchProviderRepository) List(ctx context.Context, tenantID uint64)
 // Update updates a web search provider
 func (r *webSearchProviderRepository) Update(ctx context.Context, provider *types.WebSearchProviderEntity) error {
 	return r.db.WithContext(ctx).Model(&types.WebSearchProviderEntity{}).Where(
-		"id = ? AND tenant_id = ?", provider.ID, provider.TenantID,
-	).Select("*").Updates(provider).Error
+		"id = ?", provider.ID,
+	).Select("name", "provider", "description", "parameters", "updated_at").Updates(provider).Error
 }
 
 // Delete soft-deletes a web search provider
-func (r *webSearchProviderRepository) Delete(ctx context.Context, tenantID uint64, id string) error {
-	return r.db.WithContext(ctx).Where(
-		"id = ? AND tenant_id = ?", id, tenantID,
-	).Delete(&types.WebSearchProviderEntity{}).Error
-}
-
-// ClearDefault clears the default flag for all providers of a tenant, optionally excluding one
-func (r *webSearchProviderRepository) ClearDefault(ctx context.Context, tenantID uint64, excludeID string) error {
-	query := r.db.WithContext(ctx).Model(&types.WebSearchProviderEntity{}).Where(
-		"tenant_id = ? AND is_default = ?", tenantID, true,
-	)
-	if excludeID != "" {
-		query = query.Where("id != ?", excludeID)
-	}
-	return query.Update("is_default", false).Error
+func (r *webSearchProviderRepository) Delete(ctx context.Context, id string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockWebSearchDefault(tx); err != nil {
+			return err
+		}
+		var provider types.WebSearchProviderEntity
+		query := tx.Where("id = ?", id)
+		if tx.Dialector.Name() == "postgres" {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := query.Take(&provider).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("web search provider not found")
+			}
+			return err
+		}
+		if provider.IsDefault {
+			return fmt.Errorf("default web search provider cannot be deleted")
+		}
+		return tx.Delete(&provider).Error
+	})
 }

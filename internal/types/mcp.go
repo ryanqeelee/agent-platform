@@ -23,8 +23,7 @@ const (
 // MCPService represents an MCP (Model Context Protocol) service configuration
 type MCPService struct {
 	ID             string             `json:"id"                     gorm:"type:varchar(36);primaryKey"`
-	TenantID       uint64             `json:"tenant_id"              gorm:"uniqueIndex:idx_tenant_name"`
-	Name           string             `json:"name"                   gorm:"type:varchar(255);not null;uniqueIndex:idx_tenant_name"`
+	Name           string             `json:"name"                   gorm:"type:varchar(255);not null"`
 	Description    string             `json:"description"            gorm:"type:text"`
 	Enabled        bool               `json:"enabled"                gorm:"default:true;index"`
 	TransportType  MCPTransportType   `json:"transport_type"         gorm:"type:varchar(50);not null"`
@@ -34,7 +33,7 @@ type MCPService struct {
 	AdvancedConfig *MCPAdvancedConfig `json:"advanced_config"        gorm:"type:json"`
 	StdioConfig    *MCPStdioConfig    `json:"stdio_config,omitempty" gorm:"type:json"`     // Required for stdio transport
 	EnvVars        MCPEnvVars         `json:"env_vars,omitempty"     gorm:"type:json"`     // Environment variables for stdio
-	IsBuiltin      bool               `json:"is_builtin"             gorm:"default:false"` // Whether this is a builtin MCP service (visible to all workspaces)
+	IsBuiltin      bool               `json:"is_builtin"             gorm:"default:false"` // Whether this platform definition is protected by the builtin edit policy
 	CreatedAt      time.Time          `json:"created_at"`
 	UpdatedAt      time.Time          `json:"updated_at"`
 	DeletedAt      gorm.DeletedAt     `json:"deleted_at"             gorm:"index"`
@@ -127,9 +126,8 @@ type MCPTool struct {
 // Tool list itself comes from MCP ListTools; this table only stores overrides.
 type MCPToolApproval struct {
 	ID              string    `json:"id"               gorm:"type:varchar(36);primaryKey"`
-	TenantID        uint64    `json:"tenant_id"        gorm:"not null;uniqueIndex:idx_mcp_tool_approvals_tenant_svc_tool"`
-	ServiceID       string    `json:"service_id"       gorm:"type:varchar(36);not null;uniqueIndex:idx_mcp_tool_approvals_tenant_svc_tool;index"`
-	ToolName        string    `json:"tool_name"        gorm:"type:varchar(512);not null;uniqueIndex:idx_mcp_tool_approvals_tenant_svc_tool"`
+	ServiceID       string    `json:"service_id"       gorm:"type:varchar(36);not null;uniqueIndex:idx_mcp_tool_approvals_svc_tool;index"`
+	ToolName        string    `json:"tool_name"        gorm:"type:varchar(512);not null;uniqueIndex:idx_mcp_tool_approvals_svc_tool"`
 	RequireApproval bool      `json:"require_approval" gorm:"not null;default:false"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`

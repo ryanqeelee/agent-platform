@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -50,11 +51,11 @@ func (s *customAgentService) nativeAnalysisAgent(ctx context.Context, id string,
 	ready := false
 	agent.WebSearchReady = &ready
 	if agent.Config.WebSearchEnabled && s.webSearchProviders != nil {
-		provider, err := s.webSearchProviders.GetDefault(ctx, tenantID)
+		provider, err := s.webSearchProviders.GetDefault(ctx)
 		if err != nil {
 			return nil, err
 		}
-		if provider != nil && provider.TenantID == tenantID && isValidProviderType(provider.Provider) && validateProviderParameters(provider.Provider, provider.Parameters) == nil {
+		if provider != nil && isValidProviderType(provider.Provider) && validateProviderParameters(provider.Provider, provider.Parameters) == nil {
 			agent.Config.WebSearchProviderID = provider.ID
 			ready = true
 		}

@@ -23,7 +23,6 @@ import (
 // "configured / not configured" badge without an additional round-trip.
 type MCPServiceResponse struct {
 	ID             string                   `json:"id"`
-	TenantID       uint64                   `json:"tenant_id"`
 	Name           string                   `json:"name"`
 	Description    string                   `json:"description"`
 	Enabled        bool                     `json:"enabled"`
@@ -40,8 +39,8 @@ type MCPServiceResponse struct {
 	// Credentials is the per-field "configured?" map. Embedded on the main
 	// response so the credential UI doesn't need a follow-up GET. The
 	// frontend never sees the actual secret value — only whether one is
-	// stored. Omitted entirely for builtin services (they can't have
-	// per-tenant credentials).
+	// stored. Omitted entirely for builtin services because the builtin edit
+	// policy forbids credential mutation.
 	Credentials map[string]CredentialFieldMetadata `json:"credentials,omitempty"`
 }
 
@@ -74,10 +73,9 @@ type CredentialFieldMetadata struct {
 
 // NewMCPServiceResponse converts a stored MCPService into its response shape.
 //
-// Builtin MCP services have their tenant-specific transport details (URL,
-// Headers, EnvVars, StdioConfig) stripped — these reveal how the tenant
-// configured an upstream provider and must not be visible to other tenants
-// that see the same builtin row via the cross-tenant list.
+// Runtime callers receive MCPServiceOptionResponse instead. This full response
+// is for the SystemAdmin configuration surface; builtin rows retain their
+// established extra redaction policy.
 func NewMCPServiceResponse(ctx context.Context, svc *types.MCPService) *MCPServiceResponse {
 	if svc == nil {
 		return nil
@@ -85,7 +83,6 @@ func NewMCPServiceResponse(ctx context.Context, svc *types.MCPService) *MCPServi
 	includeDetail := CanViewIntegrationSecrets(ctx)
 	resp := &MCPServiceResponse{
 		ID:             svc.ID,
-		TenantID:       svc.TenantID,
 		Name:           svc.Name,
 		Description:    svc.Description,
 		Enabled:        svc.Enabled,

@@ -39,14 +39,15 @@ func NewMCPManager(oauthRepo interfaces.MCPOAuthRepository) *MCPManager {
 	return manager
 }
 
-// cacheKey computes the connection-cache key for a service. OAuth services are
-// keyed per principal (each identity connects with its own token); all other
-// services share a single connection per service ID.
-func cacheKey(service *types.MCPService, principal types.Principal) string {
+// cacheKey keeps every runtime connection inside its real tenant. OAuth
+// services add principal identity because their bearer token is per principal.
+func cacheKey(service *types.MCPService, tenantID uint64, principal types.Principal) string {
+	base := fmt.Sprintf("%s\x00%d", service.ID, tenantID)
 	if service.AuthConfig.IsOAuth() {
-		return service.ID + "\x00" + principal.Normalize().StorageID()
+		normalized := principal.Normalize()
+		return base + "\x00" + string(normalized.Type) + "\x00" + normalized.ID
 	}
-	return service.ID
+	return base
 }
 
 // GetOrCreateClient gets an existing client or creates a new one
@@ -66,17 +67,19 @@ func (m *MCPManager) GetOrCreateClient(ctx context.Context, service *types.MCPSe
 		return nil, fmt.Errorf("stdio transport is disabled for security reasons; please use SSE or HTTP Streamable transport instead")
 	}
 
-	var tenantID uint64
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok || tenantID == 0 {
+		return nil, fmt.Errorf("workspace context is required to connect to MCP service %s", service.Name)
+	}
 	var principal types.Principal
 	if service.AuthConfig.IsOAuth() {
-		tenantID, _ = types.TenantIDFromContext(ctx)
 		principal, _ = types.PrincipalFromContext(ctx)
 		principal = types.MCPOAuthPrincipalFromContext(ctx)
 		if !principal.Valid() {
 			return nil, fmt.Errorf("principal context is required to connect to OAuth MCP service %s", service.Name)
 		}
 	}
-	key := cacheKey(service, principal)
+	key := cacheKey(service, tenantID, principal)
 
 	// For SSE/HTTP Streamable, check if client already exists and reuse
 	m.clientsMu.RLock()
@@ -152,26 +155,23 @@ func (m *MCPManager) initializeClient(service *types.MCPService, client MCPClien
 	return nil
 }
 
-// GetClient gets an existing client
-func (m *MCPManager) GetClient(serviceID string) (MCPClient, bool) {
+// GetClient gets an existing non-OAuth client for one tenant.
+func (m *MCPManager) GetClient(serviceID string, tenantID uint64) (MCPClient, bool) {
 	m.clientsMu.RLock()
 	defer m.clientsMu.RUnlock()
 
-	client, exists := m.clients[serviceID]
+	client, exists := m.clients[fmt.Sprintf("%s\x00%d", serviceID, tenantID)]
 	return client, exists
 }
 
-// CloseClient closes and removes all cached connections for a service. For
-// OAuth services this spans every per-principal connection (keys are prefixed with
-// the service ID).
+// CloseClient closes and removes every tenant/principal connection cached for
+// one global service.
 func (m *MCPManager) CloseClient(serviceID string) error {
 	m.clientsMu.Lock()
 	defer m.clientsMu.Unlock()
 
 	for key, client := range m.clients {
-		// Match the plain service-ID key as well as per-principal OAuth keys
-		// ("<serviceID>\x00<principal>").
-		if key != serviceID && !strings.HasPrefix(key, serviceID+"\x00") {
+		if !strings.HasPrefix(key, serviceID+"\x00") {
 			continue
 		}
 		if err := client.Disconnect(); err != nil {

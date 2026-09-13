@@ -12,7 +12,6 @@ import (
 // presence is exposed via the /credentials subresource.
 type WebSearchProviderResponse struct {
 	ID          string                         `json:"id"`
-	TenantID    uint64                         `json:"tenant_id"`
 	Name        string                         `json:"name"`
 	Provider    types.WebSearchProviderType    `json:"provider"`
 	Description string                         `json:"description"`
@@ -51,7 +50,6 @@ func NewWebSearchProviderResponse(ctx context.Context, e *types.WebSearchProvide
 	}
 	return &WebSearchProviderResponse{
 		ID:          e.ID,
-		TenantID:    e.TenantID,
 		Name:        e.Name,
 		Provider:    e.Provider,
 		Description: e.Description,

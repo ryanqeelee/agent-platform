@@ -6,14 +6,14 @@ import (
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
 )
 
 // MCPCredentialsHandler handles secret credentials for MCP services via a
-// dedicated subresource (/mcp-services/{id}/credentials). Splitting this out
+// dedicated platform subresource (/system/admin/mcp-services/{id}/credentials).
+// Splitting this out
 // of UpdateMCPService delivers three concrete benefits:
 //
 //  1. The main MCP PUT body never carries secrets — eliminating the
@@ -61,17 +61,10 @@ type mcpCredentialsPutRequest struct {
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Failure      404      {object}  errors.AppError         "服务不存在"
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /mcp-services/{id}/credentials [put]
+// @Router       /system/admin/mcp-services/{id}/credentials [put]
 func (h *MCPCredentialsHandler) Put(c *gin.Context) {
 	ctx := c.Request.Context()
 	serviceID := c.Param("id")
-	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	if tenantID == 0 {
-		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
-		return
-	}
-
 	var req mcpCredentialsPutRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(errors.NewBadRequestError(err.Error()))
@@ -81,7 +74,7 @@ func (h *MCPCredentialsHandler) Put(c *gin.Context) {
 	// Nothing to do — but rather than 400 (benign no-op), look up current
 	// state and return it. Client treats this identically to a real save.
 	if req.APIKey == nil && req.Token == nil {
-		svc, err := h.svc.GetMCPServiceByID(ctx, tenantID, serviceID)
+		svc, err := h.svc.GetMCPServiceByID(ctx, serviceID)
 		if err != nil || svc == nil {
 			c.Error(errors.NewNotFoundError("MCP service not found"))
 			return
@@ -95,7 +88,7 @@ func (h *MCPCredentialsHandler) Put(c *gin.Context) {
 		return
 	}
 
-	updated, err := h.svc.UpdateMCPCredentials(ctx, tenantID, serviceID, req.APIKey, req.Token)
+	updated, err := h.svc.UpdateMCPCredentials(ctx, serviceID, req.APIKey, req.Token)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"service_id": secutils.SanitizeForLog(serviceID),
@@ -127,23 +120,17 @@ func (h *MCPCredentialsHandler) Put(c *gin.Context) {
 // @Failure      400  {object}  errors.AppError  "字段名非法"
 // @Failure      404  {object}  errors.AppError  "服务不存在"
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /mcp-services/{id}/credentials/{field} [delete]
+// @Router       /system/admin/mcp-services/{id}/credentials/{field} [delete]
 func (h *MCPCredentialsHandler) DeleteField(c *gin.Context) {
 	ctx := c.Request.Context()
 	serviceID := c.Param("id")
 	field := c.Param("field")
-	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	if tenantID == 0 {
-		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
-		return
-	}
 	if field != "api_key" && field != "token" {
 		c.Error(errors.NewBadRequestError("unknown credential field: " + secutils.SanitizeForLog(field)))
 		return
 	}
 
-	if err := h.svc.ClearMCPCredential(ctx, tenantID, serviceID, field); err != nil {
+	if err := h.svc.ClearMCPCredential(ctx, serviceID, field); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"service_id": secutils.SanitizeForLog(serviceID),
 			"field":      field,

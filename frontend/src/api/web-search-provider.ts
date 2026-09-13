@@ -1,12 +1,10 @@
 import { get, post, put, del } from '@/utils/request'
-import { platformTenantPath } from './platform-tenant-path'
-
-const basePath = (tenantId?: number) => tenantId === undefined ? '/api/v1/web-search-providers' : platformTenantPath(tenantId, 'web-search-providers')
+const runtimeBasePath = '/api/v1/web-search-providers'
+const adminBasePath = '/api/v1/system/admin/web-search-providers'
 
 // WebSearchProviderEntity represents a configured web search provider instance
 export interface WebSearchProviderEntity {
   id?: string
-  tenant_id?: number
   name: string
   provider: 'bing' | 'google' | 'duckduckgo' | 'tavily' | 'ollama' | 'baidu' | 'searxng' | 'keenable' | 'zhipu' | 'metaso' | 'exa'
   description?: string
@@ -55,33 +53,37 @@ export interface WebSearchProviderConfigField {
 }
 
 // Create a new web search provider
-export function createWebSearchProvider(data: Partial<WebSearchProviderEntity>, tenantId?: number) {
-  return post(basePath(tenantId), data)
+export function createWebSearchProvider(data: Partial<WebSearchProviderEntity>) {
+  return post(adminBasePath, data)
 }
 
-// List all web search providers for the current tenant
-export function listWebSearchProviders(tenantId?: number) {
-  return get(basePath(tenantId))
+// List the enabled global provider catalog available to enterprise runtime.
+export function listWebSearchProviders() {
+  return get(runtimeBasePath)
+}
+
+export function listPlatformWebSearchProviders() {
+  return get(adminBasePath)
 }
 
 // Get a single web search provider by ID
-export function getWebSearchProvider(id: string, tenantId?: number) {
-  return get(`${basePath(tenantId)}/${id}`)
+export function getWebSearchProvider(id: string) {
+  return get(`${adminBasePath}/${id}`)
 }
 
 // Update an existing web search provider
-export function updateWebSearchProvider(id: string, data: Partial<WebSearchProviderEntity>, tenantId?: number) {
-  return put(`${basePath(tenantId)}/${id}`, data)
+export function updateWebSearchProvider(id: string, data: Partial<WebSearchProviderEntity>) {
+  return put(`${adminBasePath}/${id}`, data)
 }
 
 // Delete a web search provider
-export function deleteWebSearchProvider(id: string, tenantId?: number) {
-  return del(`${basePath(tenantId)}/${id}`)
+export function deleteWebSearchProvider(id: string) {
+  return del(`${adminBasePath}/${id}`)
 }
 
 // Get available provider types (for dynamic form rendering)
-export function listWebSearchProviderTypes(tenantId?: number): Promise<WebSearchProviderTypeInfo[]> {
-  return get(`${basePath(tenantId)}/types`).then((res: any) => {
+export function listWebSearchProviderTypes(): Promise<WebSearchProviderTypeInfo[]> {
+  return get(`${adminBasePath}/types`).then((res: any) => {
     if (res.success && res.data) {
       return res.data
     }
@@ -102,26 +104,24 @@ export interface WebSearchCredentialsResponse {
 export async function putWebSearchProviderCredentials(
   id: string,
   body: Partial<Record<WebSearchCredentialField, string>>,
-  tenantId?: number,
 ): Promise<WebSearchCredentialsResponse> {
-  const response: any = await put(`${basePath(tenantId)}/${id}/credentials`, body)
+  const response: any = await put(`${adminBasePath}/${id}/credentials`, body)
   return (response.data ?? response) as WebSearchCredentialsResponse
 }
 
 export async function deleteWebSearchProviderCredentialField(
   id: string,
   field: WebSearchCredentialField,
-  tenantId?: number,
 ): Promise<void> {
-  await del(`${basePath(tenantId)}/${id}/credentials/${field}`)
+  await del(`${adminBasePath}/${id}/credentials/${field}`)
 }
 
 // Test a web search provider connection.
 // If id is provided, tests the existing saved provider.
 // If data is provided, tests with raw credentials (no persistence).
-export function testWebSearchProvider(id?: string, data?: { provider: string; parameters: any }, tenantId?: number): Promise<any> {
+export function testWebSearchProvider(id?: string, data?: { provider: string; parameters: any }): Promise<any> {
   if (id) {
-    return post(`${basePath(tenantId)}/${id}/test`, {})
+    return post(`${adminBasePath}/${id}/test`, {})
   }
-  return post(`${basePath(tenantId)}/test`, data || {})
+  return post(`${adminBasePath}/test`, data || {})
 }

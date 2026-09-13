@@ -8,8 +8,15 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
 )
+
+type routeMCPServiceStub struct{ interfaces.MCPServiceService }
+
+func (routeMCPServiceStub) ListMCPServices(context.Context) ([]*types.MCPService, error) {
+	return []*types.MCPService{}, nil
+}
 
 func TestPlatformInfrastructureRoutesRequireSystemAdmin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -27,13 +34,20 @@ func TestPlatformInfrastructureRoutesRequireSystemAdmin(t *testing.T) {
 	RegisterModelRoutes(v1, &handler.ModelHandler{}, &handler.ModelCredentialsHandler{}, g)
 	RegisterCapabilityPlanRoutes(v1, &handler.AICapabilityPlanHandler{}, g)
 	RegisterInitializationRoutes(v1, &handler.InitializationHandler{}, g)
-	RegisterMCPServiceRoutes(v1, &handler.MCPServiceHandler{}, &handler.MCPCredentialsHandler{}, &handler.MCPOAuthHandler{}, g)
+	RegisterMCPServiceRoutes(
+		v1,
+		handler.NewMCPServiceHandler(routeMCPServiceStub{}, nil, nil),
+		&handler.MCPCredentialsHandler{},
+		&handler.MCPOAuthHandler{},
+		g,
+	)
 	RegisterVectorStoreRoutes(v1, &handler.VectorStoreHandler{}, g)
 	RegisterStorageBackendRoutes(v1, &handler.StorageBackendHandler{}, g)
 	RegisterWeKnoraCloudRoutes(v1, &handler.WeKnoraCloudHandler{}, g)
 	RegisterSystemRoutes(v1, &handler.SystemHandler{}, g)
 	RegisterSystemAdminRoutes(v1, &handler.SystemHandler{}, nil, nil, g)
 	RegisterWebSearchRoutes(v1, &handler.WebSearchHandler{}, g)
+	RegisterWebSearchProviderRoutes(v1, &handler.WebSearchProviderHandler{}, &handler.WebSearchProviderCredentialsHandler{}, g)
 	RegisterSkillRoutes(v1, &handler.SkillHandler{}, g)
 
 	for _, tc := range []struct {
@@ -54,6 +68,8 @@ func TestPlatformInfrastructureRoutesRequireSystemAdmin(t *testing.T) {
 		{http.MethodGet, "/api/v1/system/storage-engine-status"},
 		{http.MethodGet, "/api/v1/system/admin/capabilities"},
 		{http.MethodGet, "/api/v1/web-search/providers"},
+		{http.MethodGet, "/api/v1/system/admin/mcp-services"},
+		{http.MethodGet, "/api/v1/system/admin/web-search-providers"},
 	} {
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, nil))
@@ -64,8 +80,8 @@ func TestPlatformInfrastructureRoutesRequireSystemAdmin(t *testing.T) {
 
 	enterpriseCatalog := httptest.NewRecorder()
 	r.ServeHTTP(enterpriseCatalog, httptest.NewRequest(http.MethodGet, "/api/v1/mcp-services", nil))
-	if enterpriseCatalog.Code == http.StatusForbidden {
-		t.Fatal("enterprise Owner must reach the safe MCP service catalog")
+	if enterpriseCatalog.Code != http.StatusOK {
+		t.Fatalf("enterprise Owner safe MCP catalog status = %d, want %d", enterpriseCatalog.Code, http.StatusOK)
 	}
 
 	allowed := httptest.NewRecorder()

@@ -39,7 +39,7 @@ func NewMCPServiceHandler(
 
 // CreateMCPService godoc
 // @Summary      创建MCP服务
-// @Description  创建新的MCP服务配置
+// @Description  创建新的平台级 MCP 服务配置
 // @Tags         MCP服务
 // @Accept       json
 // @Produce      json
@@ -47,8 +47,7 @@ func NewMCPServiceHandler(
 // @Success      200      {object}  map[string]interface{}  "创建的MCP服务"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /mcp-services [post]
+// @Router       /system/admin/mcp-services [post]
 func (h *MCPServiceHandler) CreateMCPService(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -58,14 +57,6 @@ func (h *MCPServiceHandler) CreateMCPService(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-
-	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	if tenantID == 0 {
-		logger.Error(ctx, "Tenant ID is empty")
-		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
-		return
-	}
-	service.TenantID = tenantID
 
 	// SSRF validation for MCP service URL
 	if service.URL != nil && *service.URL != "" {
@@ -97,7 +88,7 @@ func (h *MCPServiceHandler) CreateMCPService(c *gin.Context) {
 
 // ListMCPServices godoc
 // @Summary      获取MCP服务列表
-// @Description  获取当前空间的所有MCP服务
+// @Description  获取企业运行时可选择的全局 MCP 服务安全目录
 // @Tags         MCP服务
 // @Accept       json
 // @Produce      json
@@ -109,16 +100,9 @@ func (h *MCPServiceHandler) CreateMCPService(c *gin.Context) {
 func (h *MCPServiceHandler) ListMCPServices(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	if tenantID == 0 {
-		logger.Error(ctx, "Tenant ID is empty")
-		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
-		return
-	}
-
-	services, err := h.mcpServiceService.ListMCPServices(ctx, tenantID)
+	services, err := h.mcpServiceService.ListMCPServices(ctx)
 	if err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{"tenant_id": tenantID})
+		logger.Error(ctx, "Failed to list platform MCP services", err)
 		c.Error(errors.NewInternalServerError("Failed to list MCP services"))
 		return
 	}
@@ -138,7 +122,7 @@ func (h *MCPServiceHandler) ListMCPServices(c *gin.Context) {
 
 // GetMCPService godoc
 // @Summary      获取MCP服务详情
-// @Description  根据ID获取MCP服务详情
+// @Description  根据 ID 获取平台级 MCP 服务详情
 // @Tags         MCP服务
 // @Accept       json
 // @Produce      json
@@ -146,29 +130,20 @@ func (h *MCPServiceHandler) ListMCPServices(c *gin.Context) {
 // @Success      200  {object}  map[string]interface{}  "MCP服务详情"
 // @Failure      404  {object}  errors.AppError         "服务不存在"
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /mcp-services/{id} [get]
+// @Router       /system/admin/mcp-services/{id} [get]
 func (h *MCPServiceHandler) GetMCPService(c *gin.Context) {
 	ctx := c.Request.Context()
 	serviceID := secutils.SanitizeForLog(c.Param("id"))
 
-	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	if tenantID == 0 {
-		logger.Error(ctx, "Tenant ID is empty")
-		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
-		return
-	}
-
-	service, err := h.mcpServiceService.GetMCPServiceByID(ctx, tenantID, serviceID)
+	service, err := h.mcpServiceService.GetMCPServiceByID(ctx, serviceID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"service_id": secutils.SanitizeForLog(serviceID)})
 		c.Error(errors.NewNotFoundError("MCP service not found"))
 		return
 	}
 
-	// dto.NewMCPServiceResponse omits secret fields and additionally strips
-	// transport details (URL/Headers/EnvVars/StdioConfig) for builtin services
-	// so the cross-tenant builtin list does not leak per-tenant config.
+	// dto.NewMCPServiceResponse omits secret fields and retains the established
+	// extra transport redaction for builtin services.
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    dto.NewMCPServiceResponse(ctx, service),
@@ -177,7 +152,7 @@ func (h *MCPServiceHandler) GetMCPService(c *gin.Context) {
 
 // UpdateMCPService godoc
 // @Summary      更新MCP服务
-// @Description  更新MCP服务配置
+// @Description  更新平台级 MCP 服务配置
 // @Tags         MCP服务
 // @Accept       json
 // @Produce      json
@@ -186,18 +161,10 @@ func (h *MCPServiceHandler) GetMCPService(c *gin.Context) {
 // @Success      200      {object}  map[string]interface{}  "更新后的MCP服务"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /mcp-services/{id} [put]
+// @Router       /system/admin/mcp-services/{id} [put]
 func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 	ctx := c.Request.Context()
 	serviceID := secutils.SanitizeForLog(c.Param("id"))
-
-	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	if tenantID == 0 {
-		logger.Error(ctx, "Tenant ID is empty")
-		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
-		return
-	}
 
 	// Use map to handle partial updates, including false values
 	var updateData map[string]interface{}
@@ -210,7 +177,6 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 	// Convert map to MCPService struct for validation and processing
 	var service types.MCPService
 	service.ID = serviceID
-	service.TenantID = tenantID
 
 	// Track which fields are being updated
 	updateFields := make(map[string]bool)
@@ -362,7 +328,7 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 
 	// Re-fetch to pick up server-side merges (CustomHeaders preserve, etc.)
 	// and respond with the full current state via the secret-free DTO.
-	stored, err := h.mcpServiceService.GetMCPServiceByID(ctx, tenantID, serviceID)
+	stored, err := h.mcpServiceService.GetMCPServiceByID(ctx, serviceID)
 	if err != nil {
 		c.Error(errors.NewInternalServerError("Failed to fetch updated MCP service: " + err.Error()))
 		return
@@ -375,7 +341,7 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 
 // DeleteMCPService godoc
 // @Summary      删除MCP服务
-// @Description  删除指定的MCP服务
+// @Description  删除指定的平台级 MCP 服务
 // @Tags         MCP服务
 // @Accept       json
 // @Produce      json
@@ -383,20 +349,12 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 // @Success      200  {object}  map[string]interface{}  "删除成功"
 // @Failure      500  {object}  errors.AppError         "服务器错误"
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /mcp-services/{id} [delete]
+// @Router       /system/admin/mcp-services/{id} [delete]
 func (h *MCPServiceHandler) DeleteMCPService(c *gin.Context) {
 	ctx := c.Request.Context()
 	serviceID := secutils.SanitizeForLog(c.Param("id"))
 
-	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	if tenantID == 0 {
-		logger.Error(ctx, "Tenant ID is empty")
-		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
-		return
-	}
-
-	if err := h.mcpServiceService.DeleteMCPService(ctx, tenantID, serviceID); err != nil {
+	if err := h.mcpServiceService.DeleteMCPService(ctx, serviceID); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"service_id": secutils.SanitizeForLog(serviceID)})
 		c.Error(errors.NewInternalServerError("Failed to delete MCP service: " + err.Error()))
 		return
@@ -411,7 +369,7 @@ func (h *MCPServiceHandler) DeleteMCPService(c *gin.Context) {
 
 // TestMCPService godoc
 // @Summary      测试MCP服务连接
-// @Description  测试MCP服务是否可以正常连接
+// @Description  使用临时客户端测试平台级 MCP 服务，不写入企业运行时缓存
 // @Tags         MCP服务
 // @Accept       json
 // @Produce      json
@@ -419,22 +377,14 @@ func (h *MCPServiceHandler) DeleteMCPService(c *gin.Context) {
 // @Success      200  {object}  map[string]interface{}  "测试结果"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /mcp-services/{id}/test [post]
+// @Router       /system/admin/mcp-services/{id}/test [post]
 func (h *MCPServiceHandler) TestMCPService(c *gin.Context) {
 	ctx := c.Request.Context()
 	serviceID := secutils.SanitizeForLog(c.Param("id"))
 
-	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	if tenantID == 0 {
-		logger.Error(ctx, "Tenant ID is empty")
-		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
-		return
-	}
-
 	logger.Infof(ctx, "Testing MCP service: %s", secutils.SanitizeForLog(serviceID))
 
-	result, err := h.mcpServiceService.TestMCPService(ctx, tenantID, serviceID)
+	result, err := h.mcpServiceService.TestMCPService(ctx, serviceID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"service_id": secutils.SanitizeForLog(serviceID)})
 		c.JSON(http.StatusOK, gin.H{
@@ -464,20 +414,12 @@ func (h *MCPServiceHandler) TestMCPService(c *gin.Context) {
 // @Success      200  {object}  map[string]interface{}  "工具列表"
 // @Failure      500  {object}  errors.AppError         "服务器错误"
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /mcp-services/{id}/tools [get]
+// @Router       /system/admin/mcp-services/{id}/tools [get]
 func (h *MCPServiceHandler) GetMCPServiceTools(c *gin.Context) {
 	ctx := c.Request.Context()
 	serviceID := secutils.SanitizeForLog(c.Param("id"))
 
-	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	if tenantID == 0 {
-		logger.Error(ctx, "Tenant ID is empty")
-		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
-		return
-	}
-
-	tools, err := h.mcpServiceService.GetMCPServiceTools(ctx, tenantID, serviceID)
+	tools, err := h.mcpServiceService.GetMCPServiceTools(ctx, serviceID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"service_id": secutils.SanitizeForLog(serviceID)})
 		c.Error(errors.NewInternalServerError("Failed to get MCP service tools: " + err.Error()))
@@ -500,20 +442,12 @@ func (h *MCPServiceHandler) GetMCPServiceTools(c *gin.Context) {
 // @Success      200  {object}  map[string]interface{}  "资源列表"
 // @Failure      500  {object}  errors.AppError         "服务器错误"
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /mcp-services/{id}/resources [get]
+// @Router       /system/admin/mcp-services/{id}/resources [get]
 func (h *MCPServiceHandler) GetMCPServiceResources(c *gin.Context) {
 	ctx := c.Request.Context()
 	serviceID := secutils.SanitizeForLog(c.Param("id"))
 
-	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	if tenantID == 0 {
-		logger.Error(ctx, "Tenant ID is empty")
-		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
-		return
-	}
-
-	resources, err := h.mcpServiceService.GetMCPServiceResources(ctx, tenantID, serviceID)
+	resources, err := h.mcpServiceService.GetMCPServiceResources(ctx, serviceID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"service_id": secutils.SanitizeForLog(serviceID)})
 		c.Error(errors.NewInternalServerError("Failed to get MCP service resources: " + err.Error()))
@@ -527,19 +461,25 @@ func (h *MCPServiceHandler) GetMCPServiceResources(c *gin.Context) {
 }
 
 // ListMCPToolApprovals returns persisted require_approval flags for tools on an MCP service.
+//
+// ListMCPToolApprovals godoc
+// @Summary      获取 MCP 工具人工审批策略
+// @Description  获取平台级 MCP 服务下已保存的工具审批要求
+// @Tags         MCP服务
+// @Produce      json
+// @Param        id   path      string                  true  "MCP 服务 ID"
+// @Success      200  {object}  map[string]interface{}  "审批策略列表"
+// @Failure      404  {object}  errors.AppError         "MCP 服务不存在"
+// @Security     Bearer
+// @Router       /system/admin/mcp-services/{id}/tool-approvals [get]
 func (h *MCPServiceHandler) ListMCPToolApprovals(c *gin.Context) {
 	ctx := c.Request.Context()
 	serviceID := secutils.SanitizeForLog(c.Param("id"))
-	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	if tenantID == 0 {
-		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
-		return
-	}
 	if h.mcpToolApprovalService == nil {
 		c.Error(errors.NewInternalServerError("MCP tool approval is not configured"))
 		return
 	}
-	rows, err := h.mcpToolApprovalService.ListByService(ctx, tenantID, serviceID)
+	rows, err := h.mcpToolApprovalService.ListByService(ctx, serviceID)
 	if err != nil {
 		// Distinguish "service not found" from internal errors so the client
 		// gets an accurate status code instead of an opaque 404.
@@ -573,19 +513,13 @@ type setMCPToolApprovalBody struct {
 // @Failure      400        {object}  errors.AppError         "请求参数错误"
 // @Failure      404        {object}  errors.AppError         "MCP 服务或工具不存在"
 // @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /mcp-services/{id}/tool-approvals/{tool_name} [put]
+// @Router       /system/admin/mcp-services/{id}/tool-approvals/{tool_name} [put]
 func (h *MCPServiceHandler) SetMCPToolApproval(c *gin.Context) {
 	ctx := c.Request.Context()
 	serviceID := secutils.SanitizeForLog(c.Param("id"))
 	// Gin already URL-decodes path params; do not call url.PathUnescape again
 	// or names containing literal "%" become corrupted.
 	toolName := c.Param("tool_name")
-	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	if tenantID == 0 {
-		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
-		return
-	}
 	if h.mcpToolApprovalService == nil {
 		c.Error(errors.NewInternalServerError("MCP tool approval is not configured"))
 		return
@@ -595,7 +529,7 @@ func (h *MCPServiceHandler) SetMCPToolApproval(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	if err := h.mcpToolApprovalService.SetRequireApproval(ctx, tenantID, serviceID, toolName, body.RequireApproval); err != nil {
+	if err := h.mcpToolApprovalService.SetRequireApproval(ctx, serviceID, toolName, body.RequireApproval); err != nil {
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}

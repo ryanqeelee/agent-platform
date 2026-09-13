@@ -6,7 +6,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
@@ -29,21 +28,23 @@ func NewWebSearchProviderCredentialsHandler(
 	return &WebSearchProviderCredentialsHandler{repo: repo, svc: svc}
 }
 
-func (h *WebSearchProviderCredentialsHandler) tenantID(c *gin.Context) uint64 {
-	return c.GetUint64(types.TenantIDContextKey.String())
-}
-
 type webSearchCredentialsPutRequest struct {
 	APIKey *string `json:"api_key,omitempty"`
 }
 
+// Put godoc
+// @Summary      设置网络搜索 Provider 凭据
+// @Description  写入或替换平台级 Provider API Key；省略字段时返回当前配置状态
+// @Tags         网络搜索
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                  true  "Provider ID"
+// @Param        request  body      map[string]interface{}  true  "{api_key?: string}"
+// @Success      200      {object}  map[string]interface{}  "凭据状态"
+// @Security     Bearer
+// @Router       /system/admin/web-search-providers/{id}/credentials [put]
 func (h *WebSearchProviderCredentialsHandler) Put(c *gin.Context) {
 	ctx := c.Request.Context()
-	tenantID := h.tenantID(c)
-	if tenantID == 0 {
-		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
-		return
-	}
 	id := c.Param("id")
 	var req webSearchCredentialsPutRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -51,7 +52,7 @@ func (h *WebSearchProviderCredentialsHandler) Put(c *gin.Context) {
 		return
 	}
 	if req.APIKey == nil {
-		provider, err := h.repo.GetByID(ctx, tenantID, id)
+		provider, err := h.repo.GetByID(ctx, id)
 		if err != nil || provider == nil {
 			c.Error(errors.NewNotFoundError("web search provider not found"))
 			return
@@ -63,7 +64,7 @@ func (h *WebSearchProviderCredentialsHandler) Put(c *gin.Context) {
 		}})
 		return
 	}
-	updated, err := h.svc.UpdateProviderCredentials(ctx, tenantID, id, req.APIKey)
+	updated, err := h.svc.UpdateProviderCredentials(ctx, id, req.APIKey)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"provider_id": secutils.SanitizeForLog(id),
@@ -79,20 +80,25 @@ func (h *WebSearchProviderCredentialsHandler) Put(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": resp})
 }
 
+// DeleteField godoc
+// @Summary      移除网络搜索 Provider 凭据
+// @Description  删除平台级 Provider 的 API Key
+// @Tags         网络搜索
+// @Produce      json
+// @Param        id     path      string  true  "Provider ID"
+// @Param        field  path      string  true  "字段名（api_key）"
+// @Success      204
+// @Security     Bearer
+// @Router       /system/admin/web-search-providers/{id}/credentials/{field} [delete]
 func (h *WebSearchProviderCredentialsHandler) DeleteField(c *gin.Context) {
 	ctx := c.Request.Context()
-	tenantID := h.tenantID(c)
-	if tenantID == 0 {
-		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
-		return
-	}
 	id := c.Param("id")
 	field := c.Param("field")
 	if field != "api_key" {
 		c.Error(errors.NewBadRequestError("unknown credential field: " + secutils.SanitizeForLog(field)))
 		return
 	}
-	if err := h.svc.ClearProviderCredential(ctx, tenantID, id, field); err != nil {
+	if err := h.svc.ClearProviderCredential(ctx, id, field); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"provider_id": secutils.SanitizeForLog(id),
 			"field":       field,

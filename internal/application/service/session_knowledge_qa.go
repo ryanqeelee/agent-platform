@@ -118,6 +118,13 @@ func (s *sessionService) KnowledgeQA(
 		chatModelID,
 		len(searchTargets),
 	)
+	webSearchProviderID := ""
+	if req.WebSearchEnabled {
+		webSearchProviderID, err = s.resolveWebSearchProviderID(ctx, req)
+		if err != nil {
+			return fmt.Errorf("resolve web search provider: %w", err)
+		}
+	}
 
 	chatManage := &types.ChatManage{
 		PipelineRequest: types.PipelineRequest{
@@ -143,7 +150,7 @@ func (s *sessionService) KnowledgeQA(
 			RewritePromptSystem:     s.cfg.Conversation.RewritePromptSystem,
 			RewritePromptUser:       s.cfg.Conversation.RewritePromptUser,
 			WebSearchEnabled:        req.WebSearchEnabled,
-			WebSearchProviderID:     s.resolveWebSearchProviderID(ctx, req, retrievalTenantID),
+			WebSearchProviderID:     webSearchProviderID,
 			WebSearchMaxResults:     s.resolveWebSearchMaxResults(ctx, req),
 			WebFetchEnabled:         s.resolveWebFetchEnabled(req),
 			WebFetchTopN:            s.resolveWebFetchTopN(req),
@@ -1540,19 +1547,23 @@ func (s *sessionService) emitFallbackAnswer(ctx context.Context, chatManage *typ
 }
 
 // resolveWebSearchProviderID returns the web search provider ID to use for a pipeline request.
-// Priority: agent config > tenant default (is_default=true)
-func (s *sessionService) resolveWebSearchProviderID(ctx context.Context, req *types.QARequest, tenantID uint64) string {
+// Priority: agent config > explicit platform default.
+func (s *sessionService) resolveWebSearchProviderID(ctx context.Context, req *types.QARequest) (string, error) {
 	// 1. Agent-level override
 	if req.CustomAgent != nil && req.CustomAgent.Config.WebSearchProviderID != "" {
-		return req.CustomAgent.Config.WebSearchProviderID
+		return req.CustomAgent.Config.WebSearchProviderID, nil
 	}
-	// 2. Tenant default
+	// 2. Platform default
 	if s.webSearchProviderRepo != nil {
-		if defaultProvider, err := s.webSearchProviderRepo.GetDefault(ctx, tenantID); err == nil && defaultProvider != nil {
-			return defaultProvider.ID
+		defaultProvider, err := s.webSearchProviderRepo.GetDefault(ctx)
+		if err != nil {
+			return "", err
+		}
+		if defaultProvider != nil {
+			return defaultProvider.ID, nil
 		}
 	}
-	return ""
+	return "", nil
 }
 
 // resolveWebFetchEnabled returns whether auto web fetch is enabled for this request.
@@ -1572,14 +1583,10 @@ func (s *sessionService) resolveWebFetchTopN(req *types.QARequest) int {
 }
 
 // resolveWebSearchMaxResults returns the max results for web search.
-// Priority: agent config > tenant default > default (10)
-func (s *sessionService) resolveWebSearchMaxResults(ctx context.Context, req *types.QARequest) int {
+// Priority: agent config > request default (10).
+func (s *sessionService) resolveWebSearchMaxResults(_ context.Context, req *types.QARequest) int {
 	if req.CustomAgent != nil && req.CustomAgent.Config.WebSearchMaxResults > 0 {
 		return req.CustomAgent.Config.WebSearchMaxResults
-	}
-	tenantInfo, _ := types.TenantInfoFromContext(ctx)
-	if tenantInfo != nil {
-		return types.EffectiveWebSearchConfig(tenantInfo.WebSearchConfig).MaxResults
 	}
 	return types.DefaultWebSearchMaxResults
 }

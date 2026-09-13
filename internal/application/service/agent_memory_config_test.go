@@ -14,23 +14,20 @@ type agentMemoryWebSearchRepo struct{}
 func (*agentMemoryWebSearchRepo) Create(context.Context, *types.WebSearchProviderEntity) error {
 	return nil
 }
-func (*agentMemoryWebSearchRepo) GetByID(context.Context, uint64, string) (*types.WebSearchProviderEntity, error) {
+func (*agentMemoryWebSearchRepo) GetByID(context.Context, string) (*types.WebSearchProviderEntity, error) {
 	return nil, nil
 }
-func (*agentMemoryWebSearchRepo) GetDefault(context.Context, uint64) (*types.WebSearchProviderEntity, error) {
+func (*agentMemoryWebSearchRepo) GetDefault(context.Context) (*types.WebSearchProviderEntity, error) {
 	return nil, nil
 }
-func (*agentMemoryWebSearchRepo) EnsureDefault(context.Context, uint64) (*types.WebSearchProviderEntity, error) {
-	return nil, nil
-}
-func (*agentMemoryWebSearchRepo) List(context.Context, uint64) ([]*types.WebSearchProviderEntity, error) {
+func (*agentMemoryWebSearchRepo) List(context.Context) ([]*types.WebSearchProviderEntity, error) {
 	return nil, nil
 }
 func (*agentMemoryWebSearchRepo) Update(context.Context, *types.WebSearchProviderEntity) error {
 	return nil
 }
-func (*agentMemoryWebSearchRepo) Delete(context.Context, uint64, string) error       { return nil }
-func (*agentMemoryWebSearchRepo) ClearDefault(context.Context, uint64, string) error { return nil }
+func (*agentMemoryWebSearchRepo) Delete(context.Context, string) error       { return nil }
+func (*agentMemoryWebSearchRepo) SetDefault(context.Context, string) error { return nil }
 
 // buildAgentConfig copies CustomAgentConfig into the runtime AgentConfig field
 // by field, and MemoryEnabled was missing from that list. Nothing failed

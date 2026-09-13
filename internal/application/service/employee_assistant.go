@@ -7,8 +7,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// employeeAssistant resolves a platform-owned definition in the current tenant.
-// Saved presets cannot change its tool authority or bind another tenant's provider.
+// employeeAssistant resolves a platform-owned definition for the current tenant.
+// Saved presets cannot change its tool authority or select a different global provider.
 func (s *customAgentService) employeeAssistant(ctx context.Context, tenantID uint64) (*types.CustomAgent, error) {
 	agent, err := s.platformBuiltinAgent(ctx, types.BuiltinEmployeeAssistantID, tenantID)
 	if err != nil {
@@ -59,11 +59,11 @@ func (s *customAgentService) employeeAssistant(ctx context.Context, tenantID uin
 		if s.webSearchProviders == nil {
 			return nil, ErrAssistantScenarioCapabilityUnavailable
 		}
-		provider, err := s.webSearchProviders.GetDefault(ctx, tenantID)
+		provider, err := s.webSearchProviders.GetDefault(ctx)
 		if err != nil {
 			return nil, err
 		}
-		if provider != nil && provider.TenantID == tenantID && isValidProviderType(provider.Provider) &&
+		if provider != nil && isValidProviderType(provider.Provider) &&
 			validateProviderParameters(provider.Provider, provider.Parameters) == nil {
 			agent.Config.WebSearchProviderID = provider.ID
 			ready = true

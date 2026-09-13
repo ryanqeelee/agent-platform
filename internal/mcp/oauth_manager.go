@@ -160,7 +160,7 @@ func (m *OAuthManager) StartAuthorizationForService(
 	principal types.Principal,
 	serviceID, redirectURI, frontendRedirect string,
 ) (string, error) {
-	service, err := m.serviceRepo.GetByID(ctx, tenantID, serviceID)
+	service, err := m.serviceRepo.GetByID(ctx, serviceID)
 	if err != nil {
 		return "", fmt.Errorf("failed to load MCP service: %w", err)
 	}
@@ -196,7 +196,7 @@ func (m *OAuthManager) CompleteAuthorization(
 		return frontendRedirect, serviceID, fmt.Errorf("principal context is missing from OAuth state")
 	}
 
-	service, err := m.serviceRepo.GetByID(ctx, st.TenantID, st.ServiceID)
+	service, err := m.serviceRepo.GetByID(ctx, st.ServiceID)
 	if err != nil {
 		return frontendRedirect, serviceID, fmt.Errorf("failed to load MCP service: %w", err)
 	}

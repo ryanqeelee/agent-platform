@@ -152,20 +152,11 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		}, fmt.Errorf("workspace ID not found in context")
 	}
 
-	// Get tenant info from context (same approach as search.go)
-	var tenant *types.Tenant
-	if tenantValue := ctx.Value(types.TenantInfoContextKey); tenantValue != nil {
-		tenant, _ = tenantValue.(*types.Tenant)
-	}
-
 	// Resolve provider ID: tool-level (set from agent config, which already resolved default)
 	resolvedProviderID := t.providerID
 
-	// Create a copy of the effective web search config with maxResults from agent config.
+	// Create request-local search behavior with maxResults from agent config.
 	searchConfig := types.EffectiveWebSearchConfig(nil)
-	if tenant != nil {
-		searchConfig = types.EffectiveWebSearchConfig(tenant.WebSearchConfig)
-	}
 	searchConfig.MaxResults = t.maxResults
 
 	// Perform web search

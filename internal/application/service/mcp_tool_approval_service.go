@@ -21,24 +21,24 @@ func NewMCPToolApprovalService(
 	return &mcpToolApprovalService{repo: repo, mcpRepo: mcpRepo}
 }
 
-func (s *mcpToolApprovalService) ListByService(ctx context.Context, tenantID uint64, serviceID string) ([]*types.MCPToolApproval, error) {
-	svc, err := s.mcpRepo.GetByID(ctx, tenantID, serviceID)
+func (s *mcpToolApprovalService) ListByService(ctx context.Context, serviceID string) ([]*types.MCPToolApproval, error) {
+	svc, err := s.mcpRepo.GetByID(ctx, serviceID)
 	if err != nil {
 		return nil, err
 	}
 	if svc == nil {
 		return nil, fmt.Errorf("mcp service not found")
 	}
-	return s.repo.ListByService(ctx, tenantID, serviceID)
+	return s.repo.ListByService(ctx, serviceID)
 }
 
 func (s *mcpToolApprovalService) SetRequireApproval(
-	ctx context.Context, tenantID uint64, serviceID, toolName string, require bool,
+	ctx context.Context, serviceID, toolName string, require bool,
 ) error {
 	if toolName == "" {
 		return fmt.Errorf("tool_name is required")
 	}
-	svc, err := s.mcpRepo.GetByID(ctx, tenantID, serviceID)
+	svc, err := s.mcpRepo.GetByID(ctx, serviceID)
 	if err != nil {
 		return err
 	}
@@ -46,7 +46,6 @@ func (s *mcpToolApprovalService) SetRequireApproval(
 		return fmt.Errorf("mcp service not found")
 	}
 	row := &types.MCPToolApproval{
-		TenantID:        tenantID,
 		ServiceID:       serviceID,
 		ToolName:        toolName,
 		RequireApproval: require,
@@ -54,6 +53,6 @@ func (s *mcpToolApprovalService) SetRequireApproval(
 	return s.repo.Upsert(ctx, row)
 }
 
-func (s *mcpToolApprovalService) IsRequired(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error) {
-	return s.repo.IsRequired(ctx, tenantID, serviceID, toolName)
+func (s *mcpToolApprovalService) IsRequired(ctx context.Context, serviceID, toolName string) (bool, error) {
+	return s.repo.IsRequired(ctx, serviceID, toolName)
 }

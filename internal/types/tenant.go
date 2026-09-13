@@ -141,8 +141,6 @@ type Tenant struct {
 	StorageUsed int64 `yaml:"storage_used"        json:"storage_used"        gorm:"default:0"`
 	// Global Context configuration for this workspace (default for all sessions)
 	ContextConfig *ContextConfig `yaml:"context_config"      json:"context_config"      gorm:"type:jsonb"`
-	// Global WebSearch configuration for this workspace
-	WebSearchConfig *WebSearchConfig `yaml:"web_search_config"   json:"web_search_config"   gorm:"type:jsonb"`
 	// Credentials config: third-party provider credentials (e.g. WeKnoraCloud AppID/AppSecret)
 	Credentials *CredentialsConfig `yaml:"credentials" json:"credentials" gorm:"type:jsonb"`
 	// Storage engine config: parameters for Local, MinIO, COS. Used for document/file storage and docreader.

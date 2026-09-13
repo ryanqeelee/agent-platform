@@ -117,7 +117,7 @@ type workspaceWebSearchRepo struct {
 	interfaces.WebSearchProviderRepository
 }
 
-func (workspaceWebSearchRepo) List(context.Context, uint64) ([]*types.WebSearchProviderEntity, error) {
+func (workspaceWebSearchRepo) List(context.Context) ([]*types.WebSearchProviderEntity, error) {
 	return []*types.WebSearchProviderEntity{{
 		ID: "provider-secret", Name: "provider-name", IsDefault: true,
 	}}, nil

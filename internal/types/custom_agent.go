@@ -247,7 +247,7 @@ type CustomAgentConfig struct {
 	// Maximum web search results
 	WebSearchMaxResults int `yaml:"web_search_max_results" json:"web_search_max_results"`
 	// WebSearchProviderID references a specific WebSearchProviderEntity.
-	// If empty, the workspace's default provider (is_default=true) is used.
+	// If empty, the platform default provider (is_default=true) is used.
 	WebSearchProviderID string `yaml:"web_search_provider_id" json:"web_search_provider_id,omitempty"`
 	// Whether to auto-fetch full page content for reranked web search results
 	WebFetchEnabled bool `yaml:"web_fetch_enabled" json:"web_fetch_enabled"`

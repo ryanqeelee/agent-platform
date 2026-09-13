@@ -359,7 +359,7 @@
             <template #icon><t-icon name="close" /></template>
           </t-button>
         </div>
-        <McpTestResultBody :result="testResult" :service-id="props.service?.id" :tenant-id="platformTenantID" />
+        <McpTestResultBody :result="testResult" :service-id="props.service?.id" />
       </section>
     </t-form>
   </SettingDrawer>
@@ -387,7 +387,6 @@ import {
   type MCPOAuthTokenState,
 } from '@/api/mcp-service'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
-import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 import McpTestResultBody from './McpTestResultBody.vue'
 import CredentialResource, {
   type CredentialFieldDef,
@@ -410,7 +409,6 @@ interface Emits {
 }
 
 const props = defineProps<Props>()
-const platformTenantID = usePlatformTenantControlID()
 const emit = defineEmits<Emits>()
 
 const formRef = ref<FormInstanceFunctions>()
@@ -693,11 +691,11 @@ async function handleAuthorize() {
     const hasId = !!props.service?.id
     const data = buildPayload(!hasId)
     if (hasId) {
-      await updateMCPService(props.service!.id, data, platformTenantID.value)
+      await updateMCPService(props.service!.id, data)
       serviceId = props.service!.id
       emit('created', { ...(props.service as MCPService), ...data } as MCPService)
     } else {
-      const created = await createMCPService(data, platformTenantID.value)
+      const created = await createMCPService(data)
       serviceId = created.id
       emit('created', created)
     }
@@ -753,11 +751,11 @@ const credentialApi = computed<CredentialResourceApi<McpCredentialField>>(() => 
   const id = props.service?.id ?? ''
   return {
     save: async (patch) => {
-      const meta = await putMCPCredentials(id, patch, platformTenantID.value)
+      const meta = await putMCPCredentials(id, patch)
       return meta.fields
     },
     remove: async (field) => {
-      await deleteMCPCredentialField(id, field, platformTenantID.value)
+      await deleteMCPCredentialField(id, field)
     },
   }
 })
@@ -832,7 +830,7 @@ async function handleTestConnection() {
     closeBtn: false,
   })
   try {
-    const result = await testMCPService(props.service.id, platformTenantID.value)
+    const result = await testMCPService(props.service.id)
     MessagePlugin.closeAll()
     const safe: MCPTestResult = result ?? {
       success: false,
@@ -1035,7 +1033,7 @@ const handleSubmit = async () => {
   try {
     const data = buildPayload(props.mode === 'add')
     if (props.mode === 'add') {
-      const created = await createMCPService(data, platformTenantID.value)
+      const created = await createMCPService(data)
       MessagePlugin.success(t('mcpServiceDialog.toasts.created'))
       // Keep the drawer open and hand back the new service so the parent can
       // flip it into edit mode in place — OAuth authorization and "test
@@ -1043,7 +1041,7 @@ const handleSubmit = async () => {
       // the user do them immediately instead of save → reopen.
       emit('created', created)
     } else {
-      await updateMCPService(props.service!.id, data, platformTenantID.value)
+      await updateMCPService(props.service!.id, data)
       MessagePlugin.success(t('mcpServiceDialog.toasts.updated'))
       emit('success')
     }

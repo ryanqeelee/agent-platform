@@ -121,10 +121,11 @@ export interface ParserEngineInfo {
   UnavailableReason?: string
 }
 
-/** 解析引擎配置（引擎连接参数存空间；聊天附件解析策略在智能体中配置） */
+/** 平台级解析引擎连接参数与默认聊天附件策略；智能体规则可覆盖默认策略。 */
 export type MinerUParseMethod = 'auto' | 'ocr' | 'txt'
 
 export interface ParserEngineConfig {
+  chat_parser_engine_rules?: Array<{ file_types: string[]; engine: string }>
   docreader_addr?: string
   docreader_transport?: string
   mineru_endpoint?: string
@@ -166,21 +167,22 @@ export function getParserEngines(): Promise<ParserEnginesResponse> {
   return get('/api/v1/system/parser-engines')
 }
 
+/** 平台管理投影，包含共享 DocReader 连接状态；仅限 SystemAdmin。 */
+export function getAdminParserEngines(): Promise<ParserEnginesResponse> {
+  return get('/api/v1/system/admin/parser-engines')
+}
+
 /** 使用当前填写的参数检测引擎可用性（不保存），用于填写新参数后即时测试 */
 export function checkParserEngines(config: ParserEngineConfig): Promise<ParserEnginesResponse> {
-  return post('/api/v1/system/parser-engines/check', config)
+  return post('/api/v1/system/admin/parser-engines/check', config)
 }
 
-export function getParserEngineConfig(tenantId?: number): Promise<{ data: ParserEngineConfig }> {
-  return get(tenantId === undefined ? '/api/v1/tenants/kv/parser-engine-config' : platformTenantPath(tenantId, 'parser-engine-config'))
+export function getParserEngineConfig(): Promise<{ data: ParserEngineConfig }> {
+  return get('/api/v1/system/admin/parser-engine-config')
 }
 
-export function updateParserEngineConfig(config: ParserEngineConfig, tenantId?: number): Promise<{ data: ParserEngineConfig }> {
-  return put(tenantId === undefined ? '/api/v1/tenants/kv/parser-engine-config' : platformTenantPath(tenantId, 'parser-engine-config'), config)
-}
-
-export function reconnectDocReader(addr: string): Promise<ParserEnginesResponse & { msg?: string }> {
-  return post('/api/v1/system/admin/docreader/reconnect', { addr })
+export function updateParserEngineConfig(config: ParserEngineConfig): Promise<{ data: ParserEngineConfig }> {
+  return put('/api/v1/system/admin/parser-engine-config', config)
 }
 
 // ---- 存储引擎配置（空间级，供文档/图片存储与 docreader 使用） ----

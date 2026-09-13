@@ -45,6 +45,7 @@ func TestMergeParserEngineConfigForUpdate_PreservesRedactedSecrets(t *testing.T)
 		MinerUAPIKey:          "mineru-secret",
 		PaddleOCRVLCloudToken: "paddle-secret",
 		MinerUEndpoint:        "http://mineru",
+		ChatParserEngineRules: []ParserEngineRule{{FileTypes: []string{"pdf"}, Engine: "mineru"}},
 	}
 	incoming := &ParserEngineConfig{
 		MinerUAPIKey:          RedactedSecretPlaceholder,
@@ -56,21 +57,26 @@ func TestMergeParserEngineConfigForUpdate_PreservesRedactedSecrets(t *testing.T)
 	assert.Equal(t, "mineru-secret", merged.MinerUAPIKey)
 	assert.Equal(t, "paddle-secret", merged.PaddleOCRVLCloudToken)
 	assert.Equal(t, "http://mineru-new", merged.MinerUEndpoint)
+	assert.Equal(t, existing.ChatParserEngineRules, merged.ChatParserEngineRules)
 }
 
-func TestMergeParserEngineConfigForUpdate_PreservesLegacyChatParserRules(t *testing.T) {
+func TestMergeParserEngineConfigForUpdate_ExplicitlyClearsGlobalChatRules(t *testing.T) {
 	existing := &ParserEngineConfig{
-		ChatParserEngineRules: []ParserEngineRule{
-			{FileTypes: []string{"pdf"}, Engine: "mineru"},
-		},
+		ChatParserEngineRules: []ParserEngineRule{{FileTypes: []string{"pdf"}, Engine: "mineru"}},
 	}
-	incoming := &ParserEngineConfig{
-		MinerUEndpoint: "http://mineru-new",
-	}
-	merged := MergeParserEngineConfigForUpdate(incoming, existing)
+	merged := MergeParserEngineConfigForUpdate(&ParserEngineConfig{ChatParserEngineRules: []ParserEngineRule{}}, existing)
 	require.NotNil(t, merged)
-	require.Len(t, merged.ChatParserEngineRules, 1)
-	assert.Equal(t, "mineru", merged.ChatParserEngineRules[0].Engine)
+	assert.NotNil(t, merged.ChatParserEngineRules)
+	assert.Empty(t, merged.ChatParserEngineRules)
+}
+
+func TestParserEngineConfigForResponse_MasksSecrets(t *testing.T) {
+	cfg := &ParserEngineConfig{MinerUAPIKey: "mineru-secret", PaddleOCRVLCloudToken: "paddle-secret"}
+	resp := ParserEngineConfigForResponse(cfg, true)
+	require.NotNil(t, resp)
+	assert.Equal(t, RedactedSecretPlaceholder, resp.MinerUAPIKey)
+	assert.Equal(t, RedactedSecretPlaceholder, resp.PaddleOCRVLCloudToken)
+	assert.Equal(t, "mineru-secret", cfg.MinerUAPIKey)
 }
 
 func TestMergeStorageEngineConfigForUpdate_PreservesRedactedSecrets(t *testing.T) {

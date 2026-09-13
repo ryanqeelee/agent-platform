@@ -31,6 +31,38 @@ type ParserEngine struct {
 	Available   bool   `json:"available"`
 }
 
+// ParserEngineConfig is the deployment-wide parser runtime configuration.
+// Secret fields returned by the API contain "***" when configured.
+type ParserEngineConfig struct {
+	ChatParserEngineRules               []ParserEngineRule `json:"chat_parser_engine_rules,omitempty"`
+	MinerUEndpoint                      string             `json:"mineru_endpoint"`
+	MinerUAPIKey                        string             `json:"mineru_api_key"`
+	MinerUModel                         string             `json:"mineru_model,omitempty"`
+	MinerUVLMServerURL                  string             `json:"mineru_vlm_server_url,omitempty"`
+	MinerUEnableFormula                 *bool              `json:"mineru_enable_formula,omitempty"`
+	MinerUEnableTable                   *bool              `json:"mineru_enable_table,omitempty"`
+	MinerUParseMethod                   string             `json:"mineru_parse_method,omitempty"`
+	MinerUEnableOCR                     *bool              `json:"mineru_enable_ocr,omitempty"`
+	MinerULanguage                      string             `json:"mineru_language,omitempty"`
+	MinerUCloudModel                    string             `json:"mineru_cloud_model,omitempty"`
+	MinerUCloudEnableFormula            *bool              `json:"mineru_cloud_enable_formula,omitempty"`
+	MinerUCloudEnableTable              *bool              `json:"mineru_cloud_enable_table,omitempty"`
+	MinerUCloudEnableOCR                *bool              `json:"mineru_cloud_enable_ocr,omitempty"`
+	MinerUCloudLanguage                 string             `json:"mineru_cloud_language,omitempty"`
+	ODLHybrid                           string             `json:"odl_hybrid,omitempty"`
+	ODLHybridURL                        string             `json:"odl_hybrid_url,omitempty"`
+	ODLHybridMode                       string             `json:"odl_hybrid_mode,omitempty"`
+	ODLHybridFallback                   *bool              `json:"odl_hybrid_fallback,omitempty"`
+	ODLMarkdownWithHTML                 *bool              `json:"odl_markdown_with_html,omitempty"`
+	PaddleOCRVLEndpoint                 string             `json:"paddleocr_vl_endpoint,omitempty"`
+	PaddleOCRVLUseSealRecognition       *bool              `json:"paddleocr_vl_use_seal_recognition,omitempty"`
+	PaddleOCRVLUseChartRecognition      *bool              `json:"paddleocr_vl_use_chart_recognition,omitempty"`
+	PaddleOCRVLCloudToken               string             `json:"paddleocr_vl_cloud_token,omitempty"`
+	PaddleOCRVLCloudModel               string             `json:"paddleocr_vl_cloud_model,omitempty"`
+	PaddleOCRVLCloudUseSealRecognition  *bool              `json:"paddleocr_vl_cloud_use_seal_recognition,omitempty"`
+	PaddleOCRVLCloudUseChartRecognition *bool              `json:"paddleocr_vl_cloud_use_chart_recognition,omitempty"`
+}
+
 // StorageEngineStatusItem describes one storage engine's availability
 type StorageEngineStatusItem struct {
 	Name        string `json:"name"`
@@ -126,7 +158,7 @@ func (c *Client) ListParserEngines(ctx context.Context) ([]ParserEngine, error) 
 
 // CheckParserEngines checks parser engine availability with given config overrides
 func (c *Client) CheckParserEngines(ctx context.Context, config any) ([]ParserEngine, error) {
-	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/system/parser-engines/check", config, nil)
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/system/admin/parser-engines/check", config, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -140,14 +172,36 @@ func (c *Client) CheckParserEngines(ctx context.Context, config any) ([]ParserEn
 	return result.Data, nil
 }
 
-// ReconnectDocReader reconnects the document parser service to a new address
-func (c *Client) ReconnectDocReader(ctx context.Context, addr string) error {
-	req := map[string]string{"addr": addr}
-	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/system/docreader/reconnect", req, nil)
+// GetParserEngineConfig returns the deployment-wide parser configuration with secrets masked.
+func (c *Client) GetParserEngineConfig(ctx context.Context) (*ParserEngineConfig, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/system/admin/parser-engine-config", nil, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return parseResponse(resp, nil)
+	var result struct {
+		Code int                 `json:"code"`
+		Data *ParserEngineConfig `json:"data"`
+	}
+	if err := parseResponse(resp, &result); err != nil {
+		return nil, err
+	}
+	return result.Data, nil
+}
+
+// UpdateParserEngineConfig replaces the deployment-wide parser configuration and returns its masked form.
+func (c *Client) UpdateParserEngineConfig(ctx context.Context, config *ParserEngineConfig) (*ParserEngineConfig, error) {
+	resp, err := c.doRequest(ctx, http.MethodPut, "/api/v1/system/admin/parser-engine-config", config, nil)
+	if err != nil {
+		return nil, err
+	}
+	var result struct {
+		Code int                 `json:"code"`
+		Data *ParserEngineConfig `json:"data"`
+	}
+	if err := parseResponse(resp, &result); err != nil {
+		return nil, err
+	}
+	return result.Data, nil
 }
 
 // GetStorageEngineStatus gets the availability status of all storage engines

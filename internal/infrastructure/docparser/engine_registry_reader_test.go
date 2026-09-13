@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser/anydoc"
-	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
@@ -62,12 +61,10 @@ func TestNewReaderReportsDisconnectedDocReader(t *testing.T) {
 	}
 }
 
-func TestNewReaderRequiresWeKnoraCloudCredentials(t *testing.T) {
-	_, err := NewReader(context.Background(), WeKnoraCloudEngineName, "docx", false, ReaderDeps{
-		WeKnoraCloudCredentials: func(context.Context) *types.WeKnoraCloudCredentials { return nil },
-	})
+func TestNewReaderRejectsRetiredWeKnoraCloudProvider(t *testing.T) {
+	_, err := NewReader(context.Background(), WeKnoraCloudEngineName, "docx", false, ReaderDeps{Remote: &stubRemote{}})
 	if err == nil {
-		t.Fatal("NewReader succeeded without credentials, want an error")
+		t.Fatal("NewReader accepted the retired WeKnoraCloud parser provider")
 	}
 }
 

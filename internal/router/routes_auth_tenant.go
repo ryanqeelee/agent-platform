@@ -244,8 +244,8 @@ func RegisterAuthRoutes(r *gin.RouterGroup, handler *handler.AuthHandler, g *rba
 // RegisterSystemRoutes registers system information routes
 //
 // Runtime parser, storage, and sandbox details are platform infrastructure.
-// Tenant members consume their resulting business capability through the
-// assistant and knowledge APIs without receiving these implementation details.
+// Tenant members receive only the parser capability catalog needed to author
+// knowledge-base rules; configuration and connection details stay platform-only.
 func RegisterSystemRoutes(
 	r *gin.RouterGroup,
 	handler *handler.SystemHandler,
@@ -261,9 +261,7 @@ func RegisterSystemRoutes(
 		systemGroup.GET("/admin/capabilities", g.SystemAdmin(), handler.GetDeploymentCapabilities)
 		systemGroup.GET("/admin/info", g.SystemAdmin(), handler.GetSystemInfo)
 		systemRoutes.GET("/info", g.Viewer(), handler.GetSystemInfo)
-		systemRoutes.GET("/parser-engines", g.SystemAdmin(), handler.ListParserEngines)
-		systemRoutes.POST("/parser-engines/check", g.SystemAdmin(), handler.CheckParserEngines)
-		systemGroup.POST("/admin/docreader/reconnect", g.SystemAdmin(), handler.ReconnectDocReader)
+		systemRoutes.GET("/parser-engines", g.Viewer(), handler.ListParserEngineCapabilities)
 		systemRoutes.GET("/storage-engine-status", g.SystemAdmin(), handler.GetStorageEngineStatus)
 		systemRoutes.POST("/storage-engine-check", g.SystemAdmin(), handler.CheckStorageEngine)
 	}
@@ -337,6 +335,10 @@ func RegisterSystemAdminRoutes(
 		adminRoutes.GET("/api-keys", handler.ListPlatformAPIKeys)
 		adminRoutes.POST("/api-keys", handler.CreatePlatformAPIKey)
 		adminRoutes.DELETE("/api-keys/:key_id", handler.DeletePlatformAPIKey)
+		adminRoutes.GET("/parser-engines", handler.ListParserEngines)
+		adminRoutes.POST("/parser-engines/check", handler.CheckParserEngines)
+		adminRoutes.GET("/parser-engine-config", handler.GetParserEngineConfig)
+		adminRoutes.PUT("/parser-engine-config", handler.UpdateParserEngineConfig)
 
 		// P1: platform-wide system settings (DB-backed runtime tunables).
 		// Reads return raw model rows / arrays (no `gin.H{"data":...}`

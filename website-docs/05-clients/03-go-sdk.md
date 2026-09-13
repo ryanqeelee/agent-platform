@@ -307,7 +307,7 @@ kb, err := apiClient.GetKnowledgeBase(ctx, kbID)
 |---|---|
 | `GetSystemInfo` | 获取系统信息（版本等） |
 | `ListParserEngines` / `CheckParserEngines` | 文档解析引擎列表/检测 |
-| `ReconnectDocReader` | 重连 DocReader 服务 |
+| `GetParserEngineConfig` / `UpdateParserEngineConfig` | 获取/更新平台解析引擎配置 |
 | `GetStorageEngineStatus` / `CheckStorageEngine` | 存储引擎状态/检测 |
 
 ### 其他

@@ -101,6 +101,7 @@ type temporaryDocumentService struct {
 	imageResolver   *docparser.ImageResolver
 	modelService    interfaces.ModelService
 	tenantService   interfaces.TenantService
+	parserConfig    *PlatformParserConfigService
 	taskEnqueuer    interfaces.TaskEnqueuer
 }
 
@@ -113,11 +114,13 @@ func NewTemporaryDocumentService(
 	modelService interfaces.ModelService,
 	tenantService interfaces.TenantService,
 	taskEnqueuer interfaces.TaskEnqueuer,
+	parserConfig *PlatformParserConfigService,
 ) interfaces.TemporaryDocumentService {
 	return &temporaryDocumentService{
 		repo: repo, fileService: fileService, resourceCatalog: resourceCatalog,
 		documentReader: documentReader, imageResolver: imageResolver,
 		modelService: modelService, tenantService: tenantService, taskEnqueuer: taskEnqueuer,
+		parserConfig: parserConfig,
 	}
 }
 
@@ -150,11 +153,11 @@ func (s *temporaryDocumentService) Create(
 		return nil, fmt.Errorf("unsafe file name: %w", err)
 	}
 	ext := strings.ToLower(filepath.Ext(baseName))
-	resourceTenantID := options.ResourceTenantID
-	if resourceTenantID == 0 {
-		resourceTenantID = tenantID
+	supported, err := s.supportsExtension(ctx, ext)
+	if err != nil {
+		return nil, fmt.Errorf("load platform parser configuration: %w", err)
 	}
-	if !s.supportsExtension(ctx, resourceTenantID, ext) {
+	if !supported {
 		return nil, fmt.Errorf("unsupported file type: %s", ext)
 	}
 	maxSize := secutils.GetMaxFileSizeMB() * 1024 * 1024
@@ -209,24 +212,25 @@ func (s *temporaryDocumentService) Create(
 	return document, nil
 }
 
-func (s *temporaryDocumentService) supportsExtension(ctx context.Context, tenantID uint64, ext string) bool {
+func (s *temporaryDocumentService) supportsExtension(ctx context.Context, ext string) (bool, error) {
 	if _, ok := temporaryDocumentExtensions[ext]; ok {
-		return true
+		return true, nil
 	}
 	if s.documentReader == nil {
-		return false
+		return false, nil
 	}
-	var overrides map[string]string
-	if tenant, err := s.tenantService.GetTenantByID(ctx, tenantID); err == nil && tenant != nil {
-		overrides = tenant.ParserEngineConfig.ToOverridesMap()
+	config, err := s.parserConfig.GetRuntime(ctx)
+	if err != nil {
+		return false, err
 	}
+	overrides := config.ToOverridesMap()
 	engines, err := s.documentReader.ListEngines(ctx, overrides)
 	if err != nil {
-		return false
+		return false, nil
 	}
 	wanted := strings.TrimPrefix(strings.ToLower(ext), ".")
 	if wanted == "" || wanted == "url" {
-		return false
+		return false, nil
 	}
 	for _, engine := range engines {
 		if !engine.Available {
@@ -234,11 +238,11 @@ func (s *temporaryDocumentService) supportsExtension(ctx context.Context, tenant
 		}
 		for _, fileType := range engine.FileTypes {
 			if strings.TrimPrefix(strings.ToLower(strings.TrimSpace(fileType)), ".") == wanted {
-				return true
+				return true, nil
 			}
 		}
 	}
-	return false
+	return false, nil
 }
 
 func (s *temporaryDocumentService) Get(ctx context.Context, tenantID uint64, sessionID, documentID string) (*types.TemporaryDocument, error) {
@@ -361,10 +365,12 @@ func (s *temporaryDocumentService) parse(ctx context.Context, document *types.Te
 	ext := document.FileType
 	var options types.TemporaryDocumentCreateOptions
 	_ = json.Unmarshal(document.ProcessingOptions, &options)
+	platformConfig, err := s.parserConfig.GetRuntime(ctx)
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("load platform parser configuration: %w", err)
+	}
 	if options.ParserEngine == "" || options.ParserEngine == "auto" {
-		if tenant, ok := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); ok && tenant != nil {
-			options.ParserEngine = tenant.ParserEngineConfig.ResolveChatParserEngine(ext)
-		}
+		options.ParserEngine = platformConfig.ResolveChatParserEngine(ext)
 	}
 	if _, ok := temporaryTextExtensions[ext]; ok && (options.ParserEngine == "" || options.ParserEngine == "auto") {
 		return string(data), nil, map[string]string{"parser": "plain_text"}, nil
@@ -392,13 +398,8 @@ func (s *temporaryDocumentService) parse(ctx context.Context, document *types.Te
 		FileContent: data, FileName: document.FileName, FileType: strings.TrimPrefix(ext, "."),
 		ParserEngine: parserEngine,
 	}
-	if tenant, ok := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); ok && tenant != nil && tenant.ParserEngineConfig != nil {
-		request.ParserEngineOverrides = tenant.ParserEngineConfig.ToOverridesMap()
-	}
+	request.ParserEngineOverrides = platformConfig.ToOverridesMap()
 	deps := docparser.ReaderDeps{Overrides: request.ParserEngineOverrides, Remote: s.documentReader}
-	if s.tenantService != nil {
-		deps.WeKnoraCloudCredentials = s.tenantService.GetWeKnoraCloudCredentials
-	}
 	reader, err := docparser.NewReader(ctx, parserEngine, strings.TrimPrefix(ext, "."), false, deps)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("parse document: %w", err)

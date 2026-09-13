@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -1282,7 +1281,7 @@ func (h *TenantHandler) SearchTenants(c *gin.Context) {
 
 // GetTenantKV godoc
 // @Summary      获取空间KV配置
-// @Description  获取空间级别的KV配置（支持web-search-config、prompt-templates、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）
+// @Description  获取空间级别的KV配置（支持web-search-config、prompt-templates、storage-engine-config、chat-history-config、retrieval-config）
 // @Tags         空间管理
 // @Accept       json
 // @Produce      json
@@ -1297,7 +1296,7 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 	key := secutils.SanitizeForLog(c.Param("key"))
 
 	switch key {
-	case "web-search-config", "parser-engine-config", "storage-engine-config", "chat-history-config", "retrieval-config":
+	case "web-search-config", "storage-engine-config", "chat-history-config", "retrieval-config":
 		if !types.IsSystemAdminFromContext(ctx) {
 			c.Error(errors.NewForbiddenError("platform configuration requires system administrator access"))
 			return
@@ -1310,9 +1309,6 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 		return
 	case "prompt-templates":
 		h.GetPromptTemplates(c)
-		return
-	case "parser-engine-config":
-		h.GetTenantParserEngineConfig(c)
 		return
 	case "storage-engine-config":
 		h.GetTenantStorageEngineConfig(c)
@@ -1332,7 +1328,7 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 
 // UpdateTenantKV godoc
 // @Summary      更新空间KV配置
-// @Description  更新空间级别的KV配置（支持web-search-config、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）
+// @Description  更新空间级别的KV配置（支持web-search-config、storage-engine-config、chat-history-config、retrieval-config）
 // @Tags         空间管理
 // @Accept       json
 // @Produce      json
@@ -1348,7 +1344,7 @@ func (h *TenantHandler) UpdateTenantKV(c *gin.Context) {
 	key := secutils.SanitizeForLog(c.Param("key"))
 
 	switch key {
-	case "web-search-config", "parser-engine-config", "storage-engine-config", "chat-history-config", "retrieval-config":
+	case "web-search-config", "storage-engine-config", "chat-history-config", "retrieval-config":
 		if !types.IsSystemAdminFromContext(ctx) {
 			c.Error(errors.NewForbiddenError("platform configuration requires system administrator access"))
 			return
@@ -1358,9 +1354,6 @@ func (h *TenantHandler) UpdateTenantKV(c *gin.Context) {
 	switch key {
 	case "web-search-config":
 		h.updateTenantWebSearchConfigInternal(c)
-		return
-	case "parser-engine-config":
-		h.updateTenantParserEngineConfigInternal(c)
 		return
 	case "storage-engine-config":
 		h.updateTenantStorageEngineConfigInternal(c)
@@ -1450,66 +1443,6 @@ func (h *TenantHandler) GetTenantWebSearchConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    types.WebSearchConfigForResponse(tenant.WebSearchConfig, true),
-	})
-}
-
-// GetTenantParserEngineConfig returns the tenant's parser engine config (MinerU endpoint, API key, etc.).
-func (h *TenantHandler) GetTenantParserEngineConfig(c *gin.Context) {
-	ctx := c.Request.Context()
-	tenant, _ := types.TenantInfoFromContext(ctx)
-	if tenant == nil {
-		logger.Error(ctx, "Workspace is empty")
-		c.Error(errors.NewBadRequestError("Workspace is empty"))
-		return
-	}
-	data := types.ParserEngineConfigForResponse(tenant.ParserEngineConfig, true)
-	if data == nil {
-		data = &types.ParserEngineConfig{}
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    data,
-	})
-}
-
-// updateTenantParserEngineConfigInternal updates the tenant's parser engine config.
-func (h *TenantHandler) updateTenantParserEngineConfigInternal(c *gin.Context) {
-	ctx := c.Request.Context()
-	var cfg types.ParserEngineConfig
-	if err := c.ShouldBindJSON(&cfg); err != nil {
-		logger.Error(ctx, "Failed to parse request parameters", err)
-		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
-		return
-	}
-	tenant, _ := types.TenantInfoFromContext(ctx)
-	if tenant == nil {
-		logger.Error(ctx, "Workspace is empty")
-		c.Error(errors.NewBadRequestError("Workspace is empty"))
-		return
-	}
-	merged := types.MergeParserEngineConfigForUpdate(&cfg, tenant.ParserEngineConfig)
-	if err := validateParserEngineOutboundURLs(merged); err != nil {
-		c.Error(errors.NewValidationError(err.Error()))
-		return
-	}
-	tenant.ParserEngineConfig = merged
-	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
-	if err != nil {
-		if appErr, ok := errors.IsAppError(err); ok {
-			c.Error(appErr)
-		} else {
-			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to update workspace parser engine config").WithDetails(err.Error()))
-		}
-		return
-	}
-	emitPlatformConfigAudit(ctx, h.audit, types.AuditActionSystemRetrievalProcessingChanged,
-		"update", "parser_config", strconv.FormatUint(updatedTenant.ID, 10), "enterprise_assigned",
-		platformConfigRevision(updatedTenant.CreatedAt, updatedTenant.UpdatedAt), []string{"parser_engine_config"})
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    types.ParserEngineConfigForResponse(updatedTenant.ParserEngineConfig, true),
-		"message": "解析引擎配置已更新",
 	})
 }
 
@@ -1797,31 +1730,4 @@ func (h *TenantHandler) updateTenantRetrievalConfigInternal(c *gin.Context) {
 		"data":    updatedTenant.RetrievalConfig,
 		"message": "Retrieval configuration updated successfully",
 	})
-}
-
-func validateParserEngineOutboundURLs(cfg *types.ParserEngineConfig) error {
-	if cfg == nil {
-		return nil
-	}
-	if endpoint := strings.TrimSpace(cfg.MinerUEndpoint); endpoint != "" {
-		if err := secutils.ValidateURLForSSRF(endpoint); err != nil {
-			return fmt.Errorf("mineru_endpoint failed SSRF validation: %v", err)
-		}
-	}
-	if vlmURL := strings.TrimSpace(cfg.MinerUVLMServerURL); vlmURL != "" {
-		if err := secutils.ValidateURLForSSRF(vlmURL); err != nil {
-			return fmt.Errorf("mineru_vlm_server_url failed SSRF validation: %v", err)
-		}
-	}
-	if odlURL := strings.TrimSpace(cfg.ODLHybridURL); odlURL != "" {
-		if err := secutils.ValidateURLForSSRF(odlURL); err != nil {
-			return fmt.Errorf("odl_hybrid_url failed SSRF validation: %v", err)
-		}
-	}
-	if endpoint := strings.TrimSpace(cfg.PaddleOCRVLEndpoint); endpoint != "" {
-		if err := secutils.ValidateURLForSSRF(endpoint); err != nil {
-			return fmt.Errorf("paddleocr_vl_endpoint failed SSRF validation: %v", err)
-		}
-	}
-	return nil
 }

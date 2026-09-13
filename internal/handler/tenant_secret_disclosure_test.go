@@ -2,10 +2,8 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/middleware"
@@ -135,22 +133,14 @@ func TestGetTenantKVViewerForbiddenForSecretKeys(t *testing.T) {
 	}
 }
 
-func TestGetTenantKVSystemAdminReturnsRedactedSecrets(t *testing.T) {
+func TestGetTenantKVSystemAdminCannotReadRetiredParserConfig(t *testing.T) {
 	tenant := secretTenantFixture()
 	engine := newTenantHandlerTestEngine(t, types.TenantRoleAdmin, true, tenant)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/tenants/kv/parser-engine-config", nil)
 	engine.ServeHTTP(rec, req)
-	require.Equal(t, http.StatusOK, rec.Code)
-
-	var payload struct {
-		Success bool                     `json:"success"`
-		Data    types.ParserEngineConfig `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
-	assert.Equal(t, types.RedactedSecretPlaceholder, payload.Data.MinerUAPIKey)
-	assert.NotContains(t, rec.Body.String(), "parser-secret-123")
+	require.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func secretTenantFixture() *types.Tenant {
@@ -159,9 +149,6 @@ func secretTenantFixture() *types.Tenant {
 		Name: "tenant",
 		WebSearchConfig: &types.WebSearchConfig{
 			APIKey: "legacy-search-secret-999",
-		},
-		ParserEngineConfig: &types.ParserEngineConfig{
-			MinerUAPIKey: "parser-secret-123",
 		},
 		StorageEngineConfig: &types.StorageEngineConfig{
 			MinIO: &types.MinIOEngineConfig{
@@ -182,16 +169,13 @@ func TestGetTenantKVRetrievalConfigRequiresSystemAdmin(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, rec.Code)
 }
 
-func TestPutTenantParserConfigSystemAdminPreservesRedactedSecrets(t *testing.T) {
+func TestPutTenantParserConfigSystemAdminCannotWriteRetiredParserConfig(t *testing.T) {
 	tenant := secretTenantFixture()
 	engine := newTenantHandlerTestEngine(t, types.TenantRoleAdmin, true, tenant)
 
-	body := `{"mineru_api_key":"***"}`
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/tenants/kv/parser-engine-config", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, "/tenants/kv/parser-engine-config", nil)
 	req.Header.Set("Content-Type", "application/json")
 	engine.ServeHTTP(rec, req)
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.NotNil(t, tenant.ParserEngineConfig)
-	assert.Equal(t, "parser-secret-123", tenant.ParserEngineConfig.MinerUAPIKey)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
 }

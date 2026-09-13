@@ -26,19 +26,14 @@ type EngineRegistration interface {
 }
 
 // ReaderDeps carries everything an engine may need to build its reader but
-// cannot construct itself: tenant configuration, tenant credentials, and the
-// shared docreader connection.
+// cannot construct itself: deployment configuration and the shared docreader
+// connection.
 type ReaderDeps struct {
-	// Overrides holds tenant-level engine configuration (service endpoints,
+	// Overrides holds platform engine configuration (service endpoints,
 	// API keys), as produced by ParserEngineConfig.ToOverridesMap.
 	Overrides map[string]string
 	// Remote is the docreader client. Nil when the service is not connected.
 	Remote interfaces.DocReader
-	// WeKnoraCloudCredentials resolves the tenant's WeKnora Cloud
-	// credentials. It is a function rather than a value because resolving
-	// them can hit the database, which most engines never need. Nil, or a
-	// nil return, means the tenant has not configured them.
-	WeKnoraCloudCredentials func(ctx context.Context) *types.WeKnoraCloudCredentials
 }
 
 // localEngines holds all locally registered parser engines, in registration
@@ -69,6 +64,9 @@ func lookupEngine(name string) (EngineRegistration, bool) {
 func NewReader(
 	ctx context.Context, engine, fileType string, isURL bool, deps ReaderDeps,
 ) (interfaces.DocReader, error) {
+	if engine == WeKnoraCloudEngineName {
+		return nil, errEngineUnavailable(engine, "provider is not supported by platform parser configuration")
+	}
 	if registration, ok := lookupEngine(engine); ok {
 		return registration.NewReader(ctx, deps)
 	}
@@ -102,6 +100,9 @@ func ListAllEngines(
 ) []types.ParserEngineInfo {
 	remoteMap := make(map[string]types.ParserEngineInfo, len(remoteEngines))
 	for _, re := range remoteEngines {
+		if re.Name == WeKnoraCloudEngineName {
+			continue
+		}
 		remoteMap[re.Name] = re
 	}
 
@@ -135,6 +136,9 @@ func ListAllEngines(
 	}
 
 	for _, re := range remoteEngines {
+		if re.Name == WeKnoraCloudEngineName {
+			continue
+		}
 		if seen[re.Name] {
 			continue
 		}

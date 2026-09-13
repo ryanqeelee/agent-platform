@@ -64,6 +64,7 @@ type SystemHandler struct {
 	// unit tests, in which case only the legacy config is consulted.
 	storageBackendRepo interfaces.StorageBackendRepository
 	sandboxConfigSvc   sandboxConfigService
+	parserConfigSvc    *service.PlatformParserConfigService
 	// startup snapshot for GET /system/capabilities; bound in router.NewRouter.
 	deploymentCapabilities DeploymentCapabilitiesData
 }
@@ -81,6 +82,7 @@ func NewSystemHandler(cfg *config.Config,
 	knowledgeSvc interfaces.KnowledgeService,
 	storageBackendRepo interfaces.StorageBackendRepository,
 	sandboxConfigSvc *service.TenantSandboxConfigService,
+	parserConfigSvc *service.PlatformParserConfigService,
 ) *SystemHandler {
 	return &SystemHandler{
 		cfg:                cfg,
@@ -95,6 +97,7 @@ func NewSystemHandler(cfg *config.Config,
 		knowledgeSvc:       knowledgeSvc,
 		storageBackendRepo: storageBackendRepo,
 		sandboxConfigSvc:   sandboxConfigSvc,
+		parserConfigSvc:    parserConfigSvc,
 	}
 }
 
@@ -425,132 +428,169 @@ func (h *SystemHandler) getDocReaderConnInfo() (addr, transport string) {
 	return addr, transport
 }
 
-// ListParserEngines returns available document parser engines.
-// Merges Go-native static engines with engines discovered from the remote
-// docreader service, so newly added Python engines are auto-discovered.
-// @Summary      列出可用的文档解析引擎
-// @Tags         系统
+// GetParserEngineConfig returns the deployment-wide parser configuration with
+// credentials masked. The route is SystemAdmin-only and requires no workspace.
+// @Summary      获取平台解析引擎配置
+// @Tags         System Admin
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "解析引擎列表"
-// @Router       /system/parser-engines [get]
-func (h *SystemHandler) ListParserEngines(c *gin.Context) {
-	var overrides map[string]string
-	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
-		if tenant, ok := v.(*types.Tenant); ok && tenant != nil {
-			if tenant.ParserEngineConfig != nil {
-				overrides = tenant.ParserEngineConfig.ToOverridesMap()
-			}
-			if creds := tenant.Credentials.GetWeKnoraCloud(); creds != nil {
-				if overrides == nil {
-					overrides = make(map[string]string)
-				}
-				overrides["weknoracloud_app_id"] = creds.AppID
+// @Success      200 {object} map[string]interface{}
+// @Security     Bearer
+// @Router       /system/admin/parser-engine-config [get]
+func (h *SystemHandler) GetParserEngineConfig(c *gin.Context) {
+	config, err := h.parserConfigSvc.GetRedacted(c.Request.Context())
+	if err != nil {
+		c.Error(apperrors.NewInternalServerError("Failed to load platform parser configuration").WithDetails(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": config})
+}
+
+// UpdateParserEngineConfig replaces the deployment-wide parser configuration.
+// @Summary      更新平台解析引擎配置
+// @Tags         System Admin
+// @Accept       json
+// @Produce      json
+// @Param        body body types.ParserEngineConfig true "解析引擎配置"
+// @Success      200 {object} map[string]interface{}
+// @Security     Bearer
+// @Router       /system/admin/parser-engine-config [put]
+func (h *SystemHandler) UpdateParserEngineConfig(c *gin.Context) {
+	var incoming types.ParserEngineConfig
+	if err := c.ShouldBindJSON(&incoming); err != nil {
+		c.Error(apperrors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		return
+	}
+	config, err := h.parserConfigSvc.Update(c.Request.Context(), &incoming)
+	if err != nil {
+		if appErr, ok := apperrors.IsAppError(err); ok {
+			c.Error(appErr)
+		} else {
+			c.Error(apperrors.NewInternalServerError("Failed to update platform parser configuration").WithDetails(err.Error()))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": config, "message": "解析引擎配置已更新"})
+}
+
+func validateParserEngineOutboundURLs(cfg *types.ParserEngineConfig) error {
+	if cfg == nil {
+		return nil
+	}
+	checks := []struct {
+		name  string
+		value string
+	}{
+		{"mineru_endpoint", cfg.MinerUEndpoint},
+		{"mineru_vlm_server_url", cfg.MinerUVLMServerURL},
+		{"odl_hybrid_url", cfg.ODLHybridURL},
+		{"paddleocr_vl_endpoint", cfg.PaddleOCRVLEndpoint},
+	}
+	for _, check := range checks {
+		if value := strings.TrimSpace(check.value); value != "" {
+			if err := secutils.ValidateURLForSSRF(value); err != nil {
+				return fmt.Errorf("%s failed SSRF validation: %v", check.name, err)
 			}
 		}
 	}
+	return nil
+}
 
-	reader, docreaderAddr, docreaderTransport := h.resolveDocReader(c.Request.Context(), overrides)
-	connected := reader != nil && reader.IsConnected()
-	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), reader, overrides)
-	engines := docparser.ListAllEngines(connected, overrides, remoteEngines)
+// ListParserEngineCapabilities returns the safe parser catalog needed by
+// tenant knowledge-base rule editors. It intentionally omits connection state,
+// endpoints, transport, and every credential/configuration field.
+// @Summary      列出租户可用的文档解析能力
+// @Tags         系统
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "解析引擎能力列表"
+// @Security     Bearer
+// @Router       /system/parser-engines [get]
+func (h *SystemHandler) ListParserEngineCapabilities(c *gin.Context) {
+	engines, _, _, _, err := h.parserEngineCapabilities(c.Request.Context())
+	if err != nil {
+		c.Error(apperrors.NewInternalServerError("Failed to load parser engine capabilities").WithDetails(err.Error()))
+		return
+	}
+	capabilities := make([]parserEngineCapability, 0, len(engines))
+	for _, engine := range engines {
+		capabilities = append(capabilities, parserEngineCapability{
+			Name: engine.Name, Description: engine.Description,
+			FileTypes: engine.FileTypes, Available: engine.Available,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": capabilities})
+}
+
+type parserEngineCapability struct {
+	Name        string
+	Description string
+	FileTypes   []string
+	Available   bool
+}
+
+// ListParserEngines returns the platform management projection, including the
+// shared DocReader connection state but never parser credentials.
+// @Summary      列出可用的文档解析引擎
+// @Tags         System Admin
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "解析引擎列表"
+// @Security     Bearer
+// @Router       /system/admin/parser-engines [get]
+func (h *SystemHandler) ListParserEngines(c *gin.Context) {
+	engines, docreaderAddr, docreaderTransport, connected, err := h.parserEngineCapabilities(c.Request.Context())
+	if err != nil {
+		c.Error(apperrors.NewInternalServerError("Failed to load platform parser configuration").WithDetails(err.Error()))
+		return
+	}
 	c.JSON(200, gin.H{"code": 0, "msg": "success", "data": engines, "docreader_addr": docreaderAddr, "docreader_transport": docreaderTransport, "connected": connected})
 }
 
-// ReconnectDocReader reconnects the document converter to a new (or same) DocReader address.
-// @Summary      重连文档解析服务
-// @Tags         系统
-// @Accept       json
-// @Produce      json
-// @Param        request  body  object{addr string} true "DocReader 地址"
-// @Success      200
-// @Router       /system/docreader/reconnect [post]
-func (h *SystemHandler) ReconnectDocReader(c *gin.Context) {
-	var req struct {
-		Addr string `json:"addr" binding:"required"`
+func (h *SystemHandler) parserEngineCapabilities(ctx context.Context) (
+	[]types.ParserEngineInfo,
+	string,
+	string,
+	bool,
+	error,
+) {
+	cfg, err := h.parserConfigSvc.GetRuntime(ctx)
+	if err != nil {
+		return nil, "", "", false, err
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"code": 1, "msg": "请提供 addr 参数"})
-		return
-	}
-	addr := strings.TrimSpace(req.Addr)
-	if addr == "" {
-		c.JSON(400, gin.H{"code": 1, "msg": "addr 不能为空"})
-		return
-	}
+	overrides := cfg.ToOverridesMap()
 
-	// SSRF validation for docreader address
-	if err := secutils.ValidateURLForSSRF(addr); err != nil {
-		logger.Warnf(c.Request.Context(), "SSRF validation failed for docreader addr: %v", err)
-		c.JSON(400, gin.H{"code": 1, "msg": secutils.FormatSSRFError("DocReader 地址", addr, err)})
-		return
-	}
-
-	if h.documentReader == nil {
-		c.JSON(500, gin.H{"code": 1, "msg": "document converter not initialized"})
-		return
-	}
-
-	if err := h.documentReader.Reconnect(addr); err != nil {
-		safeError := sanitizeStorageCheckError(err)
-		logger.Errorf(c.Request.Context(), "Failed to reconnect docreader: %s", safeError)
-		c.JSON(200, gin.H{"code": 1, "msg": "连接失败: " + safeError})
-		return
-	}
-
-	var overrides map[string]string
-	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
-		if tenant, ok := v.(*types.Tenant); ok && tenant != nil {
-			if tenant.ParserEngineConfig != nil {
-				overrides = tenant.ParserEngineConfig.ToOverridesMap()
-			}
-			if creds := tenant.Credentials.GetWeKnoraCloud(); creds != nil {
-				if overrides == nil {
-					overrides = make(map[string]string)
-				}
-				overrides["weknoracloud_app_id"] = creds.AppID
-			}
-		}
-	}
-	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), h.documentReader, overrides)
-	engines := docparser.ListAllEngines(true, overrides, remoteEngines)
-
-	_, docreaderTransport := h.getDocReaderConnInfo()
-	c.JSON(200, gin.H{"code": 0, "msg": "连接成功", "data": engines, "docreader_addr": addr, "docreader_transport": docreaderTransport, "connected": true})
+	reader, docreaderAddr, docreaderTransport := h.resolveDocReader(ctx, overrides)
+	connected := reader != nil && reader.IsConnected()
+	remoteEngines := h.fetchRemoteEngines(ctx, reader, overrides)
+	engines := docparser.ListAllEngines(connected, overrides, remoteEngines)
+	return engines, docreaderAddr, docreaderTransport, connected, nil
 }
 
 // CheckParserEngines runs availability check with the given config overrides (e.g. current form values).
 // Used to test engine availability without saving; body shape matches ParserEngineConfig.
 // @Summary      使用当前参数检测解析引擎可用性
-// @Tags         系统
+// @Tags         System Admin
 // @Accept       json
 // @Produce      json
 // @Param        body  body  object  true  "解析引擎配置（与保存接口同结构）"
 // @Success      200
-// @Router       /system/parser-engines/check [post]
+// @Security     Bearer
+// @Router       /system/admin/parser-engines/check [post]
 func (h *SystemHandler) CheckParserEngines(c *gin.Context) {
 	var body types.ParserEngineConfig
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(400, gin.H{"code": 1, "msg": "请求体格式错误"})
 		return
 	}
-	var existing *types.ParserEngineConfig
-	var tenant *types.Tenant
-	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
-		if t, ok := v.(*types.Tenant); ok && t != nil {
-			tenant = t
-			existing = t.ParserEngineConfig
-		}
+	existing, err := h.parserConfigSvc.GetRuntime(c.Request.Context())
+	if err != nil {
+		c.Error(apperrors.NewInternalServerError("Failed to load platform parser configuration").WithDetails(err.Error()))
+		return
 	}
 	merged := types.MergeParserEngineConfigForUpdate(&body, existing)
-	overrides := merged.ToOverridesMap()
-	if tenant != nil {
-		if creds := tenant.Credentials.GetWeKnoraCloud(); creds != nil {
-			if overrides == nil {
-				overrides = make(map[string]string)
-			}
-			overrides["weknoracloud_app_id"] = creds.AppID
-		}
+	if err := validateParserEngineOutboundURLs(merged); err != nil {
+		c.Error(apperrors.NewValidationError(err.Error()))
+		return
 	}
+	overrides := merged.ToOverridesMap()
 	reader, docreaderAddr, docreaderTransport := h.resolveDocReader(c.Request.Context(), overrides)
 	connected := reader != nil && reader.IsConnected()
 	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), reader, overrides)
@@ -559,22 +599,8 @@ func (h *SystemHandler) CheckParserEngines(c *gin.Context) {
 }
 
 func (h *SystemHandler) resolveDocReader(ctx context.Context, overrides map[string]string) (interfaces.DocumentReader, string, string) {
-	if len(overrides) > 0 {
-		if addr := strings.TrimSpace(overrides["docreader_addr"]); addr != "" && service.IsWeKnoraCloudDocReaderAddr(addr) {
-			reader := h.ResolveDocumentReader(ctx, addr)
-			return reader, addr, transportFromDocReaderAddr(addr)
-		}
-	}
-
 	addr, transport := h.getDocReaderConnInfo()
 	return h.documentReader, addr, transport
-}
-
-func transportFromDocReaderAddr(addr string) string {
-	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(addr)), "https://") {
-		return "https"
-	}
-	return "http"
 }
 
 // fetchRemoteEngines queries the remote docreader for its engine list.
@@ -1292,18 +1318,6 @@ func (h *SystemHandler) checkOBS(c *gin.Context, ctx context.Context, cfg *types
 func (h *SystemHandler) ResolveDocumentReader(ctx context.Context, addr string) interfaces.DocumentReader {
 	if addr == "" {
 		return h.documentReader
-	}
-
-	if service.IsWeKnoraCloudDocReaderAddr(addr) {
-		creds := h.tenantSvc.GetWeKnoraCloudCredentials(ctx)
-		if creds == nil {
-			return nil
-		}
-		reader, err := docparser.NewWeKnoraCloudSignedDocumentReader(creds.AppID, creds.AppSecret)
-		if err != nil {
-			return nil
-		}
-		return reader
 	}
 
 	reader, err := docparser.NewHTTPDocumentReader(addr)

@@ -32,6 +32,7 @@ func TestPlatformInfrastructureRoutesRequireSystemAdmin(t *testing.T) {
 	RegisterStorageBackendRoutes(v1, &handler.StorageBackendHandler{}, g)
 	RegisterWeKnoraCloudRoutes(v1, &handler.WeKnoraCloudHandler{}, g)
 	RegisterSystemRoutes(v1, &handler.SystemHandler{}, g)
+	RegisterSystemAdminRoutes(v1, &handler.SystemHandler{}, nil, nil, g)
 	RegisterWebSearchRoutes(v1, &handler.WebSearchHandler{}, g)
 	RegisterSkillRoutes(v1, &handler.SkillHandler{}, g)
 
@@ -49,7 +50,7 @@ func TestPlatformInfrastructureRoutesRequireSystemAdmin(t *testing.T) {
 		{http.MethodGet, "/api/v1/vector-stores/types"},
 		{http.MethodGet, "/api/v1/storage-backends/types"},
 		{http.MethodGet, "/api/v1/models/weknoracloud/status"},
-		{http.MethodGet, "/api/v1/system/parser-engines"},
+		{http.MethodGet, "/api/v1/system/admin/parser-engine-config"},
 		{http.MethodGet, "/api/v1/system/storage-engine-status"},
 		{http.MethodGet, "/api/v1/system/admin/capabilities"},
 		{http.MethodGet, "/api/v1/web-search/providers"},

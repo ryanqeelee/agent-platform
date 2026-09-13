@@ -29,8 +29,8 @@ test('employee viewers cannot deep-link into management surfaces', () => {
 })
 
 test('the skill catalog and sandbox require platform administration', () => {
-  assert.equal(SETTINGS_SECTION_MIN_ROLE.skills, 'admin')
-  assert.equal(SETTINGS_SECTION_MIN_ROLE.skills, SETTINGS_SECTION_MIN_ROLE.sandbox)
+  assert.equal(SETTINGS_SECTION_MIN_ROLE.skills, undefined)
+  assert.equal(SETTINGS_SECTION_MIN_ROLE.sandbox, undefined)
   assert.equal(SYSTEM_ADMIN_SETTINGS_SECTIONS.has('skills'), true)
   assert.equal(SYSTEM_ADMIN_SETTINGS_SECTIONS.has('sandbox'), true)
 })

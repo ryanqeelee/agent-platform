@@ -76,10 +76,6 @@ func sampleSecretTenant() *types.Tenant {
 				AppSecret: "wk-app-secret-def",
 			},
 		},
-		ParserEngineConfig: &types.ParserEngineConfig{
-			MinerUAPIKey:          "parser-secret-123",
-			PaddleOCRVLCloudToken: "paddle-secret-456",
-		},
 		StorageEngineConfig: &types.StorageEngineConfig{
 			DefaultProvider: "minio",
 			MinIO: &types.MinIOEngineConfig{

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -32,6 +33,7 @@ type AttachmentProcessor struct {
 	documentReader interfaces.DocumentReader
 	imageResolver  *docparser.ImageResolver
 	modelService   interfaces.ModelService // used to obtain the ASR model
+	parserConfig   *service.PlatformParserConfigService
 }
 
 // NewAttachmentProcessor creates an AttachmentProcessor with the given dependencies.
@@ -40,12 +42,14 @@ func NewAttachmentProcessor(
 	documentReader interfaces.DocumentReader,
 	imageResolver *docparser.ImageResolver,
 	modelService interfaces.ModelService,
+	parserConfig *service.PlatformParserConfigService,
 ) *AttachmentProcessor {
 	return &AttachmentProcessor{
 		fileService:    fileService,
 		documentReader: documentReader,
 		imageResolver:  imageResolver,
 		modelService:   modelService,
+		parserConfig:   parserConfig,
 	}
 }
 
@@ -244,19 +248,28 @@ func (p *AttachmentProcessor) processWithDocumentReader(
 			parserEngine = s
 		}
 	}
-	overrides := getParserEngineOverridesFromContext(ctx)
+	platformConfig, err := p.parserConfig.GetRuntime(ctx)
+	if err != nil {
+		return fmt.Errorf("load platform parser configuration: %w", err)
+	}
+	if parserEngine == "" || parserEngine == "auto" {
+		parserEngine = platformConfig.ResolveChatParserEngine(normalizedType)
+	}
+	overrides := platformConfig.ToOverridesMap()
 
 	// Engines that parse in this process (anydoc, MinerU, ...) are resolved
 	// through the registry so a chat attachment honours the same engine rules
-	// as an ingested document. Anything the registry cannot build here — a
-	// cloud engine whose credentials this path cannot resolve — falls back to
-	// the docreader, which is where every engine name went before.
+	// as an ingested document. A selected engine must either construct or fail
+	// explicitly; only automatic routing may continue through the DocReader.
 	reader, err := docparser.NewReader(ctx, parserEngine, normalizedType, false, docparser.ReaderDeps{
 		Overrides: overrides,
 		Remote:    p.documentReader,
 	})
 	if err != nil {
-		logger.Warnf(ctx, "parser engine %q unusable for this attachment, using docreader: %v", parserEngine, err)
+		if parserEngine != "" && parserEngine != "auto" {
+			return fmt.Errorf("construct selected parser engine %q: %w", parserEngine, err)
+		}
+		logger.Warnf(ctx, "automatic parser routing unavailable for this attachment, using docreader: %v", err)
 		reader = p.documentReader
 	}
 
@@ -328,16 +341,6 @@ func isValidFileType(fileName string) bool {
 		}
 	}
 	return false
-}
-
-// getParserEngineOverridesFromContext returns parser engine overrides from tenant in context.
-func getParserEngineOverridesFromContext(ctx context.Context) map[string]string {
-	if v := ctx.Value(types.TenantInfoContextKey); v != nil {
-		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.ParserEngineConfig != nil {
-			return tenant.ParserEngineConfig.ToOverridesMap()
-		}
-	}
-	return nil
 }
 
 // DecodeBase64Attachment decodes a base64 attachment payload, stripping any data URI prefix.

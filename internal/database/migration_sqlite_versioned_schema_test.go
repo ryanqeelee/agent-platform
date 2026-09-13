@@ -27,6 +27,7 @@ var versionedSQLiteTables = []string{
 	"operating_brief_refreshes",
 	"operating_brief_snapshots",
 	"operating_brief_scope_refs",
+	"platform_parser_config",
 }
 
 // versionedSQLiteColumns maps each existing table to the columns that the
@@ -43,7 +44,7 @@ var versionedSQLiteColumns = map[string][]string{
 	"memory_items":       {"scope"},                          // 000101
 }
 
-const expectedSQLiteMigrationVersion = 27
+const expectedSQLiteMigrationVersion = 28
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
@@ -76,6 +77,8 @@ func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	assertSQLiteMCPOAuthPrincipalUpsertWorks(t, db)
 	require.False(t, sqliteColumnExists(t, db, "knowledges", "tag_id"),
 		"SQLite migrations must drop legacy knowledges.tag_id after multi-tag migration")
+	require.False(t, sqliteColumnExists(t, db, "tenants", "parser_engine_config"),
+		"SQLite migrations must move parser configuration out of tenants")
 }
 
 func TestSQLiteMigrationsUpgradeV4PreservesData(t *testing.T) {

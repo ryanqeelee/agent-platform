@@ -54,8 +54,6 @@ func TestSystemAdminTenantRuntimeRouteSurfaceAndAPIKeyDefaultDeny(t *testing.T) 
 		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/chat-history-stats"},
 		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/memory-config"},
 		{http.MethodPut, "/api/v1/system/admin/tenants/:tenant_id/memory-config"},
-		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/parser-engine-config"},
-		{http.MethodPut, "/api/v1/system/admin/tenants/:tenant_id/parser-engine-config"},
 		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/retrieval-processing-settings"},
 		{http.MethodGet, "/api/v1/system/admin/tenants/:tenant_id/web-search-providers"},
 		{http.MethodPost, "/api/v1/system/admin/tenants/:tenant_id/web-search-providers"},
@@ -111,6 +109,8 @@ func TestSystemAdminTenantRuntimeRouteSurfaceAndAPIKeyDefaultDeny(t *testing.T) 
 		http.MethodGet + " /api/v1/skills/catalog",
 		http.MethodPost + " /api/v1/skills/catalog",
 		http.MethodPost + " /api/v1/system/sandbox-check",
+		http.MethodGet + " /api/v1/system/admin/tenants/:tenant_id/parser-engine-config",
+		http.MethodPut + " /api/v1/system/admin/tenants/:tenant_id/parser-engine-config",
 	} {
 		if _, ok := routes[oldRoute]; ok {
 			t.Errorf("legacy platform route is still registered: %s", oldRoute)

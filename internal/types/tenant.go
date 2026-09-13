@@ -143,8 +143,6 @@ type Tenant struct {
 	ContextConfig *ContextConfig `yaml:"context_config"      json:"context_config"      gorm:"type:jsonb"`
 	// Global WebSearch configuration for this workspace
 	WebSearchConfig *WebSearchConfig `yaml:"web_search_config"   json:"web_search_config"   gorm:"type:jsonb"`
-	// Parser engine config overrides (MinerU endpoint, API key, etc.). Used when parsing documents; overrides env.
-	ParserEngineConfig *ParserEngineConfig `yaml:"parser_engine_config" json:"parser_engine_config" gorm:"type:jsonb"`
 	// Credentials config: third-party provider credentials (e.g. WeKnoraCloud AppID/AppSecret)
 	Credentials *CredentialsConfig `yaml:"credentials" json:"credentials" gorm:"type:jsonb"`
 	// Storage engine config: parameters for Local, MinIO, COS. Used for document/file storage and docreader.
@@ -343,11 +341,11 @@ func (c *CredentialsConfig) Scan(value interface{}) error {
 	return nil
 }
 
-// ParserEngineConfig holds tenant-level overrides for document parser engines (e.g. MinerU endpoint, API key).
-// These values take precedence over environment variables when parsing documents.
+// ParserEngineConfig holds platform-wide overrides for document parser engines
+// (for example MinerU endpoints and cloud credentials).
 type ParserEngineConfig struct {
-	// ChatParserEngineRules selects parser engines for session-scoped chat
-	// documents. Knowledge bases keep their own rules in ChunkingConfig.
+	// ChatParserEngineRules supplies the deployment default for session-scoped
+	// documents. An explicit agent rule or request selection takes precedence.
 	ChatParserEngineRules []ParserEngineRule `json:"chat_parser_engine_rules,omitempty"`
 	MinerUEndpoint        string             `json:"mineru_endpoint"` // MinerU 自建服务端点
 	MinerUAPIKey          string             `json:"mineru_api_key"`  // MinerU 云 API Key
@@ -415,6 +413,8 @@ func ResolveMinerUParseMethod(method string, legacyOCREnabled *bool) string {
 	return MinerUParseMethodAuto
 }
 
+// ResolveChatParserEngine returns the deployment rule for a chat attachment,
+// falling back to the type-level parser default when no rule matches.
 func (c *ParserEngineConfig) ResolveChatParserEngine(fileType string) string {
 	if c != nil {
 		normalized := normalizeParserFileType(fileType)
@@ -520,24 +520,76 @@ func (c *ParserEngineConfig) ToOverridesMap() map[string]string {
 	return m
 }
 
-// Value implements the driver.Valuer interface for ParserEngineConfig
+// Value implements driver.Valuer. Secret-bearing fields are encrypted with
+// the deployment AES-GCM key before persistence. The receiver is not mutated.
+// Missing key material rejects every secret-bearing write, including writes
+// that bypass PlatformParserConfigService and call the repository directly.
 func (c *ParserEngineConfig) Value() (driver.Value, error) {
 	if c == nil {
 		return nil, nil
 	}
-	return json.Marshal(c)
+	cp := *c
+	key := utils.GetAESKey()
+	encrypt := func(value string) (string, error) {
+		if value == "" {
+			return "", nil
+		}
+		if key == nil {
+			return "", fmt.Errorf("SYSTEM_AES_KEY is not configured correctly; refusing to store parser credentials in plaintext")
+		}
+		return utils.EncryptAESGCM(value, key)
+	}
+	var err error
+	if cp.MinerUAPIKey, err = encrypt(cp.MinerUAPIKey); err != nil {
+		return nil, err
+	}
+	if cp.PaddleOCRVLCloudToken, err = encrypt(cp.PaddleOCRVLCloudToken); err != nil {
+		return nil, err
+	}
+	return json.Marshal(&cp)
 }
 
-// Scan implements the sql.Scanner interface for ParserEngineConfig
+// Scan implements sql.Scanner. Platform parser credentials have no plaintext
+// compatibility path: migrations reject legacy rows containing credentials,
+// and every value stored in this singleton must be valid AES-GCM ciphertext.
 func (c *ParserEngineConfig) Scan(value interface{}) error {
 	if value == nil {
 		return nil
 	}
 	b, ok := value.([]byte)
 	if !ok {
-		return nil
+		if s, stringOK := value.(string); stringOK {
+			b = []byte(s)
+		} else {
+			return fmt.Errorf("scan ParserEngineConfig: unsupported value type %T", value)
+		}
 	}
-	return json.Unmarshal(b, c)
+	var decoded ParserEngineConfig
+	if err := json.Unmarshal(b, &decoded); err != nil {
+		return err
+	}
+	decrypt := func(stored, label string) (string, error) {
+		if stored == "" {
+			return "", nil
+		}
+		if !strings.HasPrefix(stored, utils.EncPrefix) {
+			return "", fmt.Errorf("platform_parser_config.%s contains a plaintext credential; reconfigure it through the platform parser API", label)
+		}
+		plain, err := utils.DecryptStoredSecret(stored)
+		if err != nil {
+			return "", fmt.Errorf("decrypt platform_parser_config.%s: %w", label, err)
+		}
+		return plain, nil
+	}
+	var err error
+	if decoded.MinerUAPIKey, err = decrypt(decoded.MinerUAPIKey, "mineru_api_key"); err != nil {
+		return err
+	}
+	if decoded.PaddleOCRVLCloudToken, err = decrypt(decoded.PaddleOCRVLCloudToken, "paddleocr_vl_cloud_token"); err != nil {
+		return err
+	}
+	*c = decoded
+	return nil
 }
 
 // StorageEngineConfig holds tenant-level storage engine parameters for Local, MinIO, COS, TOS, S3, OSS, KS3, and OBS.

@@ -585,7 +585,7 @@ func (r *tenantRepository) UpdateTenant(ctx context.Context, tenant *types.Tenan
 	return r.db.WithContext(ctx).Model(&types.Tenant{}).Where("id = ?", tenant.ID).
 		Select(
 			"retriever_engines", "business", "context_config",
-			"web_search_config", "parser_engine_config", "credentials", "storage_engine_config",
+			"web_search_config", "credentials", "storage_engine_config",
 			"chat_history_config", "retrieval_config", "api_principal_config", "updated_at",
 		).Updates(tenant).Error
 }

@@ -156,7 +156,7 @@ func MergeWebSearchConfigForUpdate(incoming, existing *WebSearchConfig) *WebSear
 }
 
 // MergeParserEngineConfigForUpdate applies preserve semantics to secret fields
-// on tenant KV PUT.
+// on the platform parser singleton PUT.
 func MergeParserEngineConfigForUpdate(incoming, existing *ParserEngineConfig) *ParserEngineConfig {
 	if incoming == nil {
 		return nil
@@ -168,8 +168,8 @@ func MergeParserEngineConfigForUpdate(incoming, existing *ParserEngineConfig) *P
 	}
 	out.MinerUAPIKey = PreserveIfRedacted(out.MinerUAPIKey, prev.MinerUAPIKey)
 	out.PaddleOCRVLCloudToken = PreserveIfRedacted(out.PaddleOCRVLCloudToken, prev.PaddleOCRVLCloudToken)
-	// Chat attachment parser rules are configured per agent; preserve any legacy
-	// tenant-level rules when the settings UI omits this field on engine updates.
+	// The engine settings form does not edit chat attachment policy. An omitted
+	// field keeps the global rules; an explicit [] clears them.
 	if incoming.ChatParserEngineRules == nil && existing != nil {
 		out.ChatParserEngineRules = existing.ChatParserEngineRules
 	}

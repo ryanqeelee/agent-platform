@@ -55,14 +55,6 @@ func RegisterSystemAdminTenantRuntimeRoutes(
 		tenantRuntime.PUT("/memory-config", memory.Update)
 	}
 
-	tenantRuntime.GET("/parser-engine-config", func(c *gin.Context) {
-		c.Params = append(c.Params, gin.Param{Key: "key", Value: "parser-engine-config"})
-		tenant.GetTenantKV(c)
-	})
-	tenantRuntime.PUT("/parser-engine-config", func(c *gin.Context) {
-		c.Params = append(c.Params, gin.Param{Key: "key", Value: "parser-engine-config"})
-		tenant.UpdateTenantKV(c)
-	})
 	if capabilityPlan != nil {
 		tenantRuntime.GET("/retrieval-processing-settings", capabilityPlan.GetPlatformRetrievalProcessingSettings)
 	}

@@ -55,3 +55,22 @@ func TestDefaultParserEnginePrefersAnydocWhenLinked(t *testing.T) {
 		t.Fatalf("DefaultParserEngine(docx) = %q, want empty when anydoc is unavailable", got)
 	}
 }
+
+func TestListAllEnginesFiltersRemoteWeKnoraCloud(t *testing.T) {
+	engines := ListAllEngines(true, nil, []types.ParserEngineInfo{
+		{Name: WeKnoraCloudEngineName, Available: true},
+		{Name: "remote-supported", Available: true},
+	})
+	foundSupported := false
+	for _, engine := range engines {
+		if engine.Name == WeKnoraCloudEngineName {
+			t.Fatal("retired WeKnoraCloud parser remains reachable through discovery")
+		}
+		if engine.Name == "remote-supported" {
+			foundSupported = true
+		}
+	}
+	if !foundSupported {
+		t.Fatal("supported remote parser was removed with WeKnoraCloud")
+	}
+}

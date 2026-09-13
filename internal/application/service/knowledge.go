@@ -52,6 +52,7 @@ type knowledgeService struct {
 	kbService       interfaces.KnowledgeBaseService
 	tenantRepo      interfaces.TenantRepository
 	tenantService   interfaces.TenantService
+	parserConfig    *PlatformParserConfigService
 	documentReader  interfaces.DocumentReader
 	chunkService    interfaces.ChunkService
 	chunkRepo       interfaces.ChunkRepository
@@ -120,6 +121,7 @@ func NewKnowledgeService(
 	spanTracker SpanTracker,
 	audit interfaces.AuditLogService,
 	governance interfaces.KnowledgeGovernanceService,
+	parserConfig *PlatformParserConfigService,
 ) (interfaces.KnowledgeService, error) {
 	return &knowledgeService{
 		config:          config,
@@ -150,6 +152,7 @@ func NewKnowledgeService(
 		spanTracker:     spanTracker,
 		audit:           audit,
 		governance:      governance,
+		parserConfig:    parserConfig,
 	}, nil
 }
 
@@ -363,15 +366,15 @@ func (s *knowledgeService) failPostprocessSubspan(
 	s.tracker().FailSpan(ctx, span, code, msg, err)
 }
 
-// getParserEngineOverridesFromContext returns parser engine overrides from tenant in context (e.g. MinerU endpoint, API key).
-// Used when building document ReadRequest so UI-configured values take precedence over env.
-func (s *knowledgeService) getParserEngineOverridesFromContext(ctx context.Context) map[string]string {
-	if v := ctx.Value(types.TenantInfoContextKey); v != nil {
-		if tenant, ok := v.(*types.Tenant); ok && tenant != nil {
-			return tenant.ParserEngineConfig.ToOverridesMap()
-		}
+// getParserEngineOverrides returns the one deployment-wide parser connection.
+// The business tenant stays on ctx for document persistence and authorization;
+// it never participates in parser credential lookup.
+func (s *knowledgeService) getParserEngineOverrides(ctx context.Context) (map[string]string, error) {
+	config, err := s.parserConfig.GetRuntime(ctx)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	return config.ToOverridesMap(), nil
 }
 
 // GetRepository gets the knowledge repository

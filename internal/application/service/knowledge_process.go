@@ -3643,12 +3643,17 @@ func (s *knowledgeService) convert(
 	s.beginStage(ctx, knowledge.ID, types.StageDocReader, docInput)
 	isURL := payload.URL != ""
 	fileType := payload.FileType
-	tenantOverrides := s.getParserEngineOverridesFromContext(ctx)
+	platformOverrides, err := s.getParserEngineOverrides(ctx)
+	if err != nil {
+		s.failStage(ctx, knowledge.ID, types.StageDocReader,
+			werrors.ErrCodeDocReaderUnavailable, "failed to load platform parser configuration", err)
+		return s.failKnowledge(ctx, knowledge, isLastRetry, "failed to load platform parser configuration: %v", err)
+	}
 	var uploadOverrides map[string]string
 	if processOverrides, err := knowledge.ProcessOverrides(); err == nil && processOverrides != nil {
 		uploadOverrides = processOverrides.ParserEngineOverrides
 	}
-	mergedOverrides := MergeParserEngineOverrides(tenantOverrides, uploadOverrides)
+	mergedOverrides := MergeParserEngineOverrides(platformOverrides, uploadOverrides)
 	applyParserRuleOverrides(mergedOverrides, eff.ChunkingConfig, fileType)
 	if err := validateParserEngineOverrideURLs(mergedOverrides); err != nil {
 		logger.Errorf(ctx, "Parser endpoint rejected for SSRF protection: %v", err)
@@ -3821,9 +3826,8 @@ func (s *knowledgeService) resolveDocReader(
 	ctx context.Context, engine, fileType string, isURL bool, overrides map[string]string,
 ) interfaces.DocReader {
 	reader, err := docparser.NewReader(ctx, engine, fileType, isURL, docparser.ReaderDeps{
-		Overrides:               overrides,
-		Remote:                  s.documentReader,
-		WeKnoraCloudCredentials: s.tenantService.GetWeKnoraCloudCredentials,
+		Overrides: overrides,
+		Remote:    s.documentReader,
 	})
 	if err != nil {
 		logger.Warnf(ctx, "[resolveDocReader] engine=%q fileType=%q unusable: %v", engine, fileType, err)

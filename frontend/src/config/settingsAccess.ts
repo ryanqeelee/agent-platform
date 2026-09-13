@@ -1,7 +1,8 @@
 export type SettingsRoleKey = 'viewer' | 'admin'
 
 /**
- * Workspace-scoped settings access policy.
+ * Enterprise-scoped settings access policy. Platform sections are declared
+ * separately in SYSTEM_ADMIN_SETTINGS_SECTIONS.
  *
  * Keep this as the single frontend source of truth for both the complete
  * Settings navigation and any shortcuts that lead into it. Backend route
@@ -9,16 +10,7 @@ export type SettingsRoleKey = 'viewer' | 'admin'
  */
 export const SETTINGS_SECTION_MIN_ROLE: Record<string, SettingsRoleKey> = {
   general: 'viewer',
-  websearch: 'admin',
-  chathistory: 'admin',
-  parser: 'admin',
-  storage: 'admin',
-  sandbox: 'admin',
-  // Install writes a root shell into the sandbox image every session of
-  // that config boots. Same Admin+ bar as the sandbox editor itself.
-  skills: 'admin',
   'enterprise-skills': 'admin',
-  mcp: 'admin',
   system: 'viewer',
   userprofile: 'viewer',
   tenant: 'admin',

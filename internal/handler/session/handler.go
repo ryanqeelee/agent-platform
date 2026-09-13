@@ -65,6 +65,7 @@ func NewHandler(
 	temporaryDocuments interfaces.TemporaryDocumentService,
 	artifactCollector *service.ArtifactCollector,
 	memoryService interfaces.MemoryService,
+	parserConfig *service.PlatformParserConfigService,
 ) *Handler {
 	return &Handler{
 		sessionService:       sessionService,
@@ -91,6 +92,7 @@ func NewHandler(
 			documentReader,
 			imageResolver,
 			modelService,
+			parserConfig,
 		),
 	}
 }

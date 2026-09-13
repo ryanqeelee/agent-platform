@@ -7,6 +7,12 @@
 - 跨空间接口（`/tenants/all`、`/tenants/search`）：**需要服务端启用 `EnableCrossTenantAccess` 且当前用户具备 `CanAccessAllTenants` 权限**，否则返回 403。
 - 空间 KV 配置（`/tenants/kv/:key`）：当前空间级别的通用配置项，**`tenant_id` 从认证上下文中获取，不在 URL 中传入**。
 
+解析引擎连接和默认聊天附件解析规则属于平台配置，由 SystemAdmin 通过
+`GET/PUT /api/v1/system/admin/parser-engine-config` 管理。平台连接状态和连通性检测分别使用
+`GET /api/v1/system/admin/parser-engines` 与 `POST /api/v1/system/admin/parser-engines/check`；
+这些管理接口不需要空间上下文，也不接受 API Key。空间内的知识库规则编辑器只读取
+`GET /api/v1/system/parser-engines` 提供的引擎能力目录；该投影不包含连接地址、状态或凭据。
+
 | 方法   | 路径                       | 描述                                              |
 | ------ | -------------------------- | ------------------------------------------------- |
 | GET    | `/tenants/all`             | 获取所有空间列表（需跨空间权限）                  |
@@ -549,7 +555,6 @@ curl --location 'http://localhost:8080/api/v1/tenants' \
 | `web-search-config`    | 网页搜索配置                 |
 | `conversation-config`  | 普通模式会话/对话配置        |
 | `prompt-templates`     | 系统提示词模板（只读，按用户语言本地化） |
-| `parser-engine-config` | 解析引擎配置（如 MinerU）    |
 | `storage-engine-config`| 存储引擎配置（Local/MinIO/COS） |
 | `chat-history-config`  | 聊天历史索引配置             |
 | `retrieval-config`     | 全局检索配置                 |

@@ -32,7 +32,16 @@ test('system info selects the platform path only from an explicit argument', () 
   assert.match(systemAPI, /getSystemInfo\(systemAdmin = false\)/)
   assert.match(systemAPI, /systemAdmin \? '\/api\/v1\/system\/admin\/info' : '\/api\/v1\/system\/info'/)
   assert.match(systemInfo, /getSystemInfo\(authStore\.isSystemAdmin\)/)
-  assert.match(systemAPI, /post\('\/api\/v1\/system\/admin\/docreader\/reconnect', \{ addr \}\)/)
+})
+
+test('tenant parser catalog is separate from tenantless system-admin management', () => {
+  assert.match(systemAPI, /getParserEngines\(\)[\s\S]{0,120}get\('\/api\/v1\/system\/parser-engines'\)/)
+  assert.match(systemAPI, /getAdminParserEngines\(\)[\s\S]{0,120}get\('\/api\/v1\/system\/admin\/parser-engines'\)/)
+  assert.match(systemAPI, /post\('\/api\/v1\/system\/admin\/parser-engines\/check', config\)/)
+  assert.match(systemAPI, /get\('\/api\/v1\/system\/admin\/parser-engine-config'\)/)
+  assert.match(systemAPI, /put\('\/api\/v1\/system\/admin\/parser-engine-config', config\)/)
+  assert.doesNotMatch(systemAPI, /parser-engine-config[^\n]*tenantId/)
+  assert.doesNotMatch(systemAPI, /docreader\/reconnect/)
 })
 
 test('settings provides the selected tenant only to its existing component tree', () => {
@@ -59,7 +68,7 @@ test('message indexing uses the selected enterprise control-plane path', () => {
   assert.match(platformOperations, /:tenant-control-name="selected\?\.name"/)
 })
 
-test('nginx grants the larger skill bundle limit only to the tenant-scoped control plane', () => {
-  assert.ok(nginx.includes('location ~ ^/api/v1/system/admin/tenants/[1-9][0-9]*/(?:skills/catalog|sandbox-configs/[^/]+/skills)/?$ {'))
+test('nginx grants the larger skill bundle limit only to the platform control plane', () => {
+  assert.ok(nginx.includes('location ~ ^/api/v1/system/admin/(?:skills/catalog|sandbox-configs/[^/]+/skills)/?$ {'))
   assert.ok(!nginx.includes('location ~ ^/api/v1/(?:skills/catalog|sandbox-configs/[^/]+/skills)/?$ {'))
 })

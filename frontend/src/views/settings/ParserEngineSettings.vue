@@ -7,8 +7,6 @@
       </p>
     </div>
 
-    <PlatformRuntimeContext v-if="authStore.isSystemAdmin" context="retrieval" />
-
     <div v-if="loading" class="loading-state">
       <t-loading size="small" />
       <span>{{ $t('settings.parser.loading') }}</span>
@@ -100,7 +98,7 @@
       v-model:visible="drawerVisible"
       :title="drawerTitle"
       :class="currentEngine ? `parser-engine-drawer parser-engine-drawer--${currentEngine.Name}` : 'parser-engine-drawer'"
-      :hide-footer="!authStore.hasRole('admin') && !needsTestButton"
+      :hide-footer="!needsTestButton"
       :confirm-loading="saving"
       @confirm="onSave"
       @cancel="drawerVisible = false"
@@ -198,7 +196,6 @@
           </div>
 
           <!--
-            weknoracloud: 凭证状态 — 不再用大块卡片。已配置 / 加载中 / 未配置
             统一用 inline alert：图标 + 一行文案 + 行尾跳转 link，体量
             匹配"一条信息"该有的样子。
           -->
@@ -363,29 +360,23 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useAuthStore } from '@/stores/auth'
 import { MessagePlugin } from 'tdesign-vue-next'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
-import PlatformRuntimeContext from './components/PlatformRuntimeContext.vue'
 import {
-  getParserEngines,
+  getAdminParserEngines,
   getParserEngineConfig,
   updateParserEngineConfig,
   checkParserEngines,
   type ParserEngineInfo,
   type ParserEngineConfig,
 } from '@/api/system'
-import { usePlatformTenantControlID } from '@/composables/platformTenantControl'
 
 const { t } = useI18n()
-const authStore = useAuthStore()
-const platformTenantID = usePlatformTenantControlID()
 
 const CONFIGURABLE_ENGINES = new Set(['mineru', 'mineru_cloud', 'paddleocr_vl', 'paddleocr_vl_cloud'])
 
 /** 各解析引擎的项目/官方文档地址 */
 const ENGINE_DOC_LINKS: Record<string, string> = {
-  weknoracloud: 'https://developers.weixin.qq.com/doc/aispeech/knowledge/atomic_capability/atomic_interface.html',
   markitdown: 'https://github.com/microsoft/markitdown',
   mineru: 'https://github.com/opendatalab/MinerU',
   mineru_cloud: 'https://mineru.net/apiManage/docs',
@@ -457,14 +448,13 @@ const needsTestButton = computed(() => {
 /** 固定展示顺序，未列出的引擎排在末尾按名称排序 */
 const ENGINE_ORDER: Record<string, number> = {
   builtin: 0,
-  weknoracloud: 1,
-  simple: 2,
-  anydoc: 3,
-  markitdown: 4,
-  mineru: 5,
-  mineru_cloud: 6,
-  paddleocr_vl: 7,
-  paddleocr_vl_cloud: 8,
+  simple: 1,
+  anydoc: 2,
+  markitdown: 3,
+  mineru: 4,
+  mineru_cloud: 5,
+  paddleocr_vl: 6,
+  paddleocr_vl_cloud: 7,
 }
 
 const sortedEngines = computed(() => {
@@ -516,7 +506,7 @@ function openDrawer(engine: ParserEngineInfo) {
 
 async function loadEngines() {
   try {
-    const res = await getParserEngines()
+    const res = await getAdminParserEngines()
     engines.value = res?.data ?? []
     docreaderAddrEnv.value = res?.docreader_addr ?? ''
     const transport = (res?.docreader_transport ?? 'grpc').toLowerCase()
@@ -531,7 +521,7 @@ async function loadEngines() {
 
 async function loadConfig() {
   try {
-    const res = await getParserEngineConfig(platformTenantID.value)
+    const res = await getParserEngineConfig()
     const data = res?.data
     config.value = {
       docreader_addr: data?.docreader_addr ?? DEFAULT_PARSER_CONFIG.docreader_addr ?? '',
@@ -657,7 +647,7 @@ async function onSave() {
   saving.value = true
   saveMessage.value = ''
   try {
-    await updateParserEngineConfig(buildConfigPayload(), platformTenantID.value)
+    await updateParserEngineConfig(buildConfigPayload())
     saveSuccess.value = true
     saveMessage.value = t('settings.parser.saveSuccess')
     drawerVisible.value = false
@@ -774,8 +764,7 @@ onMounted(loadAll)
 }
 
 // 解析引擎徽章配色 —— 内置/官方系绿，外部工具按性质各取一色。
-.engine-card--builtin .engine-card__badge,
-.engine-card--weknoracloud .engine-card__badge {
+.engine-card--builtin .engine-card__badge {
   background: rgba(7, 192, 95, 0.12);
   color: #07C05F;
 }
@@ -871,7 +860,7 @@ onMounted(loadAll)
 }
 
 // ---- 抽屉内容 — 与 ModelEditorDialog 同款约定 ----
-// .form-item / .form-label / .form-desc / .weknoracloud-hint / .api-test
+// .form-item / .form-label / .form-desc / .api-test
 // 参照 frontend/src/components/ModelEditorDialog.vue 的命名与字号/间距
 .form-item {
   margin-bottom: 0;
@@ -969,7 +958,7 @@ onMounted(loadAll)
   letter-spacing: 0.02em;
 }
 
-// ---- Inline alert（替代之前的 .weknoracloud-hint 卡片） ----
+// ---- Inline alert ----
 // 一行内表达 "状态信号 + 一句话 + 跳转 link"，无外框/无 3px 左边，
 // 视觉重量与一行文字相当，section 内不会再被一个独立卡片打断。
 .inline-alert {
@@ -1123,8 +1112,7 @@ onMounted(loadAll)
   .engine-card__badge from the scoped block above.
 -->
 <style lang="less">
-.parser-engine-drawer--builtin .setting-drawer__header-icon,
-.parser-engine-drawer--weknoracloud .setting-drawer__header-icon {
+.parser-engine-drawer--builtin .setting-drawer__header-icon {
   background: rgba(7, 192, 95, 0.12);
   color: #07C05F;
 }

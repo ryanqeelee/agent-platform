@@ -206,7 +206,7 @@ type CustomAgentConfig struct {
 
 	// ===== Chat Attachment Parsing Settings =====
 	// ChatParserEngineRules selects parser engines for session-scoped chat
-	// attachments by file type. Takes precedence over the tenant-level
+	// attachments by file type. Takes precedence over the platform-wide
 	// ParserEngineConfig.ChatParserEngineRules; an explicit per-request
 	// parser_engine still overrides both.
 	ChatParserEngineRules []ParserEngineRule `yaml:"chat_parser_engine_rules" json:"chat_parser_engine_rules,omitempty"`
@@ -429,9 +429,8 @@ func oneOf(value string, allowed ...string) bool {
 	return false
 }
 
-// ResolveChatParserEngine returns the agent-configured parser engine for a
-// chat attachment file type, or the type-level default when no rule matches.
-// Mirrors ParserEngineConfig.ResolveChatParserEngine.
+// ResolveChatParserEngine returns only an explicit agent rule. The caller
+// applies the platform-wide rule and type-level default when this returns empty.
 func (c *CustomAgentConfig) ResolveChatParserEngine(fileType string) string {
 	if c != nil {
 		normalized := normalizeParserFileType(fileType)
@@ -443,7 +442,7 @@ func (c *CustomAgentConfig) ResolveChatParserEngine(fileType string) string {
 			}
 		}
 	}
-	return DefaultParserEngine(fileType)
+	return ""
 }
 
 // Value implements driver.Valuer interface for CustomAgentConfig

@@ -9,7 +9,7 @@ func TestCustomAgentConfigResolveChatParserEngine(t *testing.T) {
 	}}
 	for input, expected := range map[string]string{
 		"PDF": "mineru", ".pptx": "mineru", "png": "paddleocr_vl",
-		"txt": "", "ppt": "markitdown",
+		"txt": "", "ppt": "",
 	} {
 		if actual := config.ResolveChatParserEngine(input); actual != expected {
 			t.Fatalf("ResolveChatParserEngine(%q) = %q, want %q", input, actual, expected)
@@ -19,8 +19,8 @@ func TestCustomAgentConfigResolveChatParserEngine(t *testing.T) {
 	if actual := nilConfig.ResolveChatParserEngine("pdf"); actual != "" {
 		t.Fatalf("nil config resolved %q", actual)
 	}
-	if actual := nilConfig.ResolveChatParserEngine("pptx"); actual != "markitdown" {
-		t.Fatalf("nil config pptx resolved %q, want markitdown", actual)
+	if actual := nilConfig.ResolveChatParserEngine("pptx"); actual != "" {
+		t.Fatalf("nil config pptx resolved %q, want empty", actual)
 	}
 }
 

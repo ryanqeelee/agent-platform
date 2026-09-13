@@ -19,6 +19,14 @@
       </div>
     </div>
 
+    <div v-if="runtime && loaded && !config.enabled" class="runtime-disabled-state">
+      <t-icon name="info-circle" class="runtime-disabled-icon" />
+      <div>
+        <p class="runtime-disabled-title">{{ t('memoryWorkspaceSettings.runtimeDisabledTitle') }}</p>
+        <p class="runtime-disabled-description">{{ t('memoryWorkspaceSettings.runtimeDisabledDescription') }}</p>
+      </div>
+    </div>
+
     <div class="settings-group">
       <div v-if="!runtime" class="setting-row">
         <div class="setting-info">
@@ -367,6 +375,36 @@ onUnmounted(() => { if (saveTimer) clearTimeout(saveTimer) })
 .settings-group {
   display: flex;
   flex-direction: column;
+}
+
+.runtime-disabled-state {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 8px;
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+.runtime-disabled-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--td-brand-color);
+}
+
+.runtime-disabled-title {
+  margin: 0 0 6px;
+  color: var(--td-text-color-primary);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.runtime-disabled-description {
+  margin: 0;
+  color: var(--td-text-color-secondary);
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .setting-row {

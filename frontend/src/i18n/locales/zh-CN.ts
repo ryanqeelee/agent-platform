@@ -4954,6 +4954,8 @@ export default {
     description: '让助手跨会话记住成员说过的个人信息、偏好、事实与在办事项。',
     introTitle: '默认关闭，需要你显式开启',
     introDescription: '长期记忆会保留成员在对话中说过的内容，因此默认不开启。开启后每位成员的记忆彼此隔离，成员可以在「我的记忆」里随时查看、修改、删除或整体关闭。生效中的个人信息与偏好会进入之后的每一轮对话；事实和在办事项只在相关问题时召回。',
+    runtimeDisabledTitle: '企业尚未启用长期记忆',
+    runtimeDisabledDescription: '企业管理员可在企业设置中启用长期记忆。启用后，此处将显示运行配置。',
     enableLabel: '在本空间启用长期记忆',
     enableDescription: '关闭后本空间的所有会话都不会读取或写入记忆。',
     writeModeLabel: '记忆写入方式',

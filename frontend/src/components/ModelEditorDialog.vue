@@ -51,7 +51,7 @@
       <!--
         Section 1 — 模型来源 + 模型名称（来源直接决定下方字段，所以放一节）
       -->
-      <section v-if="!isPlatformMode" class="setting-drawer__section">
+      <section class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('model.editor.sectionSource') }}</h4>
 
         <div class="form-item">
@@ -72,6 +72,7 @@
               <span class="source-option__label">{{ $t('model.editor.sourceRemote') }}</span>
             </button>
             <button
+              v-if="!isPlatformMode"
               type="button"
               class="source-option"
               :class="{ 'is-active': formData.source === 'local', 'is-disabled': ollamaServiceStatus === false || activeModelType === 'rerank' }"
@@ -86,7 +87,7 @@
           </div>
 
           <!-- ReRank模型不支持Ollama的提示信息 -->
-          <div v-if="activeModelType === 'rerank'" class="ollama-unavailable-tip rerank-tip">
+          <div v-if="!isPlatformMode && activeModelType === 'rerank'" class="ollama-unavailable-tip rerank-tip">
             <t-icon name="info-circle-filled" class="tip-icon info" />
             <span class="tip-text">{{ $t('model.editor.ollamaNotSupportRerank') }}</span>
           </div>
@@ -415,7 +416,10 @@ import CredentialResource, {
   type CredentialFieldDef,
   type CredentialResourceApi,
 } from '@/components/credentials/CredentialResource.vue'
-import { shouldShowOllamaUnavailableTip } from '@/components/modelEditorSourceState'
+import {
+  normalizeModelEditorSource,
+  shouldShowOllamaUnavailableTip,
+} from '@/components/modelEditorSourceState'
 
 interface CustomHeaderItem {
   key: string
@@ -997,9 +1001,11 @@ const selectModelType = async (type: EditorModelType) => {
   if (isEdit.value || draftModelType.value === type) return
   draftModelType.value = type
 
-  if (isPlatformMode.value || type === 'rerank') {
-    formData.value.source = 'remote'
-  }
+  formData.value.source = normalizeModelEditorSource(
+    formData.value.source,
+    type,
+    isPlatformMode.value,
+  )
   if (type !== 'embedding') {
     formData.value.dimension = undefined
     formData.value.supportsDimensionOverride = false
@@ -1077,10 +1083,11 @@ watch(() => props.visible, (val) => {
 
       lastOpenedModelId.value = currentId
 
-      // 平台全局模型和 ReRank 模型只使用 remote 来源。
-      if (isPlatformMode.value || activeModelType.value === 'rerank') {
-        formData.value.source = 'remote'
-      }
+      formData.value.source = normalizeModelEditorSource(
+        formData.value.source,
+        activeModelType.value,
+        isPlatformMode.value,
+      )
 
       // 如果当前 provider 是 WeKnoraCloud，检查凭证状态
       if (isPlatformMode.value && formData.value.provider === 'weknoracloud') {
@@ -1655,8 +1662,13 @@ onUnmounted(() => {
 
 // 监听来源变化，清理所有状态
 watch(() => formData.value.source, () => {
-  if (isPlatformMode.value && formData.value.source !== 'remote') {
-    formData.value.source = 'remote'
+  const supportedSource = normalizeModelEditorSource(
+    formData.value.source,
+    activeModelType.value,
+    isPlatformMode.value,
+  )
+  if (formData.value.source !== supportedSource) {
+    formData.value.source = supportedSource
     return
   }
   // 重置校验状态

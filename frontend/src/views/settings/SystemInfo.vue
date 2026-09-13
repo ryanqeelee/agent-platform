@@ -302,7 +302,7 @@ const loadInfo = async () => {
     loading.value = true
     error.value = ''
     
-    const systemResponse = await getSystemInfo()
+    const systemResponse = await getSystemInfo(authStore.isSystemAdmin)
     
     if (systemResponse.data) {
       systemInfo.value = systemResponse.data

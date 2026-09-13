@@ -259,10 +259,11 @@ func RegisterSystemRoutes(
 		// Keep this browser-only alias outside apiKeyGroup: API keys remain
 		// default-denied while SystemAdmin supplies the platform identity gate.
 		systemGroup.GET("/admin/capabilities", g.SystemAdmin(), handler.GetDeploymentCapabilities)
+		systemGroup.GET("/admin/info", g.SystemAdmin(), handler.GetSystemInfo)
 		systemRoutes.GET("/info", g.Viewer(), handler.GetSystemInfo)
 		systemRoutes.GET("/parser-engines", g.SystemAdmin(), handler.ListParserEngines)
 		systemRoutes.POST("/parser-engines/check", g.SystemAdmin(), handler.CheckParserEngines)
-		systemRoutes.POST("/docreader/reconnect", g.SystemAdmin(), handler.ReconnectDocReader)
+		systemGroup.POST("/admin/docreader/reconnect", g.SystemAdmin(), handler.ReconnectDocReader)
 		systemRoutes.GET("/storage-engine-status", g.SystemAdmin(), handler.GetStorageEngineStatus)
 		systemRoutes.POST("/storage-engine-check", g.SystemAdmin(), handler.CheckStorageEngine)
 	}

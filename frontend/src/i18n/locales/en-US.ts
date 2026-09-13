@@ -2063,6 +2063,8 @@ export default {
     description: 'Let the assistant remember what members tell it — who they are, how they like to work, stable facts and what they are working on — across conversations.',
     introTitle: 'Off by default, you have to turn it on',
     introDescription: 'Long-term memory retains what members say in conversations, so it does not arrive enabled. Once on, each member has their own isolated memory space and can review, edit, delete or switch it off entirely under "My memory". Active profile and preference memories are included in every later turn; facts and ongoing tasks are recalled only when the question is related.',
+    runtimeDisabledTitle: 'Long-term memory is not enabled for this enterprise',
+    runtimeDisabledDescription: 'An enterprise administrator can enable long-term memory in Enterprise settings. Runtime controls will appear here after it is enabled.',
     enableLabel: 'Enable long-term memory in this workspace',
     enableDescription: 'When off, no conversation in this workspace reads or writes memory.',
     writeModeLabel: 'How memories are written',

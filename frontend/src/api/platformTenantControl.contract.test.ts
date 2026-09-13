@@ -26,6 +26,15 @@ test('deployment capabilities use the tenantless system-admin route for platform
   assert.match(deploymentCapabilitiesStore, /getDeploymentCapabilities\(useAuthStore\(\)\.isSystemAdmin\)/)
 })
 
+test('system info selects the platform path only from an explicit argument', () => {
+  const systemInfo = readFileSync(new URL('../views/settings/SystemInfo.vue', import.meta.url), 'utf8')
+
+  assert.match(systemAPI, /getSystemInfo\(systemAdmin = false\)/)
+  assert.match(systemAPI, /systemAdmin \? '\/api\/v1\/system\/admin\/info' : '\/api\/v1\/system\/info'/)
+  assert.match(systemInfo, /getSystemInfo\(authStore\.isSystemAdmin\)/)
+  assert.match(systemAPI, /post\('\/api\/v1\/system\/admin\/docreader\/reconnect', \{ addr \}\)/)
+})
+
 test('settings provides the selected tenant only to its existing component tree', () => {
   assert.match(settings, /defineProps<\{ tenantControlId\?: number; tenantControlName\?: string \}>\(\)/)
   assert.match(settings, /provide\(platformTenantControlIDKey, toRef\(props, 'tenantControlId'\)\)/)

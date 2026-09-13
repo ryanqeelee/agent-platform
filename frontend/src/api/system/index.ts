@@ -101,8 +101,8 @@ export interface PromptTemplatesConfig {
   intent_prompts?: PromptTemplate[]
 }
 
-export function getSystemInfo(): Promise<{ data: SystemInfo }> {
-  return get('/api/v1/system/info')
+export function getSystemInfo(systemAdmin = false): Promise<{ data: SystemInfo }> {
+  return get(systemAdmin ? '/api/v1/system/admin/info' : '/api/v1/system/info')
 }
 
 export function getProductBaseDescriptor(): Promise<{ data: ProductBaseDescriptor }> {
@@ -180,7 +180,7 @@ export function updateParserEngineConfig(config: ParserEngineConfig, tenantId?: 
 }
 
 export function reconnectDocReader(addr: string): Promise<ParserEnginesResponse & { msg?: string }> {
-  return post('/api/v1/system/docreader/reconnect', { addr })
+  return post('/api/v1/system/admin/docreader/reconnect', { addr })
 }
 
 // ---- 存储引擎配置（空间级，供文档/图片存储与 docreader 使用） ----

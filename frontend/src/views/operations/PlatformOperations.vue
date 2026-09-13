@@ -13,6 +13,7 @@
         <t-button variant="outline" :disabled="!selected" @click="openTenantSettings('chathistory')">消息索引</t-button>
         <t-button variant="outline" :disabled="!selected" @click="openTenantSettings('memory-runtime')">记忆运行配置</t-button>
         <t-button theme="primary" @click="openCreationWizard">创建企业</t-button>
+        <t-button variant="outline" @click="handleLogout">{{ $t('auth.logout') }}</t-button>
         <small v-if="!selected" class="tenant-settings-hint">选择企业后可管理该企业的消息索引和记忆运行配置</small>
       </div>
     </header>
@@ -265,8 +266,10 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
 import Settings from '@/views/settings/Settings.vue'
+import { useAuthStore } from '@/stores/auth'
 import { useUIStore } from '@/stores/ui'
 import {
   activateEnterprise, createInitialAdministrator, createOperationsEmployee, getEnterpriseActivation,
@@ -292,6 +295,8 @@ import {
 } from './platformOperationsModel'
 
 const uiStore = useUIStore()
+const authStore = useAuthStore()
+const router = useRouter()
 const enterprises = ref<OperationsEnterprise[]>([])
 const selected = ref<OperationsEnterprise>()
 const members = ref<OperationsMember[]>([])
@@ -343,6 +348,10 @@ const creation = reactive(freshEnterpriseCreationDraft())
 const employee = reactive({ username: '', email: '', password: '' })
 
 function showError(error: any) { errorMessage.value = error?.message || '操作失败' }
+async function handleLogout() {
+  authStore.logout()
+  await router.replace('/login')
+}
 function openTenantSettings(section: 'chathistory' | 'memory-runtime') {
   if (!selected.value) return
   uiStore.openSettings(section)

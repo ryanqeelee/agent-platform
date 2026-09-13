@@ -210,7 +210,7 @@ func TestGlobalMCPMigrationPreservesServiceApprovalAndOAuthReferences(t *testing
 
 	for _, table := range []string{"mcp_services", "mcp_tool_approvals"} {
 		require.NoError(t, db.Raw(`SELECT count(*) FROM information_schema.columns
-			WHERE table_name = ? AND column_name = 'tenant_id'`, table).Scan(&count).Error)
+			WHERE table_schema = current_schema() AND table_name = ? AND column_name = 'tenant_id'`, table).Scan(&count).Error)
 		require.Zero(t, count)
 	}
 }

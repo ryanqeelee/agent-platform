@@ -136,9 +136,9 @@ func TestGlobalWebSearchMigrationPreservesIDsAndLeavesDefaultUnset(t *testing.T)
 	require.Zero(t, defaultCount)
 	var tenantColumns int64
 	require.NoError(t, db.Raw(`SELECT count(*) FROM information_schema.columns
-		WHERE table_name = 'web_search_providers' AND column_name = 'tenant_id'`).Scan(&tenantColumns).Error)
+		WHERE table_schema = current_schema() AND table_name = 'web_search_providers' AND column_name = 'tenant_id'`).Scan(&tenantColumns).Error)
 	require.Zero(t, tenantColumns)
 	require.NoError(t, db.Raw(`SELECT count(*) FROM information_schema.columns
-		WHERE table_name = 'tenants' AND column_name = 'web_search_config'`).Scan(&tenantColumns).Error)
+		WHERE table_schema = current_schema() AND table_name = 'tenants' AND column_name = 'web_search_config'`).Scan(&tenantColumns).Error)
 	require.Zero(t, tenantColumns)
 }

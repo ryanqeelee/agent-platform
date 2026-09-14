@@ -184,7 +184,7 @@
       <t-empty v-else class="detail-empty" description="选择一个企业查看详情" />
     </section>
 
-    <t-dialog v-model:visible="creationOpen" header="创建企业" width="640px" :footer="false">
+    <t-dialog attach="body" v-model:visible="creationOpen" header="创建企业" width="640px" :footer="false">
       <ol class="wizard-steps" aria-label="创建企业步骤">
         <li v-for="(label, index) in creationStepLabels" :key="label" :class="{ active: creationStep >= index, current: creationStep === index }">
           <span>{{ index + 1 }}</span>{{ label }}
@@ -247,7 +247,7 @@
       </div>
     </t-dialog>
 
-    <t-dialog v-model:visible="employeeOpen" header="新增员工" :confirm-btn="{ content: '新增', loading: creatingEmployee }" @confirm="createEmployee">
+    <t-dialog attach="body" v-model:visible="employeeOpen" header="新增员工" :confirm-btn="{ content: '新增', loading: creatingEmployee }" @confirm="createEmployee">
       <t-form label-align="top">
         <t-form-item label="用户名"><t-input v-model="employee.username" /></t-form-item>
         <t-form-item label="邮箱"><t-input v-model="employee.email" /></t-form-item>
@@ -255,7 +255,7 @@
       </t-form>
     </t-dialog>
 
-    <t-dialog v-model:visible="passwordOpen" header="重置密码" @confirm="resetPassword">
+    <t-dialog attach="body" v-model:visible="passwordOpen" header="重置密码" @confirm="resetPassword">
       <t-input v-model="newPassword" type="password" placeholder="输入新密码" />
     </t-dialog>
 
